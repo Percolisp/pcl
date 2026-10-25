@@ -270,7 +270,7 @@ a
    title => '`)` followed by `-1` — the operator is swallowed into a negative NUMBER',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number', content => qr/^-/, pred => '', check => 'minus-in-number' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug', commit => 'a737c524', group => 'A', pr => undef },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug', narrowed => 's527b: only the bareword-term and -N**2 arms are left; PPI splits after ) ] } symbols numbers quotes', commit => 'a737c524', group => 'A', pr => undef },
    repro => 'my $x = (1+2)-1; print "$x\\n";',
    perl => "2\n",
    tokens => {
@@ -534,7 +534,7 @@ print g(), "\\n";
    title => 'After a FLOAT / EXP / HEX / OCTAL / BINARY number, `-N` is lexed as a NEGATIVE NUMBER — the subtraction operator disappears',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number::Float', content => qr/^-/, pred => 'prev_nonint_number', check => 'minus-in-number' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug', commit => 'a737c524', group => 'A', pr => undef },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug', narrowed => 's527b: only the bareword-term and -N**2 arms are left; PPI splits after ) ] } symbols numbers quotes', commit => 'a737c524', group => 'A', pr => undef },
    repro => 'print 1.5-0.5, " ", 1e3-1, " ", 0x10-1, "\\n";',
    perl => "1 999 15\n",
    tokens => {

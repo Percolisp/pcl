@@ -6870,29 +6870,19 @@ sub _fix_ppi_negative_number_bug {
                          ref($tokens->[$i+1]) eq 'PPI::Token::Operator' &&
                          $tokens->[$i+1]->content eq '**');
 
-      # Check if previous token ends an expression (where subtraction makes sense)
+      # Does the previous token end an expression (where subtraction makes
+      # sense)?  After a ) ] }, a symbol, a number or a quote PCL's PPI
+      # already splits `-N` itself (s527a group A, s527b group J; the arms
+      # that tested those here were deleted in s527b).  What is left is the
+      # one term end PPI cannot know: a BAREWORD that is a constant or a
+      # term-like call (`K -1` with `use constant K`), which only PCL's
+      # prototype table can tell from a list operator -- and a named unary
+      # (chr, abs, uc, ...) is NOT one: "chr -1" means chr(-1).
       my $is_expr_end = 0;
       if ($i > 0) {
         my $prev = $result[-1];  # Use result array since we may have inserted
-        my $prev_ref = ref($prev);
-
-        # Expression-ending tokens: ) ] } or symbols/words/numbers
-        # Named unary functions (chr, abs, uc, etc.) are NOT expression-enders:
-        # "chr -1" means chr(-1), not chr() - 1.
-        my $prev_is_named_unary = ($prev_ref eq 'PPI::Token::Word'
-                                   && $self->is_named_unary($prev->content));
-        $is_expr_end = (
-          $prev_ref eq 'PPI::Structure::List'        ||  # (...)
-          $prev_ref eq 'PPI::Structure::Subscript'   ||  # [...]
-          $prev_ref eq 'PPI::Structure::Block'       ||  # {...}
-          $prev_ref eq 'PPI::Token::Symbol'          ||  # $foo
-          ($prev_ref eq 'PPI::Token::Word'
-           && !$prev_is_named_unary)                 ||  # bareword/const (not named unary)
-          _is_number_token($prev)                   ||  # number, any subclass
-          $prev_ref eq 'PPI::Token::Quote::Double'   ||  # "string"
-          $prev_ref eq 'PPI::Token::Quote::Single'   ||  # 'string'
-          $prev_ref =~ /^PPI::Token::Quote/               # other quotes
-        );
+        $is_expr_end = ref($prev) eq 'PPI::Token::Word'
+                    && !$self->is_named_unary($prev->content);
       }
 
       if ($is_expr_end || $next_is_pow) {
