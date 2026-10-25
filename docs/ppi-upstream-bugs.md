@@ -1681,6 +1681,9 @@ call, a subscript, a hash element, a string, a number and a paren.
 **Repro + failing rows:** Bug 27 in `docs/ppi-bug-report.t`.  Guard:
 `Pl/t/glob-slot-operand-01.t`.
 
+
+**FIXED on PCL's PPI branch** (s527b: group L, commit `dc242138` on branch `pcl` -- `*` joins `%cast_which_trumps_braces`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-L.md`).  PCL's `_brace_glob_slot_symbol` STAYS: deleting it changed core Carp.pm's `*$_{HASH}` to an element access of `%_` (emission-ab, s527b) -- the expression lowering needs the braced spelling, not only ->symbol.
+
 ---
 
 ## 28. `$x.2` — a `.` followed by a digit after a term is lexed as a Number::Float, so the concatenation OPERATOR disappears  [CONFIRMED 1.291]

@@ -432,9 +432,9 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [138, 463, 562, 564] },
  { id => 27, kind => 'token', dump => 'symbol',
    title => '`->symbol` answers `%x` for the `$x` in `*$x{SLOT}` — the `*` cast is missing from its "cast trumps braces" set',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => 'Token::Symbol->symbol of the `$x` in `*$x{SLOT}` answers `%x` (the `*` cast is missing from its cast-trumps-braces set)' },
-   fix => { kind => 'handler', handler => 'Pl::Parser::_brace_glob_slot_symbol' },
+   fix => { kind => 'handler', handler => 'Pl::Parser::_brace_glob_slot_symbol', commit => 'dc242138', group => 'L', pr => undef, stays => 's527b: the expression lowering needs the braced spelling (Carp.pm *$_{HASH})' },
    repro => 'our $v = 9; our $a = "v"; my $x = *$a{SCALAR}; print $$x, "\\n";',
    perl => "9\n",
    tokens => {

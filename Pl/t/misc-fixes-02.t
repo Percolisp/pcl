@@ -1005,10 +1005,10 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
 {
     my $doc = PPI::Document->new(\'my $x = *$a{SCALAR};');
     my ($sym) = grep { $_->isa('PPI::Token::Symbol') && $_->content eq '$a' } $doc->tokens;
-    ok( $sym && $sym->symbol eq '%a',
-        'CANARY: PPI\'s ->symbol still answers `%a` for the `$a` in '
-      . '`*$a{SCALAR}` (the `*` cast is missing from its trumps-braces set) — '
-      . 'if this FAILS, drop _brace_glob_slot_symbol (ppi-upstream-bugs.md '
+    ok( $sym && $sym->symbol eq '$a',
+        'FIXED ON PCL\'S PPI BRANCH (s527b, group L): ->symbol answers `$a` for the `$a` in '
+      . '`*$a{SCALAR}`; PCL\'s _brace_glob_slot_symbol STAYS (the lowering needs the braced spelling) '
+      . '(ppi-upstream-bugs.md '
       . '§27)' );
 }
 {

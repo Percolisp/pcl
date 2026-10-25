@@ -588,6 +588,13 @@ sub _desugar_loop_modifiers {
 # `*{$a}{SCALAR}` — the same emission (`(p-glob-slot (p-dynamic-typeglob $a)
 # …)`, verified byte-identical) with a Symbol PPI cannot mis-canonicalise,
 # because it no longer has the subscript as its own next sibling.
+#
+# PCL's PPI answers ->symbol correctly since s527b (group L adds `*` to the
+# cast set), and this repair STAYS anyway, measured: deleting it changed core
+# Carp.pm's `*$_{HASH}` from `(p-glob-slot (p-dynamic-typeglob $_) "HASH")` to
+# `(p-dynamic-typeglob (p-gethash %_ "HASH"))` -- the expression LOWERING reads
+# Cast(*) Symbol Subscript as a cast of an element access, so the braced
+# spelling is what it consumes, not only what ->symbol needs.
 sub _brace_glob_slot_symbol {
   my ($doc) = @_;
   my $changed = 0;

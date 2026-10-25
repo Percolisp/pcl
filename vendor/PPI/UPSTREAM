@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: 46ba7e81b56fb4d18a222d166b8ec7aae0e7f5cc
-lib-tree: a236ebe29046f60c2f0c2b9e5054ae30aa888403
+branch-sha: dc242138aa251c5ccb648a98939032417c05f617
+lib-tree: efc656026f8f9477cfbe80648b5ecc61098706db
 date: 2026-10-25
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -27,6 +27,7 @@ fix: E §21 4affc7de Operator: ~~ after a block's } is two complements
 fix: D §24 1dc58208 Singletons: every punctuation-named array and hash is a magic variable
 fix: J §55 487563de Tokenizer: a builtin that takes no operand ends a term
 fix: D §24 ecd87059 Singletons: @^ is a magic variable
+fix: L §27 dc242138 Symbol: a * cast trumps the braces in ->symbol
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -65,3 +66,4 @@ commit: 76dce24a TODO test: @^ is one Magic token
 commit: ecd87059 Singletons: @^ is a magic variable
 commit: 6613fff5 TODO tests: PPI loads and parses without YAML::PP
 commit: 46ba7e81 Document: load YAML::PP only to read PPI_CUSTOM_FEATURE_INCLUDES
+commit: dc242138 Symbol: a * cast trumps the braces in ->symbol
