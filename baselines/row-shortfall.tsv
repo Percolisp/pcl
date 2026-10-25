@@ -67,6 +67,8 @@
 #       rows (3/3/3/3/4/4/4/4/3/3/3/3/1/1/1/1).
 #     LOWERED: t/mro/next_method.t 4 -> 1, t/mro/next_method_utf8.t 4 -> 1,
 #       t/op/utfhash.t 8 -> 2, t/re/charset.t 2777 -> 2776, t/uni/method.t 13 -> 1.
+#       s528 (Fable, 2026-10-25, round-5 FULL companion): t/op/utfhash.t 2 -> 0 = #3832 (s526w1, MAIN-READY-47): the file's last block `local $/; <DATA>` now SLURPS,
+#       so its __END__ eval block runs for the first time -- the row LEFT this file; its 2 failing rows are #1389 (see perl-suite-run.tsv).
 #     ADDED: t/mro/method_caching.t 3 (its 36 perl rows against 33 PCL rows --
 #       the mro registration covers it) and **t/run/fresh_perl.t 91**, which was
 #       the whole file: since 9d43ccf2 (s470bk #1057) it died at load with
@@ -258,7 +260,6 @@ t/op/tie_fetch_count.t	202	not-supported.md §`given`/`when` / smart match (`~~`
 t/op/tr.t	2	NS:A single generated top-level form above 64k characters -- measured s473t6d (CHECK 1): tr.t:494 builds a 73,801-character eval string and PCL refuses it (the ruled F6 refusal), aborting the form that holds the two `RT #132608 len=0x12000` rows
 t/op/try.t	2	#1942 + NS:Lvalue subroutines [DEFERRED] (#930) -- the two never-produced rows are `try { return }` inside a `sub : lvalue`
 t/op/undef.t	51	NS:DESTROY called by garbage collector (50 rows) + NS:Read-only constants via `\undef` stash tricks (1).  NOT an early stopper: the file runs to its LAST row.  50 of the 51 are `X::DESTROY`'s five assertions x 10 keys, reached in perl only because `undef %hash` frees the blessed values; the remaining row is `undef constants preserve identity`, behind the `BEGIN { $::{z} = \undef }` stash-constant trick whose bareword `z` dies as an undefined sub
-t/op/utfhash.t	2	NS:Unicode semantics differences -- a hash key whose UTF8 flag differs from its bytes; the never-produced rows are the \w-on-keys loop.  The file is also *rows-unstable* (#1082): its descriptions interpolate the hash order
 t/op/write.t	505	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
 t/opbasic/magic_phase.t	2	UNEXPLAINED
 t/re/alpha_assertions.t	250	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
