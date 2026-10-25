@@ -30,6 +30,12 @@
 - s526w2's uncommitted task-store files on main (3855 modified; 3863 3864 3865 new) are ITS, committed at its merge -- do not sweep them into a Fable commit.
 - OWED by Fable this session: CI check for d47caabe (both workflows); the s528 DECIDED + session-log entries at session end; remove s527a's worktree `agent-a4a4e19ab7b7a3ad0` (merged; its scratch holds the PPI clone -- the bare repo has the branch, so the worktree can go once s527b's clone is verified).
 
+## 20:5x -- CI RED on MAIN-READY-48 (both workflows, within 2 min of the push): the vendored PPI needs YAML::PP; FIXED FORWARD `13720073`
+- Cause: upstream PPI master's `PPI/Document.pm:74` has a hard `use YAML::PP ();` (AutoPrereqs; 1.291 did not need it) -- every local check passed because this box has YAML::PP v0.39 from the CPAN board; a stock runner has none, so `Pl::VendorPPI` failed to load in ci.yml's dependency step (gate job 25 s) and in the installer's check on all four matrix images.  Logs are admin-only via the API; the step names + the closure computation (`grep use|require` over vendor/PPI/lib vs Module::CoreList) found it.
+- Fix on main: libyaml-pp-perl in ci.yml + deps.sh; YAML::PP in install-pcl's remedy, README (2 lines), CLAUDE.md (Dependencies + the CI-machine sentence), core-deps-01.t's note; guards + installer dry-run green.  Debian 12/13 package it (0.035 / 0.39.0); Ubuntu jammy/noble checked via Launchpad (below); the container test (`tools/t/install-container.t`, podman) running as a bench leg = the local proof on ubuntu:24.04.
+- Filed **#3924** (s527b told): make the YAML::PP load LAZY on the `pcl` branch (upstreamable), then drop it from the lists; ONE SOURCE for the dependency list with the core-deps guard comparing the vendored lib's closure against it -- the guard would have turned this into a failing gate row.
+- Lesson for the merge gate: "the vendored lib loads from a fresh shell" is not the stock-machine property on a box whose site_perl is fat from the CPAN board -- the container test IS; run it at every merge that changes vendor/, the installer or a workflow.
+
 ## RESUME RECIPE for s529 (draft; the last block supersedes)
 1. `cat ~/pcl-agent-scratch/s513/HEAVY.holder`; clear dead pids; CI check.
 2. The two agents: `scratch/<label>/STOP.md` in `agent-a3ad79b740a76bd47` (s526w2) and `agent-a4a4e19ab7b7a3ad0` (s527a); MERGE-READY -> merge (either order; the other rebases); checkpointed -> resume from an `s529/resume-<label>.md` written like these.
