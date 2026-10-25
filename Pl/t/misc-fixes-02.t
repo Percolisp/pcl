@@ -1427,7 +1427,7 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
     my ($star) = grep { $_->content eq '*' } $doc->tokens;
     ok( ref($star) eq 'PPI::Token::Cast',
         'FIXED ON PCL\'S PPI BRANCH (s527b, group K): a statement-initial *$o after a block lexes as a Cast '
-      . '(ppi-upstream-bugs.md §38; PCL\'s _repair_statement_start_glob_cast is redundant)' );
+      . '(ppi-upstream-bugs.md §38; PCL\'s _repair_statement_start_glob_cast was deleted in s527b)' );
 }
 # ... and its code-sigil twin (#1511, s523a): `{ 1 while $x; } &$cb(7);`.
 {

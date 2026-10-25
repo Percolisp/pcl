@@ -2246,6 +2246,7 @@ traverse_sequences tail shape); canary `Pl/t/misc-fixes-02.t`; upstream row
 `docs/ppi-bug-report.t`.
 
 **FIXED on PCL's PPI branch** (s527b: the mid-document spelling by group J's brace-only scan, commit `d8bcdfa1`; a block that opens the document by group K, commit `0a536af5` -- `_curly_kind` called that `{` a hash constructor); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-K.md`).
+PCL's `_repair_statement_start_glob_cast` was deleted in s527b (corpus-diff identical; guards regex-pos-01.t and zlib-01.t green).
 
 ---
 

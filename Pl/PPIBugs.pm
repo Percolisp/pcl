@@ -586,7 +586,7 @@ print g(), "\\n";
    title => 'A statement that begins with `*$name` after a bare block is lexed with a multiplication OPERATOR',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^\*\*?=?$/, pred => 'next_is_scalar', check => 'star-as-multiply' },
-   fix => { kind => 'retag', handler => 'Pl::Parser::_repair_statement_start_glob_cast', commit => '0a536af5', group => 'K', pr => undef },
+   fix => { kind => 'retag', handler => undef, deleted => 'Pl::Parser::_repair_statement_start_glob_cast (s527b: PPI fixed on the branch)', commit => '0a536af5', group => 'K', pr => undef },
    repro => 'use Symbol; my $o = Symbol::gensym(); my ($c, $b) = (0, 1);
 { $c = $b; }
 *$o->{A} = 7; print *$o->{A}, "\\n";
