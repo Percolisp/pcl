@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 142;
+plan tests => 144;
 
 sub run_cl {
     my ($code) = @_;
@@ -1222,12 +1222,20 @@ test_cl('term-initial ~~ on a string (bop.t:285 shape)',
         'my $y = "c"; print ~~$y, "\n";', "c\n");
 test_cl('term-initial ~~ as a call argument',
         'sub f { $_[0] } my $x = 7; print f(~~$x), "\n";', "7\n");
+# After a USER sub's name PPI cannot know a term is expected (it cannot see
+# the prototype table), so PCL's narrowed _repair_term_initial_complement
+# keeps this one case (s527b).  perl 5.40.3: f(3).  After a block's } the
+# vendored PPI decides it (s527b, group E): map { $_ } ~~$y is 3.
+test_cl('term-initial ~~ after a paren-less user sub call (the repair PCL keeps)',
+        'sub f { "f(@_)" } my $y = 3; print f ~~$y; print "\n";', "f(3)\n");
+test_cl("term-initial ~~ after a block's } (map BLOCK ~~\$y)",
+        'my $y = 3; my @a = map { $_ } ~~$y; print "@a\n";', "3\n");
 {
     my $doc = PPI::Document->new(\'is(~~$y, 3);');
     ok( !(grep { $_->isa('PPI::Token::Operator') && $_->content eq '~~' } $doc->tokens)
           && 2 == (grep { $_->isa('PPI::Token::Operator') && $_->content eq '~' } $doc->tokens),
         'FIXED ON PCL\'S PPI BRANCH (s527a, group E): a term-initial `~~` lexes as two `~` '
-      . 'complements (ppi-upstream-bugs.md §21; PCL\'s _repair_term_initial_complement is redundant)' );
+      . 'complements (ppi-upstream-bugs.md §21; PCL\'s _repair_term_initial_complement keeps only the user-sub case)' );
 }
 
 # ── #922: integer stringification across the FIXNUM boundary ────────────────
