@@ -24,6 +24,12 @@
 - Probes perl -> main -> tree: hex float 3 / 3 / 3 (§2 was already right at the lowering); `sub _ { "x" }` + next statement: main drops BOTH statements, tree drops only `print _()` (#3922, §31 half fixed = the filetest.t gate-SET mover); `^^` `7%-3` `)*2` `$Ｘ` identical.  **FINDING: `print $v.2, "\n"` prints NOTHING on main** (PPI's `.2` Float makes `$v` the filehandle; no announcement; `_repair_dot_number` misses the print-argument slot) and 52 on the tree = perl -- a repair can cover LESS than the fix; guard owed with s527b's §28 deletion (written into the brief).
 - The bare PPI repository CREATED: `~/pcl-agent-scratch/ppi/PPI.git` (master 455bfa73, pcl 8955ba30).  s527b + s527c briefs FINALIZED (the DRAFT comment replaced).
 
+## 20:4x -- s527a MERGED = MAIN-READY-48 `d47caabe` (pushed; CI pending on BOTH workflows -- ci.yml and install-matrix.yml changed); s527b LAUNCHED; s526w2 told to rebase
+- Merge gate: Fable's gate PASS 337 / 11,466; corpus-diff identical 111 + 6 shapes, drops 5; emission-ab lib 52 SAME; `--ff-only`; tasks #3694 #3697 committed (`d17d6a6b`); CLAUDE.md Dependencies (PPI vendored) + rule 13 (the workaround IS the fix) + Quick Reference (vendor-ppi, canary, report) + CURRENT NUMBERS; STATUS.md 337 / 11,466; `MAIN-READY-48` file written.
+- s527b launched 20:4x (opus, worktree isolation from d47caabe) from `s528/s527b-prompt.md`; s527c waits for s526w2's merge (two at a time).  s526w2 messaged: rebase onto d47caabe, corpus-diff ref 48fd2e21, artifacts valid.
+- s526w2's uncommitted task-store files on main (3855 modified; 3863 3864 3865 new) are ITS, committed at its merge -- do not sweep them into a Fable commit.
+- OWED by Fable this session: CI check for d47caabe (both workflows); the s528 DECIDED + session-log entries at session end; remove s527a's worktree `agent-a4a4e19ab7b7a3ad0` (merged; its scratch holds the PPI clone -- the bare repo has the branch, so the worktree can go once s527b's clone is verified).
+
 ## RESUME RECIPE for s529 (draft; the last block supersedes)
 1. `cat ~/pcl-agent-scratch/s513/HEAVY.holder`; clear dead pids; CI check.
 2. The two agents: `scratch/<label>/STOP.md` in `agent-a3ad79b740a76bd47` (s526w2) and `agent-a4a4e19ab7b7a3ad0` (s527a); MERGE-READY -> merge (either order; the other rebases); checkpointed -> resume from an `s529/resume-<label>.md` written like these.
