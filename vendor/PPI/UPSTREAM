@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: 4affc7def58b81ed2cedf88b2817f1da1c5ce493
-lib-tree: b54705b3600366b6f5b3efab92c944c013df1267
+branch-sha: ecd870598ea3ced88397a11db5f6c6a7d0315642
+lib-tree: 25b08a115fce7815bcbdc94fffd7a296f88ecc20
 date: 2026-10-25
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -24,6 +24,9 @@ fix: J §55 §33 d8bcdfa1 Tokenizer: a method name, a postfix ++/-- and a subscr
 fix: K §38 0a536af5 Tokenizer: a { that opens the document is a block
 fix: J §55 29cb43ae Tokenizer: a { after a block's } opens the next block
 fix: E §21 4affc7de Operator: ~~ after a block's } is two complements
+fix: D §24 1dc58208 Singletons: every punctuation-named array and hash is a magic variable
+fix: J §55 487563de Tokenizer: a builtin that takes no operand ends a term
+fix: D §24 ecd87059 Singletons: @^ is a magic variable
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -54,3 +57,9 @@ commit: 555ef6af TODO test: a { after a block's } opens the next block
 commit: 29cb43ae Tokenizer: a { after a block's } opens the next block
 commit: 23ec7b86 TODO tests: ~~ after a block's } is two complements
 commit: 4affc7de Operator: ~~ after a block's } is two complements
+commit: fb2d6140 TODO tests: every punctuation-named array and hash is one Magic token
+commit: 1dc58208 Singletons: every punctuation-named array and hash is a magic variable
+commit: df9e06cb TODO tests: a builtin that takes no operand ends a term
+commit: 487563de Tokenizer: a builtin that takes no operand ends a term
+commit: 76dce24a TODO test: @^ is one Magic token
+commit: ecd87059 Singletons: @^ is a magic variable

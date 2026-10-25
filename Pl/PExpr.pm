@@ -5180,8 +5180,7 @@ sub _split_pid_magic_cast_run {
     # a Subscript the cast-consuming loop below tried to build a hash-element
     # access with no base and DECLINED, dropping the whole statement.  Re-class
     # it to exactly the shape `${$r}` arrives in — the established repair for a
-    # PPI misclassification (Parser.pm's `_merge_punct_array_symbols` does the
-    # mirror image).  `$$x{k}` is untouched: its `$$` is Cast+Symbol, PPI never
+    # PPI misclassification.  `$$x{k}` is untouched: its `$$` is Cast+Symbol, PPI never
     # makes it a Magic.
     if (ref($nxt) eq 'PPI::Structure::Subscript') {
       bless $nxt, 'PPI::Structure::Block';

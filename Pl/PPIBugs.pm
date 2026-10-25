@@ -395,7 +395,7 @@ $Ｘ = 1; print "$Ｘ\\n";
    title => 'A PUNCTUATION-named array `@?` is split into Cast + Operator',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XCAST', class => 'Operator', content => '', pred => '', check => 'cast-then-punct' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_merge_punct_array_symbols', commit => '6876d6eb', group => 'D', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser::_merge_punct_array_symbols (s527b: PPI fixed on the branch)', commit => 'ecd87059', also_narrowed => 'Pl::Parser2::_repair_punct_hash_name (inverse: a declared-term word before %X; and %^)', also_deleted => 'Pl::Parser2::_repair_punct_hash_cast, Pl::Parser::_reclass_subscripts_after, punct_container_chars', group => 'D', pr => undef },
    repro => '@? = (1, 2); print join(" ", @?), "\\n";',
    perl => "1 2\n",
    tokens => {

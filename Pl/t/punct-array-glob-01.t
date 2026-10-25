@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 44;
+plan tests => 46;
 
 sub write_pl {
     my ($code) = @_;
@@ -795,4 +795,40 @@ print "b1[", (defined $v1 ? $v1 : "undef"), "] b2[", (defined $v2 ? $v2 : "undef
 PL
     is(run_cl($prog), run_perl($prog),
        '#1846: a NUMBER in container position is a symbolic ref, not a CL type error (perl oracle)');
+}
+
+# §24 FIXED IN PCL'S PPI (s527b, group D): every punctuation-named array and
+# hash is one Magic token, so PCL's array merge and the hash Cast arm are
+# deleted.  `%^` stays two tokens in PPI (caret names start there) and PCL's
+# _repair_punct_hash_name keeps it.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+@! = (1, 2); @. = (1); @~ = (1, 2, 3); @& = (4); @% = (5, 6); @= = (7);
+@< = (8); @> = (9); @, = (10); @| = (11, 12); @? = (13); @^ = (14);
+print join("|", scalar(@!), scalar(@.), "@~", "@&", scalar(@%), "@=", "@<", "@>",
+                scalar(@,), "@|", "@?", scalar(@^)), "\n";
+%? = (a => 1); %. = (b => 2); %~ = (c => 3); %& = (d => 4); %= = (e => 5);
+%< = (f => 6); %> = (g => 7); %| = (h => 8); %% = (i => 9); %, = (j => 10); %^ = (k => 11);
+print join("|", keys %?, keys %., keys %~, keys %&, keys %=, keys %<, keys %>,
+                keys %|, keys %%, keys %,, keys %^), "\n";
+my $x = 7; my $h = {a => 9}; $x %= 4;
+print "$x ", $h->{a}%.5e1, "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '§24: every punctuation-named array and hash, and % after a term (perl oracle)');
+}
+# ...and the case PPI cannot know: after a word that is a term only by
+# DECLARATION (a constant, a ()-prototyped sub) perl reads `%` as modulo, and
+# PPI -- which sees an unknown word -- hands over the hash `%.` / `%~`; PCL's
+# _repair_punct_hash_name splits it back.  `time` is PPI's own (a builtin
+# without an operand ends a term, s527b group J).
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+use constant N => 7; sub g () { 3 } my $y = 2;
+print N %.5e1, " ", N %~$y, " ", g %.3e1, " ", (time %.1e1 < 10 ? "ok" : "no"), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '§24: % after a declared term word is modulo, not a punctuation hash (perl oracle)');
 }

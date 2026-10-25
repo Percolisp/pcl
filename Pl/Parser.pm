@@ -760,8 +760,7 @@ sub _ppi_new {
 # reproducer's `sub f { if ($ok) { … $) … } … }` comes back with BOTH blocks
 # unclosed (`{ ... ???`) and three `Statement::UnmatchedBrace` at document
 # level, so File::Copy — which starts `use 5.035007;` — is refused whole.  A
-# token-class repair like `_merge_punct_array_symbols` runs AFTER that tree is
-# built and cannot undo it (the #410 lesson).  The two honest options were a
+# token-class repair runs AFTER that tree is built and cannot undo it (the #410 lesson).  The two honest options were a
 # source pre-pass and a post-lex RE-PARENTING of the wrecked statements; the
 # second is a re-lex written by hand, so this is the smaller one.
 #
@@ -908,7 +907,6 @@ sub _ppi_parse {
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
   _reclassify_bare_vwords($doc) if $doc;
-  _merge_punct_array_symbols($doc) if $doc;
   _repair_statement_start_glob_cast($doc) if $doc;
   _repair_indented_heredocs($doc) if $doc;
   _repair_paren_block_filehandle($doc) if $doc;
@@ -954,7 +952,6 @@ sub fragment_doc {
   my $doc = _ppi_new($src, %opt);
   return undef unless $doc;
   _reclassify_bare_vwords($doc);
-  _merge_punct_array_symbols($doc);
   _repair_statement_start_glob_cast($doc);
   _repair_indented_heredocs($doc);
   _repair_paren_block_filehandle($doc);
@@ -1480,75 +1477,6 @@ sub _anon_signature_prologue {
   return join($sep, @stmts) . $sep;
 }
 
-# PUNCTUATION-NAMED ARRAYS (`@?`, `@!`, `@.`, …).  perl lets any punctuation
-# character name a global, and `@?` is legal perl that real code writes
-# (`ok( ! @?, … )`, t/re/subst.t:346 — one of the #415 census drops).  PPI
-# has no Magic token for them and its Symbol regex is word-bounded, so `@?`
-# comes out as Cast('@') + Operator('?') and the statement was DROPPED
-# (docs/ppi-upstream-bugs.md §24).
-#
-# The merge is unambiguous: in valid perl a `@` CAST must be followed by `$`,
-# `{` or an identifier, so a Cast immediately abutting an OPERATOR can only
-# ever be a mis-lexed punctuation name.  Adjacency is still required.
-#
-# %PUNCT_CONTAINER_CHARS is the set this repair covers.  Its OLD boundary was
-# the CL SYMBOL SPELLING — the characters that are CL constituents and so read
-# BARE, the way the sibling `@#` already does — and the rest (`@,` `@;` `@|`,
-# every CL macro or escape character) kept dropping as task #449.  That
-# boundary is GONE since s449s: `Pl::CLForm::needs_pipes` pipe-quotes a name
-# carrying a CL-unsafe character, so the set is now perl's, not CL's.
-#
-# What is NOT in it is decided by PPI, not by perl (measured, one probe per
-# character, `my $z = @X;` and `my $z = %X;`):
-#   * `* + - _` for `@` and `! + - _` for `@`/`%` — PPI ALREADY makes those one
-#     Magic/Symbol token, so there is nothing to repair;
-#   * `" ' ` #` — the token PPI built SWALLOWED the rest of the line (a string,
-#     a backtick command, a comment), so the name cannot be recovered from the
-#     token stream at all;
-#   * `$` — `@$`/`%$` is the deref spelling, and PPI hands `$;` over as Magic;
-#   * `:` — PPI makes `@:` a Symbol already, so it REACHES emission (it is a CL
-#     read error there, a different bug);
-#   * `( ) [ ] ;` — PPI hands those over as a Token::Structure, and consuming
-#     one means deleting a bracket the LEXER has already built a Structure
-#     around;
-#   * `/` and `=` for the `%` sigil only — `%/` derails into a Regexp and `%=`
-#     is lexed as ONE compound-assignment operator.
-# The residue is task #653.
-my %PUNCT_CONTAINER_CHARS = map { $_ => 1 } split //, q{?!./~^&%=<>,|@\\};
-
-# THE SIGILS DIFFER IN ONE THING: whether the sigil token is ambiguous.
-# A `@` Cast can only ever be a sigil, so adjacency alone decides it.  A `%` is
-# ALSO the modulo operator — and PPI hands the sigil over as a bare
-# Operator('%') there, not a Cast — so the `%` arm needs perl's own rule for
-# which one it is: `%` opens a HASH where a TERM is expected.  perl agrees
-# exactly (probed 5.40.3: `sub f { 7 } print f % 3, "\n"` prints `7` with NO
-# newline, because perl read `%3, "\n"` as the hash `%3` and passed it to `f`;
-# `f() % 3`, `use constant N => 7; N % 3` and `time % 100` are all modulo).
-# That question is `Pl::Parser2::_ends_term` plus the declared-term test for a
-# Word, which is why the `%` arm lives THERE, next to the same disambiguation
-# for `*` (_repair_punct_glob_name) — this file has the SET, that file has the
-# POSITION.  One set, two arms, no third copy.
-sub punct_container_chars { return \%PUNCT_CONTAINER_CHARS }
-
-sub _merge_punct_array_symbols {
-  my ($doc) = @_;
-  my @repaired;
-  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
-    next unless $cast->content eq '@';
-    my $next = $cast->next_sibling;
-    next unless $next && ($next->isa('PPI::Token::Operator')
-                          || $next->isa('PPI::Token::Cast'));
-    next unless length($next->content) == 1 && $PUNCT_CONTAINER_CHARS{$next->content};
-    my $sym = PPI::Token::Symbol->new('@' . $next->content);
-    $cast->insert_before($sym);
-    $next->delete;
-    $cast->delete;
-    push @repaired, $sym;
-  }
-  _reclass_subscripts_after($_) for @repaired;
-  return 1;
-}
-
 # A STATEMENT THAT BEGINS WITH `*$name` (task #3342): PPI 1.291 lexes that
 # `*` as the multiplication OPERATOR when the statement follows a bare block
 # whose first token is a scalar -- `{ $c = $b; }  *$o->{A} = 1;` -- having
@@ -1694,45 +1622,6 @@ sub _repair_indented_heredocs {
     }
     $t->{_indentation}     = $true;
     $t->{_terminator_line} = $extra . $tline;
-  }
-  return;
-}
-
-# The LEXER had already decided what the `{…}` / `[…]` after one of those
-# fragments was, and it decided it from the BAREWORD it saw there: `$Ｊ{a}`
-# came out as a BLOCK and `$Ｖ[0]` as an anonymous-array CONSTRUCTOR, never as
-# the SUBSCRIPT each one is (task #410; uni/gv.t, uni/stash.t, uni/caller.t and
-# the two mro utf8 files drop 21 statements on it).  Merging the tokens does not
-# move the tree, so re-class the postfix chain that follows a repaired symbol.
-# Text and tokens are untouched — only the two container CLASSES change, which
-# is exactly what PPI::Lexer would have chosen had the symbol been whole.
-# An explicit `->` was lexed correctly (PPI reads a subscript after an arrow
-# whatever precedes it), so it is stepped over, not re-classed.
-# The walk steps over WHITESPACE (`snext_sibling`), because PPI's own lexer
-# does: `$h {a}` and `@h {qw(a b)}` are Subscripts in the ASCII spelling
-# (dumped, PPI 1.291), so the repaired spelling has to agree or `$Ｘ {a}`
-# reads as a BLOCK — which made `print $Ｘ {a}` a block-form FILEHANDLE spec
-# and `print $Ｖ [1]` an anonymous array (task #422 item 2).  The mirror is
-# exact: this pass only ever re-decides what PPI decided from a bareword it
-# should never have seen.
-sub _reclass_subscripts_after {
-  my ($sym) = @_;
-  my $node = $sym;
-  while (1) {
-    my $next = $node->snext_sibling or last;
-    if ($next->isa('PPI::Token::Operator') && $next->content eq '->') {
-      $node = $next;
-      next;
-    }
-    last unless $next->isa('PPI::Structure') && $next->start;
-    last unless $next->start->content eq '{' || $next->start->content eq '[';
-    if (!$next->isa('PPI::Structure::Subscript')) {
-      bless $next, 'PPI::Structure::Subscript';
-      for my $kid ($next->children) {
-        bless $kid, 'PPI::Statement::Expression' if ref($kid) eq 'PPI::Statement';
-      }
-    }
-    $node = $next;
   }
   return;
 }

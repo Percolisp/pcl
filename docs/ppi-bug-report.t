@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 119;
+use Test::More tests => 157;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1144,4 +1144,65 @@ for my $c (
         my $smart = grep( $_ eq 'Operator=~~', @t );
         ok( $split ? !$smart : $smart, "$code: $desc" ) or diag "got: @t";
     }
+}
+
+# §24, every punctuation name: perl accepts @X and %X for each of these
+# characters in term position (probed 5.40.3, `scalar(@X)` / `scalar(%X)`),
+# as it accepts $X.  A @ cast is only ever followed by $, { or a name, so
+# there is no second reading; after a term a % is still the modulo operator.
+{
+    my @names = ( map( "\@$_", split //, q{!./~&%=<>,|@\\} ),
+                  map( "%$_",  split //, q{?./~&%=<>,|@\\} ) );
+    for my $name (@names) {
+        my $code = "my \@k = (scalar($name));";
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq "Magic=$name", @t ), "`$name` in term position is one Magic token" )
+            or diag "got: @t";
+    }
+    my @controls = (
+        [ '$x %= 3;',   'Operator=%=', 'after a term %= is the assignment operator (control)' ],
+        [ '$h{a}%.5;',  'Operator=%',  'after a subscript % is modulo, .5 a number (control)' ],
+        [ '$z = 7 %.5;', 'Operator=%',  'after a number % is modulo (control)' ],
+        [ 'my $n = @{$r};', 'Cast=@',  'a @ before { stays a cast (control)' ],
+    );
+    for my $r (@controls) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+
+# §55, a builtin that takes no operand is a whole TERM: time, wait,
+# wantarray, fork, getppid, ... (perl -e 'print time.2' prints the time
+# with a 2 appended; `time %.5e1` is a modulo).  After one of them the
+# tokenizer is in operator position.
+{
+    my @rows = (
+        [ '$t = time %.5e1;', 'Operator=%', 'after time % is modulo' ],
+        [ '$t = time.2;',     'Operator=.', 'after time . concatenates' ],
+        [ '$t = wait-1;',     'Operator=-', 'after wait - subtracts' ],
+        [ '$t = time %~$y;',  'Operator=%', 'after time %~ is modulo of a complement' ],
+        [ '$t = time*f();',   'Operator=*', 'after time * multiplies' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+    my @t = map { s{^PPI::(?:Token::)?}{}r } toks('my %h = (time => 1);');
+    ok( grep( $_ eq 'Word=time', @t ), 'time before => stays a word (control)' ) or diag "got: @t";
+}
+
+# §24, the caret: perl -e '@^ = (1,2); print scalar(@^)' prints 2.  The
+# hash spelling %^ stays two tokens here: a % before ^ starts the caret
+# names (%^H), and only %^H is one.
+{
+    my @t = map { s{^PPI::(?:Token::)?}{}r } toks('my @k = (scalar(@^));');
+    ok( grep( $_ eq 'Magic=@^', @t ), '`@^` in term position is one Magic token' )
+        or diag "got: @t";
+}
+{
+    my @t = map { s{^PPI::(?:Token::)?}{}r } toks('my $n = scalar(%^H);');
+    ok( grep( $_ eq 'Magic=%^H', @t ), '`%^H` stays one Magic token (control)' )
+        or diag "got: @t";
 }
