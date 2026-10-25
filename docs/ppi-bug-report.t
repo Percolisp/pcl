@@ -12,7 +12,7 @@
 #   perl ppi-bug-report.t
 #
 # THE UPSTREAM COPY (s527a) is t/ppi_bugs_pcl.t on PCL's PPI branch `pcl`
-# (vendor/PPI/UPSTREAM names its sha): the same 91 rows and descriptions in
+# (vendor/PPI/UPSTREAM names its sha): the same rows and descriptions in
 # PPI's test style, every row PPI still gets wrong inside a TODO block that
 # names its catalogue section.  This file stays as the catalogue's companion,
 # run against whatever PPI is loaded; the rows the branch fixes pass here
@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 91;
+use Test::More tests => 112;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1055,4 +1055,56 @@ for my $c (
     my ($amp) = grep { $_->content eq q{&} } $doc->tokens;
     is( ref($amp), q{PPI::Token::Cast},
         q{the statement-initial `&` of `&$cb(7)` after a block is a Cast} );
+}
+
+# ── Bug 55: a method name, a postfix ++/--, and a subscript's } END A TERM ──
+#
+#   $ perl -e 'package O; sub w {10} package main; my $o = bless {}, "O";
+#              sub w {2} my %h = (a => 5); my $i = 5;
+#              print $o->w*w(), " ", $i++*w(), " ", $h{a}%-1, "\n"'
+#   20 10 0
+#
+# After a term perl expects an operator (toke.c: PL_expect is XOPERATOR).  PPI
+# knows that for a symbol, a number, a quote and a closing ) or ], but not
+# for three other ends of a term: a method name after -> (a Word), a postfix
+# ++ or -- (an Operator), and the } of a subscript or of a dereference block.
+# After them PPI lexes *w as a glob, %- as the magic hash, .2 and -1 as
+# numbers and / as the start of a match.  Rows marked (control) are the
+# spellings where a term has NOT ended and that must keep their meaning.
+{
+    my @rows = (
+        [ '$o->w*w()',      'Operator=*', 'a method name ends a term: * multiplies' ],
+        [ '$o->name.2',     'Operator=.', 'a method name ends a term: . concatenates' ],
+        [ '$o->w-1',        'Operator=-', 'a method name ends a term: - subtracts' ],
+        [ '$o->h%-1',       'Operator=%', 'a method name ends a term: % is modulo' ],
+        [ '$i++*f()',       'Operator=*', 'a postfix ++ ends a term: * multiplies' ],
+        [ '$i++ / 2',       'Operator=/', 'a postfix ++ ends a term: / divides' ],
+        [ '$i++.2',         'Operator=.', 'a postfix ++ ends a term: . concatenates' ],
+        [ '$i--%-1',        'Operator=%', 'a postfix -- ends a term: % is modulo' ],
+        [ '$h{a}*f()',      'Operator=*', "a subscript's } ends a term: * multiplies" ],
+        [ '$h{a}%-1',       'Operator=%', "a subscript's } ends a term: % is modulo" ],
+        [ '$x->{a}{b}*f()', 'Operator=*', "a chained subscript's } ends a term" ],
+        [ '@{$h}*$x',       'Operator=*', "a dereference block's } ends a term: * multiplies" ],
+        [ '${$x}%$y',       'Operator=%', "a dereference block's } ends a term: % is modulo" ],
+        [ 'do { 1 }*f()',   'Operator=*', "do BLOCK's } ends a term: * multiplies" ],
+        [ 'print {$fh} .5',      'Number::Float=.5', "a block filehandle's } does not end a term: .5 is a number" ],
+    );
+    my @controls = (
+        [ '++$i*$x',               'Symbol=$i',     'a prefix ++ opens a term (control)' ],
+        [ 'sub f {} *bar = \&f;',  'Symbol=*bar',   "after a sub body's } a glob starts the statement (control)" ],
+        [ 'if ($x) { } *g = \&f;', 'Symbol=*g',     "after a block's } a glob starts the statement (control)" ],
+        [ 'map { $_ } *STDOUT',    'Symbol=*STDOUT', "after map's block a glob is the list (control)" ],
+        [ 'print $fh %h',          'Symbol=%h',     'after a scalar filehandle a hash is the list (control)' ],
+        [ 'foo *bar',              'Symbol=*bar',   'after a plain word a glob is its argument (control)' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+    for my $r (@controls) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
 }
