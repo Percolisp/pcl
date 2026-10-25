@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 26;
 
 sub write_pl {
     my ($code) = @_;
@@ -151,13 +151,22 @@ both_agree('my %g = (a => .5); print "$g{a}\n";',
 
 # The ONE position the shape oracle cannot see: a print FILEHANDLE looks like a
 # completed term and is not one — perl is still waiting for the argument list,
-# so `.5` there is the NUMBER (task #405's family; the guard is
-# Pl::Parser2::_is_print_filehandle_slot).
+# so `.5` there is the NUMBER (task #405's family).  Since s527b PCL's PPI
+# decides it (groups F + J); PCL's _repair_dot_number and its print-slot guard
+# are deleted.
 both_agree('my $x = "A"; print $x .5, "\n"; print "done\n";',
            'negative: `print $x .5` treats $x as the FILEHANDLE, .5 as a number');
 
 both_agree('print STDOUT .5, "\n";',
            'negative: `print STDOUT .5` writes 0.5');
+
+# THE MERGE-TIME FINDING (s528): on main `print $v.2` printed NOTHING -- PPI's
+# `.2` Float made $v the FILEHANDLE, silently, and the repair did not reach the
+# print-argument slot.  perl prints 52.  A block filehandle is the opposite case.
+both_agree('my $v = 5; print $v.2, "\n"; print "done\n";',
+           '`print $v.2` concatenates (perl 52): $v is not a filehandle');
+both_agree('my $fh = \*STDOUT; print {$fh} .5; print "\n";',
+           "negative: `print {\$fh} .5` writes 0.5 -- a block's } does not end a term");
 
 # ---- #2530 (s500a, ppi-upstream-bugs.md §34): after a Float / Exp / Hex /
 # Octal / Binary number PPI lexes `-N` as a NEGATIVE NUMBER; the §15 repair

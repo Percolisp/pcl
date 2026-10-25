@@ -1687,9 +1687,6 @@ sub parse {
   # the two share ONE character set).
   $doc = $self->_repair_punct_hash_cast($doc);
   $doc = $self->_repair_punct_hash_name($doc);
-  # …and the CONCATENATION spelling of the same family: `$x.2` is lexed as one
-  # Number::Float and the operator disappears — see _repair_dot_number (#480).
-  $doc = $self->_repair_dot_number($doc);
   $doc = $self->_repair_word_x_call($doc);
   $doc = $self->_repair_term_initial_complement($doc);
   # And the CASCADE of §14's readline mis-lex: with `>` read as an operator the
@@ -8239,41 +8236,6 @@ sub _glob_name_position {
   return 0;
 }
 
-# PPI LEXER BUG, task #480 (docs/ppi-upstream-bugs.md §28) — the FOURTH sibling
-# of §12 (`)*name`), §15 (`)-1`) and §25 (`)-name`), and one rule decides all
-# four.
-#
-#     my $x = $_.2;    =>  Magic($_)  Number::Float(.2)     <- WRONG: no operator
-#     my $x = $_ . 2;  =>  Magic($_)  Operator(.)  Number(2)
-#
-# There is no `.` OPERATOR in the first stream at all, so the term walker sees
-# SYMBOL NUMBER juxtaposed and DROPS the statement ("Bug. Fell through").
-# perl's own toke.c starts a number at `.` only where a TERM is expected; after
-# a complete term `.` is concatenation, which is exactly the `_ends_term`
-# discriminator the two sibling repairs already use.  A space or a non-digit
-# (`$_ . 2`, `$_."2"`) makes PPI lex it correctly — the bug needs the digit
-# adjacent.
-#
-# THE NEGATIVES ARE THE SAME FAMILY'S, and they are all "a term is expected
-# here", so the previous token is not term-ending and the repair cannot fire:
-# `= .5`, `return .5`, `(a => .5)`, `[.5]`, `f(.5)`, `,.5`, `-.5`.  A leading
-# `..`/`...` is an Operator token to PPI and never a Float, so ranges are out
-# by construction.
-sub _repair_dot_number {
-  my ($self, $doc) = @_;
-  my $repaired = 0;
-  for my $n (@{ $doc->find('PPI::Token::Number') || [] }) {
-    my $c = $n->content;
-    next unless $c =~ /^\.\d/;
-    my $prev = _prev_sig_token($n);
-    next unless _ends_term($prev);
-    next if _is_print_filehandle_slot($prev);   # print $fh .5 writes 0.5
-    $n->set_content(". " . substr($c, 1));
-    $repaired = 1;
-  }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
-}
-
 # PPI LEXER BUG (task #351, docs/ppi-upstream-bugs.md §11).  A bare `/PATTERN/`
 # as the first argument of a PAREN-LESS call is tokenized as DIVISION:
 #
@@ -8886,39 +8848,6 @@ sub _ends_term {
   return _ends_term(_prev_sig_token($t))
     if $t->isa('PPI::Token::Operator') && ($t->content eq '++' || $t->content eq '--');
   return 0;
-}
-
-# THE ONE POSITION `_ends_term` CANNOT SEE (task #480, and the family is #405's).
-#
-# `_ends_term` is a token-SHAPE oracle — a value, `)`, `]`, a subscript's `}`.
-# A `print`/`printf`/`say` FILEHANDLE is shaped like a term and is not one:
-# perl's indirect-object slot takes a plain scalar (or a bareword, or a block)
-# and then STARTS the argument list, so what follows the handle is in TERM
-# position, not operator position:
-#
-#     print $fh .5;      perl writes 0.5 to $fh      (a NUMBER — probed)
-#     my $y = $x .5;     perl concatenates           (an OPERATOR)
-#
-# Only the plain-Symbol spelling needs the guard.  A BAREWORD handle
-# (`print STDOUT .5`) is a Word, which `_ends_term` already answers 0 for; the
-# block form (`print {$fh} .5`) is a Structure::Block whose previous sibling is
-# not a Cast, which it also answers 0 for.  A non-simple expression
-# (`print $h->{fh} .5`) is NOT an indirect-object slot in perl, so it really is
-# a completed term and the guard must not fire — hence the test is exactly
-# "a `$` Symbol whose own previous significant token is print/printf/say".
-#
-# TODAY IT HAS ONE CONSUMER, deliberately: the sibling repairs
-# (`_repair_word_x_call`, …; the `-name` and `*name` ones are PPI's since s527b) can
-# reach the same position — `print $fh -3` is task #405, already filed and
-# measured as its own bug — but narrowing THEIR oracle is a wider change than
-# this one, and none of the four populations has a site (A/B measured, s456ag).
-# The next consumer routes through HERE rather than growing a second copy.
-sub _is_print_filehandle_slot {
-  my ($t) = @_;
-  return 0 unless $t && $t->isa('PPI::Token::Symbol') && $t->content =~ /^\$/;
-  my $p = _prev_sig_token($t);
-  return 0 unless $p && $p->isa('PPI::Token::Word');
-  return $p->content =~ /^(?:print|printf|say)\z/ ? 1 : 0;
 }
 
 # True when T is the FIRST significant token of its own statement — i.e. a
