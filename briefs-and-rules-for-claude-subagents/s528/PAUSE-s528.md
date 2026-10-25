@@ -42,6 +42,15 @@
 
 ## 21:1x -- the container test PASSES 17/17 on 30b4d0c5 (`install-container2.log`: root install + verify + the installer's e2e test, non-root, shared /opt, cache-info) = the stock-image proof; CI gate for 30b4d0c5 in progress; the install matrix re-triggered by this commit (deps.sh header names the five deps)
 
+## 21:2x-21:4x -- THIRD CI cause: the gate's `Pl/t/cache-surface-01.t` row 33 on a stock runner = #3921 itself; FIXED on main `ff5f72b5` (not yet pushed at 21:4x: gate re-running)
+- The CI step wrapper's PUBLIC annotations (`GET /check-runs/<job id>/annotations`) gave the failing row without admin logs -- USE THEM FIRST next time.  On a stock runner there is no PPI but the vendored one (kept out of the program's @INC), so `pcl --cache-info` printed `PPI sources: not resolvable ... recorded as absent`: a re-vendor would NEVER have re-keyed cached module transpiles there.  This box's system PPI 1.291 hid it.
+- FIX (one function + a printer line, cl/pcl-runtime.lisp ~27090): `%p-vendored-ppi` = <compiler root>/vendor/PPI/lib/PPI.pm unless PCL_SYSTEM_PPI (the loader's rule mirrored); `%p-ppi-files` prefers it; `--cache-info` says `(N files) vendored`.  Guards: cache-surface-01.t 34-35; module-fasl-cache-01.t's #1843 block (a PPI tree planted on @INC) now runs under PCL_SYSTEM_PPI=1 with a first row pinning that the planted tree does not enter the key while the vendored PPI is in force (the first gate run after the fix failed exactly those two rows, 62-63).  Probed: plain -> vendor/PPI (95 files) vendored; PCL_SYSTEM_PPI=1 -> site_perl 1.291; on the STOCK IMAGE (podman, `ci-repro-cache.log`): `/work/vendor/PPI/lib/PPI.pm (95 files) vendored`.  Everyday 116 = 116 (NEW 0 FIXED 0) on the re-keyed cache.  #3921 DONE; s527b told to leave the function alone and rebase when told.
+- Container-only artifacts (NOT PCL, NOT CI): cache-surface-01.t row 22 ("a root-owned directory" -- rootless podman makes me root), pcl-switches-01.t row 102 (`-C` alone pins LANG=en_US.UTF-8, which the image never generated; perl and pcl both print 95 there).
+- OWED: the gate PASS on ff5f72b5 (`gate-3921b.log`) -> push -> CI poll (ci.yml only; the matrix's paths are untouched, it was green on 6ddab77d) + `prove tools/t/install-container.t` once more as the local matrix proof -> tell s527b.
+
+## 21:4x -- USER: "Don't start new subtasks."
+- No further launches this session: s526w2 and s527b run to their reports (never stop a running one); a freed slot stays EMPTY; **s527c is NOT launched** (its brief `s528/s527c-prompt.md` stays final, for the next session's word), nor the §39-§54 filler, nor a correctness batch.  Fable's own duties continue: the #3921 push + CI, the merge gates when the agents report, the records.
+
 ## RESUME RECIPE for s529 (draft; the last block supersedes)
 1. `cat ~/pcl-agent-scratch/s513/HEAVY.holder`; clear dead pids; CI check.
 2. The two agents: `scratch/<label>/STOP.md` in `agent-a3ad79b740a76bd47` (s526w2) and `agent-a4a4e19ab7b7a3ad0` (s527a); MERGE-READY -> merge (either order; the other rebases); checkpointed -> resume from an `s529/resume-<label>.md` written like these.
