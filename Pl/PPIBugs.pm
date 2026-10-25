@@ -225,7 +225,7 @@ our @BUGS = (
    title => '`)*name` — a `*` after a term is lexed as a GLOB, not multiplication',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Symbol', content => qr/^\*/, pred => '', check => 'glob-for-multiply' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_glob_multiply', commit => '1cff9293', group => 'B', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser2::_repair_glob_multiply (s527b: PPI fixed on the branch)', commit => '1cff9293', group => 'B', pr => undef },
    repro => 'my ($s, $k) = (0, "abc"); $s += length($k)*length($k); print "$s\\n";',
    perl => "9\n",
    tokens => {

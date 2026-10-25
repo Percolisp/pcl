@@ -1654,12 +1654,13 @@ sub parse {
   $self->_premerge_include_prototypes($doc);
 
   # PPI LEXER BUGS in the OPERATOR-vs-TERM decision, each of which eats a whole
-  # statement: `)*name` lexed as a glob (#354), `)-name` lexed as a negative
+  # statement: `)*name` lexed as a glob (#354; PCL's PPI fixes it, s527a/s527b,
+  # and its repair is deleted), `)-name` lexed as a negative
   # bareword (#457), `/PATTERN/` after a paren-less call lexed as division
   # (#351), and a call to a sub named `x` after a list operator lexed as the
   # repetition operator (#361).  All four are repaired on the raw token stream
   # with perl's own rule — the token before must not END A TERM — see
-  # _repair_glob_multiply, _repair_minus_word, _repair_word_match,
+  # _repair_minus_word, _repair_word_match,
   # _repair_word_x_call.
   # FIRST of the block, because it is the one whose damage is UNBOUNDED: a glob
   # pattern in term position derails into a Regexp that can swallow the rest of
@@ -1670,13 +1671,12 @@ sub parse {
   # other unbounded one.  PPI scans to the closing `/`, then reads the next `/`
   # as the start of another match and swallows every statement between them, so
   # what the repairs below see there is not perl at all — it is PATTERN TEXT
-  # tokenized as code.  Left later in the block, `_repair_glob_multiply` met the
+  # tokenized as code.  Left later in the block, `_repair_glob_multiply` (deleted s527b) met the
   # `*b` of `ok /a*b?c*/` as a GLOB (a Regexp ends a term) and rewrote it to
   # `* b` — a space spliced into the middle of a regex, which then matched
   # something else entirely.  A repair whose damage is unbounded must run before
   # the repairs that read the damaged region, never beside them.
   $doc = $self->_repair_word_match($doc);
-  $doc = $self->_repair_glob_multiply($doc);
   # …and its INVERSE: a punctuation- or digit-named GLOB (`*X = *-`,
   # `local *1 = sub {…}`) that PPI hands over as two operator tokens — see
   # _repair_punct_glob_name (task #463).
@@ -7981,34 +7981,9 @@ sub _repair_nary_foreach {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
-# PPI LEXER BUG (task #354, docs/ppi-upstream-bugs.md §12).  After a token that
-# ENDS A TERM, `*name` written with no space is lexed as a GLOB — a
-# PPI::Token::Symbol — instead of the multiplication it can only be:
-#
-#     $s += length($k)*length($k);   =>  Word List Symbol(*length) List
-#
-# PExpr has no case for that shape, so the WHOLE STATEMENT is dropped (#138
-# family).  Data::Dump line 325 is exactly this, in any program that uses it.
-# What makes it easy to miss: a space (`) * length`) lexes correctly, and so
-# does a NUMBER on the left (`2*length($k)`) — measured, both.
-#
-# The repair is perl's rule on the raw token stream: a `*` cannot open a glob
-# where a term has just ended, so split the token back into operator + word and
-# reparse.  Everything the predicate leans on is in _ends_term.
-sub _repair_glob_multiply {
-  my ($self, $doc) = @_;
-  my $repaired = 0;
-  for my $sym (@{ $doc->find('PPI::Token::Symbol') || [] }) {
-    my ($name) = $sym->content =~ /^\*(\w+(?:::\w+)*)\z/ or next;
-    next unless _ends_term(_prev_sig_token($sym));
-    $sym->set_content("* $name");
-    $repaired = 1;
-  }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
-}
-
 # PPI LEXER BUG (task #463 items 3+4, docs/ppi-upstream-bugs.md §26) — the
-# INVERSE of §12 above.  perl lets any punctuation character or digit run name a
+# INVERSE of §12 (`)*name`, now fixed in PCL's PPI).  perl lets any
+# punctuation character or digit run name a
 # glob, exactly as it names a scalar; PPI's Symbol regex is word-bounded, so it
 # hands those over as two ordinary operator tokens and the statement is DROPPED:
 #
