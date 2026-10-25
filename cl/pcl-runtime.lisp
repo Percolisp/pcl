@@ -17947,9 +17947,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (let ((r (%p-stderr-tie)))
              (if r
                  (%p-tie-call r "PRINT" s)
-                 (progn
-                   (%p-out-string s *error-output* nil)
-                   (force-output *error-output*))))))))))
+                 (%p-warn-to-stderr s)))))))))
+
+(defun %p-warn-to-stderr (s)
+  "The default warn's write.  A CLOSED STDERR (`close STDERR`, or an
+   `open STDERR, '>f'` already closed) drops the warning, as perl does -- the
+   write fails and warn still returns: the effect is lost, no value flows on,
+   so this is not a rule-12 die (#3866; Log::Log4perl t/004Config.t warned
+   after `close STDERR` and the host's `stream is closed` error became $@)."
+  (handler-case
+      (progn
+        (%p-out-string s *error-output* nil)
+        (force-output *error-output*))
+    (stream-error () nil)))
 
 ;;; ============================================================
 ;;; THE STATEMENT LOCATION REGISTER (task #1240) — perl's PL_curcop

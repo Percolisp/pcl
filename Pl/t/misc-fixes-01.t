@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 142;
+plan tests => 143;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -280,6 +280,16 @@ test_cl('an element subscript is scalar context (#3863)',
      sub ctx { wantarray ? "L" : "S" } my %c = (S => "s", L => "l");
      print join(",", keys %f), " ", join(",", sort keys %h), " $h{q} @l ", $c{ctx()}, "\n";',
     "F p,q 1x 4 5 s\n");
+
+# #3866: `warn` with STDERR CLOSED drops the warning, as perl does -- it died
+# with the host's "fd-stream ... is closed" text (Log::Log4perl t/004Config.t).
+# Output probed under perl 5.40.3.
+test_cl('warn after close STDERR is dropped, not a die (#3866)',
+    'my $f = "/tmp/pcl-misc-fixes-01-3866.txt";
+     open STDERR, ">$f"; print STDERR "x\n"; close STDERR;
+     my $ok = eval { warn "after close\n"; 1 }; unlink $f;
+     print "ok=", ($ok ? 1 : 0), " err=[", ($@ // ""), "]\n";',
+    "ok=1 err=[]\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,
