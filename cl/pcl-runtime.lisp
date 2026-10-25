@@ -26922,8 +26922,9 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((ppi (%p-ppi-files)))
     (format t "PPI sources: ~A~%"
             (if ppi
-                (format nil "~A (~D files)" (first ppi) (length ppi))
-                "not resolvable from this program's @INC -- recorded as absent")))
+                (format nil "~A (~D files)~:[~; vendored~]"
+                        (first ppi) (length ppi) (%p-vendored-ppi))
+                "not found: no vendor/PPI/lib under the compiler root and none on this program's @INC -- recorded as absent")))
   (let ((set (loop for v in *p-emission-env-vars*
                    for raw = (sb-posix:getenv v)
                    when (and raw (plusp (length raw)))
@@ -27086,19 +27087,36 @@ would consume, so it dies naming the stream (rule 12)."
         (sb-posix:closedir d))))
   acc)
 
+(defun %p-vendored-ppi ()
+  "The vendored PPI's entry file, <root>/vendor/PPI/lib/PPI.pm, when the
+   compiler root is known, that file is there and PCL_SYSTEM_PPI is unset or
+   false -- the rule Pl::VendorPPI applies when pl2cl loads PPI, mirrored
+   here (task #3921, s528).  NIL otherwise.  A stock machine has NO other
+   PPI: without this the stamp recorded PPI as absent there, and a re-vendor
+   never re-keyed a cached module transpile."
+  (let ((root (%p-compiler-root))
+        (sys (sb-posix:getenv "PCL_SYSTEM_PPI")))
+    (when (and root (or (null sys) (string= sys "") (string= sys "0")))
+      (let ((p (concatenate 'string (namestring root) "vendor/PPI/lib/PPI.pm")))
+        (when (ignore-errors (sb-posix:stat p))
+          p)))))
+
 (defun %p-ppi-files ()
-  "PPI's own sources, sorted: the PPI.pm this program's @INC resolves plus
-   every PPI/**/*.pm beside it.  NIL when PPI cannot be located from here.
+  "PPI's own sources, sorted: the PPI.pm the COMPILER parses with plus every
+   PPI/**/*.pm beside it.  Since s527a that is the VENDORED tree whenever
+   %P-VENDORED-PPI finds it; else the PPI.pm this program's @INC resolves
+   (PCL_SYSTEM_PPI=1, or a tree without vendor/).  NIL when neither is found.
 
    The subdirectory is derived from the RESOLVED file's own directory, not by
    stripping `.pm` off its name: P-FIND-MODULE-IN-INC answers a `.pmc` when
    one is there (perl's PMC preference), and PPI's tree sits beside either."
-  (let ((ppi (p-find-module-in-inc "PPI.pm")))
+  (let ((ppi (or (%p-vendored-ppi) (p-find-module-in-inc "PPI.pm"))))
     (when ppi
       (let* ((slash (position #\/ ppi :from-end t))
              (dir (concatenate 'string (subseq ppi 0 (1+ (or slash -1)))
                                "PPI")))
         (cons ppi (sort (%p-pm-files-under dir '()) #'string<))))))
+
 
 (defun %p-stamp-files (acc label files)
   "Write LABEL, the COUNT of FILES and each file's path, mtime and size into

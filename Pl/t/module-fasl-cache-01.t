@@ -41,7 +41,7 @@ use PCLSbcl ();    # cached_core — the saved core the #1303 rows run through
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 65;
+plan tests => 66;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -614,6 +614,17 @@ sub _write_at {
         my $out = `sbcl @prefix --eval '$probe' 2>&1`;
         return $out =~ /^KEY (\S+)$/m ? $1 : '';
     };
+
+    # SINCE s527a PPI IS VENDORED (#3921, s528): the compiler parses with
+    # <root>/vendor/PPI/lib and the stamp hashes THAT tree unless PCL_SYSTEM_PPI
+    # says otherwise -- so a PPI tree on @INC does not enter the key at all (the
+    # row below), and the rest of this block, which is about a PPI INSTALLATION
+    # on @INC, runs with PCL_SYSTEM_PPI=1 so the @INC walk is what it exercises.
+    my $kv1 = $key->();
+    { my $t = time + 50; utime($t, $t, "$ppi1/PPI/Token.pm") or die "utime: $!" }
+    is($kv1, $key->(),
+       'the vendored PPI in force: a PPI tree on @INC does not enter the key (#3921)');
+    local $ENV{PCL_SYSTEM_PPI} = 1;
 
     my $k1 = $key->();
     my $k2 = $key->();

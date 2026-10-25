@@ -39,7 +39,7 @@ use PCLSbcl ();   # sbcl_prefix — the %p-mtime contract row asks the runtime i
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 59;
+plan tests => 61;
 
 my $dir = tempdir(CLEANUP => 1);       # where the fixture modules live
 
@@ -229,6 +229,15 @@ sub run_pcl {
          '... names the perl binary the fingerprint hashes (#1843)');
     like($info, qr{^\s*PPI sources: /\S+ \(\d+ files\)}m,
          '... and PPI, resolved through a real program @INC');
+    # SINCE s527a PPI IS VENDORED (task #3921, s528): the stamp names the tree
+    # pl2cl parses with, <root>/vendor/PPI/lib -- on a stock machine there is NO
+    # other PPI, and the first CI run of MAIN-READY-48 read "recorded as absent"
+    # here, so a re-vendor would never have re-keyed a cached module transpile.
+    like($info, qr{^\s*PPI sources: /\S+/vendor/PPI/lib/PPI\.pm \(\d+ files\) vendored}m,
+         '... the VENDORED PPI, the one pl2cl parses with (#3921)');
+    my $sinfo = `PCL_CACHE_DIR='$ncache' PCL_SYSTEM_PPI=1 $pcl --cache-info 2>&1`;
+    unlike($sinfo, qr{vendor/PPI/lib},
+           '... and PCL_SYSTEM_PPI=1 stamps the installed PPI instead, or records its absence');
     like($info, qr{^\s*emission env: none set}m,
          '... and the emission-selecting environment, here unset (#1861)');
     my $oinfo = `PCL_CACHE_DIR='$ncache' PCL_OPT=none $pcl --cache-info 2>&1`;
