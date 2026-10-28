@@ -307,9 +307,9 @@ a
    tasks => [] },
  { id => 18, kind => 'structure', dump => 'statements',
    title => '`finally { … }` is not part of the `try` statement — and eats the next one',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'continuation-split', shape => '`finally BLOCK` after try/catch starts a new statement and swallows the next one' },
-   fix => { kind => 'handler', handler => 'Pl::Parser2::_repair_try_finally' },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser2::_repair_try_finally + the _lower_block finally join (s527c: PPI fixed on the branch)', commit => '946fb9e1', group => 'Q', pr => undef },
    repro => 'use feature \'try\'; no warnings;
 try { die "e\\n" } catch ($e) { print "caught $e" } finally { print "fin\\n" }
 print "after\\n";

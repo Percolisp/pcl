@@ -1053,18 +1053,19 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
       . '(ppi-upstream-bugs.md §13)' );
 }
 {
-    # `finally {…}` is left OUT of the try Compound, and the orphan statement
-    # it starts swallows the next statement whole.
+    # `finally {…}` belongs to the try Compound, and the statement after it is
+    # its own (1.291 left the block out and the orphan swallowed the next one).
     my $doc = PPI::Document->new(\<<'PERL');
 use feature 'try';
 try { foo(); } catch ($e) { bar($e); } finally { baz(); }
 is($x, 1, 'desc');
 PERL
     my @s = grep { $_->isa('PPI::Statement') } ($doc ? $doc->schildren : ());
-    ok( !(grep { $_->content =~ /^is\(/ } @s),
-        'CANARY: PPI still lets a `finally` block swallow the statement after '
-      . 'it — if this FAILS, drop _repair_try_finally and the finally join in '
-      . '_lower_block (ppi-upstream-bugs.md §18)' );
+    ok( (grep { $_->content =~ /^is\(/ } @s)
+          && (grep { $_->isa('PPI::Statement::Compound') && $_->content =~ /finally \{ baz\(\); \}\z/ } @s),
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group Q): a `finally` block is part of '
+      . 'the try Compound and the next statement is its own (ppi-upstream-bugs.md §18; '
+      . 'PCL\'s _repair_try_finally is deleted)' );
 }
 
 # ── runtime warning strings used CL "...\n", but \n in a CL string literal is a

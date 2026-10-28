@@ -1684,10 +1684,6 @@ sub parse {
   # _repair_readline_cascade (task #479).
   $doc = $self->_repair_readline_cascade($doc);
 
-  # PPI LEXER BUG: a `finally { … }` block is not part of the try Compound PPI
-  # built, and the orphan statement it starts swallows the rest of the block —
-  # see _repair_try_finally.
-  $doc = $self->_repair_try_finally($doc);
 
   # `state` outside the classic subset (scalar statement-decl in a named sub)
   # is rewritten at SOURCE level into plain Perl the existing machinery
@@ -8252,47 +8248,6 @@ sub _repair_word_x_call {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
-# PPI LEXER BUG (task #340, docs/ppi-upstream-bugs.md §18).  With
-# `use feature 'try'` in scope PPI 1.291 knows the construct half way: it lexes
-# `try {…} catch (VAR) {…}` into a PPI::Statement::Compound and then STOPS.  A
-# following `finally {…}` is left out, and since the orphan statement it starts
-# has no terminator, it SWALLOWS every following statement up to the next `;`:
-#
-#     try {…} catch ($e) {…} finally {…}   is one Compound plus
-#     is($x, 1, 'desc');                   PPI::Statement: finally {…} is(…);
-#
-# so the assertion after a finally block simply disappears into it.  (Without
-# the pragma PPI does not know `try` at all and the whole construct is one
-# swallowing statement — but then perl does not compile the file either, so
-# principle 9 leaves that alone.)
-#
-# The repair terminates the orphan where perl does, by giving the finally
-# block's closing brace a `;`.  What comes after is then an ordinary statement
-# again, and the `finally {…};` that is left joins its try in _lower_block —
-# the same route the unlabeled `continue` block already takes.
-sub _repair_try_finally {
-  my ($self, $doc) = @_;
-  my $repaired = 0;
-  for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {
-    next unless $w->content eq 'finally';
-    my $stmt = $w->parent;
-    next unless $stmt && ref($stmt) eq 'PPI::Statement';
-    my @k = _strip_semi($stmt->schildren);
-    # `finally` must OPEN the statement and be followed by its block; anything
-    # else (Try::Tiny's `try {…} catch {…} finally {…};`, where finally is
-    # mid-statement) is a different construct and is left alone.
-    next unless @k > 2 && $k[0] == $w && $k[1]->isa('PPI::Structure::Block');
-    my $prev = $stmt->sprevious_sibling;
-    next unless $prev && $prev->isa('PPI::Statement::Compound');
-    my @pk = $prev->schildren;
-    next unless @pk && $pk[0]->isa('PPI::Token::Word') && $pk[0]->content eq 'try';
-    my $close = $k[1]->finish or next;
-    $close->set_content($close->content . ';');
-    $repaired = 1;
-  }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
-}
-
 # Is this bareword a TERM — the half of perl's rule that keeps `time / 60` and
 # `PI / 2` division?  Three sources, in the order they are cheap:
 #   * the 0-ary builtins (time, times, wantarray, __PACKAGE__, …);
@@ -11475,25 +11430,6 @@ sub _lower_block_1 {
     }
   }
 
-  # -- `try {…} catch (VAR) {…}` followed by its `finally {…}`: PPI leaves the
-  # finally block OUT of the Compound (see _repair_try_finally, which has by now
-  # terminated it), so it arrives as the next sibling statement.  Join it back
-  # on, exactly as the unlabeled `continue` block above is joined.
-  if ($first->isa('PPI::Statement::Compound') && @rest
-      && ref($rest[0]) eq 'PPI::Statement') {
-    my @ck = $first->schildren;
-    my @ok = _strip_semi($rest[0]->schildren);
-    if (@ck && $ck[0]->isa('PPI::Token::Word') && $ck[0]->content eq 'try'
-        && @ok == 2
-        && $ok[0]->isa('PPI::Token::Word') && $ok[0]->content eq 'finally'
-        && $ok[1]->isa('PPI::Structure::Block')) {
-      my @rest2 = @rest[1 .. $#rest];
-      return ($self->_lower_compound($first, $vi,
-                                     (@rest2 ? undef : $tail_ctx), $ok[1]),
-              $self->_lower_block(\@rest2, $vi, $tail_ctx));
-    }
-  }
-
   # -- a licensed handle declared in an if/unless/while/until CONDITION
   # (`if (open(my $fh, …)) {…}`) is freed at the exit of the ENCLOSING block,
   # not at the end of the statement (perl, probed: task #2006 (b)).  Its `let`
@@ -12757,8 +12693,8 @@ sub _lower_compound {
   }
 
   # `try BLOCK catch (VAR) BLOCK [finally BLOCK]` — perl 5.34's feature 'try'.
-  # The finally block is NOT in the Compound (PPI stops after catch); it rides
-  # in through $sib_cont, joined by _lower_block.  Everything else about the
+  # The finally block is the one after the `finally` word (PCL's PPI keeps it
+  # in the Compound, docs/ppi-upstream-bugs.md §18).  Everything else about the
   # construct is in the p-try macro's docstring — this end only has to hand it
   # three lowered blocks and the catch variable's CL name.
   if ($kw eq 'try') {
@@ -12773,7 +12709,6 @@ sub _lower_compound {
         $after_finally = 1 if $el->content eq 'finally';
       }
     }
-    $sib_cont //= $fin_block;
     # A missing/odd shape DIES naming itself rather than lowering half a
     # construct: perl requires the catch block, and a `try` whose catch we
     # cannot see would silently swallow every exception.
@@ -12796,8 +12731,8 @@ sub _lower_compound {
     my @catch = $self->_lower_scope([$blocks[1]->schildren], $vi, $tail_ctx);
     $self->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
-    my @fin = defined $sib_cont
-      ? $self->_lower_scope([$sib_cont->schildren], $vi) : ();
+    my @fin = defined $fin_block
+      ? $self->_lower_scope([$fin_block->schildren], $vi) : ();
     return ['p-try', ['progn', @try], ['list', $cl_var, ['progn', @catch]],
             (@fin ? (['progn', @fin]) : ())];
   }
