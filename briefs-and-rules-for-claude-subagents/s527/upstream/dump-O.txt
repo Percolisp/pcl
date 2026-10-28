@@ -1,0 +1,15 @@
+BEFORE (master 455bfa73)
+BEGIN { 1 } /x/ and print;
+    Word(BEGIN) Structure({) Number(1) Structure(}) Operator(/) Word(x) Operator(/) Operator(and) Word(print) Structure(;)
+@a = grep { 1 } /(x)/;
+    Symbol(@a) Operator(=) Word(grep) Structure({) Number(1) Structure(}) Operator(/) Structure(() Word(x) Structure()) Operator(/) Structure(;)
+$x = $h{a} /2;
+    Symbol($x) Operator(=) Symbol($h) Structure({) Word(a) Structure(}) Operator(/) Number(2) Structure(;)
+
+AFTER (branch pcl)
+BEGIN { 1 } /x/ and print;
+    Word(BEGIN) Structure({) Number(1) Structure(}) Regexp::Match(/x/) Operator(and) Word(print) Structure(;)
+@a = grep { 1 } /(x)/;
+    Symbol(@a) Operator(=) Word(grep) Structure({) Number(1) Structure(}) Regexp::Match(/(x)/) Structure(;)
+$x = $h{a} /2;
+    Symbol($x) Operator(=) Symbol($h) Structure({) Word(a) Structure(}) Operator(/) Number(2) Structure(;)

@@ -1,0 +1,15 @@
+BEFORE (master 455bfa73)
+@? = (1,2);
+    Cast(@) Operator(?) Operator(=) Structure(() Number(1) Operator(,) Number(2) Structure()) Structure(;)
+%%. = ();
+    Cast(%) Operator(%) Operator(.) Operator(=) Structure(() Structure()) Structure(;)
+@^ = (1,2);
+    Cast(@) Operator(^) Operator(=) Structure(() Number(1) Operator(,) Number(2) Structure()) Structure(;)
+
+AFTER (branch pcl)
+@? = (1,2);
+    Magic(@?) Operator(=) Structure(() Number(1) Operator(,) Number(2) Structure()) Structure(;)
+%%. = ();
+    Magic(%%) Operator(.) Operator(=) Structure(() Structure()) Structure(;)
+@^ = (1,2);
+    Magic(@^) Operator(=) Structure(() Number(1) Operator(,) Number(2) Structure()) Structure(;)

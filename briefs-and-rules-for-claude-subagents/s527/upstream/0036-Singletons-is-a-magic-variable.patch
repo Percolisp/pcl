@@ -1,0 +1,50 @@
+From ecd870598ea3ced88397a11db5f6c6a7d0315642 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 21:43:27 +0200
+Subject: [PATCH 36/55] Singletons: @^ is a magic variable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+@^ joins the punctuation arrays in %MAGIC.  The hash %^ stays out: a %
+before ^ starts the caret names, and Token::Magic already decides %^H
+from the next character.
+
+Completes PCL §24 in t/ppi_bugs_pcl.t (the @^ row).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Singletons.pm | 2 +-
+ t/ppi_bugs_pcl.t      | 3 +--
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Singletons.pm b/lib/PPI/Singletons.pm
+index f51406e1..00e7ace5 100644
+--- a/lib/PPI/Singletons.pm
++++ b/lib/PPI/Singletons.pm
+@@ -39,7 +39,7 @@ our %MAGIC = map { $_ => 1 } qw{
+ 	$~ $^ $: $? @? $! %! $@ $$ $< $>
+ 	$( $0 $[ $] @_ @*
+ 
+-	@! @. @/ @~ @& @% @= @< @> @| @@
++	@! @. @/ @~ @& @% @= @< @> @| @@ @^
+ 	%? %. %/ %~ %& %% %= %< %> %| %@
+ 
+ 	$^L $^A $^E $^C $^D $^F $^H
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index b12ebbab..2e547a19 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1262,8 +1262,7 @@ TODO: {
+ # §24, the caret: perl -e '@^ = (1,2); print scalar(@^)' prints 2.  The
+ # hash spelling %^ stays two tokens here: a % before ^ starts the caret
+ # names (%^H), and only %^H is one.
+-TODO: {
+-    local $TODO = 'PCL §24: A PUNCTUATION-named array @? is split into Cast + Operator';
++{
+     my @t = map { short_class($_) } toks('my @k = (scalar(@^));');
+     ok( grep( $_ eq 'Magic=@^', @t ), '`@^` in term position is one Magic token' )
+         or diag "got: @t";
+-- 
+2.53.0
+

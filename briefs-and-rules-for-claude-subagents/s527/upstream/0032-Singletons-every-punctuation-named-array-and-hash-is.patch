@@ -1,0 +1,94 @@
+From 1dc5820886c8d957bc3f6b885db697f3cdd7332d Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 21:39:29 +0200
+Subject: [PATCH 32/55] Singletons: every punctuation-named array and hash is a
+ magic variable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl names an array or a hash by any punctuation character, as it names
+a scalar: @! @. @/ @~ @& @% @= @< @> @, @| @@ @\ and %? %. %/ %~ %& %%
+%= %< %> %, %| %@ %\ all join %MAGIC beside @? @- @+ %! %- %+ (the comma
+and backslash spellings are added outside the qw list, like $, and $\).
+A @ cast is only ever followed by $, { or a name, so there is no second
+reading; the % arm asks _after_term before %MAGIC, so after a term the %
+stays the modulo operator ($x %= 3, $h{a}%.5).  ^ is left out: it starts
+the caret names (%^H, @^W).
+
+Completes PCL §24 in t/ppi_bugs_pcl.t (the @! and %? rows and the table).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Singletons.pm |  5 ++++-
+ t/ppi_bugs_pcl.t      | 19 +++++++------------
+ 2 files changed, 11 insertions(+), 13 deletions(-)
+
+diff --git a/lib/PPI/Singletons.pm b/lib/PPI/Singletons.pm
+index b64da134..c87c8ca0 100644
+--- a/lib/PPI/Singletons.pm
++++ b/lib/PPI/Singletons.pm
+@@ -39,12 +39,15 @@ our %MAGIC = map { $_ => 1 } qw{
+ 	$~ $^ $: $? @? $! %! $@ $$ $< $>
+ 	$( $0 $[ $] @_ @*
+ 
++	@! @. @/ @~ @& @% @= @< @> @| @@
++	%? %. %/ %~ %& %% %= %< %> %| %@
++
+ 	$^L $^A $^E $^C $^D $^F $^H
+ 	$^I $^M $^N $^O $^P $^R $^S
+ 	$^T $^V $^W $^X %^H
+ 
+ 	$::|
+-}, '$}', '$,', '$#', '$#+', '$#-';
++}, '$}', '$,', '$#', '$#+', '$#-', '@\\', '%\\', '@,', '%,';
+ 
+ our %LAYER = ( 1 => [], 2 => [] );    # Registered function store
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index b47a01a9..54d0ae24 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -668,8 +668,7 @@ TODO: {
+ }
+ # The documented siblings prove the intent — @- and @+ ARE single Magic tokens,
+ # so the name rule is an enumeration where perl has a character class.
+-TODO: {
+-    local $TODO = 'PCL §24: A PUNCTUATION-named array @? is split into Cast + Operator';
++{
+     my $doc = PPI::Document->new(\'my $n = scalar(@!);');
+     my @sym = grep { $_->isa('PPI::Token::Symbol') || $_->isa('PPI::Token::Magic') }
+                    $doc->tokens;
+@@ -686,8 +685,7 @@ TODO: {
+ #   7                        # `%3, "\n"` is the HASH %3, passed to f
+ #   $ perl -e 'sub f { 7 } print f() % 3, "\n"'
+ #   1                        # after `)` a term has ended: modulo
+-TODO: {
+-    local $TODO = 'PCL §24: A PUNCTUATION-named array @? is split into Cast + Operator';
++{
+     my $doc = PPI::Document->new(\'my @k = keys %?;');
+     my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+     ok( (grep { $_->content eq '%?' } @sym),
+@@ -1221,14 +1219,11 @@ TODO: {
+ {
+     my @names = ( map( "\@$_", split //, q{!./~&%=<>,|@\\} ),
+                   map( "%$_",  split //, q{?./~&%=<>,|@\\} ) );
+-    TODO: {
+-        local $TODO = 'PCL §24: A PUNCTUATION-named array @? is split into Cast + Operator';
+-        for my $name (@names) {
+-            my $code = "my \@k = (scalar($name));";
+-            my @t = map { short_class($_) } toks($code);
+-            ok( grep( $_ eq "Magic=$name", @t ), "`$name` in term position is one Magic token" )
+-                or diag "got: @t";
+-        }
++    for my $name (@names) {
++        my $code = "my \@k = (scalar($name));";
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq "Magic=$name", @t ), "`$name` in term position is one Magic token" )
++            or diag "got: @t";
+     }
+     my @controls = (
+         [ '$x %= 3;',   'Operator=%=', 'after a term %= is the assignment operator (control)' ],
+-- 
+2.53.0
+

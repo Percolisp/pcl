@@ -1,0 +1,55 @@
+From c1058d0505e6714c41fbf7084365a0cf3d0d48ad Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:43:57 +0200
+Subject: [PATCH 45/55] Whitespace: a / after a statement block starts a match
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the } of a block that opens a statement (a bare or labelled block)
+or follows a word (BEGIN, END, map, grep, sort, a sub's name) perl
+expects a term, so a / starts a match there: BEGIN { 1 } /x/ and
+grep { 1 } /(x)/.  The / arm asks _after_statement_block, the test the
+- arm uses since the previous commit; a / after a subscript, a
+dereference block or an anonymous sub still divides.
+
+Fixes PCL §56 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Whitespace.pm | 4 ++++
+ t/ppi_bugs_pcl.t            | 3 +--
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 107afbfd..fa09420c 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -358,6 +358,10 @@ sub __TOKENIZER__on_char {
+ 			return 'Regexp::Match';
+ 		}
+ 
++		# After the } of a block that opens a statement or follows a word
++		# (BEGIN { } /x/, grep { } /x/), a term starts
++		return 'Regexp::Match' if $t->_after_statement_block;
++
+ 		# Functions and keywords
+ 		if (
+ 			$MATCHWORD{$prec}
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index dbaf8d6e..bc9e5e99 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1304,8 +1304,7 @@ TODO: {
+ # statement or follows a word, a / starts a match.  perl:
+ # $_ = "x"; BEGIN { 1 } /x/ and print "m\n" prints m, and
+ # grep { 1 } /(x)/ is the list of the match's groups.
+-TODO: {
+-    local $TODO = 'PCL §56: a / after a statement block is lexed as a division';
++{
+     my @rows = (
+         [ 'BEGIN { 1 } /x/ and print;', 'Regexp::Match=/x/', 'a match after a BEGIN block' ],
+         [ '{ 1 } /x/ and print;',       'Regexp::Match=/x/', 'a match after a bare block' ],
+-- 
+2.53.0
+

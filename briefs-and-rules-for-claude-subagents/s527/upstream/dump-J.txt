@@ -1,0 +1,27 @@
+BEFORE (master 455bfa73)
+$o->w*w();
+    Symbol($o) Operator(->) Word(w) Symbol(*w) Structure(() Structure()) Structure(;)
+$i++ / 2;
+    Symbol($i) Operator(++) Regexp::Match(/ 2;)
+$h{a}%%-1;
+    Symbol($h) Structure({) Word(a) Structure(}) Operator(%) Magic(%-) Number(1) Structure(;)
+@{$h}*$y;
+    Cast(@) Structure({) Symbol($h) Structure(}) Cast(*) Symbol($y) Structure(;)
+{ 1 } { 2 } *trit = *scile;
+    Structure({) Number(1) Structure(}) Structure({) Number(2) Structure(}) Symbol(*trit) Operator(=) Symbol(*scile) Structure(;)
+print time.2;
+    Word(print) Word(time) Number::Float(.2) Structure(;)
+
+AFTER (branch pcl)
+$o->w*w();
+    Symbol($o) Operator(->) Word(w) Operator(*) Word(w) Structure(() Structure()) Structure(;)
+$i++ / 2;
+    Symbol($i) Operator(++) Operator(/) Number(2) Structure(;)
+$h{a}%%-1;
+    Symbol($h) Structure({) Word(a) Structure(}) Operator(%) Magic(%-) Number(1) Structure(;)
+@{$h}*$y;
+    Cast(@) Structure({) Symbol($h) Structure(}) Operator(*) Symbol($y) Structure(;)
+{ 1 } { 2 } *trit = *scile;
+    Structure({) Number(1) Structure(}) Structure({) Number(2) Structure(}) Symbol(*trit) Operator(=) Symbol(*scile) Structure(;)
+print time.2;
+    Word(print) Word(time) Operator(.) Number(2) Structure(;)

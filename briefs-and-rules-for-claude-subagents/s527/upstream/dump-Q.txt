@@ -1,0 +1,15 @@
+BEFORE (master 455bfa73)
+$$$a = 3;
+    Magic($$) Symbol($a) Operator(=) Number(3) Structure(;)
+$${$ref};
+    Magic($$) Structure({) Symbol($ref) Structure(}) Structure(;)
+$$ + 1;
+    Magic($$) Operator(+) Number(1) Structure(;)
+
+AFTER (branch pcl)
+$$$a = 3;
+    Cast($) Cast($) Symbol($a) Operator(=) Number(3) Structure(;)
+$${$ref};
+    Cast($) Cast($) Structure({) Symbol($ref) Structure(}) Structure(;)
+$$ + 1;
+    Magic($$) Operator(+) Number(1) Structure(;)

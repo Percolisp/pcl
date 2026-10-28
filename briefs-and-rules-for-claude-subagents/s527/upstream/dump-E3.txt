@@ -1,0 +1,7 @@
+BEFORE (master 455bfa73)
+sub f { 1 } ~~$y;
+    Word(sub) Word(f) Structure({) Number(1) Structure(}) Operator(~~) Symbol($y) Structure(;)
+
+AFTER (branch pcl)
+sub f { 1 } ~~$y;
+    Word(sub) Word(f) Structure({) Number(1) Structure(}) Operator(~) Operator(~) Symbol($y) Structure(;)

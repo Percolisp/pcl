@@ -1,0 +1,7 @@
+BEFORE (master 455bfa73)
+print <<~' EOF';\n  some data\n   EOF\n
+    Word(print) HereDoc(<<~' EOF') Structure(;)
+
+AFTER (branch pcl)
+print <<~' EOF';\n  some data\n   EOF\n
+    Word(print) HereDoc(<<~' EOF') Structure(;)

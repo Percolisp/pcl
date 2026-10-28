@@ -1,0 +1,144 @@
+From 29cb43ae54e8e84feb2bc53ba90503bc05bf72a8 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 20:54:44 +0200
+Subject: [PATCH 28/55] Tokenizer: a { after a block's } opens the next block
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A { right after a } opens a chained subscript only when that } closed a
+subscript or a dereference ($h{a}{b}, @{$r}{qw(a b)}); after a block's }
+it opens the next block, and the } closing it does not end a term.
+_curly_kind asks itself about the earlier }.
+
+Fixes PCL §55 in t/ppi_bugs_pcl.t (the block-after-block row).  The
+regression pair 54 gains both spellings; the plan of 25_increment.t
+follows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Tokenizer.pm                          | 11 ++++-
+ t/25_increment.t                              |  2 +-
+ .../08_regression/54_term_end_subscript.code  |  2 +
+ .../08_regression/54_term_end_subscript.dump  | 45 +++++++++++++++++++
+ t/ppi_bugs_pcl.t                              |  3 +-
+ 5 files changed, 58 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index a94b7838..18050c52 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -882,11 +882,18 @@ sub _curly_kind {
+ 		last if !$depth;
+ 	}
+ 	return if $cursor < 0;
+-	my ( $prev ) = $self->_significant_before($cursor);
++	my ( $prev, $at ) = $self->_significant_before($cursor);
+ 	return 'block' if !$prev;
+ 	return 'subscript' if $prev->isa('PPI::Token::Symbol');
+ 	my $content = $prev->content;
+-	return 'subscript' if $content eq '->' or $content eq '}' or $content eq ']';
++	return 'subscript' if $content eq '->' or $content eq ']';
++	if ( $content eq '}' ) {
++		# A chained subscript ($h{a}{b}, @{$r}{qw(a b)}) follows the } of a
++		# subscript or a dereference; after a block's } a { opens the next
++		# block (a bare block after an if, sub or bare block).
++		my $before = $self->_curly_kind($at);
++		return ( $before and ( $before eq 'subscript' or $before eq 'deref' ) ) ? 'subscript' : 'block';
++	}
+ 	return 'deref' if $prev->isa('PPI::Token::Cast');
+ 	return 'value' if $prev->isa('PPI::Token::Word') and ( $content eq 'do' or $content eq 'eval' );
+ 	return 'block';
+diff --git a/t/25_increment.t b/t/25_increment.t
+index 20e0d316..63db77ba 100644
+--- a/t/25_increment.t
++++ b/t/25_increment.t
+@@ -7,7 +7,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 10358 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 10582 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI::Test::Run ();
+ 
+diff --git a/t/data/08_regression/54_term_end_subscript.code b/t/data/08_regression/54_term_end_subscript.code
+index 5709bf50..7147d5b3 100644
+--- a/t/data/08_regression/54_term_end_subscript.code
++++ b/t/data/08_regression/54_term_end_subscript.code
+@@ -5,3 +5,5 @@ $x->{a}{b}*f();
+ do { 1 }*f();
+ sub f {} *bar = \&f;
+ print {$fh} .5;
++${$r}{a}*f();
++{ my $y = 1; } { my %h; } *trit = *scile;
+diff --git a/t/data/08_regression/54_term_end_subscript.dump b/t/data/08_regression/54_term_end_subscript.dump
+index 77000497..80798386 100644
+--- a/t/data/08_regression/54_term_end_subscript.dump
++++ b/t/data/08_regression/54_term_end_subscript.dump
+@@ -80,3 +80,48 @@ PPI::Document
+     PPI::Token::Number::Float  	'.5'
+     PPI::Token::Structure  	';'
+   PPI::Token::Whitespace  	'\n'
++  PPI::Statement
++    PPI::Token::Cast  	'$'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Symbol  	'$r'
++    PPI::Structure::Subscript  	{ ... }
++      PPI::Statement::Expression
++        PPI::Token::Word  	'a'
++    PPI::Token::Operator  	'*'
++    PPI::Token::Word  	'f'
++    PPI::Structure::List  	( ... )
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement::Variable
++        PPI::Token::Word  	'my'
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Symbol  	'$y'
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Operator  	'='
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'1'
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	' '
++  PPI::Statement::Compound
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement::Variable
++        PPI::Token::Word  	'my'
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Symbol  	'%h'
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	' '
++  PPI::Statement
++    PPI::Token::Symbol  	'*trit'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'*scile'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 119e140e..156240a8 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1180,8 +1180,7 @@ TODO: {
+ # §55, the block-after-block case: a { right after a block's } opens the next
+ # BLOCK, not a subscript, so a glob after the second block starts the next
+ # statement (perl-tests/array.t: `{ ... }\n\n{ ... }\n\n*trit = *scile;`).
+-TODO: {
+-    local $TODO = 'PCL §55: a { after a block\'s } is taken for a chained subscript';
++{
+     my @t = map { short_class($_) } toks('{ my $y = 1; } { my %h; } *trit = *scile;');
+     ok( grep( $_ eq 'Symbol=*trit', @t ),
+         'a glob after two consecutive blocks starts the next statement' )
+-- 
+2.53.0
+

@@ -1,7 +1,7 @@
 From 176ab5fe7dd1077dd90534a80091ff4aa5a91be4 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:38:39 +0300
-Subject: [PATCH 08/23] TODO test: @? is one Magic token
+Subject: [PATCH 08/55] TODO test: @? is one Magic token
 
 Every punctuation variable name is an array name too, and perl -e
 '@? = (1,2); print scalar(@?)' prints 2.  PPI lexes @? as a Cast and

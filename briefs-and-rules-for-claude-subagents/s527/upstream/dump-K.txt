@@ -1,0 +1,7 @@
+BEFORE (master 455bfa73)
+{ 1 } *g = \&f;
+    Structure({) Number(1) Structure(}) Symbol(*g) Operator(=) Cast(\) Symbol(&f) Structure(;)
+
+AFTER (branch pcl)
+{ 1 } *g = \&f;
+    Structure({) Number(1) Structure(}) Symbol(*g) Operator(=) Cast(\) Symbol(&f) Structure(;)

@@ -1,0 +1,27 @@
+BEFORE (master 455bfa73)
+*X = *-;
+    Symbol(*X) Operator(=) Operator(*) Operator(-) Structure(;)
+local *a = *1;
+    Word(local) Symbol(*a) Operator(=) Operator(*) Number(1) Structure(;)
+*^R = *g;
+    Operator(*) Operator(^) Word(R) Operator(=) Symbol(*g) Structure(;)
+local *@;
+    Word(local) Cast(*) Cast(@) Structure(;)
+return *!;
+    Word(return) Operator(*) Operator(!) Structure(;)
+$x = $y *-1;
+    Symbol($x) Operator(=) Symbol($y) Operator(*) Number(-1) Structure(;)
+
+AFTER (branch pcl)
+*X = *-;
+    Symbol(*X) Operator(=) Symbol(*-) Structure(;)
+local *a = *1;
+    Word(local) Symbol(*a) Operator(=) Symbol(*1) Structure(;)
+*^R = *g;
+    Symbol(*^R) Operator(=) Symbol(*g) Structure(;)
+local *@;
+    Word(local) Symbol(*@) Structure(;)
+return *!;
+    Word(return) Symbol(*!) Structure(;)
+$x = $y *-1;
+    Symbol($x) Operator(=) Symbol($y) Operator(*) Number(-1) Structure(;)

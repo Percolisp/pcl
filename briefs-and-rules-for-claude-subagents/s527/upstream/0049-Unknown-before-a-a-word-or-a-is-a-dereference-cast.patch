@@ -1,0 +1,144 @@
+From eb16e9d26c94674f04a426296c8ac224921f4f10 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:51:39 +0200
+Subject: [PATCH 49/55] Unknown: $$ before a $, a word or a { is a dereference
+ cast
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads $$$a as ${${$a}} and $${$ref} as ${${$ref}}; PPI lexed the
+magic $$ (the process id) followed by $a, and then structured the braces
+of $${$ref} as a hash subscript of $$.  When the $ arm sees $$ followed by
+a $, a word character or a {, the first $ is now a Cast and the rest is
+tokenized again: $$$a is Cast Cast Symbol, $$$$b three Casts and a
+Symbol, $${$ref} Cast Cast Block.  $$ alone, $$ + 1 and "$$" stay the
+process id, $${^MATCH} is Cast + Magic as before.
+
+This is upstream PR #428 (Perl-Critic/PPI, by toddr-bot, fixing issue
+#60), taken as it stands and widened by the { case; its regression pair
+is renumbered 55 here.
+
+Fixes PCL §1 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm                         |  8 ++++++++
+ t/08_regression.t                                |  2 +-
+ t/25_increment.t                                 |  2 +-
+ t/data/08_regression/55_triple_dollar_deref.code |  1 +
+ t/data/08_regression/55_triple_dollar_deref.dump | 11 +++++++++++
+ t/ppi_bugs_pcl.t                                 |  6 ++----
+ t/ppi_token_magic.t                              |  1 -
+ 7 files changed, 24 insertions(+), 7 deletions(-)
+ create mode 100644 t/data/08_regression/55_triple_dollar_deref.code
+ create mode 100644 t/data/08_regression/55_triple_dollar_deref.dump
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 07a17fcd..481807f2 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -138,6 +138,14 @@ sub __TOKENIZER__on_char {
+ 		}
+ 
+ 		if ( $MAGIC{ $c . $char } ) {
++			if ( $char eq '$' ) {
++				my $after = substr( $t->{line}, $t->{line_cursor} + 1, 1 );
++				if ( $after ne '' and $after =~ /[\w\${]/ ) {
++					# $$$var, $$$$var or $${EXPR}: the first $ is a dereference cast
++					$t->{class} = $t->{token}->set_class( 'Cast' );
++					return $t->_finalize_token->__TOKENIZER__on_char( $t );
++				}
++			}
+ 			# Magic variable
+ 			$t->{class} = $t->{token}->set_class( 'Magic' );
+ 			return 1;
+diff --git a/t/08_regression.t b/t/08_regression.t
+index 13cbb7f8..35d24743 100644
+--- a/t/08_regression.t
++++ b/t/08_regression.t
+@@ -7,7 +7,7 @@
+ use if !(-e 'META.yml'), "Test::InDistDir";
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 1175 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 1193 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Test qw( pause );
+diff --git a/t/25_increment.t b/t/25_increment.t
+index 63db77ba..44112011 100644
+--- a/t/25_increment.t
++++ b/t/25_increment.t
+@@ -7,7 +7,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 10582 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 10622 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI::Test::Run ();
+ 
+diff --git a/t/data/08_regression/55_triple_dollar_deref.code b/t/data/08_regression/55_triple_dollar_deref.code
+new file mode 100644
+index 00000000..c8b7c84f
+--- /dev/null
++++ b/t/data/08_regression/55_triple_dollar_deref.code
+@@ -0,0 +1 @@
++$$$a = 3;
+diff --git a/t/data/08_regression/55_triple_dollar_deref.dump b/t/data/08_regression/55_triple_dollar_deref.dump
+new file mode 100644
+index 00000000..0b18aa79
+--- /dev/null
++++ b/t/data/08_regression/55_triple_dollar_deref.dump
+@@ -0,0 +1,11 @@
++PPI::Document
++  PPI::Statement
++    PPI::Token::Cast  	'$'
++    PPI::Token::Cast  	'$'
++    PPI::Token::Symbol  	'$a'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Number  	'3'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index c483846b..91c3cadd 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -52,8 +52,7 @@ sub toks {
+ # correctly gives as Cast '$' + Symbol '$ref'.  For $$$ref PPI instead emits the
+ # special process-ID variable $$ (PPI::Token::Magic) + Symbol '$ref', so the
+ # extra dereference is lost and there is no PID variable in this code at all.
+-TODO: {
+-    local $TODO = 'PCL §1: $$$ref (triple dereference) tokenized as $$ + $ref';
++{
+     my @t = toks('$$$ref');
+     ok( !grep(/^PPI::Token::Magic=\$\$$/, @t),
+         '$$$ref should NOT tokenize as the PID variable $$ (it is a triple deref)' )
+@@ -67,8 +66,7 @@ TODO: {
+ # PPI::Structure::Subscript, i.e. a hash key.  Compare ${$ref}, which PPI
+ # correctly gives as Cast '$' + PPI::Structure::Block.  A consumer that repairs
+ # only the Magic still has a subscript with no base in front of it.
+-TODO: {
+-    local $TODO = 'PCL §1: $$$ref (triple dereference) tokenized as $$ + $ref';
++{
+     my $doc = PPI::Document->new(\'$${$ref}');
+     my ($sub) = @{ $doc->find('PPI::Structure::Subscript') || [] };
+     ok( !$sub,
+diff --git a/t/ppi_token_magic.t b/t/ppi_token_magic.t
+index 128ac1fd..a8070ddb 100644
+--- a/t/ppi_token_magic.t
++++ b/t/ppi_token_magic.t
+@@ -56,7 +56,6 @@ PUNCTUATION_ARRAY: {
+ }
+ 
+ TRIPLE_DOLLAR: {
+-	local $TODO = '$$$a is lexed as the magic $$ and $a';
+ 	my $document = safe_new \"my \$x = \$\$\$a;";
+ 	my $casts = $document->find( 'PPI::Token::Cast' ) || [];
+ 	is( scalar(@$casts), 2, '$$$a produces two Cast tokens' );
+-- 
+2.53.0
+

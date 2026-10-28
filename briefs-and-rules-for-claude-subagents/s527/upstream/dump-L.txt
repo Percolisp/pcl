@@ -1,0 +1,7 @@
+BEFORE (master 455bfa73)
+my $x = *$a{SCALAR};
+    Word(my) Symbol($x) Operator(=) Cast(*) Symbol($a) Structure({) Word(SCALAR) Structure(}) Structure(;)
+
+AFTER (branch pcl)
+my $x = *$a{SCALAR};
+    Word(my) Symbol($x) Operator(=) Cast(*) Symbol($a) Structure({) Word(SCALAR) Structure(}) Structure(;)

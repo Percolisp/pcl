@@ -1,0 +1,65 @@
+From dc242138aa251c5ccb648a98939032417c05f617 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 22:15:20 +0200
+Subject: [PATCH 39/55] Symbol: a * cast trumps the braces in ->symbol
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`*$x{SCALAR}` is perl's glob-slot syntax, *{$x}{SCALAR}, whose operand
+is the scalar $x:
+
+  perl -e 'our $n = "g"; *{$n} = \10; print ${*$n{SCALAR}}'
+  10
+
+->symbol resolved the $x to %x because its set of casts that trump the
+following braces was $ @ % only.  `*$x[0]{...}` is not valid perl, so
+braces after a * cast are never an element access; * joins the set.
+Core Carp.pm has five such sites (`*$_{HASH}`).
+
+Fixes PCL §27 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Symbol.pm | 2 +-
+ t/ppi_bugs_pcl.t        | 6 ++----
+ 2 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Token/Symbol.pm b/lib/PPI/Token/Symbol.pm
+index 0e100ef9..612e43b1 100644
+--- a/lib/PPI/Token/Symbol.pm
++++ b/lib/PPI/Token/Symbol.pm
+@@ -80,7 +80,7 @@ Returns the symbol as a string.
+ 
+ =cut
+ 
+-my %cast_which_trumps_braces = map { $_ => 1 } qw{ $ @ % };
++my %cast_which_trumps_braces = map { $_ => 1 } qw{ $ @ % * };
+ 
+ sub symbol {
+ 	my $self   = shift;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 2e547a19..9eb1ab7d 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -802,15 +802,13 @@ TODO: {
+ # (`*$_{HASH}`, `${*$_{SCALAR}}`), plus t/op/filetest.t, t/op/stat.t,
+ # t/op/gv.t and t/uni/parser.t.  One-token fix: add `*` to
+ # %cast_which_trumps_braces in PPI/Token/Symbol.pm.
+-TODO: {
+-    local $TODO = 'PCL §27: ->symbol answers %x for the $x in *$x{SLOT}';
++{
+     my $doc = PPI::Document->new(\'my $x = *$a{SCALAR};');
+     my ($sym) = grep { $_->isa('PPI::Token::Symbol') && $_->content eq '$a' } $doc->tokens;
+     is( ($sym ? $sym->symbol : '(no token)'), '$a',
+         '`$a` under a `*` cast is the SCALAR $a — the glob-slot operand' );
+ }
+-TODO: {
+-    local $TODO = 'PCL §27: ->symbol answers %x for the $x in *$x{SLOT}';
++{
+     my $doc = PPI::Document->new(\'return *$_{HASH};');
+     my ($sym) = grep { $_->isa('PPI::Token::Magic') && $_->content eq '$_' } $doc->tokens;
+     is( ($sym ? $sym->symbol : '(no token)'), '$_',
+-- 
+2.53.0
+

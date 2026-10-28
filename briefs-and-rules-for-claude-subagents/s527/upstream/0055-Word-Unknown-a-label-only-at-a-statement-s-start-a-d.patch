@@ -1,0 +1,147 @@
+From 6a5de5c1953d94e3e7e829b40af80b23a97867ca Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 01:03:29 +0200
+Subject: [PATCH 55/55] Word, Unknown: a label only at a statement's start; a
+ declaration's attributes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads a word followed by a colon as a label only where it expects a
+statement (toke.c's XSTATE).  PPI made every such word a label unless an
+operator preceded it, so (sub :lvalue { 1 }) lexed `sub :` as a Label
+and the anonymous sub was lost.  _label_position now asks for the start
+of the document, a ; or a {, a block's } (_curly_kind) or another label.
+
+The colon after a declared variable or list -- my $x : shared,
+our ($p, $q) : unique, state $n :shared -- introduces the declaration's
+attributes; __TOKENIZER__is_an_attribute now says so
+(_after_declared_variables), so the words after it are Attribute tokens,
+as they are on a sub.
+
+Upstream PR #430 (the inverted label test in Lexer::_add_element) is a
+different site; these rows needed only the tokenizer.
+
+Fixes PCL §7 §8 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm |  3 +++
+ lib/PPI/Token/Word.pm    |  2 +-
+ lib/PPI/Tokenizer.pm     | 48 ++++++++++++++++++++++++++++++++++++++++
+ t/ppi_bugs_pcl.t         |  6 ++---
+ 4 files changed, 54 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 8c2fe7ea..13e577c7 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -438,6 +438,9 @@ sub __TOKENIZER__is_an_attribute {
+ 	# If we just had a prototype, then we are an attribute
+ 	return 1 if $p0->isa('PPI::Token::Prototype');
+ 
++	# A declaration's attributes: my $x : shared, our ($p, $q) : unique
++	return 1 if $t->_after_declared_variables;
++
+ 	# Other than that, we would need to have had a bareword
+ 	return '' unless $p0->isa('PPI::Token::Word');
+ 
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index ecfc3e12..89ed1805 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -306,7 +306,7 @@ sub __TOKENIZER__commit {
+ 				# attribute operator doesn't directly
+ 				# touch the object name already works.
+ 				$token_class = 'Word';
+-			} elsif ( !($tokens[0] and $tokens[0]->isa('PPI::Token::Operator')) ) {
++			} elsif ( $t->_label_position($tokens[0]) ) {
+ 				$word .= $1;
+ 				$t->{line_cursor} += length($1);
+ 				$token_class = 'Label';
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 5a25404a..7e163f8b 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -1006,6 +1006,54 @@ sub _in_signature {
+ 	return $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+ }
+ 
++# True when the previous significant token ends the variable or list of a
++# declaration -- my $x, our ($p, $q), state @s -- where a colon introduces
++# the declaration's attributes (my $x : shared).
++my %DECLARATOR = map { $_ => 1 } qw( my our state );
++
++sub _after_declared_variables {
++	my $self   = shift;
++	my $tokens = $self->{tokens};
++	my $cursor = $#$tokens;
++	$cursor-- while $cursor >= 0 and !$tokens->[$cursor]->significant;
++	return '' if $cursor < 0;
++	my $last = $tokens->[$cursor];
++	if ( $last->isa('PPI::Token::Structure') and $last->content eq ')' ) {
++		my $depth = 1;
++		while ( --$cursor >= 0 ) {
++			my $token = $tokens->[$cursor];
++			next if !$token->isa('PPI::Token::Structure');
++			$depth++ if $token->content eq ')';
++			$depth-- if $token->content eq '(';
++			last if !$depth;
++		}
++		return '' if $cursor < 0;
++	}
++	elsif ( !$last->isa('PPI::Token::Symbol') ) {
++		return '';
++	}
++	my ( $prev ) = $self->_significant_before($cursor);
++	return $prev && $prev->isa('PPI::Token::Word') && $DECLARATOR{ $prev->content };
++}
++
++# A word followed by a colon is a LABEL only where a statement starts (perl
++# reads a label only when it expects a statement, toke.c's XSTATE): at the
++# start of the document, after a ; or a { or a block's }, or after another
++# label.  Elsewhere -- (sub :lvalue { }), a ? : -- it is a word and the colon
++# an operator.
++sub _label_position {
++	my ( $self, $prev ) = @_;
++	return 1 if !$prev or $prev->isa('PPI::Token::Label');
++	return '' if !$prev->isa('PPI::Token::Structure');
++	my $c = $prev->content;
++	return 1 if $c eq ';' or $c eq '{';
++	return '' if $c ne '}';
++	my $cursor = $#{ $self->{tokens} };
++	$cursor-- while $cursor >= 0 and !$self->{tokens}->[$cursor]->significant;
++	my $kind = $self->_curly_kind($cursor);
++	return !$kind || $kind eq 'block';
++}
++
+ # True when the token before the current one ends a term (_ends_term_at),
+ # except in the scalar-filehandle slot of print $fh LIST, where the next
+ # token starts the list (_after_scalar_filehandle).
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 0d5a3331..672235c9 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -131,8 +131,7 @@ TODO: {
+ # Operator ':' plus ordinary Words — indistinguishable from an unrelated
+ # expression fragment, so a consumer that supports `my $x <trailing expr>`
+ # silently takes ": shared = 1" as that expression.
+-TODO: {
+-    local $TODO = 'PCL §8: A variable declaration\'s ATTRIBUTE is not a Token::Attribute';
++{
+     my @t = toks('my $x : shared = 1;');
+     ok( grep(/^PPI::Token::Attribute=/, @t),
+         'my $x : shared = 1 should yield a Token::Attribute, as sub attributes do' )
+@@ -1389,8 +1388,7 @@ for my $code ( "use v5.36;\nsub f (\$, \$y) { 1 }",
+ # §7 and §8, more shapes.  perl reads a word before a colon as a LABEL only
+ # where it expects a statement (toke.c's XSTATE), and the colon after a
+ # declared variable or list introduces the declaration's attributes.
+-TODO: {
+-    local $TODO = 'PCL §7/§8: an attribute is lexed as a label or a word';
++{
+     my @rows = (
+         [ 'my @a = (sub :lvalue { 1 });',  'Attribute=lvalue', 'an anonymous sub in a list takes an attribute, not a label' ],
+         [ 'my @s = (sub : lvalue { 1 });', 'Attribute=lvalue', 'an anonymous sub in a list takes a spaced attribute' ],
+-- 
+2.53.0
+

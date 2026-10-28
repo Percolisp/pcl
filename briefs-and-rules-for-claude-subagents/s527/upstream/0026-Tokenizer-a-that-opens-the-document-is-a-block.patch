@@ -1,0 +1,91 @@
+From 0a536af53fa1c9b4bb96b12451bcdb3ac3e82eb6 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 20:48:20 +0200
+Subject: [PATCH 26/55] Tokenizer: a { that opens the document is a block
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+  perl -e '{ my $c = 1 } *main::x = sub { 7 }; print x(), "\n"'
+  7
+
+A } whose matching { is the first token of the document closes a block:
+perl reads a { at the start of a statement as a block, so a * or & after
+it starts the next statement as a cast.  _curly_kind called it a
+document start, which _cast_or_op took for a hash constructor and so
+for an operator.
+
+Fixes PCL §38 in t/ppi_bugs_pcl.t (the two rows whose block opens the
+document; the mid-document spelling was fixed with the brace scan).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm | 3 +--
+ lib/PPI/Tokenizer.pm     | 6 +++---
+ t/ppi_bugs_pcl.t         | 6 ++----
+ 3 files changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index fc696544..6682f091 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -381,8 +381,7 @@ sub _cast_or_op {
+ 	if ( $token->isa( 'PPI::Token::Structure' ) and $token->content eq '}' ) {
+ 		# After a block's } a cast starts the next term; after the } of a
+ 		# subscript, of a dereference block or of do/eval's block it is an
+-		# operator.  An unbalanced }, or a { that opens the document (which
+-		# must be a hash constructor), counts as a term too.
++		# operator.  An unbalanced } counts as a term.
+ 		my $kind = $t->_curly_kind( $cursor + 1 );
+ 		return ( $kind and $kind eq 'block' ) ? 'Cast' : 'Operator';
+ 	}
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index b13b1a30..a94b7838 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -867,8 +867,8 @@ sub _significant_before {
+ #   'subscript'  after a Symbol, a ->, or another subscript's } or ]  ($h{a}, $r->{a}{b})
+ #   'deref'      after a Cast                                         (@{$r}, ${$x})
+ #   'value'      after do or eval, whose block yields a value         (do { 1 })
+-#   'block'      anything else
+-#   'start'      the { opens the document
++#   'block'      anything else, and a { that opens the document (perl reads
++#                a { at the start of a statement as a block)
+ #   undef        no matching { (an unbalanced })
+ sub _curly_kind {
+ 	my ( $self, $cursor ) = @_;
+@@ -883,7 +883,7 @@ sub _curly_kind {
+ 	}
+ 	return if $cursor < 0;
+ 	my ( $prev ) = $self->_significant_before($cursor);
+-	return 'start' if !$prev;
++	return 'block' if !$prev;
+ 	return 'subscript' if $prev->isa('PPI::Token::Symbol');
+ 	my $content = $prev->content;
+ 	return 'subscript' if $content eq '->' or $content eq '}' or $content eq ']';
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 8e98f7eb..959ed806 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1111,16 +1111,14 @@ TODO: {
+ # §38 -- a statement that begins with `*$name` after a bare block whose first
+ # token is a scalar: the `*` is lexed as the multiplication Operator.
+ # perl: `{ my $c = 1; $c++ } *$o->{A} = 7;` stores into the glob's hash.
+-TODO: {
+-    local $TODO = 'PCL §38: A statement that begins with *$name after a bare block is lexed with a multiplication OPERATOR';
++{
+     my $doc = PPI::Document->new(\qq{{ \$c = \$b; }\n*\$o->{A} = 1;\n});
+     my ($star) = grep { $_->content eq q{*} } $doc->tokens;
+     is( ref($star), q{PPI::Token::Cast},
+         q{the statement-initial `*` of `*$o->{A} = 1` after a block is a Cast} );
+ }
+ # §38, the code-sigil twin: `{ 1 while $x; } &$cb(7);` -- perl calls $cb.
+-TODO: {
+-    local $TODO = 'PCL §38: A statement that begins with *$name after a bare block is lexed with a multiplication OPERATOR';
++{
+     my $doc = PPI::Document->new(\qq{{ 1 while \$x; }\n&\$cb(7);\n});
+     my ($amp) = grep { $_->content eq q{&} } $doc->tokens;
+     is( ref($amp), q{PPI::Token::Cast},
+-- 
+2.53.0
+

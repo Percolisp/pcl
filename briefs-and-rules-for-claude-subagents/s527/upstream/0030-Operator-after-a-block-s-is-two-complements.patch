@@ -1,0 +1,62 @@
+From 4affc7def58b81ed2cedf88b2817f1da1c5ce493 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 21:14:33 +0200
+Subject: [PATCH 30/55] Operator: ~~ after a block's } is two complements
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+__term_expected read the term-ness of a } from _opcontext, which calls
+every } the end of a term.  A block's } is not one (map { $_ } ~~$y,
+print {$fh} ~~$y), a subscript's is ($h{a} ~~ @a): it now asks
+_after_term, which tells the two apart by the brace's opener.
+
+Completes PCL §21 in t/ppi_bugs_pcl.t (the rows after a block).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Operator.pm | 10 ++++++----
+ t/ppi_bugs_pcl.t          |  1 -
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index 9e4a25e5..0ac082e3 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -116,15 +116,17 @@ my %NO_OPERAND = map { $_ => 1 } qw(
+ );
+ 
+ # Is a TERM expected where the tokenizer now stands?  Only what is known
+-# counts: after an operator, an opening bracket or a ; (_opcontext), at the
+-# start of the document, and after a builtin that takes an operand (print,
+-# return, ...).  After a match, a method name or a user's word it cannot
+-# say, and the answer is no.
++# counts: after an operator, an opening bracket or a ; (_opcontext), after a
++# block's } (_after_term), at the start of the document, and after a builtin
++# that takes an operand (print, return, ...).  After a match, a method name or
++# a user's word it cannot say, and the answer is no.
+ sub __term_expected {
+ 	my ( $t ) = @_;
+ 	my ( $prev, $prevprev ) = $t->_previous_significant_tokens(2);
+ 	return 1 if !$prev;
+ 	return 1 if $t->_opcontext eq 'operand';
++	# A block's } does not end a term (map { $_ } ~~$y); a subscript's does
++	return !$t->_after_term if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
+ 	return '' if !$prev->isa('PPI::Token::Word');
+ 	return '' if $prevprev and $prevprev->isa('PPI::Token::Operator') and $prevprev->content eq '->';
+ 	return $KEYWORDS{ $prev->content } && !$NO_OPERAND{ $prev->content };
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 3e3bc060..31207435 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1210,7 +1210,6 @@ TODO: {
+         my ( $code, $split, $desc ) = @$r;
+         my @t = map { short_class($_) } toks($code);
+         my $smart = grep( $_ eq 'Operator=~~', @t );
+-        local $TODO = $split ? 'PCL §21: a term-initial ~~ is lexed as the smart-match operator' : undef;
+         ok( $split ? !$smart : $smart, "$code: $desc" ) or diag "got: @t";
+     }
+ }
+-- 
+2.53.0
+

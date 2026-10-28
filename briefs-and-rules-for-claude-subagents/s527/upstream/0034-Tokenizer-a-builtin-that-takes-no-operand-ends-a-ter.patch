@@ -1,0 +1,136 @@
+From 487563ded4bfb15fe988592092b042663537d23a Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 21:42:25 +0200
+Subject: [PATCH 34/55] Tokenizer: a builtin that takes no operand ends a term
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+_ends_term_at counts a Word that is one of the builtins without an
+operand (time, wait, wantarray, fork, getppid, ...) as the end of a
+term, so time.2 concatenates, wait-1 subtracts, time*f() multiplies and
+time %.5e1 is a modulo.  The list was Token::Operator's private
+%NO_OPERAND (its ~~ test); it moves to PPI::Singletons so both ask one
+table.
+
+Fixes PCL §55 in t/ppi_bugs_pcl.t (the no-operand builtin rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Singletons.pm     | 11 ++++++++++-
+ lib/PPI/Token/Operator.pm | 11 +----------
+ lib/PPI/Tokenizer.pm      |  3 +++
+ t/ppi_bugs_pcl.t          | 11 ++++-------
+ 4 files changed, 18 insertions(+), 18 deletions(-)
+
+diff --git a/lib/PPI/Singletons.pm b/lib/PPI/Singletons.pm
+index c87c8ca0..f51406e1 100644
+--- a/lib/PPI/Singletons.pm
++++ b/lib/PPI/Singletons.pm
+@@ -8,7 +8,7 @@ use Exporter     ();
+ our $VERSION = '1.292';
+ 
+ our @ISA       = 'Exporter';
+-our @EXPORT_OK = qw{ %_PARENT %_POSITION_CACHE %OPERATOR %MAGIC %LAYER $CURLY_SYMBOL %QUOTELIKE %KEYWORDS };
++our @EXPORT_OK = qw{ %_PARENT %_POSITION_CACHE %OPERATOR %MAGIC %LAYER $CURLY_SYMBOL %QUOTELIKE %KEYWORDS %NO_OPERAND };
+ 
+ our %_PARENT; # Master Child -> Parent index
+ our %_POSITION_CACHE; # cache for position in parent
+@@ -49,6 +49,15 @@ our %MAGIC = map { $_ => 1 } qw{
+ 	$::|
+ }, '$}', '$,', '$#', '$#+', '$#-', '@\\', '%\\', '@,', '%,';
+ 
++# Builtins that take no operand: each is a whole term, so after one of them
++# an operator follows (time ~~ @a is a smart match, time.2 a concatenation).
++our %NO_OPERAND = map { $_ => 1 } qw(
++	time times wait wantarray fork getppid getlogin
++	getgrent gethostent getnetent getprotoent getpwent getservent
++	endgrent endhostent endnetent endprotoent endpwent endservent
++	setgrent setpwent
++);
++
+ our %LAYER = ( 1 => [], 2 => [] );    # Registered function store
+ 
+ our $CURLY_SYMBOL = qr{\G\^[[:upper:]_]\w+\}};
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index 0ac082e3..6aaac2f9 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -41,7 +41,7 @@ L<PPI::Token> and L<PPI::Element> classes.
+ 
+ use strict;
+ use PPI::Token ();
+-use PPI::Singletons qw' %OPERATOR %KEYWORDS ';
++use PPI::Singletons qw' %OPERATOR %KEYWORDS %NO_OPERAND ';
+ 
+ our $VERSION = '1.292';
+ 
+@@ -106,15 +106,6 @@ sub __TOKENIZER__on_char {
+ 	$t->_finalize_token->__TOKENIZER__on_char( $t );
+ }
+ 
+-# Builtins that take no operand: after one of them an operator follows
+-# (time ~~ @a is a smart match).
+-my %NO_OPERAND = map { $_ => 1 } qw(
+-	time times wait wantarray fork getppid getlogin
+-	getgrent gethostent getnetent getprotoent getpwent getservent
+-	endgrent endhostent endnetent endprotoent endpwent endservent
+-	setgrent setpwent
+-);
+-
+ # Is a TERM expected where the tokenizer now stands?  Only what is known
+ # counts: after an operator, an opening bracket or a ; (_opcontext), after a
+ # block's } (_after_term), at the start of the document, and after a builtin
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 18050c52..bd43ddd5 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -87,6 +87,7 @@ use PPI::Token      ();
+ use PPI::Exception  ();
+ use PPI::Exception::ParserRejection ();
+ use PPI::Document ();
++use PPI::Singletons qw' %NO_OPERAND ';
+ 
+ our $VERSION = '1.292';
+ 
+@@ -823,6 +824,7 @@ sub _after_scalar_filehandle {
+ # tables of _opcontext cannot see:
+ #
+ #   * a method name -- a Word right after -> ($o->w * 2, $o->name . 2);
++#   * a builtin that takes no operand (time . 2, wait - 1);
+ #   * a postfix ++ or -- ($i++ * 2), which is the one that itself follows a
+ #     term; the prefix spelling (++$i) opens a term instead;
+ #   * the } of a subscript or of a dereference block ($h{a} * 2,
+@@ -834,6 +836,7 @@ sub _ends_term_at {
+ 	return '' if $cursor < 0;
+ 	my $token = $tokens->[$cursor];
+ 	if ( $token->isa('PPI::Token::Word') ) {
++		return 1 if $NO_OPERAND{ $token->content };
+ 		my ( $prev ) = $self->_significant_before($cursor);
+ 		return $prev && $prev->isa('PPI::Token::Operator') && $prev->content eq '->';
+ 	}
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 04bc669b..6a6dce26 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1250,13 +1250,10 @@ TODO: {
+         [ '$t = time %~$y;',  'Operator=%', 'after time %~ is modulo of a complement' ],
+         [ '$t = time*f();',   'Operator=*', 'after time * multiplies' ],
+     );
+-    TODO: {
+-        local $TODO = 'PCL §55: a builtin that takes no operand does not end a term';
+-        for my $r (@rows) {
+-            my ( $code, $want, $desc ) = @$r;
+-            my @t = map { short_class($_) } toks($code);
+-            ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+-        }
++    for my $r (@rows) {
++        my ( $code, $want, $desc ) = @$r;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+     }
+     my @t = map { short_class($_) } toks('my %h = (time => 1);');
+     ok( grep( $_ eq 'Word=time', @t ), 'time before => stays a word (control)' ) or diag "got: @t";
+-- 
+2.53.0
+

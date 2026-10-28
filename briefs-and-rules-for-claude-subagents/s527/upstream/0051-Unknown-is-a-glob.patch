@@ -1,0 +1,49 @@
+From 5ef65f34f519b0fc8e8cc06d99c6d9ca9bb68f5d Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:56:40 +0200
+Subject: [PATCH 51/55] Unknown: *: is a glob
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The glob-name test of the * arm left out the colon to keep *::foo whole;
+a colon that no second colon follows names the glob of $: too.
+
+Fixes PCL §26 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm | 2 +-
+ t/ppi_bugs_pcl.t         | 3 +--
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 481807f2..cee102a8 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -58,7 +58,7 @@ sub __TOKENIZER__on_char {
+ 		# symbolic glob, so $ and { never start such a name.
+ 		if ( $t->_glob_name_expected ) {
+ 			pos $t->{line} = $t->{line_cursor};
+-			my ($name) = $t->{line} =~ m/\G(\d+|\^[A-Z\[\]^_?\\]|[^\w\s\$\{\}\*\#':])/gc;
++			my ($name) = $t->{line} =~ m/\G(\d+|\^[A-Z\[\]^_?\\]|:(?!:)|[^\w\s\$\{\}\*\#':])/gc;
+ 			if ( defined $name and ( $name =~ /^[\d^]/ or $MAGIC{ '$' . $name } ) ) {
+ 				$t->{token}->{content} .= $name;
+ 				$t->{line_cursor} += length $name;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 19baf037..2e70c0fc 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1356,8 +1356,7 @@ TODO: {
+ 
+ # §26, the colon: $: names a scalar, so *: is a glob, while *::foo stays the
+ # glob main::foo.
+-TODO: {
+-    local $TODO = 'PCL §26: A glob whose NAME is punctuation or a digit run is split into two operators';
++{
+     my @t = map { short_class($_) } toks('*X = *:;');
+     ok( grep( $_ eq 'Symbol=*:', @t ), '*: is one glob' ) or diag "got: @t";
+ }
+-- 
+2.53.0
+

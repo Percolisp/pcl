@@ -1,0 +1,53 @@
+From 555ef6afe1bbe9fe55fbcd9cc5e93dadd9e6e68f Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 20:54:11 +0200
+Subject: [PATCH 27/55] TODO test: a { after a block's } opens the next block
+
+perl-tests/array.t has two bare blocks in a row and then *trit = *scile;
+the brace scan of the previous commit took the second { for a chained
+subscript (the token before it is a }), so the } closing it ended a term
+and *trit became a multiplication.  A control pins the real chain:
+${$r}{a}*f() multiplies.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 959ed806..119e140e 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 112 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 114 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1176,3 +1176,20 @@ TODO: {
+         ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+     }
+ }
++
++# §55, the block-after-block case: a { right after a block's } opens the next
++# BLOCK, not a subscript, so a glob after the second block starts the next
++# statement (perl-tests/array.t: `{ ... }\n\n{ ... }\n\n*trit = *scile;`).
++TODO: {
++    local $TODO = 'PCL §55: a { after a block\'s } is taken for a chained subscript';
++    my @t = map { short_class($_) } toks('{ my $y = 1; } { my %h; } *trit = *scile;');
++    ok( grep( $_ eq 'Symbol=*trit', @t ),
++        'a glob after two consecutive blocks starts the next statement' )
++        or diag "got: @t";
++}
++{
++    my @t = map { short_class($_) } toks('${$r}{a}*f()');
++    ok( grep( $_ eq 'Operator=*', @t ),
++        "a subscript after a dereference block ends a term: * multiplies (control)" )
++        or diag "got: @t";
++}
+-- 
+2.53.0
+

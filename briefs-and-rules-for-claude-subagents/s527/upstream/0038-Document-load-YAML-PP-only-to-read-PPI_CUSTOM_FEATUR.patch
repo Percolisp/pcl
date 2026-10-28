@@ -1,0 +1,88 @@
+From 46ba7e81b56fb4d18a222d166b8ec7aae0e7f5cc Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 25 Oct 2026 21:56:50 +0200
+Subject: [PATCH 38/55] Document: load YAML::PP only to read
+ PPI_CUSTOM_FEATURE_INCLUDES
+
+YAML::PP is used in one place, to parse $ENV{PPI_CUSTOM_FEATURE_INCLUDES},
+so it is required there instead of at compile time: PPI loads and parses
+on a machine without YAML::PP, and setting the variable there dies with
+perl's own "Can't locate YAML/PP.pm".  The call gains parentheses, since
+YAML::PP::Load is no longer declared when Document.pm is compiled.
+
+dist.ini: [AutoPrereqs] would still list a runtime `require` as a hard
+requirement, so YAML::PP is skipped there and declared under
+[Prereqs / RuntimeRecommends] instead -- an optional feature is a
+recommendation, which cpanm and CPAN.pm install by default only when
+asked to.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dist.ini                       | 5 +++++
+ lib/PPI/Document.pm            | 6 ++++--
+ t/ppi_document_optional_yaml.t | 3 +--
+ 3 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/dist.ini b/dist.ini
+index b185f385..6eae8415 100644
+--- a/dist.ini
++++ b/dist.ini
+@@ -17,12 +17,17 @@ match    = ^t/data/
+ skip = Class::XSAccessor ; used only in an experimental module
+ skip = Time::HiRes       ; optional, only used to speed up testing a little
+ skip = PPI::XS           ; optional, experimental
++skip = YAML::PP          ; optional, only read for PPI_CUSTOM_FEATURE_INCLUDES
+ 
+ [Prereqs]
+ ; Force the existence of the weaken function
+ ; (which some distributions annoyingly don't have)
+ Task::Weaken = 0
+ 
++[Prereqs / RuntimeRecommends]
++; needed only to read $ENV{PPI_CUSTOM_FEATURE_INCLUDES}
++YAML::PP = 0
++
+ [Prereqs / TestRequires]
+ Test::More = 0.96
+ 
+diff --git a/lib/PPI/Document.pm b/lib/PPI/Document.pm
+index 07e9def8..f5b2771a 100644
+--- a/lib/PPI/Document.pm
++++ b/lib/PPI/Document.pm
+@@ -71,7 +71,6 @@ use Digest::MD5                   ();
+ use PPI::Util                     ();
+ use PPI                           ();
+ use PPI::Node                     ();
+-use YAML::PP                      ();
+ 
+ use overload 'bool' => \&PPI::Util::TRUE;
+ use overload '""'   => 'content';
+@@ -278,7 +277,10 @@ sub _setattr {
+ 	$document->{custom_feature_includes}   = $attr{custom_feature_includes};
+ 	$document->{custom_feature_include_cb} = $attr{custom_feature_include_cb};
+ 	if ( $ENV{PPI_CUSTOM_FEATURE_INCLUDES} ) {
+-		my $includes = YAML::PP::Load $ENV{PPI_CUSTOM_FEATURE_INCLUDES};
++		# YAML::PP is needed only here, so it is loaded only here: PPI itself
++		# runs without it (dist.ini lists it as a runtime recommendation).
++		require YAML::PP;
++		my $includes = YAML::PP::Load( $ENV{PPI_CUSTOM_FEATURE_INCLUDES} );
+ 		die "\$ENV{PPI_CUSTOM_FEATURE_INCLUDES} "
+ 		  . "does not contain valid perl:\n"
+ 		  . "val: '$ENV{PPI_CUSTOM_FEATURE_INCLUDES}'\nerr: $@"
+diff --git a/t/ppi_document_optional_yaml.t b/t/ppi_document_optional_yaml.t
+index c8735ada..fe760951 100644
+--- a/t/ppi_document_optional_yaml.t
++++ b/t/ppi_document_optional_yaml.t
+@@ -20,8 +20,7 @@ our $TODO;
+ 
+ delete $ENV{PPI_CUSTOM_FEATURE_INCLUDES};
+ 
+-TODO: {
+-	local $TODO = 'PPI::Document loads YAML::PP when it is compiled';
++{
+ 	ok( eval { require PPI; 1 }, 'PPI loads without YAML::PP' ) or diag $@;
+ 	my $doc = eval { PPI::Document->new( \'my $x = 1;' ) };
+ 	ok( $doc && $doc->serialize eq 'my $x = 1;', '... and parses a document' );
+-- 
+2.53.0
+

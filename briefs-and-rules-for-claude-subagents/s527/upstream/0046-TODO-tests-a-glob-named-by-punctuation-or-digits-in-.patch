@@ -1,0 +1,72 @@
+From 74ee2b19475f8f58b28eea13baebab48ddb8f868 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:46:23 +0200
+Subject: [PATCH 46/55] TODO tests: a glob named by punctuation or digits, in
+ more positions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The five §26 rows are after = and at the start of the document; perl
+names a glob with punctuation, a digit run or a caret letter wherever a
+term is expected, so return *!, local *12 = sub { 1 } and (*-, *+) are
+globs too.  Three rows marked TODO; four controls pin $y *-1 and 2*3 as
+multiplications, *$g as a glob dereference and the existing guess after
+an unknown word (foo *-1).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 33 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index bc9e5e99..3ca402b0 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 170 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 177 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1330,3 +1330,34 @@ TODO: {
+         ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+     }
+ }
++
++# §26, more positions of the same bug: after return and local, and in a
++# list (the five rows above are after = and at the start).
++TODO: {
++    local $TODO = 'PCL §26: A glob whose NAME is punctuation or a digit run is split into two operators';
++    my @rows = (
++        [ 'return *!;',                'Symbol=*!',  '*! after return is one glob' ],
++        [ 'local *12 = sub { 1 };',    'Symbol=*12', '*12 after local is one glob' ],
++        [ '@a = (*-, *+);',           'Symbol=*+',  '*- and *+ in a list are globs' ],
++    );
++    for my $r (@rows) {
++        my ( $code, $want, $desc ) = @$r;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
++    }
++}
++# The controls: after a term a * multiplies, *$g is a glob dereference, and
++# after an unknown word the existing guess stays.
++{
++    my @rows = (
++        [ '$x = $y *-1;',  'Operator=*', 'a scalar times -1 multiplies (control)' ],
++        [ '$x = 2*3;',     'Operator=*', '2*3 multiplies (control)' ],
++        [ '$z = *$g;',     'Cast=*',     '*$g is a glob dereference (control)' ],
++        [ 'foo *-1;',      'Operator=*', 'after an unknown word * stays an operator (control)' ],
++    );
++    for my $r (@rows) {
++        my ( $code, $want, $desc ) = @$r;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
++    }
++}
+-- 
+2.53.0
+

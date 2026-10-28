@@ -1,0 +1,15 @@
+BEFORE (master 455bfa73)
+use v5.36;\nmy $e = $);
+    Word(use) Number::Version(v5.36) Structure(;) Word(my) Symbol($e) Operator(=) Symbol($) Structure()) Structure(;)
+use v5.36;\nmy $s = $,;
+    Word(use) Number::Version(v5.36) Structure(;) Word(my) Symbol($s) Operator(=) Symbol($) Operator(,) Structure(;)
+use v5.36;\nsub f ($, $y) { 1 }
+    Word(use) Number::Version(v5.36) Structure(;) Word(sub) Word(f) Structure(() Symbol($) Operator(,) Symbol($y) Structure()) Structure({) Number(1) Structure(})
+
+AFTER (branch pcl)
+use v5.36;\nmy $e = $);
+    Word(use) Number::Version(v5.36) Structure(;) Word(my) Symbol($e) Operator(=) Magic($)) Structure(;)
+use v5.36;\nmy $s = $,;
+    Word(use) Number::Version(v5.36) Structure(;) Word(my) Symbol($s) Operator(=) Magic($,) Structure(;)
+use v5.36;\nsub f ($, $y) { 1 }
+    Word(use) Number::Version(v5.36) Structure(;) Word(sub) Word(f) Structure(() Symbol($) Operator(,) Symbol($y) Structure()) Structure({) Number(1) Structure(})

@@ -1,0 +1,23 @@
+BEFORE (master 455bfa73)
+print $fh -e $f;
+    Word(print) Symbol($fh) Operator(-) Word(e) Symbol($f) Structure(;)
+print $fh -1;
+    Word(print) Symbol($fh) Operator(-) Number(1) Structure(;)
+BEGIN { 1 } -e $f;
+    Word(BEGIN) Structure({) Number(1) Structure(}) Operator(-) Word(e) Symbol($f) Structure(;)
+sort { $a <=> $b } -1, 2;
+    Word(sort) Structure({) Symbol($a) Operator(<=>) Symbol($b) Structure(}) Operator(-) Number(1) Operator(,) Number(2) Structure(;)
+print $fh - 1;
+    Word(print) Symbol($fh) Operator(-) Number(1) Structure(;)
+
+AFTER (branch pcl)
+print $fh -e $f;
+    Word(print) Symbol($fh) Operator(-e) Symbol($f) Structure(;)
+print $fh -1;
+    Word(print) Symbol($fh) Number(-1) Structure(;)
+BEGIN { 1 } -e $f;
+    Word(BEGIN) Structure({) Number(1) Structure(}) Operator(-e) Symbol($f) Structure(;)
+sort { $a <=> $b } -1, 2;
+    Word(sort) Structure({) Symbol($a) Operator(<=>) Symbol($b) Structure(}) Number(-1) Operator(,) Number(2) Structure(;)
+print $fh - 1;
+    Word(print) Symbol($fh) Operator(-) Number(1) Structure(;)

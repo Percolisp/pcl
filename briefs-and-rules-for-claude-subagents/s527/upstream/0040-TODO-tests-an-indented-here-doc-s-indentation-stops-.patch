@@ -1,0 +1,83 @@
+From e5b464883bb05e2fa94254771719fe9c887d0483 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:29:26 +0200
+Subject: [PATCH 40/55] TODO tests: an indented here-doc's indentation stops at
+ its terminator
+
+perl strips the whitespace that stands BEFORE the terminator on its line.
+PPI takes ^(\s*) of the whole line, so a terminator that itself begins
+with whitespace (<<~' HERE') or is empty (<<~'') over-counts: the body is
+left unstripped, or stripped one character too far, and serialize() adds
+the over-count back.  Three rows, marked TODO.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_token_heredoc.t | 45 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_token_heredoc.t b/t/ppi_token_heredoc.t
+index 4f450850..d35c38dd 100644
+--- a/t/ppi_token_heredoc.t
++++ b/t/ppi_token_heredoc.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 30 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 33 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use Helper 'safe_new';
+@@ -397,6 +397,49 @@ h	{
+ 		},
+ 	};
+ 
++	# The indentation is what stands BEFORE the terminator on its line, so a
++	# terminator that itself begins with whitespace, or is empty, does not
++	# count towards it (perl strips the same).
++TODO: {
++	local $TODO = 'the indentation is ^(\s*) of the whole terminator line';
++h	{
++		name     => 'Single-quoted terminator beginning with a space (indented).',
++		content  => "my \$heredoc = <<~' HERE';\n\t\tLine 1\n\t\tLine 2\n\t\t HERE\n",
++		expected => {
++			_terminator_line => " HERE\n",
++			_damaged         => undef,
++			_terminator      => ' HERE',
++			_mode            => 'literal',
++			_indented        => 1,
++			_indentation     => "\t\t",
++		},
++	};
++h	{
++		name     => 'Double-quoted terminator beginning with two spaces (indented).',
++		content  => "my \$heredoc = <<~\"  HERE\";\n\tLine 1\n\tLine 2\n\t  HERE\n",
++		expected => {
++			_terminator_line => "  HERE\n",
++			_damaged         => undef,
++			_terminator      => '  HERE',
++			_mode            => 'interpolate',
++			_indented        => 1,
++			_indentation     => "\t",
++		},
++	};
++h	{
++		name     => 'Empty terminator (indented).',
++		content  => "my \$heredoc = <<~'';\n  Line 1\n  Line 2\n  \n",
++		expected => {
++			_terminator_line => "\n",
++			_damaged         => undef,
++			_terminator      => '',
++			_mode            => 'literal',
++			_indented        => 1,
++			_indentation     => "  ",
++		},
++	};
++}
++
+ 
+ sub h {
+     my ( $test ) = @_;
+-- 
+2.53.0
+
