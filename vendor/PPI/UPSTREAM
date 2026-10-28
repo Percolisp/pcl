@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-T
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: ded727c31a80b563524e5875a5d688c8ce599446
-lib-tree: b0f4372bffe97bb89ecdb8c336ff4f6d6a94281e
+branch: r-T
+branch-sha: 4e021b91b9881e8e551114482b3cfb70b420325d
+lib-tree: 3ca6c95705fd3e387fb4009120bd2e62a53f0dcd
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -36,6 +36,7 @@ fix: Q §1 eb16e9d2 Unknown: $$ before a $, a word or a { is a dereference cast
 fix: P §26 5ef65f34 Unknown: *: is a glob
 fix: R §32 61817c99 Tokenizer: a nameless parameter only inside a signature
 fix: S §7 §8 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
+fix: T §18 4e021b91 Lexer: finally belongs to the try statement
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -93,3 +94,5 @@ commit: a7f3847f TODO tests: an attribute after a list's anonymous sub or a decl
 commit: 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
 commit: 9d43dfa9 TODO tests: a typed declaration's attribute
 commit: ded727c3 Tokenizer: a typed declaration's colon introduces attributes
+commit: 44b918d4 TODO tests: finally belongs to the try statement
+commit: 4e021b91 Lexer: finally belongs to the try statement

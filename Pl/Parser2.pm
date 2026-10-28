@@ -12762,12 +12762,18 @@ sub _lower_compound {
   # construct is in the p-try macro's docstring — this end only has to hand it
   # three lowered blocks and the catch variable's CL name.
   if ($kw eq 'try') {
-    my (@blocks, $clist, $has_catch);
+    my (@blocks, $clist, $has_catch, $after_finally, $fin_block);
     for my $el (@k[1 .. $#k]) {
-      if    ($el->isa('PPI::Structure::Block')) { push @blocks, $el }
+      if ($el->isa('PPI::Structure::Block')) {
+        if ($after_finally) { $fin_block = $el } else { push @blocks, $el }
+      }
       elsif ($el->isa('PPI::Structure::List'))  { $clist = $el }
-      elsif ($el->isa('PPI::Token::Word'))      { $has_catch = 1 if $el->content eq 'catch' }
+      elsif ($el->isa('PPI::Token::Word')) {
+        $has_catch = 1 if $el->content eq 'catch';
+        $after_finally = 1 if $el->content eq 'finally';
+      }
     }
+    $sib_cont //= $fin_block;
     # A missing/odd shape DIES naming itself rather than lowering half a
     # construct: perl requires the catch block, and a `try` whose catch we
     # cannot see would silently swallow every exception.
