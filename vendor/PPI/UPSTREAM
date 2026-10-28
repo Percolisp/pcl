@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-U
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-V
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: r-U
-branch-sha: a320f21a8962f2a8152c65d017054cd8581f6bb3
-lib-tree: 62571ef464f4ed7e2d10ac10f4013c8ac0014dc4
+branch: r-V
+branch-sha: 75fc24e8d436aa766ab0efe2f8cdeefa9284e816
+lib-tree: f64e758a59036b1aa6d35721c18ff1b5f44408e0
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -38,6 +38,7 @@ fix: R §32 61817c99 Tokenizer: a nameless parameter only inside a signature
 fix: S §7 §8 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
 fix: T §18 4e021b91 Lexer: finally belongs to the try statement
 fix: U §6 §10 §29 a320f21a Lexer: the loop variable of foreach is any of perl's forms
+fix: V §17 §36 75fc24e8 Lexer: a [ or { after a dereference block or a key/value slice name subscripts it
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -100,3 +101,5 @@ commit: 4e021b91 Lexer: finally belongs to the try statement
 commit: d15cb43f TODO tests: a block filehandle right after print( is a block
 commit: 949debd9 TODO tests: every loop variable foreach accepts
 commit: a320f21a Lexer: the loop variable of foreach is any of perl's forms
+commit: 0e07c904 TODO tests: a [ or { after a dereference block or a key/value slice name subscripts it
+commit: 75fc24e8 Lexer: a [ or { after a dereference block or a key/value slice name subscripts it

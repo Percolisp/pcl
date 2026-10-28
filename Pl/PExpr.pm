@@ -1248,21 +1248,21 @@ sub parse {
         && $i > 0
         && $self->is_internal_node_type($e->[$i-1]);
     # KV slice: %hash{keys} - PPI parses this as Symbol '%h' + Block '{keys}'
-    my $is_kv_slice_block = ref($term) eq 'PPI::Structure::Block'
+    my $is_kv_slice_block = (ref($term) eq 'PPI::Structure::Block' || ref($term) eq 'PPI::Structure::Subscript')
         && $term->start() eq '{'
         && $i > 0
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^%/;
     # KV array slice: %arr[indices] - PPI parses as Symbol '%arr' + Constructor '[indices]'
-    my $is_kv_arr_constructor = ref($term) eq 'PPI::Structure::Constructor'
+    my $is_kv_arr_constructor = (ref($term) eq 'PPI::Structure::Constructor' || ref($term) eq 'PPI::Structure::Subscript')
         && $term->start() eq '['
         && $i > 0
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^%/;
     # KV array slice via block-deref: %{$ref}[indices] - Cast('%') + Block('{ref}') + Constructor '[indices]'
-    my $is_kv_arr_deref_constructor = ref($term) eq 'PPI::Structure::Constructor'
+    my $is_kv_arr_deref_constructor = (ref($term) eq 'PPI::Structure::Constructor' || ref($term) eq 'PPI::Structure::Subscript')
         && $term->start() eq '['
         && $i >= 2
         && ref($e->[$i-1]) eq 'PPI::Structure::Block'
@@ -1271,7 +1271,7 @@ sub parse {
         && $e->[$i-2]->content() eq '%';
     # KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
     # PPI gives two Blocks (not Subscript) when sigil is %
-    my $is_kv_hash_deref_block = ref($term) eq 'PPI::Structure::Block'
+    my $is_kv_hash_deref_block = (ref($term) eq 'PPI::Structure::Block' || ref($term) eq 'PPI::Structure::Subscript')
         && $term->start() eq '{'
         && $i >= 2
         && ref($e->[$i-1]) eq 'PPI::Structure::Block'
@@ -1542,7 +1542,9 @@ sub parse {
       }
     }
 
-    if ($self->is_arr_or_hash_braces($term)) {
+    if ($self->is_arr_or_hash_braces($term)
+        && !$is_kv_slice_block && !$is_kv_arr_constructor
+        && !$is_kv_arr_deref_constructor && !$is_kv_hash_deref_block) {
       # X[] or X{}
       # #211: with a REAL arrow ($is_reference), a leading scalar-deref cast
       # binds WITH the ref target — `$$rr->{k}` == `(${$rr})->{k}`, deref
@@ -1694,11 +1696,7 @@ sub parse {
 
     # Handle KV slice: %hash{keys} - PPI gives Symbol '%h' + Block '{keys}'
     # (unlike @h{keys} which gives Subscript)
-    if (ref($term) eq 'PPI::Structure::Block'
-        && $term->start() eq '{'
-        && !$self->is_internal_node_type($pre)
-        && $self->is_var($pre)
-        && $pre->content() =~ /^%/) {
+    if ($is_kv_slice_block) {
       my $node = $self->_kv_slice_node('kv_slice_h_acc', $self->parse([$pre]), $term);
       _reduce_pre($e, \$i, $node, 1);
       next;
@@ -2448,7 +2446,8 @@ sub _term_extent {
       && $p->content() =~ /^%/ && $end + 1 <= $limit) {
     my $nx = $e->[$end + 1];
     if ((ref($nx) eq 'PPI::Structure::Block' && $nx->start() eq '{')
-        || (ref($nx) eq 'PPI::Structure::Constructor' && $nx->start() eq '[')) {
+        || (ref($nx) eq 'PPI::Structure::Constructor' && $nx->start() eq '[')
+        || ref($nx) eq 'PPI::Structure::Subscript') {
       return $end + 1;
     }
   }
