@@ -80,9 +80,9 @@ use utf8;
 our @BUGS = (
  { id => 1, kind => 'token', dump => 'tokens',
    title => '`$$$ref` (triple dereference) tokenized as `$$` + `$ref`',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Magic', content => '$$', pred => 'adj_deref_follows', check => 'pid-magic-is-cast-run' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_split_pid_magic_cast_run' },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::_split_pid_magic_cast_run', commit => 'eb16e9d2', group => 'Q', pr => 428 },
    repro => 'my $v = 7; my $ref = \\\\$v; print $$$ref, "\\n";',
    perl => "7\n",
    tokens => {
@@ -419,9 +419,9 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [138, 457] },
  { id => 26, kind => 'token', dump => 'tokens',
    title => 'A glob whose NAME is punctuation or a digit run is split into two operators',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^\*\*?=?$/, pred => '', check => 'star-as-multiply' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_punct_glob_name' },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser2::_repair_punct_glob_name + _glob_name_position (s527b: PPI fixed on the branch; the leaf lowers the Symbol through Pl::Environment::punct_glob_name)', commit => '6100d8b3', group => 'P', pr => undef },
    repro => 'our %X = (k => 1); *X = *-; print scalar(keys %X), "\\n";',
    perl => "0\n",
    tokens => {
@@ -613,6 +613,19 @@ print g(), "\\n";
    },
    unblocks => [],
    tasks => [3940] },
+ { id => 56, kind => 'token', dump => 'tokens',
+   title => 'A `/` after the `}` of a block that opens a statement or follows a word (`BEGIN { } /x/`, `{ 1 } /x/`, `grep { 1 } /(x)/`) is lexed as a DIVISION, where perl expects a term and reads a match',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'slash-as-division', shape => 'a `/` right after a statement block\'s `}`' },
+   fix => { kind => 'relex', handler => undef, commit => 'c1058d05', group => 'O', pr => undef },
+   repro => '$_ = "x"; { 1 } /x/ and print "match\\n";',
+   perl => "match\n",
+   tokens => {
+     got  => ['Magic=$_', 'Operator==', 'Quote::Double="x"', 'Structure=;', 'Structure={', 'Number=1', 'Structure=}', 'Operator=/', 'Word=x', 'Operator=/', 'Operator=and', 'Word=print', 'Quote::Double="match\\n"', 'Structure=;'],
+     want => ['Magic=$_', 'Operator==', 'Quote::Double="x"', 'Structure=;', 'Structure={', 'Number=1', 'Structure=}', 'Regexp::Match=/x/', 'Operator=and', 'Word=print', 'Quote::Double="match\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [3942] },
 );
 
 # The one accessor.

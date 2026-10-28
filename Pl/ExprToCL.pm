@@ -1432,6 +1432,11 @@ sub gen_symbol_form {
     $self->environment->add_referenced_package($pkg) if $self->environment;
     return ['p-make-typeglob', "\"$pkg\"", "\"$name\""];
   }
+  # A glob named by a digit run, punctuation or a caret letter (*1, *-, *^R):
+  # one Symbol from PCL's PPI (§26), lowered as the symbolic *{'NAME'} is.
+  if (defined(my $pname = Pl::Environment::punct_glob_name($content))) {
+    return ['p-dynamic-typeglob', _cl_string_literal_form($pname)];
+  }
   # Handle simple typeglob: *foo -> (p-make-typeglob "current-pkg" "foo")
   if ($content =~ /^\*(\w+)$/) {
     my $name = $1;

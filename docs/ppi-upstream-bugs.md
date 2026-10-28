@@ -55,6 +55,8 @@ Also below: [possibly fixed upstream](#possibly-fixed-upstream--verify-before-tr
 
 ## 1. `$$$ref` (triple dereference) tokenized as `$$` + `$ref`  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527b: group Q, commit `eb16e9d2` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md): upstream PR #428 (toddr-bot, issue #60) taken as it stands and widened to `$${EXPR}`; `$$` before a `$`, a word character or a `{` is a dereference Cast.  PCL's `Pl::PExpr::_split_pid_magic_cast_run` DELETED (corpus-diff identical); upstream PR: #428 (credited in `PR-Q.md`).
+
 **Perl:** `$$$ref` means `${${$ref}}` — a triple scalar dereference.
 
 **PPI:** tokenizes it as the special PID variable `$$` (`PPI::Token::Magic`)
@@ -1512,6 +1514,8 @@ ends a term (all probed against perl).  Guard rows: `Pl/t/minus-word-01.t`.
 
 ## 26. A glob whose NAME is punctuation or a digit run is split into two operators  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527b: group P, commits `6100d8b3` + `5ef65f34` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md; `Token/Unknown.pm`'s `*` arm takes a digit run, a caret letter or a magic-scalar punctuation character into one Symbol where a term is expected); PCL's `Pl::Parser2::_repair_punct_glob_name` + `_glob_name_position` DELETED, the leaf lowers the Symbol through `Pl::Environment::punct_glob_name` (corpus-diff: two comment lines echoing the source, and perl-tests/magic.t:254 `*@{HASH}` now takes the HASH slot of `*@` -- still the blessed #1459 failure); upstream PR: pending (`PR-P.md`).
+
 **Perl:** a glob is named by whatever names a variable, and punctuation and
 digits name variables (`$-`, `$!`, `$1`), so `*-`, `*!` and `*1` are globs.
 Real perl test code writes them:
@@ -2293,6 +2297,33 @@ which has all of these, so they stayed alive.  Main dropped `print @{$h}*$y`,
 arms, the `.digit` test and the `/` arm); upstream PR: pending
 (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-J.md`).  Upstream row:
 `docs/ppi-bug-report.t` (21 rows, 6 of them controls); registry row §55.
+
+---
+
+## 56. A `/` after the `}` of a statement block is lexed as a DIVISION  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527b: group O, commit `c1058d05` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-O.md`).  Task #3942.
+
+**Minimal repro** (valid perl; 5.40.3 prints `m`, `b`, `x`):
+
+```perl
+$_ = "x"; BEGIN { 1 } /x/ and print "m\n"; { 1 } /x/ and print "b\n";
+my @a = grep { 1 } /(x)/; print "@a\n";
+```
+
+After the `}` of a block that opens a statement (a bare or labelled block) or
+follows a word (`BEGIN`, `END`, `map`, `grep`, `sort`, a sub's name) perl
+expects a TERM, so a `/` starts a match.  **PPI 1.291**: `Structure[}]
+Operator[/] Word[x] Operator[/]` -- a division.  **Expected**:
+`Regexp::Match[/x/]`.  The sibling of §35 (the same rule for a `-`), found
+while fixing it.
+
+**Impact on PCL**: the statement was DROPPED (loudly: "Handle single node of
+unknown type").  No PCL workaround existed.  **Fix**: `Token/Whitespace.pm`'s
+`/` arm asks `Tokenizer::_after_statement_block` (group N's helper); after a
+subscript, a dereference block, an anonymous sub or an anonymous hash a `/`
+still divides.  Report rows: the six `§56` rows at the end of
+`docs/ppi-bug-report.t`.
 
 ---
 

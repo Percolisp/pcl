@@ -1009,6 +1009,28 @@ sub fh_forced_main_name {
     return defined $name && $FORCED_MAIN_HANDLE{$name} ? 1 : 0;
 }
 
+=head2 punct_glob_name($content)
+
+The NAME of a glob Symbol named by a digit run, a punctuation character or a
+caret letter (C<*1>, C<*->, C<*!>, C<*^R>), or undef for any other token text.
+PCL's PPI hands these over as ONE Symbol (vendor/PPI, docs/ppi-upstream-bugs.md
+§26).  perl forces such names to C<main::>, and C<*^R> is the glob named by the
+CONTROL character (toke.c's toCTRL: the character xor 64), the one C<$^R> reads,
+so the answer is the name the runtime's dynamic-glob resolver takes -- the same
+glob as C<*{'-'}> / C<*{"\cR"}>.  ONE predicate for the expression leaf and the
+C<local *NAME> statement.
+
+=cut
+
+sub punct_glob_name {
+    my $content = shift;
+    return undef if !defined $content
+        || $content !~ /^\*(\d+|\^[A-Z\[\]^_?\\]|[^\w\s])$/;
+    my $name = $1;
+    $name = chr(ord(substr($name, 1)) ^ 64) if length($name) == 2 && $name =~ /^\^/;
+    return $name;
+}
+
 =head2 canon_filehandle_name($name)
 
 THE canonical registry key AND emitted spelling for a bareword filehandle NAME

@@ -1677,10 +1677,6 @@ sub parse {
   # something else entirely.  A repair whose damage is unbounded must run before
   # the repairs that read the damaged region, never beside them.
   $doc = $self->_repair_word_match($doc);
-  # …and its INVERSE: a punctuation- or digit-named GLOB (`*X = *-`,
-  # `local *1 = sub {…}`) that PPI hands over as two operator tokens — see
-  # _repair_punct_glob_name (task #463).
-  $doc = $self->_repair_punct_glob_name($doc);
   # …and the HASH twin of §24's punctuation-named ARRAY: PPI lexes those itself
   # since s527b, except after a DECLARED TERM word, which only PCL knows -- see
   # _repair_punct_hash_name (task #550).
@@ -7975,131 +7971,6 @@ sub _repair_nary_foreach {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
-# PPI LEXER BUG (task #463 items 3+4, docs/ppi-upstream-bugs.md §26) — the
-# INVERSE of §12 (`)*name`, now fixed in PCL's PPI).  perl lets any
-# punctuation character or digit run name a
-# glob, exactly as it names a scalar; PPI's Symbol regex is word-bounded, so it
-# hands those over as two ordinary operator tokens and the statement is DROPPED:
-#
-#     *X = *-;            Symbol(*X) Operator(=) Operator(*) Operator(-)
-#     local *a = *1;      Word(local) Symbol(*a) Operator(=) Operator(*) Number(1)
-#     local *1 = sub {…}; Word(local) Operator(*) Number(1) Operator(=) …
-#
-# and the compiler's own message for the first is "Got op '-', not postfix.  But
-# there is nothing after it??".  perl means the punctuation globals by them:
-# `*X = *-` makes `%X` the named-capture hash, `local *a = *1` makes `$a` the
-# first capture group.
-#
-# THE REPAIR SPELLS THE GLOB THE WAY THE COMPILER ALREADY LOWERS ONE:
-# `*-` becomes `*{'-'}`, the symbolic form, and the document is reparsed.  The
-# two are the same glob in perl even inside a package — probed, both reach the
-# forced-main punctuation globals, and both give `ell` for `*{"1"}` after a
-# match — and `p-glob-assign-dynamic` already implements that path.
-#
-# THE CONDITION IS A WHITELIST, not `_ends_term`'s negative, and that asymmetry
-# is deliberate (memory: a refusal classifier is asymmetric — a miss is free, a
-# false positive kills a file).  A `*` can only OPEN a glob name where a term
-# can start, and the term-start positions a glob is written in are few:
-# statement/block/list start, after `=`, `,` or `=>`, after `return`.
-# Everything the population's term-position `*` sites actually are —
-# a glob PATTERN inside a `<…>` run PPI derailed (`<op/*.t>`, `<*>`), a regex
-# body in a file PPI mis-lexed whole (t/re/pat.t), and `@{$h} * (…)` where
-# `_ends_term` wrongly says the term has not ended because a deref block's `}`
-# is not a subscript's — has a previous token OUTSIDE that list, so none of them
-# can be touched.  Measured over all four populations: 1329 files, 23
-# term-position `*` sites, and the whitelist selects exactly the 8 glob ones.
-#
-# `^` is NOT in the punctuation set, and that is the third shape (task #562):
-# `*^R` — PPI Operator(*) Operator(^) Word(R) — is not the glob named `^` but
-# perl's CARET CONVENTION for the glob named chr(18), the one `$^R` reads.
-# `*{'^'}R` would be a silent wrong.  It is repaired in the same walk, into the
-# same symbolic spelling with the CONTROL CHARACTER as the name, which is what
-# perl means by it (probed: `*^R = *g` aliases $^R to $g, `"" . *^R` is
-# `*main::` + chr(18), and `${"\cR"}` IS `$^R` while `${"^R"}` is a different
-# variable).  The runtime meets it at %p-slot-name.
-#
-# ONE UPPER-CASE LETTER ONLY.  PPI hands the whole following word over as one
-# token, so `*^Rfoo` arrives as Word("Rfoo") — which is `*^R` followed by
-# `foo`, not a glob name — and a longer Word therefore keeps dropping loudly
-# rather than being rewritten into something perl never meant.
-# A CLOSING BRACKET can name a glob too — `*]` is the glob whose scalar slot is
-# `$]`, and `tie my $var4 => 'main', *];` (t/op/tie_fetch_count.t:189) is the one
-# occurrence in the population.  PPI hands `]` over as a Token::Structure, not an
-# Operator, so it needs its own arm — and that arm has to be sure the bracket is
-# not CLOSING something.  PPI answers that itself: a bracket that closes a real
-# subscript, list or constructor is the `finish` of a PPI::Structure, while an
-# orphan is parked in a PPI::Statement::UnmatchedBrace (measured over subscripts,
-# slices, anon constructors, list slices and `($x)[0]`).  A `(*)` PROTOTYPE never
-# reaches here at all — PPI lexes it as one Token::Prototype.
-#
-# OPENERS (`[`, `(`, `{`) are deliberately absent: `*{` is the deref-block
-# spelling and must never be claimed, and an opener is never orphaned, so the
-# UnmatchedBrace test could not protect them.  So is `;`: deleting it would take
-# the statement terminator with it, and `*;` occurs nowhere.
-# A SIGIL CHARACTER names a glob too — `*@` is the glob whose scalar slot is
-# `$@`, and `local *@;` is perl-tests/local.t:828 — and it is the THIRD
-# spelling of this bug, because PPI hands BOTH tokens over as CASTS there
-# (`Cast(*) Cast(@)`), never as the two Operators the arms above repair.  The
-# `*` is a Cast exactly where a term is expected, so the position test is the
-# same one; what the sigil arm needs on top is the certainty that the second
-# Cast is not a real DEREF cast, and that is the token AFTER it: a deref
-# applies to something (a Symbol, a `{` block, another Cast), a glob name is
-# followed by whatever ends or continues the statement.
-my %SIGIL_GLOB_CHARS = map { $_ => 1 } split //, q{$@%&};
-my %PUNCT_GLOB_CHARS = map { $_ => 1 } split //, q{-!+./\\,:?=<>~&%|};
-my %PUNCT_GLOB_CLOSERS = map { $_ => 1 } split //, '])}';
-
-sub _repair_punct_glob_name {
-  my ($self, $doc) = @_;
-  my @tok = grep { $_->significant } $doc->tokens;
-  my $repaired = 0;
-  for my $i (0 .. $#tok - 1) {
-    my ($star, $next) = @tok[$i, $i + 1];
-    next unless $star->content eq '*'
-             && ($star->isa('PPI::Token::Operator') || $star->isa('PPI::Token::Cast'));
-    next unless _glob_name_position($i ? $tok[$i - 1] : undef);
-    my ($name, $letter);
-    if ($star->isa('PPI::Token::Cast')) {
-      # The sigil-named glob; see %SIGIL_GLOB_CHARS above.  A Cast `*` before
-      # anything else is the ordinary `*{EXPR}` / `*$name` deref and is left
-      # alone — those already lower.
-      next unless $next->isa('PPI::Token::Cast')
-               && $SIGIL_GLOB_CHARS{ $next->content };
-      my $after = $tok[$i + 2];
-      next if $after && ($after->isa('PPI::Token::Symbol')
-                      || $after->isa('PPI::Token::Cast')
-                      || ($after->isa('PPI::Token::Structure')
-                          && $after->content eq '{'));
-      $name = $next->content;
-    }
-    elsif ($next->isa('PPI::Token::Number') && $next->content =~ /\A[0-9]+\z/) {
-      $name = $next->content;
-    }
-    elsif ($next->isa('PPI::Token::Operator') && length($next->content) == 1
-           && $PUNCT_GLOB_CHARS{ $next->content }) {
-      $name = $next->content;
-    }
-    elsif ($next->isa('PPI::Token::Structure')
-           && $PUNCT_GLOB_CLOSERS{ $next->content }
-           && $next->parent
-           && $next->parent->isa('PPI::Statement::UnmatchedBrace')) {
-      $name = $next->content;
-    }
-    elsif ($next->isa('PPI::Token::Operator') && $next->content eq '^'
-           && $i + 2 <= $#tok && $tok[$i + 2]->isa('PPI::Token::Word')
-           && (($letter) = $tok[$i + 2]->content =~ /\A([A-Z])\z/)) {
-      $name = chr(ord($letter) - 64);
-    }
-    next unless defined $name;
-    (my $q = $name) =~ s/([\\'])/\\$1/g;
-    $star->set_content("*{'$q'}");
-    $tok[$i + 2]->delete if defined $letter;
-    $next->delete;
-    $repaired = 1;
-  }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
-}
-
 # A PUNCTUATION-named hash after a DECLARED TERM (task #550, docs/ppi-upstream-
 # bugs.md §24; rewritten s527b).  PCL's PPI lexes `%?` `%.` `%~` `%=` … in term
 # position as ONE Magic token (s527b, group D) and keeps `%` the modulo operator
@@ -8141,32 +8012,6 @@ sub _repair_punct_hash_name {
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;
-}
-
-# Where a `*` may OPEN a glob name — see _repair_punct_glob_name.
-#
-# `}` is not in the list on purpose: it is the one token that is a statement end
-# in one reading (`sub f {…} *bar = …`) and a term end in the other (`$h{a}*2`),
-# and a punctuation glob at that position is a miss, which costs nothing.
-#
-# `local` IS in the list since s449s, and the history is why the list is
-# measured rather than guessed: `local *1 = sub {…}` (t/op/method.t:38,
-# t/op/tie_fetch_count.t:203) repairs into `local *{'1'} = sub {…}`, and until
-# #564 that Cast + Block target fell through `_process_local_declaration` and
-# the statement VANISHED with no announcement — so the repair was held back
-# rather than trade a loud drop for a silent one.  #564 gave the shape its
-# lowering (p-local-glob-dynamic), so the repair may fire.  `local *a = *1` was
-# never affected either way: its `*1` is on the RIGHT of the `=`.
-sub _glob_name_position {
-  my ($prev) = @_;
-  return 1 unless $prev;                                     # document start
-  return $prev->content =~ /\A[;{(\[]\z/ ? 1 : 0
-    if $prev->isa('PPI::Token::Structure');
-  return $prev->content =~ /\A(?:=|,|=>)\z/ ? 1 : 0
-    if $prev->isa('PPI::Token::Operator');
-  return $prev->content =~ /\A(?:return|local)\z/ ? 1 : 0
-    if $prev->isa('PPI::Token::Word');
-  return 0;
 }
 
 # PPI LEXER BUG (task #351, docs/ppi-upstream-bugs.md §11).  A bare `/PATTERN/`
@@ -8762,9 +8607,9 @@ sub _ends_term {
     return 1 if $t->content eq '}'
              && $t->parent && $t->parent->isa('PPI::Structure::Subscript');
     # A DEREF BLOCK yields a value too — `${$x}`, `@{$h}`, `%{$h}`, `*{$n}` —
-    # and the gap was already known: `_repair_punct_glob_name`'s comment names
-    # `@{$h} * (…)` as a site where "`_ends_term` wrongly says the term has not
-    # ended because a deref block's `}` is not a subscript's", and works around
+    # and the gap was already known: the comment of `_repair_punct_glob_name`
+    # (deleted s527b, PCL's PPI lexes those globs) named `@{$h} * (…)` as a site where "`_ends_term` wrongly says the
+    # term has not ended because a deref block's `}` is not a subscript's", and works around
     # it with a whitelist.  PPI marks the difference itself: a deref block's
     # previous sibling is the Cast, a map/grep/sort block's is not — which is
     # what keeps `map { … } <op/*>` a diamond (s449s, found by the #563

@@ -18,13 +18,15 @@
 # PPI's Symbol regex is word-bounded, so it hands `*-` over as two ordinary
 # operator tokens (docs/ppi-upstream-bugs.md §26) and every one of these was
 # DROPPED — "Got op '-', not postfix.  But there is nothing after it??".
-# Pl::Parser2::_repair_punct_glob_name rewrites the name into the symbolic
-# spelling `*{'-'}` the compiler already lowers; the `;` family needed no lexer
+# Pl::Parser2::_repair_punct_glob_name rewrote the name into the symbolic
+# spelling `*{'-'}` the compiler already lowers; since s527b PCL's own PPI
+# lexes `*-` as ONE Symbol (vendor/PPI, §26) and the leaf lowers it the same
+# way (Pl::Environment::punct_glob_name), and the repair is deleted; the `;` family needed no lexer
 # fix at all, only Pl::Parser2::_normalize_null_statements, because
 # PPI::Statement::Null is INSIGNIFICANT and the walker was the only thing that
 # could see it.
 #
-# THE NEGATIVES ARE THE POINT.  The repair's condition is a WHITELIST of the
+# THE NEGATIVES ARE THE POINT.  The repair's condition (PPI's, since s527b) is a WHITELIST of the
 # positions where a `*` can OPEN a glob name (statement/list start, after `=`,
 # `,` or `return`), not `_ends_term`'s negative, because a false positive here
 # turns working multiplication into a glob and kills the file, while a miss
@@ -51,7 +53,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 28;
+plan tests => 30;
 
 sub write_pl {
     my ($code) = @_;
@@ -412,4 +414,20 @@ $^R = 'oldR';
 our @caretRglobwithnoscalar = (1,2);
 *^R = *caretRglobwithnoscalar;
 print "1 caretR=[", (defined $^R ? $^R : 'UNDEF'), "]\n";
+PL
+
+# s527b, PCL's PPI at the source (§26 group P, §56 group O): punctuation globs
+# after `return` and in a list, and a match after a statement block's `}`.  On
+# main the block-`}` match was a DROPPED statement.
+both_agree(<<'PL', 's527b §26/§56: *- *+ in a list, return *!, and /x/ after a block');
+"ab" =~ /(?<n>a)(b)/;
+sub g { return *! }
+my @g = (*-, *+);
+print "1 $g[0] $g[1] ", (exists ${ *{ g() }{HASH} }{ENOENT} ? "errno" : "none"), "\n";
+$_ = "x"; { 1 } /x/ and print "2 match\n";
+my @a = grep { 1 } /(x)/; print "3 @a\n";
+PL
+both_agree(<<'PL', 's527b §1: $$$r and $${$rr} are two dereferences (PR #428)');
+my $v = 7; my $r = \$v; my $rr = \$r; my $rrr = \$rr;
+print "1 ", $$$rr, " ", $${$rr}, " ", $$$$rrr, "\n";
 PL

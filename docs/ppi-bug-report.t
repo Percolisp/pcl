@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 164;
+use Test::More tests => 179;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1239,4 +1239,76 @@ for my $c (
         my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
         ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
     }
+}
+
+# §56 -- the same rule for a /: after the } of a block that opens a
+# statement or follows a word, a / starts a match.  perl:
+# $_ = "x"; BEGIN { 1 } /x/ and print "m\n" prints m, and
+# grep { 1 } /(x)/ is the list of the match's groups.
+{
+    my @rows = (
+        [ 'BEGIN { 1 } /x/ and print;', 'Regexp::Match=/x/', 'a match after a BEGIN block' ],
+        [ '{ 1 } /x/ and print;',       'Regexp::Match=/x/', 'a match after a bare block' ],
+        [ '@a = grep { 1 } /(x)/;',     'Regexp::Match=/(x)/', 'a match after a grep block' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+# The controls: after a subscript, a dereference block and an anonymous sub
+# a / divides.
+{
+    my @rows = (
+        [ '$x = $h{a} /2;',          'Operator=/', 'a subscript divided by 2 (control)' ],
+        [ '$x = @{$r} /2;',          'Operator=/', 'a dereference divided by 2 (control)' ],
+        [ 'my $s = sub { 1 } / 2;',  'Operator=/', 'an anonymous sub divided by 2 (control)' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+
+# §26, more positions of the same bug: after return and local, and in a
+# list (the five rows above are after = and at the start).
+{
+    my @rows = (
+        [ 'return *!;',                'Symbol=*!',  '*! after return is one glob' ],
+        [ 'local *12 = sub { 1 };',    'Symbol=*12', '*12 after local is one glob' ],
+        [ '@a = (*-, *+);',           'Symbol=*+',  '*- and *+ in a list are globs' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+# The controls: after a term a * multiplies, *$g is a glob dereference, and
+# after an unknown word the existing guess stays.
+{
+    my @rows = (
+        [ '$x = $y *-1;',  'Operator=*', 'a scalar times -1 multiplies (control)' ],
+        [ '$x = 2*3;',     'Operator=*', '2*3 multiplies (control)' ],
+        [ '$z = *$g;',     'Cast=*',     '*$g is a glob dereference (control)' ],
+        [ 'foo *-1;',      'Operator=*', 'after an unknown word * stays an operator (control)' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+
+# §26, the colon: $: names a scalar, so *: is a glob, while *::foo stays the
+# glob main::foo.
+{
+    my @t = map { s{^PPI::(?:Token::)?}{}r } toks('*X = *:;');
+    ok( grep( $_ eq 'Symbol=*:', @t ), '*: is one glob' ) or diag "got: @t";
+}
+{
+    my @t = map { s{^PPI::(?:Token::)?}{}r } toks('*X = *::foo;');
+    ok( grep( $_ eq 'Symbol=*::foo', @t ), '*::foo stays one glob (control)' ) or diag "got: @t";
 }

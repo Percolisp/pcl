@@ -4466,7 +4466,8 @@ sub _process_local_declaration {
   }
 
   if (@non_ws && ref($non_ws[0]) eq 'PPI::Token::Symbol'
-      && $non_ws[0]->content =~ /^\*(.+)$/) {
+      && $non_ws[0]->content =~ /^\*(.+)$/
+      && !defined Pl::Environment::punct_glob_name($non_ws[0]->content)) {
     my $glob_content = $non_ws[0]->content;  # e.g. "*foo" or "*Pkg::foo"
     my ($pkg, $name);
     if ($glob_content =~ /^\*(.*)::([^:]+)$/) {
@@ -4792,17 +4793,24 @@ sub _process_local_declaration {
   # is the runtime's one dynamic-glob resolver, shared with the assignment path
   # (%p-glob-dynamic-target).  Written above the `[$@%]` deref branch because
   # the shape test is the same and only the sigil tells them apart.
-  if (@non_ws >= 2
-      && ref($non_ws[0]) eq 'PPI::Token::Cast'
-      && $non_ws[0]->content eq '*'
-      && (ref($non_ws[1]) eq 'PPI::Structure::Block'
-          || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
-    my $name_cl = ref($non_ws[1]) eq 'PPI::Token::Symbol'
+  # A glob NAMED by punctuation, a digit run or a caret letter (`local *@`,
+  # `local *1`) is one Symbol from PCL's PPI (§26) and is the symbolic
+  # *{'NAME'} -- the same statement, its name a string.
+  my $punct_name = @non_ws ? Pl::Environment::punct_glob_name($non_ws[0]->content) : undef;
+  $punct_name = undef if @non_ws && ref($non_ws[0]) ne 'PPI::Token::Symbol';
+  if (defined $punct_name
+      || (@non_ws >= 2
+          && ref($non_ws[0]) eq 'PPI::Token::Cast'
+          && $non_ws[0]->content eq '*'
+          && (ref($non_ws[1]) eq 'PPI::Structure::Block'
+              || ref($non_ws[1]) eq 'PPI::Token::Symbol'))) {
+    my $name_cl = defined $punct_name ? Pl::ExprToCL::cl_string_literal($punct_name)
+      : ref($non_ws[1]) eq 'PPI::Token::Symbol'
       ? ($self->_parse_expression([$non_ws[1]], $stmt) // 'nil')
       : ($self->_parse_expression([$self->_deref_block_inner($non_ws[1])], $stmt) // 'nil');
     my @rhs_parts;
     my $past_eq = 0;
-    for my $p (@non_ws[2 .. $#non_ws]) {
+    for my $p (@non_ws[(defined $punct_name ? 1 : 2) .. $#non_ws]) {
       if (!$past_eq && ref($p) eq 'PPI::Token::Operator' && $p->content eq '=') {
         $past_eq = 1;
         next;

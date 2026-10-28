@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: 5b822dea1c34d4e279c72536c1e1cf4790f25e29
-lib-tree: c3c9f656b7ee7c8ca236c16696fdccc78d69ef6a
+branch-sha: 5ef65f34f519b0fc8e8cc06d99c6d9ca9bb68f5d
+lib-tree: de398ccbcfc99acb644d20ac16912fac39c7350e
 date: 2026-10-29
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -30,6 +30,10 @@ fix: D §24 ecd87059 Singletons: @^ is a magic variable
 fix: L §27 dc242138 Symbol: a * cast trumps the braces in ->symbol
 fix: M §30 3ed5f883 HereDoc: the indentation is what stands before the terminator
 fix: N §22 §35 5b822dea Tokenizer: a - after a filehandle or a statement block starts a term
+fix: O §56 c1058d05 Whitespace: a / after a statement block starts a match
+fix: P §26 6100d8b3 Unknown: a glob may be named by punctuation, digits or a caret letter
+fix: Q §1 eb16e9d2 Unknown: $$ before a $, a word or a { is a dereference cast
+fix: P §26 5ef65f34 Unknown: *: is a glob
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -73,3 +77,11 @@ commit: e5b46488 TODO tests: an indented here-doc's indentation stops at its ter
 commit: 3ed5f883 HereDoc: the indentation is what stands before the terminator
 commit: 3ddbee5e TODO tests: a - that starts a term after a filehandle or a block
 commit: 5b822dea Tokenizer: a - after a filehandle or a statement block starts a term
+commit: 89306003 TODO tests: a / after a statement block starts a match
+commit: c1058d05 Whitespace: a / after a statement block starts a match
+commit: 74ee2b19 TODO tests: a glob named by punctuation or digits, in more positions
+commit: 6100d8b3 Unknown: a glob may be named by punctuation, digits or a caret letter
+commit: 59e0c3b9 TODO tests: $$$a is two dereferences of $a
+commit: eb16e9d2 Unknown: $$ before a $, a word or a { is a dereference cast
+commit: 436169bb TODO test: *: is a glob
+commit: 5ef65f34 Unknown: *: is a glob
