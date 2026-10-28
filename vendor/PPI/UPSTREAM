@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-T
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-U
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: r-T
-branch-sha: 4e021b91b9881e8e551114482b3cfb70b420325d
-lib-tree: 3ca6c95705fd3e387fb4009120bd2e62a53f0dcd
+branch: r-U
+branch-sha: a320f21a8962f2a8152c65d017054cd8581f6bb3
+lib-tree: 62571ef464f4ed7e2d10ac10f4013c8ac0014dc4
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -37,6 +37,7 @@ fix: P §26 5ef65f34 Unknown: *: is a glob
 fix: R §32 61817c99 Tokenizer: a nameless parameter only inside a signature
 fix: S §7 §8 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
 fix: T §18 4e021b91 Lexer: finally belongs to the try statement
+fix: U §6 §10 §29 a320f21a Lexer: the loop variable of foreach is any of perl's forms
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -96,3 +97,6 @@ commit: 9d43dfa9 TODO tests: a typed declaration's attribute
 commit: ded727c3 Tokenizer: a typed declaration's colon introduces attributes
 commit: 44b918d4 TODO tests: finally belongs to the try statement
 commit: 4e021b91 Lexer: finally belongs to the try statement
+commit: d15cb43f TODO tests: a block filehandle right after print( is a block
+commit: 949debd9 TODO tests: every loop variable foreach accepts
+commit: a320f21a Lexer: the loop variable of foreach is any of perl's forms

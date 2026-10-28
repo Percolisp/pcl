@@ -7693,10 +7693,16 @@ sub _repair_alias_foreach {
   for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {
     next unless $w->content =~ /^for(?:each)?$/;
     my $cast = _next_sig_token($w);
+    my $decl;
+    # `for my \%e (…)` (the declared_refs spelling) is the same loop as
+    # `for \my %e (…)`: the declarator may stand before the cast or after it.
+    if ($cast && $cast->isa('PPI::Token::Word') && $cast->content =~ /^(?:my|our|state)$/) {
+      $decl = $cast;
+      $cast = _next_sig_token($decl);
+    }
     next unless $cast && $cast->isa('PPI::Token::Cast') && $cast->content eq '\\';
     my $t = _next_sig_token($cast);
-    my $decl;
-    if ($t && $t->isa('PPI::Token::Word') && $t->content =~ /^(?:my|our|state)$/) {
+    if (!$decl && $t && $t->isa('PPI::Token::Word') && $t->content =~ /^(?:my|our|state)$/) {
       $decl = $t;
       $t = _next_sig_token($t);
     }
@@ -12459,6 +12465,23 @@ sub _lower_compound {
   }
 
   if ($kw eq 'for' || $kw eq 'foreach') {
+    # A DEREFERENCE as the loop variable (`for $$f (LIST)`, `for ${*$f}
+    # (LIST)`, docs/ppi-upstream-bugs.md §6 §29) aliases whatever the
+    # reference names; it has no lowering yet (task #1580).  PCL's PPI now
+    # lexes it, so it reaches here.  Taking the first Block for the body
+    # (it is the dereference's) or the Symbol for the variable would be a
+    # silent wrong, and a transpile-time die would cost the whole file, so
+    # the STATEMENT is dropped the s433 way: announced, and a perl-shaped
+    # run-time die at the site (Pl::Parser::_dropped_statement_cl).
+    if (grep { $_->isa('PPI::Token::Cast') } @k) {
+      my $why = "foreach whose loop variable is a dereference (#1580)";
+      my $fb  = $self->fallback_parser;
+      # The compound can be lowered twice (a speculative lowering first);
+      # the announcement names the statement once.
+      $fb->_announce_dropped_statement([$stmt], $stmt, $why)
+        if !$self->{_drop_announced}{ Scalar::Util::refaddr($stmt) }++;
+      return Pl::CLForm::raw($fb->_dropped_statement_cl([$stmt], $stmt, $why));
+    }
     my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;

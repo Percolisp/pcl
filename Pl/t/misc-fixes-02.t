@@ -936,9 +936,25 @@ test_cl('named-capture %+ hash element still works after the %- workaround',
 # row asserts the CURRENT broken state on purpose — when it FAILS, a PPI
 # upgrade fixed the lexer: drop this canary, drop §6, un-register op/for.t
 # (its suite registration carries this cause) and re-run the suite file.
-ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
-    'CANARY: PPI still cannot lex `for ${*$f} (LIST){}` — if this FAILS, '
-  . 'PPI is fixed: un-register op/for.t (ppi-upstream-bugs.md §6)' );
+#   FIXED ON PCL'S PPI BRANCH (s527c, group S): the document lexes, and the
+# loop is one foreach Compound.  The LOWERING of a dereferenced loop variable
+# is still missing (#1580): the statement is DROPPED the s433 way (announced,
+# a run-time die at the site), so the rest of the file runs -- guarded below.
+{
+    my $doc = PPI::Document->new(\'for ${*$f} (5,11,33) { print } f();');
+    my @s = $doc ? $doc->schildren : ();
+    ok( @s == 2 && $s[0]->isa('PPI::Statement::Compound') && $s[0]->type eq 'foreach',
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group S): `for ${*$f} (LIST){}` lexes as '
+      . 'one foreach Compound (ppi-upstream-bugs.md §6 §29)' );
+}
+test_cl('a dereference foreach loop variable costs its statement, not the file (#1580)',
+    'no strict "refs"; our $v = 1; my $g = "v"; print "a\n";'
+  . ' if (0) { for ${*$g} (5, 11) { print $v } } print "b\n";',
+    "a\nb\n");
+test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (§10)',
+    'use feature qw(refaliasing declared_refs); no warnings;'
+  . ' my @h = ({ a => 1 }, { a => 2 }); for my \\%e (@h) { print $e{a} } print "\n";',
+    "12\n");
 
 # ── PPI bug CANARIES for the three mis-lexes PCL WORKS AROUND ────────────────
 # Each of these asserts the CURRENT broken PPI behaviour, because PCL's repair
@@ -962,10 +978,11 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
 {
     my $doc = PPI::Document->new(\'for my ($q, $r) (@l) { A() }');
     my ($first) = $doc ? $doc->schildren : ();
-    ok( $first && $first->content !~ /\{/,
-        'CANARY: PPI still drops the list and block from a `for my ($q,$r) '
-      . '(LIST)` compound — if this FAILS, drop _repair_nary_foreach and '
-      . '_repair_alias_foreach (ppi-upstream-bugs.md §10)' );
+    ok( $first && $first->content =~ /\{ A\(\) \}\z/,
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group S): a `for my ($q,$r) (LIST)` '
+      . 'compound keeps its list and block (ppi-upstream-bugs.md §10; '
+      . '_repair_nary_foreach and _repair_alias_foreach stay -- they are the '
+      . 'LOWERING of the two heads, a token re-spelling, not a PPI repair)' );
 }
 {
     my $doc = PPI::Document->new(\'ok /foo/, "d";');
