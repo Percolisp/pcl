@@ -1831,6 +1831,8 @@ with #1648).  PPI version tested 1.291; no workaround shipped.
 
 ## 30. An indented here-doc's INDENTATION is `^(\s*)` of the whole terminator line, so a delimiter that begins with whitespace (or is empty) over-counts  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527b: group M, commit `3ed5f883` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md; `Token/HereDoc.pm` `_indent` = the terminator line minus its newline minus the terminator); PCL's `_repair_indented_heredocs` DELETED (corpus-diff identical); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-M.md`).
+
 **Perl:** `<<~DELIM` strips, from every body line, the whitespace that stands
 **before the delimiter TEXT** on the terminator line.  The delimiter may itself
 begin with whitespace (`<<~' EOF'`) or be empty (`<<~''`), and perl still

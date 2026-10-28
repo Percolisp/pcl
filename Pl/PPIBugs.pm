@@ -471,9 +471,9 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [1580, 1648, 1649] },
  { id => 30, kind => 'token', dump => 'heredoc',
    title => 'An indented here-doc\'s INDENTATION is `^(\\s*)` of the whole terminator line, so a delimiter that begins with whitespace (or is empty) over-counts',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => '`<<~DELIM` whose delimiter begins with whitespace (or is empty): the indentation is over-counted' },
-   fix => { kind => 'handler', handler => 'Pl::Parser::_repair_indented_heredocs' },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser::_repair_indented_heredocs (s527b: PPI fixed on the branch)', commit => '3ed5f883', group => 'M', pr => undef },
    repro => 'print <<~\' EOF\';
   some data
    EOF

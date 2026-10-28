@@ -16,9 +16,12 @@
 # intact, a SILENT WRONG — or, when the body happens to be indented as far as
 # the over-count, strips ONE CHARACTER TOO MANY.
 #
-# `Pl::Parser::_repair_indented_heredocs` recomputes the indentation as the
-# terminator line minus the delimiter text and repairs the token, so all
-# eleven readers of `->heredoc` get perl's answer from ONE place.
+# `Pl::Parser::_repair_indented_heredocs` recomputed the indentation as the
+# terminator line minus the delimiter text and repaired the token.  Since s527b
+# PCL's own PPI computes it that way (vendor/PPI, group M), the repair is
+# deleted, and all eleven readers of `->heredoc` get perl's answer from the
+# tokenizer itself -- including the shape the repair could not separate (a
+# body indented as far as the over-count, terminator at EOF).
 #
 # Every program here is built from EXPLICIT "\n" pieces, never from a here-doc
 # in this file: the test IS the whitespace, and a delimiter like `' EOF '` has
@@ -135,26 +138,27 @@ for my $s (@shapes) {
     is($g2, $w2, "<<~ indentation, terminator at EOF with no newline: PCL matches perl");
 }
 
-# The INVERSE side of the repair, at the PPI level and with no SBCL: after it
+# The INVERSE side of the fix, at the PPI level and with no SBCL: after it
 # the document round-trips byte-exact through serialize, which plain PPI does
-# not manage (§30's second face) — the check that says the repaired
-# indentation and the repaired body agree.
+# not manage (§30's second face) — the check that says the fixed
+# indentation and the fixed body agree.
 {
     require Pl::Parser;
     my $src = "print <<~' EOF'\n  some data\n   EOF\n";
     my $doc = Pl::Parser::fragment_doc($src);
     is($doc && $doc->serialize, $src,
-       "#1501/§30: a repaired <<~' EOF' document round-trips through serialize");
+       "#1501/§30: a <<~' EOF' document round-trips through serialize");
 }
 
-# CANARY (CLAUDE.md rule 13): the workaround is keyed on PPI 1.291 still
-# getting this wrong.  When a PPI upgrade fixes it, THIS row fails, and that is
-# the signal to drop `_repair_indented_heredocs`.
+# FIXED ON PCL'S PPI BRANCH (s527b, group M; CLAUDE.md rule 13): the
+# vendored PPI strips the body itself.  This row FAILS on PPI 1.291 (and on
+# PCL_SYSTEM_PPI=1 until upstream takes the fix), where it is the guard that
+# the deleted _repair_indented_heredocs is not needed.
 {
-    require PPI;
+    require Pl::VendorPPI;
     my $src = "print <<~' EOF'\n  some data\n   EOF\n";
     my $doc = PPI::Document->new(\$src);
     my ($hd) = @{ $doc->find('PPI::Token::HereDoc') || [] };
-    is(join('', $hd->heredoc), "  some data\n",
-       "CANARY: PPI $PPI::VERSION still leaves the body unstripped (§30)");
+    is(join('', $hd->heredoc), "some data\n",
+       "FIXED ON PCL'S PPI BRANCH: PPI strips the body of <<~' EOF' (§30)");
 }

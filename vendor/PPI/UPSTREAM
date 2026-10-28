@@ -6,9 +6,9 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: dc242138aa251c5ccb648a98939032417c05f617
-lib-tree: efc656026f8f9477cfbe80648b5ecc61098706db
-date: 2026-10-25
+branch-sha: 3ed5f8839db87e0dafd1c3d3985db30cea645992
+lib-tree: 84ddc08ab98c48d63a7ffe2998d8f140deca3180
+date: 2026-10-29
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
@@ -28,6 +28,7 @@ fix: D §24 1dc58208 Singletons: every punctuation-named array and hash is a mag
 fix: J §55 487563de Tokenizer: a builtin that takes no operand ends a term
 fix: D §24 ecd87059 Singletons: @^ is a magic variable
 fix: L §27 dc242138 Symbol: a * cast trumps the braces in ->symbol
+fix: M §30 3ed5f883 HereDoc: the indentation is what stands before the terminator
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -67,3 +68,5 @@ commit: ecd87059 Singletons: @^ is a magic variable
 commit: 6613fff5 TODO tests: PPI loads and parses without YAML::PP
 commit: 46ba7e81 Document: load YAML::PP only to read PPI_CUSTOM_FEATURE_INCLUDES
 commit: dc242138 Symbol: a * cast trumps the braces in ->symbol
+commit: e5b46488 TODO tests: an indented here-doc's indentation stops at its terminator
+commit: 3ed5f883 HereDoc: the indentation is what stands before the terminator
