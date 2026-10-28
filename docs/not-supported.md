@@ -3449,6 +3449,8 @@ region rewrite — then both shapes fall out.
 
 ## `:prototype(...)` on an anonymous sub at the START of an expression
 
+**RESOLVED (s527b, 2026-10-29):** PCL's own PPI no longer lexes `sub :attr` as a label (vendor/PPI, group S, ppi-upstream-bugs.md §7); the prototype is KEPT (`(sub :prototype($) { 42 })` answers `$` from `prototype`, as perl does) and nothing is announced.  The text below is the history.
+
 **What:** the prototype attribute is DROPPED (loudly) when the anon sub
 carrying it opens an expression — after `(`, `[`, `{` or a `,` that starts a
 fresh expression statement:

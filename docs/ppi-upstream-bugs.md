@@ -285,6 +285,8 @@ op/for.t.
 
 ## 7. `(sub :lvalue { … })` — an anon sub's ATTRIBUTE at expression start becomes a LABEL  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527b: group S, commit `6a5de5c1` on branch `pcl`, vendored as vendor/PPI; `Tokenizer::_label_position`: a word before a colon is a label only where a statement starts -- the tokenizer alone, upstream PR #430 (a Lexer site) is not needed for these rows); PCL's `Pl::Parser2::_normalize_anon_sub_attrs` + `_repair_swallowing_prototypes` DELETED, so `(sub :prototype($) {…})` keeps its prototype; upstream PR: pending (`PR-S.md`).
+
 Minimal repro (found s365, task #268 — `t/op/sub_lval.t`):
 
 ```perl
@@ -378,6 +380,8 @@ inverse guards.
 ---
 
 ## 8. A variable declaration's ATTRIBUTE is not a `Token::Attribute`  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527b: group S, commit `6a5de5c1`; `Tokenizer::_after_declared_variables`: the colon after `my`/`our`/`state` + a variable or list introduces Attribute tokens); `Pl::Parser2::_strip_decl_decorations` STAYS (it is the drop-and-announce semantics) and now reads the Attribute tokens; upstream PR: pending (`PR-S.md`).
 
 Minimal repro (found s395, task #314 family F-A2 — `t/op/attrs.t`, `t/uni/attrs.t`):
 
@@ -1970,6 +1974,8 @@ and re-lexes, in the family of `_reclassify_bare_vwords` /
 ---
 
 ## 32. `$)` is tokenized as `Symbol:$` + `Structure:)` ANYWHERE once the `signatures` feature is on — and the stray `)` wrecks the enclosing structure  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527b: group R, commit `61817c99` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md; `Tokenizer::_in_signature`: a nameless parameter only inside a signature; `$,` and `$=` had the same bug and are fixed with it); PCL's source repair (`Pl::Parser::_signature_gid_offsets` + `_restore_signature_gid` + `_walk_token_offsets`) DELETED; upstream PR: pending (`PR-R.md`).
 
 **PPI version tested:** 1.291 (`perl -MPPI -e 'print $PPI::VERSION'`).
 

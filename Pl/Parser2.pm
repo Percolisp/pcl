@@ -1623,10 +1623,6 @@ sub parse {
   # _normalize_null_statements.
   $doc = $self->_normalize_null_statements($doc);
 
-  # PPI LEXER BUG: an anon sub with an ATTRIBUTE at the START of an expression
-  # is tokenized as a LABEL — see _normalize_anon_sub_attrs.
-  $doc = $self->_normalize_anon_sub_attrs($doc);
-
   # PPI LEXER BUG: a `for` whose loop variable is a \-cast (refaliasing) or a
   # non-scalar swallows the rest of the file — see _repair_alias_foreach.
   # Its n-at-a-time sibling (`for my ($q,$r) (LIST)`, perl 5.36) mis-lexes the
@@ -6037,7 +6033,8 @@ sub _rewrite_lexsub_use {
 # so valid input never has one to protect.
 # PPI lexed the KEYWORD, and three of its structural decisions are wrong for
 # the sub call the Word now is; they are repaired IN PLACE (no reparse — the
-# precedent is the label-merge repair in _normalize_anon_sub_attrs):
+# precedent was the label-merge repair in _normalize_anon_sub_attrs, deleted
+# s527b when PCL's PPI stopped making `sub :` a label):
 #   * a statement-initial one opened a COMPOUND statement (`if;`, `map { if }
 #     …`, `(unless, 2)`) — it is an ordinary expression statement, of the
 #     class PPI gives the parent's other children;
@@ -7672,149 +7669,6 @@ sub _loop_scope_of {
       if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
   }
   return (0, undef);
-}
-
-sub _normalize_anon_sub_attrs {
-  my ($self, $doc) = @_;
-  # #270 first: a prototype whose text ends in `$` mangles the run one layer
-  # deeper than the repair below can see, and it is repaired on the raw token
-  # stream before any of the tree surgery here runs.
-  $doc = $self->_repair_swallowing_prototypes($doc);
-  for my $lab (@{ $doc->find('PPI::Token::Label') || [] }) {
-    next unless $lab->content =~ /^sub\s*:$/;
-    # Inside a `for`/`foreach` LIST the lexer goes one step further and puts
-    # each mis-lexed label in a STATEMENT OF ITS OWN (a label statement is a
-    # complete statement), splitting one expression across two or three
-    # siblings.  Merge them back into the label's statement first, so the run
-    # below sees the same token sequence it sees inside an ordinary list.
-    my $stmt = $lab->parent;
-    if ($stmt && $stmt->isa('PPI::Statement')) {
-      my $merged = 0;
-      while (1) {
-        my @sig = $stmt->schildren;
-        last unless @sig && $sig[-1]->isa('PPI::Token::Label');
-        my $next = $stmt->snext_sibling;
-        last unless $next && $next->isa('PPI::Statement');
-        for my $c ($next->children) {
-          $next->remove_child($c);
-          $stmt->add_element($c);
-        }
-        $next->delete;
-        $merged++;
-      }
-      # It was only a statement because of the label; it is an expression.
-      bless $stmt, 'PPI::Statement::Expression'
-        if $merged && ref($stmt) ne 'PPI::Statement::Expression';
-    }
-    my @drop;
-    my $t = $lab->snext_sibling;
-    while ($t) {
-      if ($t->isa('PPI::Token::Label') && $t->content =~ /^\w+\s*:$/) {
-        push @drop, $t;                       # a chained attribute
-        $t = $t->snext_sibling;
-        next;
-      }
-      last unless $t->isa('PPI::Token::Word');
-      push @drop, $t;                         # the final attribute's name
-      $t = $t->snext_sibling;
-      if ($t && $t->isa('PPI::Structure::List')) {
-        push @drop, $t;                       # `:prototype($$)`'s own parens
-        $t = $t->snext_sibling;
-      }
-      last;
-    }
-    # The run must end at the sub's block.  A `sub :` Label is only ever
-    # produced by this mis-lex, so a run that does NOT end at a Block is
-    # known-mangled input in a shape the repair does not cover: die naming it
-    # rather than fall through, which would silently drop the statement
-    # (#270 — that silence is what made `:prototype($)` vanish at exit 0).
-    if (! (@drop && $t && $t->isa('PPI::Structure::Block'))) {
-      my $shape = join '', map { $_->content } $lab, @drop;
-      die "Parser2: unrepaired mis-lexed anon-sub attribute run `$shape` "
-        . "(PPI lexes `sub :ATTR` at the start of an expression as a Label; "
-        . "see docs/ppi-upstream-bugs.md \x{a7}7) at line "
-        . $lab->line_number . "\n";
-    }
-    # `:prototype(…)` normally survives as a runtime `__pcl_set_prototype`
-    # wrap (Pl::Parser::_extract_prototype_attributes), but that pass runs on
-    # the token stream PPI produced — where this one is a Word, invisible to
-    # it — and it cannot be re-run here without a reparse that would just
-    # re-create the mis-lex.  Dropping it is EFFECT-ONLY (an anon sub has no
-    # name for the call-site parser to consult; that is already true of the
-    # correctly-lexed spelling, whose wrap is a runtime call), so it
-    # ANNOUNCES and continues per the s329 boundary rather than dying or
-    # going quiet.  docs/not-supported.md carries the entry.
-    # The attribute NAME and its parens are separate tokens here (Word +
-    # Structure::List), so read the run as text rather than per token.
-    my $run   = join '', map { $_->content } @drop;
-    my $proto = $run =~ /(prototype\([^)]*\))/ ? $1 : '';
-    warn "PCL: attribute `:$proto` on an anonymous sub at the start "
-       . "of an expression is dropped (PPI lexes it as a label; see "
-       . "docs/ppi-upstream-bugs.md \x{a7}7)\n"
-      if $proto ne '';
-    $_->delete for @drop;
-    bless $lab, 'PPI::Token::Word';
-    $lab->set_content('sub');
-  }
-  return $doc;
-}
-
-# #270, the second layer of the §7 mis-lex, repaired on the RAW TOKEN STREAM.
-#
-# `prototype($)` — and every prototype whose text ends in `$`: `(;$)`,
-# `($;$)`, … — has its closing paren eaten by the magic variable `$)`, so PPI
-# never closes the attribute's paren group there.  It closes it on the sub's
-# OWN closing paren instead, swallowing the block in between; the tree that
-# results has the ENCLOSING structure left unfinished, so no local tree edit
-# can restore it (and inside a `for` LIST the damage spreads across sibling
-# statements).  `($$)`, `(\@)` etc. lex correctly and never come here.
-#
-# So this runs BEFORE any tree surgery and does not read the tree at all: it
-# walks the token stream from each `sub :` Label, and when the run spells
-# `:[attr:]*prototype(` … `$)` it blanks exactly those tokens.  The document
-# text then reads `sub { … }` as if the attribute had never been written, and
-# one reparse yields the tree PPI would have built for the plain anon sub.
-#
-# Dropping the prototype is EFFECT-ONLY and ANNOUNCES, per the s329 boundary
-# and the #268 entry in docs/not-supported.md: an anon sub has no name for a
-# call-site parser to consult, so nothing downstream consumes the value.
-sub _repair_swallowing_prototypes {
-  my ($self, $doc) = @_;
-  my $repaired = 0;
-  for my $lab (@{ $doc->find('PPI::Token::Label') || [] }) {
-    next unless $lab->content =~ /^sub\s*:$/;
-    my @blank;                                # tokens to erase from the source
-    my $t = _next_sig_token($lab);
-    while ($t && $t->isa('PPI::Token::Label') && $t->content =~ /^\w+\s*:$/) {
-      push @blank, $t;                        # a chained attribute
-      $t = _next_sig_token($t);
-    }
-    next unless $t && $t->isa('PPI::Token::Word') && $t->content eq 'prototype';
-    push @blank, $t;
-    $t = _next_sig_token($t);
-    next unless $t && $t->isa('PPI::Token::Structure') && $t->content eq '(';
-    push @blank, $t;
-    # Everything up to the mis-lexed `$)`, which must all be prototype text —
-    # anything else means this is not the shape, and the run is left alone for
-    # the caller's die to name.
-    my @proto;
-    while (1) {
-      $t = _next_sig_token($t);
-      last unless $t && $t->isa('PPI::Token');
-      last if $t->isa('PPI::Token::Magic') && $t->content eq '$)';
-      last unless $t->content =~ /^[\\\$\@\%\&\*\[\]\;\+\_]+$/;
-      push @proto, $t;
-    }
-    next unless $t && $t->isa('PPI::Token::Magic') && $t->content eq '$)';
-    warn "PCL: attribute `:prototype("
-       . join('', map { $_->content } @proto) . "\$)` on an anonymous sub at "
-       . "the start of an expression is dropped (PPI lexes it as a label; see "
-       . "docs/ppi-upstream-bugs.md \x{a7}7)\n";
-    $lab->set_content('sub');
-    $_->set_content('') for @blank, @proto, $t;
-    $repaired = 1;
-  }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
 # PPI LEXER BUG (task #327): `for \my %e (@list) {…}` — the refaliasing
@@ -15178,20 +15032,16 @@ sub _strip_decl_decorations {
       @k = $v->schildren;
     }
     # (b) attribute list: from the ':' up to (not including) the first token
-    # that is neither an attribute name, its argument list, nor another ':'.
+    # that is neither an attribute nor another ':'.  PCL's PPI hands each
+    # attribute over as ONE Attribute token, its argument list inside
+    # (`:shared`, `:Foo(bar)`; vendor/PPI, docs/ppi-upstream-bugs.md §8).
     next unless @k >= 3
       && ($k[1]->isa('PPI::Token::Symbol') || $k[1]->isa('PPI::Structure::List'))
       && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq ':';
     my (@drop, @named);
     for my $t (@k[2 .. $#k]) {
       if ($t->isa('PPI::Token::Operator') && $t->content eq ':') { push @drop, $t; next }
-      if ($t->isa('PPI::Token::Word')) { push @drop, $t; push @named, $t->content; next }
-      # A parenthesised argument list belongs to the attribute BEFORE it.
-      if ($t->isa('PPI::Structure::List') && @named) {
-        push @drop, $t;
-        $named[-1] .= $t->content;
-        next;
-      }
+      if ($t->isa('PPI::Token::Attribute')) { push @drop, $t; push @named, $t->content; next }
       last;
     }
     $_->delete for @drop;

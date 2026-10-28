@@ -948,10 +948,9 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
 # docs/ppi-upstream-bugs.md §8/§9/§10, filable as ppi-bug-report.t bugs 5/6/7.
 {
     my $doc = PPI::Document->new(\'my $x : shared = 1;');
-    ok( $doc && !grep { $_->isa('PPI::Token::Attribute') } $doc->tokens,
-        'CANARY: PPI still gives a declaration attribute as Operator+Word, not '
-      . 'Token::Attribute — if this FAILS, drop _strip_decl_decorations\'s '
-      . 'attribute half (ppi-upstream-bugs.md §8)' );
+    ok( $doc && grep { $_->isa('PPI::Token::Attribute') } $doc->tokens,
+        'FIXED ON PCL\'S PPI BRANCH (s527b, group S): a declaration attribute is a '
+      . 'Token::Attribute; _strip_decl_decorations reads it (ppi-upstream-bugs.md §8)' );
 }
 {
     my $doc = PPI::Document->new(\'@{+}');
@@ -1391,17 +1390,17 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
 # ── CANARY for PPI bug 32 (ppi-upstream-bugs.md; task #1999) ────────────────
 # PPI 1.291 splits the magic variable `$)` into Symbol:$ + Structure:) once
 # the `signatures` feature is in force, and the stray `)` wrecks the enclosing
-# block structure -- so PCL repairs the SOURCE before PPI sees it
-# (Pl::Parser::_signature_gid_offsets).  THIS ROW ASSERTS THE BUG IS STILL
-# THERE: when a PPI upgrade fixes it, this row FAILS, and that is the signal
-# to delete the repair.
+# block structure.  PCL repaired the SOURCE before PPI saw it
+# (Pl::Parser::_signature_gid_offsets) until s527b fixed it on PCL's PPI
+# branch (group R: a nameless parameter only inside a signature) and deleted
+# the repair.  This row FAILS on PPI 1.291.
 {
     my $src = "use v5.36;\nmy \$e = \$);\n";
     my $doc = PPI::Document->new(\$src);
     my ($tok) = grep { $_->content eq '$)' } $doc->tokens;
-    isnt( ref($tok), 'PPI::Token::Magic',
-          'CANARY: PPI still mis-lexes `$)` under the signatures feature '
-        . '(when this FAILS, drop Pl::Parser::_signature_gid_offsets)' );
+    is( ref($tok), 'PPI::Token::Magic',
+        'FIXED ON PCL\'S PPI BRANCH (s527b, group R): `$)` under the signatures feature '
+      . 'is one Magic token; _signature_gid_offsets is deleted (ppi-upstream-bugs.md §32)' );
 }
 
 # ── CANARY for PPI bug 37 (ppi-upstream-bugs.md; task #3244) ────────────────

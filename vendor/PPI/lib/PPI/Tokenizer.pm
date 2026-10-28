@@ -965,6 +965,95 @@ sub _glob_name_expected {
 	return $self->_opcontext eq 'operand';
 }
 
+# True when the signatures feature is on AND the tokenizer stands inside a
+# signature: the innermost open bracket before the current token is a ( that
+# follows sub (an anonymous sub) or sub NAME, with any attributes between.
+# Only there is a $, @ or % before ) , or = a nameless parameter; anywhere
+# else $) $, $= are the magic variables.  The scan is bounded: it stops at
+# the first unmatched opener, or at a ; outside brackets.
+sub _in_signature {
+	my $self = shift;
+	return '' if !$self->_current_token_has_signatures_active;
+	my $tokens = $self->{tokens};
+	my $depth  = 0;
+	my $cursor = $#$tokens;
+	for ( ; $cursor >= 0; $cursor-- ) {
+		my $token = $tokens->[$cursor];
+		next if !$token->isa('PPI::Token::Structure');
+		my $c = $token->content;
+		if ( $c eq ')' or $c eq ']' or $c eq '}' ) {
+			$depth++;
+			next;
+		}
+		return '' if $c eq ';' and !$depth;
+		next if $c eq ';';
+		if ( $depth ) {
+			$depth--;
+			next;
+		}
+		return '' if $c ne '(';
+		last;
+	}
+	return '' if $cursor < 0;
+	my ( $prev, $at ) = $self->_significant_before($cursor);
+	while ( $prev and ( $prev->isa('PPI::Token::Attribute')
+		or ( $prev->isa('PPI::Token::Operator') and $prev->content eq ':' ) ) ) {
+		( $prev, $at ) = $self->_significant_before($at);
+	}
+	return '' if !$prev or !$prev->isa('PPI::Token::Word');
+	return 1 if $prev->content eq 'sub';
+	( $prev ) = $self->_significant_before($at);
+	return $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+}
+
+# True when the previous significant token ends the variable or list of a
+# declaration -- my $x, our ($p, $q), state @s -- where a colon introduces
+# the declaration's attributes (my $x : shared).
+my %DECLARATOR = map { $_ => 1 } qw( my our state );
+
+sub _after_declared_variables {
+	my $self   = shift;
+	my $tokens = $self->{tokens};
+	my $cursor = $#$tokens;
+	$cursor-- while $cursor >= 0 and !$tokens->[$cursor]->significant;
+	return '' if $cursor < 0;
+	my $last = $tokens->[$cursor];
+	if ( $last->isa('PPI::Token::Structure') and $last->content eq ')' ) {
+		my $depth = 1;
+		while ( --$cursor >= 0 ) {
+			my $token = $tokens->[$cursor];
+			next if !$token->isa('PPI::Token::Structure');
+			$depth++ if $token->content eq ')';
+			$depth-- if $token->content eq '(';
+			last if !$depth;
+		}
+		return '' if $cursor < 0;
+	}
+	elsif ( !$last->isa('PPI::Token::Symbol') ) {
+		return '';
+	}
+	my ( $prev ) = $self->_significant_before($cursor);
+	return $prev && $prev->isa('PPI::Token::Word') && $DECLARATOR{ $prev->content };
+}
+
+# A word followed by a colon is a LABEL only where a statement starts (perl
+# reads a label only when it expects a statement, toke.c's XSTATE): at the
+# start of the document, after a ; or a { or a block's }, or after another
+# label.  Elsewhere -- (sub :lvalue { }), a ? : -- it is a word and the colon
+# an operator.
+sub _label_position {
+	my ( $self, $prev ) = @_;
+	return 1 if !$prev or $prev->isa('PPI::Token::Label');
+	return '' if !$prev->isa('PPI::Token::Structure');
+	my $c = $prev->content;
+	return 1 if $c eq ';' or $c eq '{';
+	return '' if $c ne '}';
+	my $cursor = $#{ $self->{tokens} };
+	$cursor-- while $cursor >= 0 and !$self->{tokens}->[$cursor]->significant;
+	my $kind = $self->_curly_kind($cursor);
+	return !$kind || $kind eq 'block';
+}
+
 # True when the token before the current one ends a term (_ends_term_at),
 # except in the scalar-filehandle slot of print $fh LIST, where the next
 # token starts the list (_after_scalar_filehandle).

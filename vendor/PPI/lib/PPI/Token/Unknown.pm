@@ -132,7 +132,7 @@ sub __TOKENIZER__on_char {
 
 		# Is it a nameless arg in a signature?
 		my %noname = ( ')' => 1, '=' => 1, ',' => 1 );
-		if ( $noname{$char} and $t->_current_token_has_signatures_active ) {
+		if ( $noname{$char} and $t->_in_signature ) {
 			$t->{class} = $t->{token}->set_class('Symbol');
 			return $t->_finalize_token->__TOKENIZER__on_char($t);
 		}
@@ -184,7 +184,7 @@ sub __TOKENIZER__on_char {
 		}
 
 		# Is it a nameless arg in a signature?
-		if ( $char eq ')' and $t->_current_token_has_signatures_active ) {
+		if ( $char eq ')' and $t->_in_signature ) {
 			$t->{class} = $t->{token}->set_class('Symbol');
 			return $t->_finalize_token->__TOKENIZER__on_char($t);
 		}
@@ -235,7 +235,7 @@ sub __TOKENIZER__on_char {
 		}
 
 		# Is it a nameless arg in a signature?
-		if ( $char eq ')' and $t->_current_token_has_signatures_active ) {
+		if ( $char eq ')' and $t->_in_signature ) {
 			$t->{class} = $t->{token}->set_class('Symbol');
 			return $t->_finalize_token->__TOKENIZER__on_char($t);
 		}
@@ -437,6 +437,9 @@ sub __TOKENIZER__is_an_attribute {
 
 	# If we just had a prototype, then we are an attribute
 	return 1 if $p0->isa('PPI::Token::Prototype');
+
+	# A declaration's attributes: my $x : shared, our ($p, $q) : unique
+	return 1 if $t->_after_declared_variables;
 
 	# Other than that, we would need to have had a bareword
 	return '' unless $p0->isa('PPI::Token::Word');

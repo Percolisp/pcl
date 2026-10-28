@@ -22,7 +22,7 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
 
-use Test::More tests => 70;
+use Test::More tests => 71;
 BEGIN { use_ok('Pl::PExpr') };
 
 my $code;
@@ -505,3 +505,18 @@ both_agree('use v5.24; no warnings; my $r=[10,20]; my @log;
             sub s7 { push @log, $_[0]; $_[1] }
             print "[", join(",", (s7(1,0), s7(2,$r))->@*), " ", join(",",@log), "]\n";',
            '#612 ... every element still evaluated, in order');
+
+# s527b, PCL's PPI at the source (§7 §8 group S, §32 group R): an anonymous sub's
+# attribute inside a list is no label, a declaration's attributes are Attribute
+# tokens, and $) $, under the signatures feature are the magic variables (on main
+# :prototype($) was dropped and '$, = undef' was a dropped statement).
+both_agree(<<'PL', 's527b §7/§8/§32: attributes and $) $, under signatures');
+use v5.36;
+my $x : shared = 1; print "1 $x\n";
+my @a = (sub :lvalue { 1 }); print "2 ", ref($a[0]), "\n";
+sub f { my $ok = 1; if ($ok) { $ok = grep { $_ == 5 } split /\s+/, $) } return $ok }
+say "3 ", f() ? "yes" : "no";
+my $p = (sub :prototype($) { 42 }); print "4 ", $p->(), " ", prototype($p) // "u", "\n";
+local $, = "-"; print "5", "a"; print "\n"; $, = undef;
+sub g ($a, $, $c = 3) { "$a$c" } say "6 ", g(1, 2);
+PL

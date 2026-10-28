@@ -158,9 +158,9 @@ our @BUGS = (
    tasks => [228, 253, 254] },
  { id => 7, kind => 'token', dump => 'tokens',
    title => '`(sub :lvalue { … })` — an anon sub\'s ATTRIBUTE at expression start becomes a LABEL',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Label', content => qr/^sub\s*:$/, pred => '', check => 'label-not-at-statement-start' },
-   fix => { kind => 'retag', handler => 'Pl::Parser2::_normalize_anon_sub_attrs' },
+   fix => { kind => 'retag', handler => undef, deleted => 'Pl::Parser2::_normalize_anon_sub_attrs + _repair_swallowing_prototypes (s527b: PPI fixed on the branch)', commit => '6a5de5c1', group => 'S', pr => undef },
    repro => 'my @a = (sub :lvalue { 1 }); print ref($a[0]), "\\n";',
    perl => "CODE\n",
    tokens => {
@@ -171,9 +171,9 @@ our @BUGS = (
    tasks => [268, 270] },
  { id => 8, kind => 'token', dump => 'tokens',
    title => 'A variable declaration\'s ATTRIBUTE is not a `Token::Attribute`',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XOPERATOR', class => 'Operator', content => ':', pred => '', check => 'decl-attribute-as-operator' },
-   fix => { kind => 'retag', handler => 'Pl::Parser2::_strip_decl_decorations' },
+   fix => { kind => 'retag', handler => undef, kept => 'Pl::Parser2::_strip_decl_decorations (the declaration-attribute semantics: drop + announce; it now reads the Attribute tokens)', commit => '6a5de5c1', group => 'S', pr => undef },
    repro => 'my $x : shared = 1; print "$x\\n";',
    perl => "1\n",
    tokens => {
@@ -500,9 +500,9 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [138, 1817] },
  { id => 32, kind => 'token', dump => 'tokens',
    title => '`$)` is tokenized as `Symbol:$` + `Structure:)` ANYWHERE once the `signatures` feature is on — and the stray `)` wrecks the enclosing structure',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Symbol', content => '$', pred => '', check => 'bare-sigil-symbol' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_ppi_new' },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser::_signature_gid_offsets + _restore_signature_gid + _walk_token_offsets (s527b: PPI fixed on the branch)', commit => '61817c99', group => 'R', pr => undef },
    repro => 'use v5.36;
 my $e = $);
 print length($e) ? "gid\\n" : "none\\n";

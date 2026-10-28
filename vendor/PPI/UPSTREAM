@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: 5ef65f34f519b0fc8e8cc06d99c6d9ca9bb68f5d
-lib-tree: de398ccbcfc99acb644d20ac16912fac39c7350e
+branch-sha: 6a5de5c1953d94e3e7e829b40af80b23a97867ca
+lib-tree: 89a7ca8b98f4b650c2729413b5447c7077916916
 date: 2026-10-29
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -34,6 +34,8 @@ fix: O §56 c1058d05 Whitespace: a / after a statement block starts a match
 fix: P §26 6100d8b3 Unknown: a glob may be named by punctuation, digits or a caret letter
 fix: Q §1 eb16e9d2 Unknown: $$ before a $, a word or a { is a dereference cast
 fix: P §26 5ef65f34 Unknown: *: is a glob
+fix: R §32 61817c99 Tokenizer: a nameless parameter only inside a signature
+fix: S §7 §8 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -85,3 +87,7 @@ commit: 59e0c3b9 TODO tests: $$$a is two dereferences of $a
 commit: eb16e9d2 Unknown: $$ before a $, a word or a { is a dereference cast
 commit: 436169bb TODO test: *: is a glob
 commit: 5ef65f34 Unknown: *: is a glob
+commit: 2e173336 TODO tests: $, and $= under the signatures feature
+commit: 61817c99 Tokenizer: a nameless parameter only inside a signature
+commit: a7f3847f TODO tests: an attribute after a list's anonymous sub or a declaration
+commit: 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
