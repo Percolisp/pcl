@@ -694,7 +694,6 @@ sub parse {
 
   $e            = $self->cleanup_for_parsing($e);
   $self->_merge_split_qualified_words($e);
-  $self->_split_pid_magic_cast_run($e);
   $self->_fold_braced_punct_magic($e);
   $self->_retag_magic_array_index($e);
   $self->_default_filetest_operand($e);
@@ -5134,61 +5133,6 @@ sub _stringify_trailing_colon_package {
     next if defined $next && ref($next) eq 'PPI::Token::Word'
          && $next->content =~ /^::/;
     splice @$e, $i, 1, PPI::Token::Quote::Single->new("'$name'");
-  }
-}
-
-# PPI upstream bug (docs/ppi-upstream-bugs.md §8, #305): `$$` is lexed as the
-# PID magic variable whenever it is NOT directly followed by an identifier —
-# so `$$rr` is Cast($) Symbol($rr), correctly, but `$$$rr` comes through as
-# Magic($$) Symbol($rr) and `$$$$rr` as Magic($$) Cast($) Symbol($rr).  The
-# stray Magic matched no case and the "Missing case" die then dropped the
-# whole statement (`$$$rr{k}`, `$$$rrr->{k}` printed NOTHING).
-#
-# Perl's rule is positional: `$$` immediately before another deref sigil, a
-# scalar, or a brace block is two scalar-deref casts; `$$` before an operator,
-# a comma, `;`, `}` … is the PID.  Rewriting it here — ONE pre-pass, before
-# any of the term machinery runs — means both cast-consuming sites below see
-# the ordinary Cast run they already understand, instead of each growing a
-# Magic special case (rule 11).
-#
-# Source ADJACENCY is the test, read from PPI's own sibling links rather than
-# from @$e (which has whitespace filtered out): `$$ $x` is not a deref run.
-sub _split_pid_magic_cast_run {
-  my ($self, $e) = @_;
-  for (my $i = 0; $i < scalar(@$e); $i++) {
-    my $tok = $e->[$i];
-    next unless ref($tok) eq 'PPI::Token::Magic' && $tok->content eq '$$';
-    my $nxt = $tok->next_sibling;
-    next if !$nxt || $nxt->isa('PPI::Token::Whitespace');
-    # A MAGIC scalar is a scalar (#507, the #466 finding again): `$$$_` comes
-    # through as Magic($$) Magic($_) and `ref() eq 'Symbol'` answered no for
-    # the second half, so the run was left unrepaired and the whole statement
-    # dropped — while the one-cast spelling `$$_` (Cast + Magic) always worked.
-    # PPI::Token::Magic IS-A PPI::Token::Symbol, so `isa` is the whole fix; the
-    # `^\$` test still keeps `@_` out (`$$@_` is a syntax error in perl).
-    next unless ref($nxt) eq 'PPI::Token::Cast'
-             || ($nxt->isa('PPI::Token::Symbol') && $nxt->content =~ /^\$/)
-             || (ref($nxt) eq 'PPI::Structure::Block'    && $nxt->start eq '{')
-             || (ref($nxt) eq 'PPI::Structure::Subscript' && $nxt->start eq '{');
-    splice @$e, $i, 1, PPI::Token::Cast->new('$'), PPI::Token::Cast->new('$');
-    # `$${EXPR}` (#463 item 1): PPI calls the braces a SUBSCRIPT because they
-    # follow a variable token — but once the Magic is two casts there is no
-    # primary between them and the braces, so they cannot be a subscript at
-    # all.  They are the inner deref's BLOCK: `$${$r}` is `${ ${$r} }`, and
-    # `$${$_[0]}` (t/op/gv.t:911, t/uni/gv.t:805) is `${ ${$_[0]} }`.  Left as
-    # a Subscript the cast-consuming loop below tried to build a hash-element
-    # access with no base and DECLINED, dropping the whole statement.  Re-class
-    # it to exactly the shape `${$r}` arrives in — the established repair for a
-    # PPI misclassification.  `$$x{k}` is untouched: its `$$` is Cast+Symbol, PPI never
-    # makes it a Magic.
-    if (ref($nxt) eq 'PPI::Structure::Subscript') {
-      bless $nxt, 'PPI::Structure::Block';
-      for my $kid ($nxt->children) {
-        bless $kid, 'PPI::Statement'
-          if ref($kid) eq 'PPI::Statement::Expression';
-      }
-    }
-    $i++;   # skip past the pair just written
   }
 }
 

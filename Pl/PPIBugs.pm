@@ -82,7 +82,7 @@ our @BUGS = (
    title => '`$$$ref` (triple dereference) tokenized as `$$` + `$ref`',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Magic', content => '$$', pred => 'adj_deref_follows', check => 'pid-magic-is-cast-run' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_split_pid_magic_cast_run', commit => 'eb16e9d2', group => 'Q', pr => 428 },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::PExpr::_split_pid_magic_cast_run (s527b: PPI fixed on the branch; upstream PR #428 taken)', commit => 'eb16e9d2', group => 'Q', pr => 428 },
    repro => 'my $v = 7; my $ref = \\\\$v; print $$$ref, "\\n";',
    perl => "7\n",
    tokens => {
