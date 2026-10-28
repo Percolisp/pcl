@@ -365,9 +365,9 @@ print "after\\n";
    tasks => [339, 370, 371] },
  { id => 22, kind => 'token', dump => 'tokens',
    title => 'A filetest after a SCALAR filehandle is split into `-` + WORD',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Operator', content => '-', pred => 'adj_filetest_word', check => 'filetest-split' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fuse_print_filehandle_filetest' },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::PExpr::_fuse_print_filehandle_filetest (s527b: PPI fixed on the branch)', commit => '5b822dea', group => 'N', pr => undef },
    repro => 'my $f = "/"; my $fh = \\*STDOUT; print $fh -e $f; print "\\n";',
    perl => "1\n",
    tokens => {
@@ -545,9 +545,9 @@ print g(), "\\n";
    tasks => [2530] },
  { id => 35, kind => 'token', dump => 'tokens',
    title => 'A filetest right after a `BEGIN { … }` block on the same line is split into `-` + WORD',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Operator', content => '-', pred => 'adj_filetest_after_phaser', check => 'filetest-split' },
-   fix => { kind => 'relex', handler => 'PCLSwitches::prefix_first_code_line' },
+   fix => { kind => 'relex', handler => undef, kept => 'PCLSwitches::prefix_first_code_line (the `;` that closes a switch prefix ending in a block is an ordinary statement separator, not a token repair; it stays)', commit => '5b822dea', group => 'N', pr => undef },
    repro => 'BEGIN { 1 } -e _; print "x\\n";',
    perl => "x\n",
    tokens => {

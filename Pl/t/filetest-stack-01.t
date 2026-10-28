@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 # Fixtures built by the HARNESS (real perl), with their paths interpolated into
 # the generated program — so the expectations below do not depend on anything
@@ -263,3 +263,16 @@ for my $op (qw(r w x R W X)) {
 chmod 0644, $N; unlink $N;
 PL
    'an existing but permission-less file is a DEFINED false for -r -w -x -R -W -X (#403)');
+
+# §22/§35 at the source (s527b, PCL's PPI group N): a - that starts a TERM in
+# the print-filehandle slot (no whitespace after it) and after the } of a
+# statement block.  perl 5.40.3: print $fh -1 writes -1 to $fh (#405's shape),
+# BEGIN { 1 } -e "/" is a filetest, sort { … } -1, 2 sorts the number -1.  On
+# PPI 1.291 + main's repairs: the handle got 0, `e` was called as a sub.
+is(run_cl(<<'PL'), "[-11]\nafter-begin\n-3 -1 2\nafter-bare\n",
+open my $fh, '>', \my $buf or die; print $fh -1; print $fh -e "/"; close $fh; print "[$buf]\n";
+BEGIN { 1 } -e "/" and print "after-begin\n";
+my @s = sort { $a <=> $b } -1, 2, -3; print "@s\n";
+{ 1 } -d "/" and print "after-bare\n";
+PL
+   'a - starting a term after print $fh and after a statement block (§22/§35, #405)');

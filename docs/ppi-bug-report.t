@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 157;
+use Test::More tests => 164;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1205,4 +1205,38 @@ for my $c (
     my @t = map { s{^PPI::(?:Token::)?}{}r } toks('my $n = scalar(%^H);');
     ok( grep( $_ eq 'Magic=%^H', @t ), '`%^H` stays one Magic token (control)' )
         or diag "got: @t";
+}
+
+# §22 and §35, the rest of the rule.  perl reads a - as the start of a TERM
+# (toke.c: PL_expect = XTERM) in two places where PPI's operator context says
+# subtraction: in the filehandle slot of print $fh LIST, when whitespace
+# stands before the - and none after it (perl -e 'print $fh -1' prints -1 to
+# $fh), and after the } of a block that ends a statement or takes a list
+# (BEGIN { 1 } -e $f, { 1 } -e $f, sort { $a <=> $b } -1, 2).
+{
+    my @rows = (
+        [ 'print $fh -1;',                'Number=-1',   'print $fh -1 prints the number -1 to $fh' ],
+        [ '{ 1 } -e $f;',                 'Operator=-e', 'a filetest after a bare block' ],
+        [ 'END { 1 } -e $f;',             'Operator=-e', 'a filetest after an END block' ],
+        [ '@s = sort { $a <=> $b } -1, 2;', 'Number=-1', 'sort BLOCK -1, 2 sorts the number -1' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+# The controls: a spaced - after the handle, a - after an anonymous sub and a
+# - after a subscript stay subtractions.
+{
+    my @rows = (
+        [ 'print $fh - e $f;',       'Word=e',     'print $fh - e $f subtracts a call of e (control)' ],
+        [ 'my $s = sub { 1 } - 1;',  'Operator=-', 'an anonymous sub minus 1 subtracts (control)' ],
+        [ '$x = $h{a} -1;',          'Operator=-', 'a subscript minus 1 subtracts (control)' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
 }

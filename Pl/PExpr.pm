@@ -697,7 +697,6 @@ sub parse {
   $self->_split_pid_magic_cast_run($e);
   $self->_fold_braced_punct_magic($e);
   $self->_retag_magic_array_index($e);
-  $self->_fuse_print_filehandle_filetest($e);
   $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
@@ -5258,45 +5257,6 @@ sub _retag_magic_array_index {
   }
 }
 
-# PPI BUG (1.291, docs/ppi-upstream-bugs.md): after a SCALAR or BLOCK
-# filehandle, a leading filetest is split in two.
-#
-#     print $fh -e $f    →  Word(print) Symbol($fh) Operator(-) Word(e) Symbol($f)
-#     print STDERR -e $f →  Word(print) Word(STDERR) Operator(-e)  Symbol($f)
-#
-# The bareword form is right and the scalar/block form is wrong: perl reads
-# `-e` as ONE filetest in both (deparse agrees), and after a term `-e` cannot
-# be a binary minus at all — `$n -e $b` is a perl SYNTAX ERROR, so there is no
-# competing reading to protect.  Repair the tokens here and every consumer
-# downstream — the print-filehandle oracle, `_default_filetest_operand`, the
-# prefix-run reduction — sees the `-X` Operator PPI should have produced, with
-# no new case anywhere (rule 11).
-#
-# ADJACENCY is the discriminator and perl honours it too: `print $fh - e $f`
-# really is negation of a call to sub `e` (probed, deparse: `-(e('...'))`).
-# `next_sibling` — not `snext_sibling` — answers it: with a space between, the
-# dash's immediate sibling is the Whitespace token.
-sub _fuse_print_filehandle_filetest {
-  my ($self, $e) = @_;
-  for (my $i = 0; $i + 3 < scalar(@$e); $i++) {
-    my $word = $e->[$i];
-    next unless $self->is_word($word)
-             && $word->content =~ /^(?:print|printf|say)$/;
-    my $fh = $e->[$i + 1];
-    next unless $self->_is_scalar_fh_token($fh)
-             || ref($fh) eq 'PPI::Structure::Block';
-    my ($dash, $letter) = @$e[$i + 2, $i + 3];
-    next unless ref($dash) eq 'PPI::Token::Operator' && $dash->content eq '-';
-    next unless $self->is_word($letter) && $letter->content =~ /^[A-Za-z]$/;
-    # The prefix table IS the filetest list — no second copy of the letters.
-    next unless $self->prefix->{'-' . $letter->content};
-    next unless $dash->can('next_sibling')
-             && ($dash->next_sibling // 0) == $letter;
-    splice @$e, $i + 2, 2,
-           PPI::Token::Operator->new('-' . $letter->content);
-  }
-}
-
 sub _default_filetest_operand {
   my ($self, $e) = @_;
   for (my $i = 0; $i < scalar(@$e); $i++) {
@@ -5313,8 +5273,9 @@ sub _default_filetest_operand {
 # A SCALAR VARIABLE in the filehandle slot of print/printf/say — the other
 # half of the `print $fh LIST` decision, whose second half is
 # _is_print_term_start (does what follows begin a new term?).  ONE predicate,
-# three call sites: the operator-loop print path, the `print $fh -e $f` filetest
-# repair, and the paren form `print($fh LIST)` (#466).
+# two call sites: the operator-loop print path and the paren form
+# `print($fh LIST)` (#466).  (The third, the `print $fh -e $f` filetest repair,
+# is gone since s527b: PCL's own PPI lexes the filetest -- vendor/PPI, group N.)
 #
 # perl's grammar is `listop: LSTOP indirob listexpr` with
 # `indirob: WORD | scalar | block`, and `scalar` is ANY scalar variable — a

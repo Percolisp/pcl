@@ -1213,6 +1213,8 @@ refuses it perl-shaped (smart match was removed in perl 5.42 — task #371,
 
 ## 22. A filetest after a SCALAR filehandle is split into `-` + WORD  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527b: group N, commit `5b822dea` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md; `Tokenizer::_minus_starts_term`: a - in the print-filehandle slot with no whitespace or = after it, or after the } of a statement block, starts a term); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-N.md`); PCL's `Pl::PExpr::_fuse_print_filehandle_filetest` DELETED (corpus-diff identical).
+
 **Perl:** in `print FILEHANDLE LIST` the handle may be a bareword, a scalar or
 a block, and a leading `-X` in the LIST is one filetest operator in all three.
 `perl -MO=Deparse` agrees, and it distinguishes the spaced form:
@@ -2118,6 +2120,8 @@ beside them; canary `Pl/t/misc-fixes-02.t`.  Upstream row: `docs/ppi-bug-report.
 ---
 
 ## 35. A filetest right after a `BEGIN { … }` block on the same line is split into `-` + WORD  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527b: group N, commit `5b822dea` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md; `Tokenizer::_minus_starts_term`: a - in the print-filehandle slot with no whitespace or = after it, or after the } of a statement block, starts a term); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-N.md`); the `;` `PCLSwitches::prefix_first_code_line` puts after a switch prefix stays (a statement separator, not a repair).
 
 The statement-start sibling of §21 (a filetest after a SCALAR/BLOCK
 filehandle).  **Minimal repro** (valid perl; perl 5.40.3 prints `x`):

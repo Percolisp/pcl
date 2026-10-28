@@ -997,9 +997,9 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
 }
 {
     my $doc = PPI::Document->new(\'print $fh -e $f;');
-    ok( $doc && !grep { $_->isa('PPI::Token::Operator') && $_->content eq '-e' } $doc->tokens,
-        'CANARY: PPI still splits a filetest after a SCALAR filehandle into '
-      . '`-` + Word — if this FAILS, drop _fuse_print_filehandle_filetest '
+    ok( $doc && grep { $_->isa('PPI::Token::Operator') && $_->content eq '-e' } $doc->tokens,
+        'FIXED ON PCL\'S PPI BRANCH (s527b, group N): a filetest after a SCALAR filehandle '
+      . 'lexes as one `-e` Operator; _fuse_print_filehandle_filetest is deleted '
       . '(ppi-upstream-bugs.md §22)' );
 }
 {
