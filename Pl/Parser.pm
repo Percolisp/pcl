@@ -760,17 +760,6 @@ sub _ppi_parse {
   # eval sits in, so an unowned __SUB__ there is not "outside any sub".
   my $in_eval = delete $opt{in_eval};
   my $doc = _ppi_new($src, %opt);
-  # PPI GLOBAL-STATE BUG (docs/ppi-upstream-bugs.md §13, task #356): once
-  # certain documents have been parsed in a PROCESS, a later document's
-  # trailing `__END__`/`__DATA__` section comes back carrying ONE EXTRA
-  # newline.  The same bytes round-trip clean in a fresh process and grow by
-  # one in a warm one (measured: parse t/op/switch.t, then re-parse its last
-  # two lines).  It matters here because the DATA section IS program data —
-  # `while (<DATA>)` would read a line the file does not contain — and this is
-  # the ONE place both pipelines turn source into a document (Parser2's
-  # repair reparses through here too), so the invented tail is trimmed once,
-  # against the bytes we were actually given.
-  _trim_invented_tail($doc, $src) if $doc;
   # _extract_prototype_attributes must run BEFORE _desugar_anon_signatures:
   # it strips the `:prototype(...)` attribute (and wraps anon subs), and the
   # signature desugar then finds the now-attribute-free `sub` it spliced in
@@ -788,10 +777,7 @@ sub _ppi_parse {
                | _desugar_loop_modifiers($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = _ppi_new($fixed, %opt);   # the seed applies to the reparse too
-    if ($redo) {
-      _trim_invented_tail($redo, $fixed);
-      $doc = $redo;
-    }
+    $doc = $redo if $redo;
   }
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
@@ -841,20 +827,6 @@ sub fragment_doc {
   _reclassify_bare_vwords($doc);
   _repair_paren_block_filehandle($doc);
   return $doc;
-}
-
-# Drop trailing whitespace the PARSE invented (see the note in _ppi_parse).
-# Bounded and byte-exact: it stops the moment the document is no longer longer
-# than the source it came from, and only ever deletes WHITESPACE, so a document
-# PPI parsed faithfully is untouched.
-sub _trim_invented_tail {
-  my ($doc, $src) = @_;
-  while (length($doc->serialize) > length($src)) {
-    my $last = ($doc->tokens)[-1] or last;
-    last unless $last->isa('PPI::Token::Whitespace');
-    $last->delete or last;
-  }
-  return;
 }
 
 # Perl engages v-stringness for a DOTLESS `vNN` only in expression position

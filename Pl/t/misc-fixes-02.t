@@ -1073,16 +1073,17 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (�
       . '_repair_word_match (ppi-upstream-bugs.md §14)' );
 }
 {
-    # This one is not about tokens but about `$/`: with the slurp separator in
-    # force, PPI adds a newline to a trailing __END__ section, so serialize
-    # stops being the identity.  PCL both scopes its slurps and trims the
-    # invented tail in _ppi_parse; when PPI is fixed, the trim can go.
+    # This one is not about tokens but about `$/`: PCL's PPI tokenizes with
+    # $/ = "\n" whatever the caller's $/ is, so serialize is the identity in
+    # slurp mode too, and a DATA section keeps exactly its bytes.
     my $src = "# c\n__END__\n";
     my $slurped = do { local $/; PPI::Document->new(\$src)->serialize };
-    isnt( $slurped, $src,
-        'CANARY: PPI parsing still depends on $/ (trailing __END__ gains a '
-      . 'newline in slurp mode) — if this FAILS, drop _trim_invented_tail '
-      . '(ppi-upstream-bugs.md §13)' );
+    my $data = "x;\n__DATA__\na\n\nb";
+    my $dslurp = do { local $/; PPI::Document->new(\$data)->serialize };
+    ok( $slurped eq $src && $dslurp eq $data,
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group X): PPI parsing no longer depends '
+      . 'on $/ (a trailing __END__ / __DATA__ section round-trips in slurp mode; '
+      . 'ppi-upstream-bugs.md §13; PCL\'s _trim_invented_tail was deleted)' );
 }
 {
     # `finally {…}` belongs to the try Compound, and the statement after it is

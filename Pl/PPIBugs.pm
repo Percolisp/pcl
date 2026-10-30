@@ -236,9 +236,9 @@ our @BUGS = (
    tasks => [138, 354] },
  { id => 13, kind => 'source', dump => 'slurp',
    title => 'Tokenization of a trailing `__END__`/`__DATA__` section depends on `$/`',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => 'source read with $/ undefined: a final __END__/__DATA__ line gains a newline' },
-   fix => { kind => 'handler', handler => 'Pl::Parser::_trim_invented_tail' },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_trim_invented_tail + its two _ppi_parse calls (s527c: PPI fixed on the branch)', commit => '9d33245a', group => 'X', pr => undef },
    repro => 'print "x\\n";
 __END__
 ',
