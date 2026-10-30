@@ -571,9 +571,9 @@ print g(), "\\n";
    tasks => [2645] },
  { id => 37, kind => 'structure', dump => 'structure',
    title => '`print({$fh} LIST)` -- the parenthesised block filehandle -- is split into two statements, or its block is a CONSTRUCTOR',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'filehandle-block-split', shape => '`print({$fh} LIST)`: the block filehandle becomes its own Statement::Compound, or a Constructor' },
-   fix => { kind => 'handler', handler => 'Pl::Parser::_repair_paren_block_filehandle' },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_repair_paren_block_filehandle (33 lines + comment) and its two calls (_ppi_parse, fragment_doc) (s527c: PPI fixed on the branch)', commit => '5ce95d4a', group => 'Y', pr => undef },
    repro => 'my $fh = \\*STDOUT; print({$fh} "a", "b"); printf({$fh} "%s\\n", "c");',
    perl => "abc\n",
    tokens => {

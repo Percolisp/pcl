@@ -8,9 +8,9 @@
 # PARENTHESISED block-filehandle form (and say / printf), is one expression in
 # perl.  PPI 1.291 splits the parens' content into a compound statement plus a
 # second statement, or makes the block a hash Constructor (ppi-upstream-bugs.md
-# §37), and PCL DROPPED the statement ("Fell through").  The repair
-# (Pl::Parser::_repair_paren_block_filehandle) hands the shape to the existing
-# paren-form filehandle path.  Every row compares with perl itself; the
+# §37), and PCL DROPPED the statement ("Fell through").  PCL's PPI builds the
+# one statement with the Block first (s527c, group Y), which the existing
+# paren-form filehandle path consumes (the repair that did it is deleted).  Every row compares with perl itself; the
 # finders were HTTP-Tiny t/Util.pm (`print({$fh} @_) || die`) and Path-Tiny's
 # spew (`print( {$fh} map {...} @data)`).
 
