@@ -1438,17 +1438,24 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
 }
 
 # ── CANARY for PPI bug 37 (ppi-upstream-bugs.md; task #3244) ────────────────
-# PPI 1.291 builds `print({$fh} "a")` as TWO statements in the parens (a
-# compound holding the block, then the list), and PCL repairs the structure
-# (Pl::Parser::_repair_paren_block_filehandle).  THIS ROW ASSERTS THE BUG IS
-# STILL THERE: when a PPI upgrade fixes it, this row FAILS -- drop the repair.
+# PPI 1.291 built `print({$fh} "a")` as TWO statements in the parens (a
+# compound holding the block, then the list) and `printf({$fh} ...)` with a
+# Constructor; perl reads ONE statement whose filehandle is the block.  PCL's
+# PPI builds that (s527c, group Y), and PCL's repair
+# (_repair_paren_block_filehandle) was deleted.
 {
-    my $doc = PPI::Document->new(\'print({$fh} "a");');
-    my ($list) = @{ $doc->find('PPI::Structure::List') || [] };
-    my @st = $list->schildren;
-    ok( @st == 2 && $st[0]->isa('PPI::Statement::Compound'),
-        'CANARY: PPI still splits print({$fh} LIST) into two statements '
-      . '(when this FAILS, drop Pl::Parser::_repair_paren_block_filehandle)' );
+    my @ok;
+    for my $code ('print({$fh} "a");', 'printf({$fh} "%s", "a");', 'say({$fh} "a");') {
+        my $doc = PPI::Document->new(\$code);
+        my ($list) = @{ $doc->find('PPI::Structure::List') || [] };
+        my @st = $list ? $list->schildren : ();
+        push @ok, $code if @st == 1 && ref($st[0]) eq 'PPI::Statement'
+                        && ref($st[0]->schild(0)) eq 'PPI::Structure::Block';
+    }
+    ok( @ok == 3,
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group Y): print/printf/say({$fh} LIST) is ONE '
+      . 'statement whose first element is the Block (ppi-upstream-bugs.md §37)' )
+      or diag "only: @ok";
 }
 
 # ── CANARY for PPI bug 38 (ppi-upstream-bugs.md; task #3342) ────────────────

@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-X
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> r-Y
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: r-X
-branch-sha: 3a08ed1fbd775d1768c61df1b2d823a552839df4
-lib-tree: e6125375960c55b58a466f38ba4ca0e88d743adf
+branch: r-Y
+branch-sha: a2fa26a09c6149844fff2f3f87e3db327fe23b01
+lib-tree: 38d698c4a2e303244424a4887e2d0c2e71f0f314
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -41,6 +41,7 @@ fix: U §6 §10 §29 a320f21a Lexer: the loop variable of foreach is any of perl
 fix: V §17 §36 75fc24e8 Lexer: a [ or { after a dereference block or a key/value slice name subscripts it
 fix: W §5 a2f28ed9 Lexer: { STRING, ... } where a statement starts is an anonymous hash
 fix: X §13 3a08ed1f Lexer: the caller's $/ does not reach the tokenizer
+fix: Y §37 56330a40 Lexer: a block filehandle right after print( is a block
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -109,3 +110,5 @@ commit: e1c736f9 TODO tests: { STRING, ... } where a statement starts is an anon
 commit: a2f28ed9 Lexer: { STRING, ... } where a statement starts is an anonymous hash
 commit: bd99765f TODO tests: the tokens of a document do not depend on $/
 commit: 3a08ed1f Lexer: the caller's $/ does not reach the tokenizer
+commit: 56330a40 Lexer: a block filehandle right after print( is a block
+commit: a2fa26a0 t/ppi_bugs_pcl.t: the for $$$r loop rows are no longer TODO
