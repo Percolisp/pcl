@@ -11404,7 +11404,6 @@ sub _lower_block_1 {
     shift @ck if @ck && $ck[0]->isa('PPI::Token::Label');
     my @ok = $rest[0]->schildren;
     if (@ck && $ck[0]->isa('PPI::Structure::Block')
-        && !Pl::Parser::_bare_block_is_anon_hash($ck[0])
         && @ok >= 2
         && $ok[0]->isa('PPI::Token::Word') && $ok[0]->content eq 'continue'
         && $ok[1]->isa('PPI::Structure::Block')) {
@@ -12135,10 +12134,6 @@ sub _lower_compound {
       ($cont) = grep { $_->isa('PPI::Structure::Block') } @k[$ci + 1 .. $#k];
       die "Parser2 TODO: continue without a block\n" unless $cont;
     }
-    # PPI mis-tokenizes an anon-hash constructor statement `{ LITERAL , … };`
-    # as a bare block — v1's detector + statement fallback handle it.
-    return $self->_fallback_stmt($stmt)
-      if Pl::Parser::_bare_block_is_anon_hash($k[0]);
     # The dynamic-loop-exit licence (task #1022 half (b)): a bare block is a
     # loop-once, so a `last` from a sub it calls exits it — perl-tests
     # loopctl.t's `dynamically scoped` row and t/op/rt119311.t's six

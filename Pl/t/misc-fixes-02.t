@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 144;
+plan tests => 145;
 
 sub run_cl {
     my ($code) = @_;
@@ -95,6 +95,17 @@ test_cl('braced array block-deref with index/slice subscript',
     . ' my $x = ${$ar}[1]; my @s = @{$ar}[0,2];'
     . ' print "[$x][@s]\n";',
     "[20][10 30]\n");
+
+# `{ Foo, 1 }` where a statement starts is an ANONYMOUS HASH (toke.c: a first
+# term that is a string, a number or a word not starting with a lower-case
+# letter, then a comma); `{ foo, 1 }` is a block.  PCL's PPI builds the
+# Constructor (s527c, group W, ppi-upstream-bugs.md §5); on main the
+# capitalized word took the block path and the sub returned a flat list.
+test_cl('{ Word, ... } / { STRING, ... } at statement start is an anon hash (§5)',
+    'no strict; no warnings; sub j { { Foo, 1 } } sub f { { "a", "foo" } }'
+    . ' sub i { { foo, 1 } } my @r = i();'
+    . ' print ref(j()), " ", j()->{Foo}, " ", f()->{a}, " ", scalar(@r), "\n";',
+    "HASH 1 foo 2\n");
 
 # Float stringification must match Perl's %.15g (15 significant digits, then
 # strip trailing zeros), NOT SBCL's shortest-round-trip form.  `0.1+0.2` is the

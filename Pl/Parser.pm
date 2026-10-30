@@ -2177,28 +2177,6 @@ sub _block_is_anon_sub {
   return $s && $s->isa('PPI::Token::Word') && $s->content eq 'sub';
 }
 
-# True if a leading-`{` statement that PPI tokenized as a bare block
-# (PPI::Statement::Compound → PPI::Structure::Block) is really an anonymous
-# hash constructor.  PPI only classifies `{...}` as a Constructor when the
-# first separator is `=>`; Perl's parser also treats `{ LITERAL , ... }` —
-# a string or number literal followed by a comma — as a hashref in term
-# context (e.g. `eval "{ 'a', 'b' }"`).  Barewords (`{ foo, 1 }`) and
-# variables (`{ $x, 1 }`) stay blocks, matching Perl.  This is deliberately
-# narrower than `_block_is_hash_constructor` (used for map/grep blocks, where
-# `{ 'a', $_ }` IS a code block, not a hash).
-sub _bare_block_is_anon_hash {
-  my ($block) = @_;
-  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
-  return 0 unless @ch == 1 && ref($ch[0]) eq 'PPI::Statement';
-  my @sig = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
-  return 0 unless @sig >= 2;
-  my $r0 = ref($sig[0]);
-  return 0 unless $r0 =~ /^PPI::Token::Quote::(?:Single|Double|Literal|Interpolate)$/
-               || $r0 =~ /^PPI::Token::Number/;
-  return 0 unless ref($sig[1]) eq 'PPI::Token::Operator'
-               && ($sig[1]->content eq ',' || $sig[1]->content eq '=>');
-  return 1;
-}
 
 
 
@@ -5440,17 +5418,6 @@ sub _process_compound_statement {
       $first_block = $child;
       last;  # Found the block - don't scan further (avoid picking up 'continue' as first_word)
     }
-  }
-
-  if (!$first_word && $first_block && !$label
-      && _bare_block_is_anon_hash($first_block)) {
-    # PPI mis-tokenized an anon-hash constructor `{ LITERAL , ... }` as a bare
-    # block.  Emit it as a hash-constructor expression (its value is discarded
-    # in void context, or returned as the last statement of a string eval).
-    $self->_emit(";; { ... } (anon hash constructor)");
-    $self->_emit($self->parse_hash_block_to_cl_string($first_block));
-    $self->_emit("");
-    return;
   }
 
   if (!$first_word && $first_block) {

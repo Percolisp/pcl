@@ -132,9 +132,9 @@ our @BUGS = (
    tasks => [] },
  { id => 5, kind => 'structure', dump => 'structure',
    title => '`{ LITERAL , ... }` (anon hash, comma-separated) misclassified as a Block',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'statement position: `{` + a string or word + `,` (yyl_leftcurly 6364-6505: an anon hash) built as Structure::Block' },
-   fix => { kind => 'handler', handler => 'Pl::Parser::_bare_block_is_anon_hash' },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_bare_block_is_anon_hash + its three call sites (s527c: PPI fixed on the branch; PExpr::_block_is_hash_constructor stays -- map/grep blocks are a different rule)', commit => '134ced7d', group => 'W', pr => undef },
    repro => 'sub f { { \'a\' , \'foo\' } } print f()->{a}, "\\n";',
    perl => "foo\n",
    tokens => {
