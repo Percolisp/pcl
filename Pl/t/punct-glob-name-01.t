@@ -53,7 +53,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 31;
 
 sub write_pl {
     my ($code) = @_;
@@ -430,4 +430,21 @@ PL
 both_agree(<<'PL', 's527b §1: $$$r and $${$rr} are two dereferences (PR #428)');
 my $v = 7; my $r = \$v; my $rr = \$r; my $rrr = \$rr;
 print "1 ", $$$rr, " ", $${$rr}, " ", $$$$rrr, "\n";
+PL
+
+# s527b, the WIDE emission-ab's finding: §26's `*>` must not break a §14 glob.
+# In a `<…*>` that PPI still mis-lexes as `<` … `>` (§14, s527d) the last `*`
+# is in term position by PPI's own reading, so group P lexes `*>` as ONE glob
+# Symbol and Pl::PExpr::_fix_ppi_glob_after_block lost its `>`: t/op/glob.t:14
+# `map { … } <op/*>` was DROPPED and `like <*>, …` (t/op/coreamp.t),
+# `unlink <tmp_imp/*>` (core ExtUtils/MM_OS2.pm) silently became comparisons.
+both_agree(<<'PL', 's527b §26 negative: a glob pattern ending in * before > (the §14 repair)');
+my $d = "/tmp/pcl-pgn-$$"; mkdir $d or die; chdir $d or die;
+for (qw(a1 a2)) { open my $f, '>', $_ or die; close $f }
+my %f; map { $f{$_}++ } <*>; print "1 ", join(",", sort keys %f), "\n";
+sub like { print "2 @_\n" } like <*>, "x";
+my @s = sort { $b cmp $a } <a*>; print "3 @s\n";
+print "4 ", join(",", grep { 1 } <*>), "\n";
+print "5 ", eval { unlink <a*> }, "\n";
+chdir "/"; rmdir $d;
 PL

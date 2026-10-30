@@ -6893,6 +6893,20 @@ sub _fix_ppi_glob_after_block {
           $found_close = 1;
           last;
         }
+        # ... or the pattern's LAST `*` fused with it.  PCL's PPI (group P,
+        # docs/ppi-upstream-bugs.md §26) lexes `*` + a punctuation character
+        # where a term is expected as ONE glob Symbol -- perl's reading,
+        # `*>` is the glob of `$>` -- and in a `<…*>` that §14 mis-lexed the
+        # `*` IS in term position by PPI's own reading (after the operator it
+        # took the `<` or `/` for).  So `<*>` and `<op/*>` arrive as
+        # `< Symbol(*>)` / `< op / Symbol(*>)`: the same run, one token fewer.
+        # This half of §14's repair goes with §14's PPI fix (s527d).
+        if (ref($t) eq 'PPI::Token::Symbol' && $c eq '*>') {
+          $glob_content .= '*';
+          $has_glob_chars = 1;
+          $found_close = 1;
+          last;
+        }
 
         # Accumulate content
         $glob_content .= $c;
