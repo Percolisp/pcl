@@ -702,7 +702,6 @@ sub parse {
   # as its argument (e.g. `defined *{$g}{CODE}` in Sub::Override) instead of just
   # the Cast '*'.  Without parens, handle_subcalls would otherwise orphan the
   # trailing {EXPR}{SLOT} blocks and the parse would fall through.
-  $self->_retag_braced_deref_subscript($e);
   $self->_retag_list_slice_subscripts($e);
   $self->_insert_elided_call_arrows($e);
   $self->_precollapse_dyn_glob_slots($e);
@@ -1247,31 +1246,30 @@ sub parse {
         && $term->start() eq '['
         && $i > 0
         && $self->is_internal_node_type($e->[$i-1]);
-    # KV slice: %hash{keys} - PPI parses this as Symbol '%h' + Block '{keys}'
-    my $is_kv_slice_block = (ref($term) eq 'PPI::Structure::Block' || ref($term) eq 'PPI::Structure::Subscript')
+    # KV slice: %hash{keys} - Symbol '%h' + Subscript '{keys}'
+    my $is_kv_slice_block = ref($term) eq 'PPI::Structure::Subscript'
         && $term->start() eq '{'
         && $i > 0
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^%/;
-    # KV array slice: %arr[indices] - PPI parses as Symbol '%arr' + Constructor '[indices]'
-    my $is_kv_arr_constructor = (ref($term) eq 'PPI::Structure::Constructor' || ref($term) eq 'PPI::Structure::Subscript')
+    # KV array slice: %arr[indices] - Symbol '%arr' + Subscript '[indices]'
+    my $is_kv_arr_constructor = ref($term) eq 'PPI::Structure::Subscript'
         && $term->start() eq '['
         && $i > 0
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^%/;
-    # KV array slice via block-deref: %{$ref}[indices] - Cast('%') + Block('{ref}') + Constructor '[indices]'
-    my $is_kv_arr_deref_constructor = (ref($term) eq 'PPI::Structure::Constructor' || ref($term) eq 'PPI::Structure::Subscript')
+    # KV array slice via block-deref: %{$ref}[indices] - Cast('%') + Block('{ref}') + Subscript '[indices]'
+    my $is_kv_arr_deref_constructor = ref($term) eq 'PPI::Structure::Subscript'
         && $term->start() eq '['
         && $i >= 2
         && ref($e->[$i-1]) eq 'PPI::Structure::Block'
         && $e->[$i-1]->start() eq '{'
         && ref($e->[$i-2]) eq 'PPI::Token::Cast'
         && $e->[$i-2]->content() eq '%';
-    # KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
-    # PPI gives two Blocks (not Subscript) when sigil is %
-    my $is_kv_hash_deref_block = (ref($term) eq 'PPI::Structure::Block' || ref($term) eq 'PPI::Structure::Subscript')
+    # KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Subscript('{"keys"}')
+    my $is_kv_hash_deref_block = ref($term) eq 'PPI::Structure::Subscript'
         && $term->start() eq '{'
         && $i >= 2
         && ref($e->[$i-1]) eq 'PPI::Structure::Block'
@@ -1377,8 +1375,7 @@ sub parse {
         # a Constructor; left alone they match no case and the parse falls
         # through to the "Missing case" die.  Re-tag each DIRECTLY following
         # brace as a Subscript so the X[]/X{} machinery below chains them
-        # exactly like the Subscripts in $x->[0]{k} (same fix pattern as
-        # _retag_braced_deref_subscript).
+        # exactly like the Subscripts in $x->[0]{k}.
         for (my $j = $np + 1; $j < scalar(@$e); $j++) {
           my $t = $e->[$j];
           if ((ref($t) eq 'PPI::Structure::Block'
@@ -2668,33 +2665,6 @@ sub _fold_terms {
 # lets a preceding named unary (`defined *{$g}{CODE}` in Sub::Override) grab the
 # whole glob-slot as one argument.  The in-loop handler (~line 1234) still covers
 # the Block/Block form reached via later recursion.
-# PPI mis-tokenizes the subscript after a braced array/scalar deref: in
-# `${$ref}[idx]` and `@{$ref}[i,j]` the `[...]` arrives as a
-# PPI::Structure::Constructor (an anonymous-array literal) rather than a
-# PPI::Structure::Subscript — only because it follows a Block `}` rather than a
-# Symbol.  (The hash form `${$ref}{key}` is correctly a Subscript, which is why
-# it already works.)  Left alone, the Cast+Block+Constructor triple matches no
-# case in the main loop and the parse falls through to the "Missing case" die,
-# which degrades to a silent `undef`.  Re-tag the Constructor as a Subscript so
-# the existing Cast+Block+Subscript machinery (the same path `${$ref}{key}`
-# uses) handles it.  `%`-cast (KV array slice `%{$ref}[i]`) and `*`-cast (glob)
-# are left as Constructors — they have their own dedicated handlers.
-sub _retag_braced_deref_subscript {
-  my ($self, $e) = @_;
-  for (my $i = 2; $i < scalar(@$e); $i++) {
-    my $term = $e->[$i];
-    next unless ref($term) eq 'PPI::Structure::Constructor'
-             && $term->start() eq '[';
-    my $block = $e->[$i-1];
-    my $cast  = $e->[$i-2];
-    next unless ref($block) eq 'PPI::Structure::Block'
-             && $block->start() eq '{'
-             && ref($cast) eq 'PPI::Token::Cast'
-             && ($cast->content() eq '$' || $cast->content() eq '@');
-    bless $term, 'PPI::Structure::Subscript';   # correct PPI's misclassification
-  }
-}
-
 # The SAME PPI habit one group further along: after a LIST SLICE `(…)[i]` /
 # `qw(…)[i]` — where the `[i]` is itself a Constructor by predecessor (see
 # W4 in _term_extent) — a following arrow-less `{k}` arrives as a Structure::

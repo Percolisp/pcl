@@ -5720,13 +5720,8 @@ sub _brace_name_refs {
     # unbraced spelling (task #2645): `${x}[1]` is an element of @x, `${x}{k}`
     # and `@{x}{k}` of %x, `%{x}[1]` a kv-slice of @x.  Without this, a rename
     # of `$x` would have rewritten @x's element.
-    # PPI 1.291 lexes the `[1]` of `${x}[1]` as a CONSTRUCTOR (its `{k}` as a
-    # Subscript) -- docs/ppi-upstream-bugs.md §"`${name}[i]`"; a term cannot
-    # follow a term, so a `[` structure there is always the subscript.
     my $nx  = $b->snext_sibling;
-    my $sub = ($nx && ($nx->isa('PPI::Structure::Subscript')
-                       || ($nx->isa('PPI::Structure::Constructor')
-                           && substr($nx->content, 0, 1) eq '[')))
+    my $sub = ($nx && $nx->isa('PPI::Structure::Subscript'))
             ? substr($nx->content, 0, 1) : '';
     my $kind = $sig eq '$#'  ? '@'
              : $sub eq '['   ? '@'

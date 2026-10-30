@@ -936,7 +936,7 @@ test_cl('named-capture %+ hash element still works after the %- workaround',
 # row asserts the CURRENT broken state on purpose — when it FAILS, a PPI
 # upgrade fixed the lexer: drop this canary, drop §6, un-register op/for.t
 # (its suite registration carries this cause) and re-run the suite file.
-#   FIXED ON PCL'S PPI BRANCH (s527c, group S): the document lexes, and the
+#   FIXED ON PCL'S PPI BRANCH (s527c, group U): the document lexes, and the
 # loop is one foreach Compound.  The LOWERING of a dereferenced loop variable
 # is still missing (#1580): the statement is DROPPED the s433 way (announced,
 # a run-time die at the site), so the rest of the file runs -- guarded below.
@@ -944,7 +944,7 @@ test_cl('named-capture %+ hash element still works after the %- workaround',
     my $doc = PPI::Document->new(\'for ${*$f} (5,11,33) { print } f();');
     my @s = $doc ? $doc->schildren : ();
     ok( @s == 2 && $s[0]->isa('PPI::Statement::Compound') && $s[0]->type eq 'foreach',
-        'FIXED ON PCL\'S PPI BRANCH (s527c, group S): `for ${*$f} (LIST){}` lexes as '
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group U): `for ${*$f} (LIST){}` lexes as '
       . 'one foreach Compound (ppi-upstream-bugs.md §6 §29)' );
 }
 test_cl('a dereference foreach loop variable costs its statement, not the file (#1580)',
@@ -979,7 +979,7 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (�
     my $doc = PPI::Document->new(\'for my ($q, $r) (@l) { A() }');
     my ($first) = $doc ? $doc->schildren : ();
     ok( $first && $first->content =~ /\{ A\(\) \}\z/,
-        'FIXED ON PCL\'S PPI BRANCH (s527c, group S): a `for my ($q,$r) (LIST)` '
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group U): a `for my ($q,$r) (LIST)` '
       . 'compound keeps its list and block (ppi-upstream-bugs.md §10; '
       . '_repair_nary_foreach and _repair_alias_foreach stay -- they are the '
       . 'LOWERING of the two heads, a token re-spelling, not a PPI repair)' );
@@ -1044,11 +1044,15 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (�
       . '(ppi-upstream-bugs.md §16; PCL\'s _fix_ppi_logical_xor_bug was deleted)' );
 }
 {
-    my $doc = PPI::Document->new(\'my $v = ${$r}[0];');
+    # The [0] after a deref block and the {..} / [..] after a key/value slice
+    # name are SUBSCRIPTS (perl expects an operator after a term, toke.c).
+    my $doc = PPI::Document->new(\'my $v = ${$r}[0]; my %s = %h{"a"}; my %t = %a[0, 1];');
     my @s = map { ref } @{ $doc->find(sub { $_[1]->isa('PPI::Structure') }) || [] };
-    ok( !(grep { $_ eq 'PPI::Structure::Subscript' } @s),
-        'CANARY: PPI still structures a braced-deref subscript as a Constructor '
-      . '— if this FAILS, drop the re-blessing in PExpr (ppi-upstream-bugs.md §17)' );
+    ok( (grep { $_ eq 'PPI::Structure::Subscript' } @s) == 3
+        && !(grep { $_ eq 'PPI::Structure::Constructor' } @s),
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group V): a braced-deref subscript and a '
+      . 'key/value slice subscript are Subscripts (ppi-upstream-bugs.md §17 §36; '
+      . 'PCL\'s _retag_braced_deref_subscript and the Constructor/Block arms were deleted)' );
 }
 {
     my $doc = PPI::Document->new(\'sort <STDIN>;');
@@ -1080,7 +1084,7 @@ PERL
     my @s = grep { $_->isa('PPI::Statement') } ($doc ? $doc->schildren : ());
     ok( (grep { $_->content =~ /^is\(/ } @s)
           && (grep { $_->isa('PPI::Statement::Compound') && $_->content =~ /finally \{ baz\(\); \}\z/ } @s),
-        'FIXED ON PCL\'S PPI BRANCH (s527c, group Q): a `finally` block is part of '
+        'FIXED ON PCL\'S PPI BRANCH (s527c, group T): a `finally` block is part of '
       . 'the try Compound and the next statement is its own (ppi-upstream-bugs.md §18; '
       . 'PCL\'s _repair_try_finally is deleted)' );
 }
