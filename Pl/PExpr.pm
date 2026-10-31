@@ -3011,6 +3011,9 @@ sub _block_word_subscript {
   return undef unless $w =~ /\A[A-Za-z_]\w*(?:::\w+)*\z/;
   my $g = $ch[1];
   my $r = ref $g;
+  # toke.c S_scan_ident excludes exactly one name: `${sub {...}}` is the deref of
+  # an anonymous sub (`strNE(dest, "sub")` for the `{` spelling only).
+  return undef if $w eq 'sub' && $r ne 'PPI::Structure::Constructor';
   return undef unless ($r eq 'PPI::Structure::Block' && $g->start() eq '{')
                    || ($r eq 'PPI::Structure::Constructor' && $g->start() eq '[')
                    || $r eq 'PPI::Structure::Subscript';

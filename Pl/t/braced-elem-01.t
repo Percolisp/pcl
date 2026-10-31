@@ -13,6 +13,9 @@
 # Logger.pm:731 `${Log::Log4perl::Level::LEVELS{$cust_prio}}`).  The fix is
 # the `${name}` collapse's sibling in Pl::PExpr (_block_word_subscript).
 # A quote-like NAME (`${m{q}}`) is PPI's lexing question, task #4102.
+# `${sub {...}}` stays the deref of an anonymous sub: toke.c excludes exactly
+# that name for the `{` spelling (r15); a declared sub or another keyword name
+# is the element (r16).
 # Every expected value is perl's own: the program runs under perl AND pcl and
 # each row compares its line.
 
@@ -46,9 +49,11 @@ print "r11 ${h{k}}\n";
 sub f { my %z = (q => 'r'); return ${z{q}} } print "r12 ", f(), "\n";
 my $i = 1; print "r13 ", ${l[$i + 1]}, "\n";
 our %g = (a => 1); { no strict 'refs'; print "r14 ", ${g{a}}, "\n"; }
+our %sub = (7 => 'x'); print "r15 ", (eval { ${sub{7}} } ? "elem" : ($@ =~ /^Not a SCALAR reference/ ? "anon-sub deref" : "?")), "\n";
+sub kk { 1 } our %kk = (1 => 'h'); our %do = (1 => 'd'); print "r16 ", ${kk {1}}, ${do{1}}, "\n";
 PERL
 
-my @labels = map { "r$_" } 1 .. 14;
+my @labels = map { "r$_" } 1 .. 16;
 plan tests => scalar(@labels);
 
 my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
