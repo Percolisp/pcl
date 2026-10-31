@@ -3742,6 +3742,11 @@ sub handle_subcalls {
             # in perl.  The parser answers with the whole lambda form.
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
             $ref_node->{lambda_form} = $self->_embedded_block($next, 'do');
+            # The BLOCK mark: only this func_ref is the block of `do {}`.
+            # `do sub { ... }` / `eval sub { ... }` are do / eval EXPR with a
+            # code ref (do FILE / eval STRING of its string, the sub is never
+            # called) and reach ExprToCL as a func_ref too (#3945).
+            $ref_node->{block_arg} = 1;
             $self->add_child_to_node($top_id, $ref_id);
           } else {
             # A &-prototype sub (e.g. try/catch, first/reduce) receives the

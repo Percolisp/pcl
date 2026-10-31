@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 145;
+plan tests => 146;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -280,6 +280,41 @@ test_cl('an element subscript is scalar context (#3863)',
      sub ctx { wantarray ? "L" : "S" } my %c = (S => "s", L => "l");
      print join(",", keys %f), " ", join(",", sort keys %h), " $h{q} @l ", $c{ctx()}, "\n";',
     "F p,q 1x 4 5 s\n");
+
+# #3945 (s530a): `do sub { ... }` / `do(sub { ... })` / `eval sub { ... }` take the EXPR form (do FILE / eval STRING of the code ref): the sub is never called; do BLOCK unchanged.  Outputs probed under perl 5.40.3.
+test_cl('do / eval of an anonymous-sub literal is do / eval EXPR, never a call (#3945)',
+        <<'PL', <<'OUT');
+{
+sub foo { 5 }
+my $r = do { 1; 2 }; print "1 $r\n";
+my @l = do { (1,2,3) }; print "2 @l\n";
+my $x = do { foo() }; print "3 $x\n";
+my $y = 1 + do { 3 }; print "4 $y\n";
+$! = 0; my $z = do sub { 9 }; print "5 ", (defined $z ? $z : "undef"), " ", ($!+0 ? "err" : "ok"), "\n";
+$! = 0; my @m = do sub { (1,2) }; print "6 ", scalar(@m), " ", (defined $m[0] ? $m[0] : "undef"), "\n";
+$! = 0; my $w = do(sub { 9 }); print "7 ", (defined $w ? $w : "undef"), "\n";
+my $called = 0; $! = 0; my $v = do sub { $called++; 1 }; print "8 called=$called\n";
+}
+{
+my @l = ('$::v = 42;');
+my $r = do sub { return 0 unless @l; $_ = shift @l; return 1 };
+print "1 r=", (defined $r ? $r : "undef"), " v=", ($::v // "undef"), " n=", scalar(@l), "\n";
+my $c = 0; my $e = eval sub { $c++; 5 }; print "2 e=", (defined $e ? $e : "undef"), " c=$c at=", ($@ ? "set" : "empty"), "\n";
+my $f = do { sub { 6 } }; print "3 ", ref($f), " ", $f->(), "\n";
+}
+PL
+1 2
+2 1 2 3
+3 5
+4 4
+5 undef err
+6 1 undef
+7 undef
+8 called=0
+1 r=undef v=undef n=1
+2 e=undef c=0 at=set
+3 CODE 6
+OUT
 
 # #3865 (s530a): a bare ARRAY as a hash key is its COUNT -- read, interpolation, store, ->{}, exists, delete, pos, a multi-key exists; outputs probed under perl 5.40.3.
 test_cl('a bare array as a hash KEY keys on its count (#3865)',

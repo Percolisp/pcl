@@ -2730,7 +2730,10 @@ sub gen_funcall_form {
           or die "PCL internal: analysis-only inline_lambda (eval) reached emission\n";
         return $wrap->(['p-eval-block', @$bf]);
       }
-      elsif ($arg_node->{type} eq 'func_ref') {
+      elsif ($arg_node->{type} eq 'func_ref' && $arg_node->{block_arg}) {
+        # A BLOCK's func_ref (PExpr marks it).  An anonymous-sub literal --
+        # `eval sub { ... }` -- is eval STRING of the code ref and takes the
+        # string arm below: the sub is never called (the do twin, #3945).
         my $func_ref = $self->gen_node_form($kids->[1]);
         return $wrap->(['p-eval-block', ['funcall', $func_ref]]);
       }
@@ -2835,13 +2838,16 @@ sub gen_funcall_form {
     return ['p-goto-computed', $self->gen_node_form($kids->[1])];
   }
 
-  # do { BLOCK } / do &CODE — inline evaluation, returns last value.  (do FILE
-  # has a non-internal-node arg and falls through to the generic tail, which
-  # carries the do ctx-wrap.)
+  # do { BLOCK } — inline evaluation, returns last value.  (do FILE has a
+  # non-internal-node arg and falls through to the generic tail, which
+  # carries the do ctx-wrap.)  Only the BLOCK's func_ref is called: `do sub
+  # { ... }` / `do(sub { ... })` is `do EXPR` with a CODE ref -- perl's do
+  # FILE on the ref's string, which fails (undef, $! ENOENT) and never calls
+  # the sub (probed 5.40.3, #3945) -- so that func_ref takes the generic tail.
   if ($func_name eq 'do' && @$kids == 2) {
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     if ($self->expr_o->is_internal_node_type($arg_node)) {
-      if ($arg_node->{type} eq 'func_ref') {
+      if ($arg_node->{type} eq 'func_ref' && $arg_node->{block_arg}) {
         my $func_ref = $self->gen_node_form($kids->[1]);
         my $ctx = $self->expr_o->get_node_context($node_id);
         return ['funcall', $func_ref] if $ctx == INHERIT_CTX;
