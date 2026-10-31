@@ -2947,6 +2947,16 @@ sub _collapse_braced_bareword_derefs {
              || $sigil eq '$#';
     my $blk = $e->[$i+1];
     next unless ref($blk) eq 'PPI::Structure::Block' && $blk->start() eq '{';
+    # `${name{KEY}}` / `${name[IDX]}` / `@{name[LIST]}` / `@{name{LIST}}` are
+    # the ELEMENT / SLICE `$name{KEY}` ... (toke.c S_scan_ident: an identifier
+    # followed by `{` or `[` inside `${...}` is the subscripted variable), not
+    # a call of `name` (task #3864).
+    if ($sigil eq '$' || $sigil eq '@') {
+      if (my $sub = _block_word_subscript($blk)) {
+        splice @$e, $i, 2, PPI::Token::Symbol->new($sigil . $sub->[0]), $sub->[1];
+        next;
+      }
+    }
     my $bw = _block_sole_bareword($blk);
     # `$#{^CAPTURE}`: a CARET name in the block.  PPI lexes `${^CAPTURE}` and
     # `@{^CAPTURE}` as one Magic token but has no token for the `$#` spelling,
@@ -2981,6 +2991,37 @@ sub _block_caret_name {
   return $w =~ /\A[A-Za-z_]\w*\z/ ? '{^' . $w . '}' : undef;
 }
 
+
+# A deref block holding exactly an identifier and ONE brace / bracket group,
+# `{name{KEY}}` / `{name[IDX]}` (task #3864): returns [NAME, SUBSCRIPT] where
+# SUBSCRIPT is that group as the PPI::Structure::Subscript PPI builds for the
+# plain spelling `$name{KEY}` -- PPI lexes the group after a Word as a Block
+# or a Constructor, so it is re-classed IN PLACE (its statement becomes the
+# Statement::Expression a subscript holds, which the bareword-key autoquote
+# reads).  A group already re-classed by an earlier walk of the same tokens
+# is accepted as it is.  undef for anything else.
+sub _block_word_subscript {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return undef unless @ch == 2 && ref($ch[0]) eq 'PPI::Token::Word';
+  my $w = $ch[0]->content();
+  return undef unless $w =~ /\A[A-Za-z_]\w*(?:::\w+)*\z/;
+  my $g = $ch[1];
+  my $r = ref $g;
+  return undef unless ($r eq 'PPI::Structure::Block' && $g->start() eq '{')
+                   || ($r eq 'PPI::Structure::Constructor' && $g->start() eq '[')
+                   || $r eq 'PPI::Structure::Subscript';
+  if ($r ne 'PPI::Structure::Subscript') {
+    bless $g, 'PPI::Structure::Subscript';
+    for my $st ($g->children()) {
+      bless $st, 'PPI::Statement::Expression' if ref($st) eq 'PPI::Statement';
+    }
+  }
+  return [$w, $g];
+}
 
 sub _block_sole_bareword {
   my $block = shift;
