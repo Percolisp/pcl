@@ -274,6 +274,30 @@ or a parenthesised call, so the parse is the same either way.  No displaced buil
 
 The default stays `announce` (§9): on these dists it prints only the harmless kind.
 
+## 11. The four dists of s526w2 (`PCL_DETECT=log`)
+
+Measured on the s526w2 tree (gen v2-8688, rebased onto main 2c2b83cc) with
+`tools/cpan-scoreboard.pl --jobs 4 --timeout 120` over YAML-PP-v0.39.0,
+Pod-Simple-3.47, Log-Log4perl-1.58 and Template-Toolkit-3.106 **minus TT's 29
+files that hang behind #3856 (#3869), excluded BY NAME** through `--only`
+(block capture case compile1 dumper foreach format html image macro math object
+outline output plugin_list prefix proc process ref service skel
+stash-xs-unicode strcat strict switch table tags throw zz-plugin-leak; they say
+nothing about the detector and cost 58 minutes of timeouts): 285 files, 13 logged
+lines, **7 distinct sites in 2 dists**; Pod-Simple and Template-Toolkit log
+nothing.  ONE site is real, and it is already filed.
+
+| dist | distinct sites | what |
+|---|---|---|
+| YAML-PP-v0.39.0-0 | 1 | `t/32.cyclic-refs.t:38`: `warning_like`, assumed `unknown`, installed `(&$;$)` -- imported by `use Test::Warn` (line 5), which makes it by GLOB ALIAS (`*warning_like = *warnings_like`), so no static read sees the prototype and the block-first call does not parse as perl parses it.  This is **#3851**, the cause of the file's blessed row: the detector names the bug the census found by hand |
+| YAML-PP-v0.39.0-0 | 3 | site_perl Test::Deep::Cache::Simple (reached by 37 / 49 / 54): `weaken`, imported at run time by `Scalar::Util->import('weaken')` (or a no-op glob), assumed `list-call`, installed `($)`; every call is parenthesised (`eval{weaken($d1)}`), so the parse is the same -- harmless |
+| Log-Log4perl-1.58-0 | 3 | core Opcode.pm (reached by `t/041SafeEval.t` through Safe): `opset`, assumed `;@`, installed none -- Opcode is XS and its object does not load (NS:DynaLoader, the file's blessed row); a list call either way -- harmless |
+
+Ten further TT files (anycase assert blocks compile4 datafile directive directry
+evalperl vmethods/hash wrapper) reached the 120 s timeout in this run at load ~9;
+in the census they died at ~24 s with the binding-stack exhaustion, the other face
+of #3869.  The default stays `announce` (§9).
+
 ## Appendix A -- the gate's 53 distinct call sites
 
 `unit  name  install:line/kind  call:line  assumed  installed`  (CORE: = perl's own lib; /tmp/*.pl = a gate test's program)

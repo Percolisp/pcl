@@ -166,11 +166,11 @@ adds ten dists chosen by USE, in two census briefs.  Half 1 (s526w1):
 TimeDate, HTTP-Date, URI, HTTP-Message, YAML-Tiny (the repo copy) and
 Data-Dumper (its pure-Perl half, run from the dist's own `blib/lib` with
 `--inc=`: the dist has no `lib/`); half 2 (s526w2): YAML-PP, Pod-Simple,
-Log-Log4perl, Template-Toolkit (its PP-stash build note is w2's).  The
+Log-Log4perl join, Template-Toolkit was censused and does NOT join (its `Template::Parser` refuses to compile, #3856, and 98 of its 121 files print no TAP -- the board takes a dist whose files run).  Template-Toolkit's dist copy is BUILT PURE-PERL in place (`perl Makefile.PL TT_XS_ENABLE=n TT_XS_DEFAULT=n TT_ACCEPT=y && make`, so `lib/Template/Config.pm` says `$STASH = 'Template::Stash'`): PCL cannot load Template::Stash::XS, and the site_perl Template (XS stash) is for ordinary perl use, never the board -- do not re-run its Makefile.PL with XS.  Pod-Simple runs its DIST lib (3.47, 822 ok against 814 for the core 3.45 under `--no-dist-lib`): a dual-life pure-Perl module's lib/ does not fall under oracle rule 2 when it loads.  The
 INSTALL step came first (Fable, `cpanm` into the oracle perl from the
 fetched copies under `~/.cpan/build`, every missing prerequisite with
 them), so `prove -b` in each dist is the oracle side.  Census and filler
-detail: `docs/session-log.md` (Session s526w1).
+detail: `docs/session-log.md` (Sessions s526w1 and s526w2).  After half 2 the board is 29 dists / 775 files and takes ~100 min at load 9-12 beside other agents' legs (round 4: ~20 min for 449 files on a quiet box).
 
 ## Release gate (exit criteria)
 - [ ] Every corpus module loads + passes 100% of non-not-supported `t/` tests, 0 crashes.
