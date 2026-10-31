@@ -1,0 +1,20 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# tools/t/fixture-oracle-perl -- a stand-in for the board's perl ORACLE
+# (tools/run-dist-t.pl --oracle-perl), for tools/t/cpan-scoreboard.t.
+# It IS perl for every t-file, except that with STUB_PERL_RUNS=1 it answers
+# for skipped.t as if perl RAN it (two rows, one failing) -- the shape of a
+# file PCL skips and perl does not, which must read FAIL, never SKIP.
+use strict;
+use warnings;
+my $t = $ARGV[-1] // '';
+if ($ENV{STUB_PERL_RUNS} && $t =~ m{/skipped\.t\z}) {
+    print "1..2\nok 1 - perl ran this\nnot ok 2 - perl fails this\n";
+    exit 1;
+}
+exec $^X, @ARGV;
+die "exec $^X: $!\n";

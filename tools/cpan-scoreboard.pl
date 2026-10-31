@@ -70,6 +70,22 @@
 #   PASS    = at least one ok, zero not-ok, the PLAN MET and SBCL's exit 0
 #   PARTIAL = at least one ok, but not-ok rows, a SHORTFALL, or a non-zero exit
 #   FAIL    = zero ok (transpile failure, load crash, timeout, no TAP)
+#   SKIP    = PCL printed `1..0 # SKIP` AND the perl oracle skips the file too
+#             (#4160 / s531b): not a failure, its own column; PCL skipping a
+#             file perl RUNS stays FAIL.  `*FILE*` rows are still written for
+#             a SKIP file (the blessed PERL-SKIP row is its record).
+#
+# THE PERL ORACLE (s531b, Fable ruling s531 #4): every t-file is also run
+# under real perl, from the dist root, with the same @INC rule
+# (tools/run-dist-t.pl --oracle-only, CACHED under ~/.pcl-cache/oracle/, so it
+# costs a perl run per file only the first time; --refresh-oracle re-measures,
+# --no-oracle turns it off).  It is its own timed call, so it never eats the
+# PCL run's timeout.  With --causes <blessed rows> the run also prints, per
+# dist and in total, the not-ok rows split by their blessed cause -- ours /
+# ruled / perl's / harness (PCLCauses::class_group) -- and the assertions
+# hidden behind whole-file rows; and a MISMATCH line for every blessed
+# PERL-SKIP / PERL-FAILS claim perl's own run contradicts (a report, never a
+# gate: perl's answer depends on the box's installed modules).
 #
 # THE SHORTFALL (#3241): a file whose program stops before its plan is met is
 # not a PASS, whatever rows it printed first.  Before #3241 the verdict read
@@ -205,10 +221,19 @@ my $only_rx;         # --only=REGEX: run only the t-files whose DIST/NAME matche
 my $no_dist_lib = 0;
 my ($tsv, $rows_file);
 my $timeouts_tsv = "$root/baselines/cpan-board-timeouts.tsv";
+# THE PERL ORACLE (s531b, Fable ruling s531 #4): on by default; cached by
+# tools/run-dist-t.pl, so it costs a perl run per t-file only the first time.
+my ($oracle, $refresh_oracle, $oracle_perl, $oracle_to) = (1, 0, undef, 120);
+my $causes_file;     # --causes: the blessed row baseline, for the split + MISMATCH
 my @argv_copy = @ARGV;
 while (@ARGV) {
   my $a = shift @ARGV;
-  if    ($a eq '--jobs')        { $jobs = shift @ARGV }
+  if    ($a eq '--no-oracle')      { $oracle = 0 }
+  elsif ($a eq '--refresh-oracle') { $refresh_oracle = 1 }
+  elsif ($a eq '--oracle-perl')    { $oracle_perl = shift @ARGV }
+  elsif ($a eq '--oracle-timeout') { $oracle_to = shift @ARGV }
+  elsif ($a eq '--causes')         { $causes_file = shift @ARGV }
+  elsif ($a eq '--jobs')        { $jobs = shift @ARGV }
   elsif ($a eq '--timeout')     { $timeout = shift @ARGV }
   elsif ($a eq '--tsv')         { $tsv = shift @ARGV }
   elsif ($a eq '--rows')        { $rows_file = shift @ARGV }
@@ -228,7 +253,7 @@ for my $d (@dists) {
   my ($dir, $ndl, $inc) = @$d;
   -d "$dir/t" or die "no t/ in $dir\n";
   for my $t (t_files("$dir/t")) {
-    my $rel = basename($dir) . "/" . t_name($t);
+    my $rel = basename($dir) . "/" . t_name($t, $dir);
     next if $only_rx && $rel !~ $only_rx;
     push @work, { dist => $dir, ndl => $ndl, inc => $inc, t => $t, rel => $rel,
                   to => PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout) };
@@ -253,8 +278,36 @@ my @queue = @work;
 pipe(my $rd, my $wr) or die "pipe: $!";
 my @rows;
 
+# The oracle is its OWN timed call, before the PCL run: a slow or hanging perl
+# must never eat the PCL run's timeout allowance, or verdicts would move for an
+# instrument reason.  Its PERLROW lines go to a per-work temp file, like ROW.
+sub run_oracle {
+  my ($w) = @_;
+  my @o = (undef) x 6;   # perl plan, perl skip, perl ok, perl notok, how, seconds
+  return @o unless $oracle;
+  my @cmd = ("timeout", "-k", 5, $oracle_to + 15, "$root/tools/run-dist-t.pl", "--oracle-only",
+             "--oracle-timeout", $oracle_to);
+  push @cmd, "--refresh-oracle" if $refresh_oracle;
+  push @cmd, "--oracle-perl", $oracle_perl if defined $oracle_perl;
+  push @cmd, "--no-dist-lib" if $w->{ndl};
+  push @cmd, map { ("--inc", $_) } @{ $w->{inc} || [] };
+  push @cmd, $w->{dist}, $w->{t};
+  my $out = do {
+    open(my $p, '-|', @cmd) or return @o;
+    local $/; my $o = <$p> // ''; close $p; $o;
+  };
+  @o[4, 5] = $out =~ /^ORACLE\t(\w+)\t([\d.]+)$/m ? ($1, $2) : ('timeout', $oracle_to);
+  @o[0 .. 3] = ($1, $2, $3, $4) if $out =~ /^PERL\t([^\t]*)\t([^\t]*)\t(\d+)\t(\d+)\t/m;
+  if (open my $pf, '>', "$tmp/$w->{idx}.perl") {
+    print $pf "$_\n" for ($out =~ /^PERLROW\t([^\n]*)$/mg);
+    close $pf;
+  }
+  return @o;
+}
+
 sub run_one {
   my ($w) = @_;
+  my @perl = run_oracle($w);
   my @cmd = ("timeout", "-k", 5, $w->{to}, "$root/tools/run-dist-t.pl", "--rows");
   push @cmd, "--no-dist-lib" if $w->{ndl};
   push @cmd, map { ("--inc", $_) } @{ $w->{inc} || [] };
@@ -281,13 +334,19 @@ sub run_one {
   my $class = $ok == 0                         ? 'FAIL'
             : ($notok || $rc != 0 || length $short) ? 'PARTIAL'
             :                                    'PASS';
+  # SKIP (#4160): a file perl skips TOO is not a failure -- and only then:
+  # PCL's skip_all alone is FAIL, because PCL skipping a file perl runs is a
+  # divergence (a module PCL cannot load, a feature probe answering wrong).
+  $class = 'SKIP' if $class eq 'FAIL' && $ok + $notok == 0 && length($skip)
+                     && defined $perl[1] && length $perl[1];
   $class = 'FAIL' if $rc == 124;   # timeout
   open my $rf, '>', "$tmp/$w->{idx}.rows" or return undef;
   print $rf "$_\n" for ($out =~ /^ROW\t([^\n]*)$/mg);
   close $rf;
-  return [$w->{dist}, t_name($w->{t}), $class, $ok, $notok, $rc,
-          $w->{idx}, $plan, $skip, $sig, $short];
+  return [$w->{dist}, t_name($w->{t}, $w->{dist}), $class, $ok, $notok, $rc,
+          $w->{idx}, $plan, $skip, $sig, $short, map { $_ // '' } @perl];
 }
+use constant NFIELDS => 17;   # the result line's fields (11 + the oracle's 6)
 
 # A dist's t-files, RECURSIVELY and sorted (Type-Tiny keeps 371 of its 375
 # in subdirectories, s518e), and the NAME a row carries: the path under t/
@@ -307,7 +366,13 @@ sub t_files {
   }
   return sort @out;
 }
-sub t_name { my ($t) = @_; $t =~ s{^.*?/t/}{}; return $t }
+sub t_name {
+  # The path under the DIST's t/ -- never under the first `/t/` of the whole
+  # path: tools/t/fixture-dist/t/x.t is x.t (the fixture dist lives under tools/t).
+  my ($t, $dist) = @_;
+  $t =~ s{^\Q$dist\E/t/}{} or $t =~ s{^.*?/t/}{};
+  return $t;
+}
 
 # The shortfall text for a file that RAN rows (see the header, #3241): '' when
 # the plan is met and the exit is clean, else "ran M of N, rc R".
@@ -343,7 +408,7 @@ while (@rows < $expected) {
   my $line = <$rd>;
   defined $line or last;
   chomp $line;
-  push @rows, [split /\t/, $line, 11];
+  push @rows, [split /\t/, $line, NFIELDS];
   my $done = wait();
   delete $kids{$done} if $done > 0;
   spawn_one(shift @queue) if @queue;
@@ -370,25 +435,168 @@ close $rd;
   }
 }
 
+
+# ── the rows of one t-file, as the row file writes them ────────────────────
+# A description is the JOIN KEY, so it is built in ONE place for PCL's rows,
+# the blessed baseline's and perl's (the oracle's PERLROW lines):
+#   * a TODO/SKIP directive is kept on the description (`desc # TODO why`);
+#   * a temp-file name changes every run, so a random `/tmp/<name>` component
+#     is written as `/tmp/XXXX` (RULED s519 #2, DECIDED ## s519; Path-Tiny
+#     filesystem.t `Read contents of /tmp/MuB2nxVyim correctly`).
+sub row_desc {
+  my ($desc, $dir) = @_;
+  $desc = '' unless defined $desc;
+  $desc .= " # $dir" if defined $dir && length $dir;
+  $desc =~ s{/tmp/[A-Za-z0-9_]{6,}(?![A-Za-z0-9_.-])}{/tmp/XXXX}g;
+  return $desc;
+}
+
+# [num, desc, got, expected] per row of a result, the synthetic `*FILE*` /
+# `*PLAN*` row first -- what --rows writes and what the split counts.
+sub file_rows {
+  my ($r) = @_;
+  my (undef, undef, undef, $ok, $notok, $rc, $idx, $plan, $skip, undef, $short) = @$r;
+  my @out;
+  if (open my $rf, '<', "$tmp/$idx.rows") {
+    while (my $l = <$rf>) { chomp $l; push @out, [ split /\t/, $l, 5 ] }
+    close $rf;
+  }
+  if ($ok == 0 && $notok == 0) {
+    # No TAP at all: the file's story is "it did not run", and without a
+    # synthetic row it would be invisible in a file of failing assertions.
+    # A SKIP file keeps its row too: the blessed PERL-SKIP row is its record,
+    # and dropping the row would read as FIXED in every --diff.
+    my $what = length($skip // '') ? "1..0 $skip (rc=$rc)" : "no TAP rows (rc=$rc)";
+    unshift @out, [0, '*FILE*', $what, (defined $plan && length $plan) ? "$plan row(s)" : 'TAP rows'];
+  } elsif (length($short // '')) {
+    # It ran rows and stopped short of its plan, or exited non-zero (#3241).
+    unshift @out, [0, '*PLAN*', $short, (defined $plan && length $plan) ? "$plan row(s)" : 'a plan'];
+  }
+  return map { [ $_->[0], row_desc($_->[1], $_->[4]), $_->[2] // '', $_->[3] // '' ] } @out;
+}
+
+# perl's NOT-OK rows for a result (the oracle's PERLROW lines), keyed by the
+# row description exactly as PCL's rows are.
+sub perl_notok {
+  my ($r) = @_;
+  my %d;
+  if (open my $pf, '<', "$tmp/$r->[6].perl") {
+    while (my $l = <$pf>) { chomp $l; my (undef, $desc, $dir) = split /\t/, $l, 3; $d{ row_desc($desc, $dir) } = 1 }
+    close $pf;
+  }
+  return \%d;
+}
+
+# ── the blessed causes (--causes): the split and the MISMATCH check ────────
+my %cause;           # "dist\tfile\tdesc" -> cause
+if (defined $causes_file) {
+  my $b = load_rows($causes_file);
+  $cause{$_} = $b->{$_}{cause} for keys %$b;
+}
+
 # Report.
 my %by_dist;
 for my $r (sort { $a->[0] cmp $b->[0] || $a->[1] cmp $b->[1] } @rows) {
   push @{ $by_dist{ $r->[0] } }, $r;
 }
+my @VERDICTS = qw(PASS PARTIAL FAIL SKIP);
+my @SPLIT = ('ours', 'ruled', "perl's", 'harness', 'unread', 'unblessed');
+my (%grand, %gsplit, %ghid);
 my $grand_bad = 0;
+my @mismatch;
+
+# One file's contribution to the split: every FAILING assertion row by the
+# group of its blessed cause (PCLCauses::class_group -- ours / ruled / perl's /
+# harness; `unblessed` = no blessed row), and every whole-file row (`*FILE*`,
+# `*PLAN*`) with the assertions it hides -- `ran M of N` hides N - M, a file
+# that printed nothing hides perl's count (the oracle), a SKIP file hides none.
+sub split_file {
+  my ($r, $split, $hid) = @_;
+  my ($dist, $file, $class) = @$r;
+  my $base = basename($dist);
+  for my $row (file_rows($r)) {
+    my $c = $cause{"$base\t$file\t$row->[1]"};
+    my $g = defined $c ? PCLCauses::class_group(PCLCauses::cause_class($c)) : 'unblessed';
+    if ($row->[1] eq '*FILE*' || $row->[1] eq '*PLAN*') {
+      next if $class eq 'SKIP';
+      my $n = 0;
+      if ($row->[2] =~ /^ran (\d+) of (\d+)/) { $n = $2 - $1 }
+      elsif ($row->[1] eq '*FILE*' && length($r->[13] // '')) { $n = $r->[13] + $r->[14] }
+      $hid->{files}++; $hid->{rows} += $n > 0 ? $n : 0;
+      $hid->{ours}++ if $g eq 'ours';
+      next;
+    }
+    $split->{$g}++;
+  }
+}
+
+# MISMATCH: a blessed PERL-SKIP / PERL-FAILS claim the oracle contradicts.  A
+# report line of the board run, never a gate: perl's answer depends on the
+# modules installed on the box (ruling 4).  A blessed row of another class
+# whose description perl ALSO fails is printed as a PERL-FAILS candidate (c).
+sub mismatch_file {
+  my ($r) = @_;
+  my ($dist, $file) = @$r;
+  return unless %cause && length($r->[15] // '') && $r->[15] ne 'timeout';
+  my $base = basename($dist);
+  my $perl_ran = ($r->[13] || 0) + ($r->[14] || 0);
+  my $pn = perl_notok($r);
+  for my $k (grep { index($_, "$base\t$file\t") == 0 } keys %cause) {
+    my $cl = PCLCauses::cause_class($cause{$k});
+    my $desc = (split /\t/, $k, 3)[2];
+    if ($cl eq 'perl-skip' && $perl_ran) {
+      push @mismatch, "MISMATCH PERL-SKIP  $base $file: perl ran $perl_ran row(s) (ok $r->[13], not ok $r->[14])";
+    } elsif ($cl eq 'perl-fails' && !$pn->{$desc}) {
+      push @mismatch, "MISMATCH PERL-FAILS $base $file \"$desc\": perl's row is ok";
+    } elsif ($cl ne 'perl-fails' && $cl ne 'perl-skip' && $pn->{$desc}) {
+      push @mismatch, "PERL-FAILS CANDIDATE $base $file \"$desc\": perl fails it too (blessed as $cl)";
+    }
+  }
+}
+
+sub split_text {
+  my ($s, $h) = @_;
+  my $t = join(' / ', map { sprintf '%d %s', $s->{$_} // 0, $_ } grep { $_ ne 'unread' || $s->{$_} } @SPLIT);
+  return sprintf "not ok rows: %s; + %d assertion(s) never reached behind %d whole-file row(s) (%d of them ours)",
+                 $t, $h->{rows} // 0, $h->{files} // 0, $h->{ours} // 0;
+}
+
 for my $dist (sort keys %by_dist) {
-  my %n = (PASS => 0, PARTIAL => 0, FAIL => 0);
+  my %n = map { ($_ => 0) } @VERDICTS;
+  my (%split, %hid);
   print "== ", basename($dist), "\n";
   for my $r (@{ $by_dist{$dist} }) {
     my (undef, $file, $class, $ok, $notok, $rc) = @$r;
     $n{$class}++;
     printf "  %-8s %-28s ok=%-4d notok=%-4d rc=%d\n",
            $class, $file, $ok, $notok, $rc;
+    split_file($r, \%split, \%hid) if %cause;
+    mismatch_file($r);
+    $grand{ok} += $ok; $grand{notok} += $notok;
   }
   my $total = @{ $by_dist{$dist} };
-  printf "  -- %d PASS / %d PARTIAL / %d FAIL of %d\n",
-         $n{PASS}, $n{PARTIAL}, $n{FAIL}, $total;
-  $grand_bad += $n{FAIL};
+  printf "  -- %d PASS / %d PARTIAL / %d FAIL / %d SKIP of %d\n",
+         $n{PASS}, $n{PARTIAL}, $n{FAIL}, $n{SKIP}, $total;
+  printf "     %s\n", split_text(\%split, \%hid) if %cause;
+  $grand{$_} += $n{$_} for @VERDICTS;
+  $grand{files} += $total;
+  $gsplit{$_} += $split{$_} // 0 for @SPLIT;
+  $ghid{$_} += $hid{$_} // 0 for qw(rows files ours);
+  $grand_bad += $n{FAIL};   # FAIL alone: a SKIP file is not a failure
+}
+printf "\n== TOTAL: %d PASS / %d PARTIAL / %d FAIL / %d SKIP of %d file(s); %d ok, %d not ok\n",
+       (map { $grand{$_} // 0 } @VERDICTS), $grand{files} // 0, $grand{ok} // 0, $grand{notok} // 0;
+print "   ", split_text(\%gsplit, \%ghid), "\n" if %cause;
+print "   (no --causes: the not-ok split needs the blessed row baseline)\n" unless %cause;
+print "$_\n" for sort @mismatch;
+if ($oracle) {
+  my %o; my $secs = 0;
+  for my $r (@rows) { $o{ $r->[15] || 'none' }++; $secs += $r->[16] || 0 }
+  printf "ORACLE: %d file(s) -- %d cached, %d measured (%.1f s of perl), %d timed out%s\n",
+         scalar(@rows), $o{cached} // 0, $o{measured} // 0, $secs, $o{timeout} // 0,
+         $o{none} ? ", $o{none} with no answer" : '';
+} else {
+  print "ORACLE: OFF (--no-oracle): a file PCL skips reads FAIL, SKIP cannot be decided\n";
 }
 
 # Machine-diffable baseline: dist basename (NOT the path — it carries a build
@@ -423,35 +631,8 @@ if (defined $rows_file) {
            join(' ', $0, @argv_copy);
   my $nrows = 0;
   for my $r (sort { $a->[0] cmp $b->[0] || $a->[1] cmp $b->[1] } @rows) {
-    my ($dist, $file, $class, $ok, $notok, $rc, $idx, $plan, $skip, undef, $short) = @$r;
-    my @out;
-    if (open my $rf, '<', "$tmp/$idx.rows") {
-      while (my $l = <$rf>) { chomp $l; push @out, $l }
-      close $rf;
-    }
-    if ($ok == 0 && $notok == 0) {
-      # No TAP at all: the file's story is "it did not run", and without a
-      # synthetic row it would be invisible in a file of failing assertions.
-      my $what = length($skip // '') ? "1..0 $skip (rc=$rc)" : "no TAP rows (rc=$rc)";
-      unshift @out, join("\t", 0, '*FILE*', $what,
-                         (defined $plan && length $plan) ? "$plan row(s)" : 'TAP rows');
-    } elsif (length($short // '')) {
-      # It ran rows and stopped short of its plan, or exited non-zero (#3241).
-      unshift @out, join("\t", 0, '*PLAN*', $short,
-                         (defined $plan && length $plan) ? "$plan row(s)" : 'a plan');
-    }
-    for my $l (@out) {
-      my ($num, $desc, $got, $exp, $dir) = split /\t/, $l, 5;
-      $desc = '' unless defined $desc;
-      $desc .= " # $dir" if defined $dir && length $dir;   # TODO/SKIP directive
-      # A temp-file name in a description changes every run, and the
-      # description is the JOIN KEY: a random `/tmp/<name>` component is
-      # written as `/tmp/XXXX`, so the blessed row and every run's row carry
-      # the same key (RULED s519 #2, DECIDED ## s519; Path-Tiny filesystem.t
-      # `Read contents of /tmp/MuB2nxVyim correctly`).
-      $desc =~ s{/tmp/[A-Za-z0-9_]{6,}(?![A-Za-z0-9_.-])}{/tmp/XXXX}g;
-      print $fh join("\t", basename($dist), $file, $num, $desc,
-                           $got // '', $exp // ''), "\n";
+    for my $row (file_rows($r)) {
+      print $fh join("\t", basename($r->[0]), $r->[1], @$row), "\n";
       $nrows++;
     }
   }

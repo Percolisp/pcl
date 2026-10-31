@@ -62,6 +62,12 @@ ARGS=$(perl -e '
 ' "$LIST" "$TREE" "$HOME") || exit 1
 mapfile -t DISTS <<< "$ARGS"
 echo "cpan-board.sh: list $LIST, tree $TREE, $(grep -c . <<< "$ARGS") args"
-exec tools/cpan-scoreboard.pl --jobs "${PCL_BOARD_JOBS:-4}" \
+# --causes: the TREE's blessed rows, for the not-ok split (ours / ruled /
+# perl's / harness) and the oracle's MISMATCH lines (s531b).
+CAUSES=()
+if [ -r "$TREE/baselines/cpan-board14-fails.tsv" ]; then
+  CAUSES=(--causes "$TREE/baselines/cpan-board14-fails.tsv")
+fi
+exec tools/cpan-scoreboard.pl "${CAUSES[@]}" --jobs "${PCL_BOARD_JOBS:-4}" \
   --timeout "${PCL_BOARD_TIMEOUT:-120}" \
   --tsv "$OUT.tsv" --rows "$OUT.rows.tsv" "${DISTS[@]}"

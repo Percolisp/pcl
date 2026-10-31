@@ -180,4 +180,26 @@ spew("$root/baselines/row-shortfall.tsv",
        'an absent baseline says so instead of contributing zeros');
 }
 
+# ── the grammar's classes, --by-id, the UNREDUCED hygiene list (s531b) ─────
+{
+  spew("$root/baselines/cpan-board14-fails.tsv",
+    join("\t", 'Dist-1.0', 'a.t', 2, 'ruled', '', '', 'NS:ns-xs -- #233 (an XS module)'),
+    join("\t", 'Dist-1.0', 'a.t', 3, 'ruled too', '', '', 'NS:ns-xs (another)'),
+    join("\t", 'Dist-1.0', 'a.t', 4, 'perl fails it', '', '', 'PERL-FAILS (the dist marks it TODO)'),
+    join("\t", 'Dist-1.0', 'b.t', 5, 'not isolated', '', '', 'UNREDUCED #4087 (b.t: the symptom)'),
+    join("\t", 'Dist-1.0', 'b.t', 6, 'the runner', '', '', 'HARNESS #3923 (a runner marker)'),
+    join("\t", 'Dist-1.0', 'b.t', 7, 'a bug', '', '', '#77 (a task)'),
+  );
+  my ($out) = run_census('--by-id', '--hygiene');
+  like($out, qr/CPAN board.*\n\s+CAUSES: 6 of 6 — not-supported 2, parked 0, bug 1, other 0, unreduced 1, perl-fails 1, harness 1, unexplained 0/,
+       'the grammar\'s three classes print where they occur');
+  like($out, qr/CPAN board.*?not-supported \+ parked: 50\.0%/s,
+       'perl-fails and harness leave the share\'s denominator (2 of ns 2 + bug 1 + unreduced 1)');
+  like($out, qr/^  ns-xs\s.*\s2$/m, '--by-id: the ruled cost per not-supported id');
+  like($out, qr/^UNREDUCED — 1 row\(s\) over 1 task\(s\)/m, '--hygiene lists the UNREDUCED rows');
+  my ($md) = run_census('--markdown');
+  like($md, qr/^\| population \| rows \| not-supported \| parked \| bug \| other \| unexplained \| perl-skip \| perl-fails \| unreduced \| harness \| not-supported \+ parked \|$/m,
+       '--markdown gains the grammar\'s columns only when a population spells them');
+}
+
 done_testing();

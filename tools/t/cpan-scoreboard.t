@@ -28,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 43;
+use Test::More tests => 54;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -131,7 +131,9 @@ my $reg_file = "$tmp/board-timeouts.tsv";
 }
 my ($tsv, $rows) = ("$tmp/board.tsv", "$tmp/board.rows.tsv");
 my $err = "$tmp/board.err";
-system("perl \Q$root/tools/cpan-scoreboard.pl\E --jobs 2 --timeout 120 "
+# --no-oracle: this run pins the verdicts WITHOUT a perl oracle (a file PCL
+# skips reads FAIL, as it always did); the oracle runs are further down.
+system("perl \Q$root/tools/cpan-scoreboard.pl\E --no-oracle --jobs 2 --timeout 120 "
      . "--timeouts \Q$reg_file\E --tsv \Q$tsv\E --rows \Q$rows\E \Q$dist\E "
      . ">$tmp/board.out 2>\Q$err\E") == 0 or diag("scoreboard exited $?");
 
@@ -199,4 +201,58 @@ like($rows_out, qr/^SBCL\t2\t0\t1$/m, 'run-dist-t --rows reports the SBCL exit c
   like($out2, qr/^LOST\s+fixture-dist rows\.t — 3 passing row\(s\) \(5 -> 2\)$/m,
        'a file whose ok count fell reports its lost passing rows');
   like($out2, qr/^TOTAL passing: baseline 6, current 3$/m, 'the run prints the passing TOTAL both ways');
+}
+
+# ── THE PERL ORACLE, the SKIP verdict, MISMATCH (s531b, #4160 / ruling 4) ──
+# The oracle is tools/t/fixture-oracle-perl: perl itself, except that with
+# STUB_PERL_RUNS=1 it RUNS skipped.t (two rows).  Each run has its own oracle
+# cache, so one run's answer is never another's.
+{
+  my $stub = "$FindBin::RealBin/fixture-oracle-perl";
+  my $causes = "$tmp/causes.rows.tsv";
+  open my $cf, '>', $causes or die;
+  print $cf "fixture-dist\tskipped.t\t0\t*FILE*\t1..0\t\tPERL-SKIP (the fixture skips itself)\n";
+  print $cf "fixture-dist\trows.t\t2\tfixture named fail\t'2'\t'3'\tPERL-FAILS (perl fails it too)\n";
+  print $cf "fixture-dist\trows.t\t0\tfixture named pass\t\t\tPERL-FAILS (a stale claim: perl passes it)\n";
+  print $cf "fixture-dist\trows.t\t3\t\t\t\t#77 (an unnamed failure)\n";
+  print $cf "fixture-dist\tdies.t\t0\t*PLAN*\tran 1 of 3, rc 255\t3 row(s)\tNS:ns-xs (a ruled whole-file row)\n";
+  close $cf;
+  my $board = sub {
+    my ($tag, %env) = @_;
+    local @ENV{keys %env} = values %env;
+    local $ENV{PCL_ORACLE_CACHE} = "$tmp/oracle-$tag";
+    my $out = `perl \Q$root/tools/cpan-scoreboard.pl\E --jobs 2 --oracle-perl \Q$stub\E --causes \Q$causes\E --tsv \Q$tmp/$tag.tsv\E --rows \Q$tmp/$tag.rows.tsv\E \Q$dist\E 2>&1`;
+    my @t = do { open my $f, '<', "$tmp/$tag.tsv" or die; grep { /\S/ } <$f> };
+    chomp @t;
+    return ($out, \@t);
+  };
+
+  my ($out, $t) = $board->('skip');
+  is((grep { /\tskipped\.t\t/ } @$t)[0], "fixture-dist\tskipped.t\tSKIP\t0\t0\t0",
+     'SKIP: PCL prints 1..0 # SKIP and the perl oracle skips the file too');
+  like($out, qr/^  -- 0 PASS \/ 2 PARTIAL \/ 0 FAIL \/ 1 SKIP of 3$/m, 'SKIP has its own column in the per-dist line');
+  like($out, qr/^== TOTAL: 0 PASS \/ 2 PARTIAL \/ 0 FAIL \/ 1 SKIP of 3 file\(s\); 3 ok, 2 not ok$/m, '... and in the totals');
+  my @rl = do { open my $f, '<', "$tmp/skip.rows.tsv" or die; grep { /\S/ && !/^#/ } <$f> };
+  ok((grep { /\tskipped\.t\t0\t\*FILE\*\t/ } @rl), 'a SKIP file still gets its *FILE* row (the blessed PERL-SKIP row is its record)');
+  like($out, qr/not ok rows: 1 ours \/ 0 ruled \/ 1 perl's \/ 0 harness \/ 0 unblessed; \+ 2 assertion\(s\) never reached behind 1 whole-file row\(s\) \(0 of them ours\)/,
+       'the split: each failing row by its blessed cause; a SKIP file hides nothing; ran 1 of 3 hides 2');
+  like($out, qr/^MISMATCH PERL-FAILS fixture-dist rows\.t "fixture named pass": perl's row is ok$/m,
+       'MISMATCH fires for a PERL-FAILS claim perl\'s own run contradicts');
+  unlike($out, qr/MISMATCH PERL-SKIP/, 'no MISMATCH for a PERL-SKIP claim perl confirms');
+  like($out, qr/^ORACLE: 3 file\(s\) -- 0 cached, 3 measured/m, 'the oracle reports what it measured');
+
+  ($out, $t) = $board->('runs', STUB_PERL_RUNS => 1);
+  is((grep { /\tskipped\.t\t/ } @$t)[0], "fixture-dist\tskipped.t\tFAIL\t0\t0\t0",
+     'a file PCL skips and perl RUNS reads FAIL, never SKIP');
+  like($out, qr/^MISMATCH PERL-SKIP  fixture-dist skipped\.t: perl ran 2 row\(s\) \(ok 1, not ok 1\)$/m,
+       'MISMATCH fires for a PERL-SKIP claim on a file perl runs');
+
+  # --diff: the SKIP file's *FILE* row is in both files and its ok count is
+  # 0 both ways, so the SKIP verdict moves neither FIXED nor LOST.
+  my $bb = "$tmp/skip-base.tsv";
+  open my $bf, '>', $bb or die;
+  print $bf "fixture-dist\tdies.t\tPARTIAL\t1\t0\t0\nfixture-dist\trows.t\tPARTIAL\t2\t2\t0\nfixture-dist\tskipped.t\tFAIL\t0\t0\t0\n";
+  close $bf;
+  my $d = `perl \Q$root/tools/cpan-scoreboard.pl\E --diff \Q$causes\E \Q$tmp/skip.rows.tsv\E --board-baseline \Q$bb\E --board-current \Q$tmp/skip.tsv\E 2>&1`;
+  unlike($d, qr/^(?:FIXED|LOST)\s+fixture-dist skipped\.t/m, '--diff: a SKIP file reports neither FIXED nor LOST');
 }

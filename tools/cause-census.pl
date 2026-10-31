@@ -44,11 +44,13 @@ use lib "$FindBin::RealBin/lib";
 use PCLPaths ();
 use PCLCauses qw(cause_class class_census census_line);
 use Getopt::Long;
+use Time::Local ();
 
-my ($MARKDOWN, $HYGIENE, $FAILLOG, $ROOT);
-GetOptions('markdown' => \$MARKDOWN, 'hygiene' => \$HYGIENE,
+my ($MARKDOWN, $HYGIENE, $BY_ID, $FAILLOG, $ROOT, $UNREDUCED_DAYS);
+GetOptions('markdown' => \$MARKDOWN, 'hygiene' => \$HYGIENE, 'by-id' => \$BY_ID,
+           'unreduced-days=i' => \$UNREDUCED_DAYS,
            'faillog=s' => \$FAILLOG, 'root=s' => \$ROOT)
-    or die "usage: $0 [--markdown] [--hygiene] [--faillog DIR] [--root DIR]\n";
+    or die "usage: $0 [--markdown] [--hygiene [--unreduced-days N]] [--by-id] [--faillog DIR] [--root DIR]\n";
 
 my $root = $ROOT // PCLPaths::root($FindBin::RealBin);
 my $bl   = "$root/baselines";
@@ -225,7 +227,7 @@ my @pop = (
 
 sub commify { my $n = reverse shift; $n =~ s/(\d{3})(?=\d)/$1,/g; return scalar reverse $n }
 
-my (@table, @hygiene, %grand);
+my (@table, @hygiene, %grand, @unreduced, %by_id);
 for my $p (@pop) {
     my ($label, $d) = @$p;
     if ($d->{missing}) {
@@ -238,7 +240,14 @@ for my $p (@pop) {
     push @table, { label => $label, n => $n, note => $d->{note},
                    total => scalar(@causes) };
     for my $r (@{ $d->{rows} }) {
-        push @hygiene, [$label, $r->[0], $r->[1]] if cause_class($r->[1]) eq 'other';
+        my ($class, $key, undef, $legacy) = PCLCauses::parse_cause($r->[1]);
+        push @hygiene, [$label, $r->[0], $r->[1]] if $class eq 'other';
+        push @unreduced, [$label, $r->[0], $key, $r->[1]] if $class eq 'unreduced';
+        # --by-id: the ruled cost per not-supported id / parking key (ruling 6)
+        if ($class eq 'not-supported' || $class eq 'parked') {
+            my $id = $legacy ? "($class, legacy spelling: no id)" : ($class eq 'parked' ? "PARKED:$key" : $key);
+            $by_id{$id}{$label}++;
+        }
     }
 }
 
@@ -317,4 +326,44 @@ if ($HYGIENE) {
     }
     printf "\n  (%d distinct cause text(s) over %d row(s))\n",
            scalar(keys %seen), scalar(@hygiene);
+
+    # UNREDUCED must not become a dumping ground (ruling 1): every row, its
+    # task's age, and a flag on the ones older than two rounds -- a round is
+    # ~3 days at the s519-s530 cadence, so the default bound is 7 days.
+    my $days = $UNREDUCED_DAYS // 7;
+    my $store = $ENV{PCL_TASK_STORE} // "$root/dot-claude-in-home-dir/tasks/pcl";
+    my %age;
+    my @now = localtime; my $today = sprintf '%04d-%02d-%02d', $now[5] + 1900, $now[4] + 1, $now[3];
+    for my $u (@unreduced) {
+        next if exists $age{ $u->[2] };
+        my $created = '';
+        if (open my $f, '<:raw', "$store/$u->[2].json") {
+            local $/; my $j = eval { require JSON::PP; JSON::PP->new->utf8->decode(<$f>) };
+            $created = $j->{created} // '' if $j;
+        }
+        $age{ $u->[2] } = $created =~ /^(\d{4})-(\d\d)-(\d\d)/
+            ? int((Time::Local::timelocal(0, 0, 12, $now[3], $now[4], $now[5])
+                 - Time::Local::timelocal(0, 0, 12, $3, $2 - 1, $1)) / 86400) : undef;
+    }
+    my $old = grep { defined $age{ $_->[2] } && $age{ $_->[2] } > $days } @unreduced;
+    printf "\nUNREDUCED — %d row(s) over %d task(s); %d older than %d days (two rounds, %s) — each"
+         . " is a hunt its task must finish or re-cause.\n\n", scalar(@unreduced),
+         scalar(keys %age), $old, $days, $today;
+    for my $u (sort { ($age{ $b->[2] } // 1e9) <=> ($age{ $a->[2] } // 1e9) } @unreduced) {
+        my $a = $age{ $u->[2] };
+        printf "  %s %-26s #%s (%s) %s\n", (defined $a && $a > $days ? 'OLD' : '   '), $u->[0], $u->[2],
+               defined $a ? "$a day(s)" : 'no created date', $u->[1];
+    }
+}
+
+if ($BY_ID) {
+    # The ruled cost per not-supported id (and per parking key), across the
+    # populations: the s521 "NOT IN THE PLAN" table as a query (ruling 6).
+    my @labels = map { $_->{label} } grep { !$_->{missing} } @table;
+    print "\nBY ID — rows per not-supported id / parking key (tools/ns-ids.pl --list names them)\n\n";
+    printf "  %-44s %s  total\n", 'id', join('  ', map { sprintf '%9.9s', $_ } @labels);
+    for my $id (sort { my ($x, $y) = map { my $t = 0; $t += $_ for values %{ $by_id{$_} }; $t } $a, $b; $y <=> $x || $a cmp $b } keys %by_id) {
+        my $t = 0; $t += $_ for values %{ $by_id{$id} };
+        printf "  %-44s %s  %5d\n", $id, join('  ', map { sprintf '%9d', $by_id{$id}{$_} // 0 } @labels), $t;
+    }
 }

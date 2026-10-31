@@ -13,6 +13,11 @@
 #   tools/run-dist-t.pl --summary <dist-dir> <t-file>  # print only the TAP summary
 #   tools/run-dist-t.pl --rows <dist-dir> <t-file>     # summary + one ROW line
 #                                                      # per FAILING assertion
+#   tools/run-dist-t.pl --rows --oracle DIST T         # ... and the PERL oracle's lines
+#   tools/run-dist-t.pl --oracle-only DIST T           # only the oracle (cached)
+#        [--refresh-oracle] [--oracle-perl PATH] [--oracle-timeout SECS]
+#   (the oracle: real perl on the same t-file, from the dist root, the same
+#    @INC rule and PERL5LIB -- see "THE PERL ORACLE" below; s531b)
 #
 # --rows is the summary plus, for each failing row,
 #   ROW <TAB> num <TAB> description <TAB> got <TAB> expected <TAB> directive
@@ -44,10 +49,14 @@ use PCLSbcl ();  # the ONE sbcl command-line builder (task #344; #2959: this run
 use PCLProc ();  # the ONE child-isolation helper: a run killed by `timeout`
                  # takes its pl2cl / SBCL with it (task #3064)
 use PCLDistPrereq ();  # the dist's BUILT prerequisites' blibs (task #3520)
+use Digest::MD5 ();    # the oracle cache key (s531b)
+use File::Path ();
+use Time::HiRes ();
 
 my $root = abs_path(dirname(abs_path($0)) . "/..");
 
 my ($no_dist_lib, $summary_only, $rows_out) = (0, 0, 0);
+my ($oracle, $oracle_only, $refresh_oracle, $oracle_perl, $oracle_to) = (0, 0, 0, undef, 120);
 my (@args, @extra_inc);
 while (@ARGV) {
   $_ = shift @ARGV;
@@ -55,6 +64,11 @@ while (@ARGV) {
   elsif ($_ eq '--inc')         { push @extra_inc, shift(@ARGV) // die "--inc needs a directory\n" }
   elsif ($_ eq '--summary')     { $summary_only = 1 }
   elsif ($_ eq '--rows')        { $rows_out = 1; $summary_only = 1 }
+  elsif ($_ eq '--oracle')      { $oracle = 1 }
+  elsif ($_ eq '--oracle-only') { $oracle = 1; $oracle_only = 1 }
+  elsif ($_ eq '--refresh-oracle') { $refresh_oracle = 1 }
+  elsif ($_ eq '--oracle-perl') { $oracle_perl = shift(@ARGV) // die "--oracle-perl needs a path\n" }
+  elsif ($_ eq '--oracle-timeout') { $oracle_to = shift(@ARGV) // die "--oracle-timeout needs seconds\n" }
   else                          { push @args, $_ }
 }
 
@@ -84,6 +98,85 @@ my $err  = "/tmp/run-dist-t_$$.err";
 
 my $out  = "/tmp/run-dist-t_$$.out";
 
+# The environment `make test` has under the CPAN shell (task #3520): a
+# requirement the box perl does not satisfy, satisfied by a BUILT copy under
+# ~/.cpan/build, goes on PERL5LIB -- for the RUN only (the transpile below
+# bakes PERL5LIB into the program's @INC; this is for the `$^X` children a
+# test spawns, which run the box perl, and for the perl ORACLE).  The header
+# says what was added, and what is built nowhere (never fetched or built here).
+my ($prereq, $prereq_notes) = PCLDistPrereq::built_prereq_blibs(dist => $dist);
+my @prereq_dirs = PCLDistPrereq::perl5lib_dirs($prereq);
+my $run_perl5lib = join ':', @prereq_dirs, grep { defined && length } $ENV{PERL5LIB};
+{
+  my $hdr = $summary_only || $oracle_only ? \*STDOUT : \*STDERR;
+  printf $hdr "PREREQ\tadded\t%s %s (box perl %s) from %s\n", $_->{module}, $_->{built},
+    $_->{installed} // 'none', $_->{dir} for @$prereq;
+  print $hdr "PREREQ\tmissing\t$_\n" for @$prereq_notes;
+}
+
+# ── THE PERL ORACLE (s531b, Fable ruling s531 #4) ──────────────────────────
+# The same t-file under real perl, from the dist root, with the same @INC rule
+# and the run's PERL5LIB -- what `make test` would say.  Printed as
+#
+#   PERL    <TAB> plan <TAB> skip_all <TAB> ok <TAB> notok <TAB> rc
+#   PERLROW <TAB> num <TAB> description <TAB> directive     (each perl NOT-OK row,
+#                                                            its TODO rows included)
+#   ORACLE  <TAB> cached|measured|timeout <TAB> seconds
+#
+# skip_all is `# SKIP reason` when perl printed `1..0` (reason may be empty),
+# else empty.  The scoreboard's SKIP verdict needs BOTH sides to skip; its
+# MISMATCH line checks a blessed PERL-SKIP / PERL-FAILS row against this.
+#
+# CACHED under $PCL_ORACLE_CACHE (default ~/.pcl-cache/oracle/), keyed by the
+# oracle perl (its version, or a non-default binary's path + size + mtime),
+# the t-file's real path + size + mtime, and the @INC / PERL5LIB the run uses
+# -- so after the first board run the oracle costs nothing.  The key cannot
+# see a module installed on the box (which changes perl's skips): the round
+# run passes --refresh-oracle.  A timed-out oracle is never cached.
+sub oracle_lines {
+  my $perl = $oracle_perl // $^X;
+  my $who = defined $oracle_perl
+    ? do { my @s = stat($perl) or die "oracle perl not found: $perl\n";
+           join(' ', abs_path($perl), $s[7], $s[9]) }
+    : sprintf('perl %vd %s', $^V, $^X);
+  my @ts = stat($tfile);
+  my $key = Digest::MD5::md5_hex(join "\0", $who, abs_path($tfile), $ts[7], $ts[9],
+                                 $iflags, $run_perl5lib);
+  my $cdir = $ENV{PCL_ORACLE_CACHE} // "$ENV{HOME}/.pcl-cache/oracle";
+  my $cfile = "$cdir/$key";
+  if (!$refresh_oracle && open(my $c, '<', $cfile)) {
+    local $/; my $body = <$c>; close $c;
+    return ($body, "ORACLE\tcached\t0\n");
+  }
+  my $pout = "/tmp/run-dist-t_$$.perl";
+  my $t0 = Time::HiRes::time();
+  my ($st) = do {
+    local $ENV{PERL5LIB} = $run_perl5lib if length $run_perl5lib;
+    PCLProc::run_isolated("timeout -k 5 $oracle_to $perl $iflags $tfile >$pout 2>/dev/null </dev/null");
+  };
+  my $secs = sprintf '%.2f', Time::HiRes::time() - $t0;
+  my $text = '';
+  if (open(my $f, '<', $pout)) { local $/; $text = <$f> // '' }
+  unlink $pout;
+  my $prc = $st >> 8;
+  return ('', "ORACLE\ttimeout\t$secs\n") if $prc == 124 || ($st & 127);
+  my $tap = PCLTap::parse_tap($text);
+  my $body = sprintf "PERL\t%s\t%s\t%d\t%d\t%d\n", $tap->{plan} // '',
+    defined $tap->{skip_all} ? '# SKIP ' . PCLTap::tsv_clean($tap->{skip_all}) : '',
+    $tap->{ok}, $tap->{notok}, $prc;
+  $body .= join("\t", 'PERLROW', $_->{num}, $_->{desc}, $_->{directive}) . "\n" for @{ $tap->{rows} };
+  if (File::Path::make_path($cdir) || -d $cdir) {
+    my $tmpc = "$cfile.tmp.$$";
+    if (open(my $w, '>', $tmpc)) { print $w $body; close $w; rename $tmpc, $cfile or unlink $tmpc }
+  }
+  return ($body, "ORACLE\tmeasured\t$secs\n");
+}
+if ($oracle) {
+  my ($body, $how) = oracle_lines();
+  print $body, $how;
+  exit 0 if $oracle_only;
+}
+
 # Both children run in their OWN session (PCLProc::run_isolated): a hung SBCL
 # ignores TERM, and before #3064 a `timeout N run-dist-t.pl` killed only this
 # script and left the SBCL spinning, orphaned, for hours.
@@ -105,22 +198,8 @@ if ($rc != 0) {
 my $sbcl_cmd = PCLSbcl::sbcl_prefix_str(runtime => "$root/cl/pcl-runtime.lisp", quote => 0)
   . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp";
 print STDERR "SBCL[run-dist-t]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
-# The environment `make test` has under the CPAN shell (task #3520): a
-# requirement the box perl does not satisfy, satisfied by a BUILT copy under
-# ~/.cpan/build, goes on PERL5LIB -- for the RUN only (the transpile above
-# bakes PERL5LIB into the program's @INC; this is for the `$^X` children a
-# test spawns, which run the box perl).  The header says what was added, and
-# what is built nowhere (never fetched or built here).
-my ($prereq, $prereq_notes) = PCLDistPrereq::built_prereq_blibs(dist => $dist);
-my @prereq_dirs = PCLDistPrereq::perl5lib_dirs($prereq);
-{
-  my $hdr = $summary_only ? \*STDOUT : \*STDERR;
-  printf $hdr "PREREQ\tadded\t%s %s (box perl %s) from %s\n", $_->{module}, $_->{built},
-    $_->{installed} // 'none', $_->{dir} for @$prereq;
-  print $hdr "PREREQ\tmissing\t$_\n" for @$prereq_notes;
-}
-local $ENV{PERL5LIB} = join ':', @prereq_dirs, grep { defined && length } $ENV{PERL5LIB}
-  if @prereq_dirs;
+# The run's PERL5LIB (the dist's built prerequisites, computed above).
+local $ENV{PERL5LIB} = $run_perl5lib if @prereq_dirs;
 my ($sbcl_status) = PCLProc::run_isolated("$sbcl_cmd >$out 2>$err");
 # TAP is read from STDOUT ALONE, as `prove` reads it (#3241).  The two streams
 # used to share one file, and a stderr line written without its newline (the
