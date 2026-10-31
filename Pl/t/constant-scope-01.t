@@ -112,21 +112,17 @@ sub write_pl {
 # Run through `pcl`, the way a user runs a program: the module is transpiled
 # at its `use` with the program's @INC, so the `require` inside it finds
 # C3870::B and B's prototypes are merged.  A bare pl2cl + sbcl load does not
-# reach that merge (measured: the bug did not reproduce there).  A private
-# module cache per file run, so nothing another tree compiled is reused.
+# reach that merge (measured: the bug did not reproduce there).
 # PCL_XSERVER= (empty) keeps the gate's transpile server out of it: the
 # runtime hands the module transpile its @INC as `perl -I DIR pl2cl --module`,
 # and a SERVED request does not carry perl's -I switches (task #4041) -- under
 # the server the require inside the module did not find C3870::B, so the row
 # passed on the unfixed tree.
-my $cache = tempdir(CLEANUP => 1);
-chmod 0700, $cache;
-
 sub both_agree {
     my ($code, $desc) = @_;
     my $pl   = write_pl($code);
     my $perl = `perl $pl 2>&1 </dev/null`;
-    my $pcl  = `PCL_XSERVER= PCL_CACHE_DIR=$cache $pcl_bin $pl 2>&1 </dev/null`;
+    my $pcl  = `PCL_XSERVER= $pcl_bin $pl 2>&1 </dev/null`;
     is($pcl, $perl, "$desc (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
 }
 
