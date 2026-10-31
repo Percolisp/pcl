@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 197;
+use Test::More tests => 253;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1390,4 +1390,213 @@ for my $code ( "use v5.36;\nsub f (\$, \$y) { 1 }",
     my @t = map { s{^PPI::(?:Token::)?}{}r } toks('my $y = $c ? print $x : 1;');
     ok( grep( $_ eq 'Operator=:', @t ), 'a ternary after print $x keeps its colon (control)' )
         or diag "got: @t";
+}
+
+# ── s527c, the Lexer rows (the same rows as t/ppi_bugs_pcl.t on PCL's PPI
+# branch, in the same order).  Two helpers they use, as the upstream copy has
+# them.
+# A class name without its PPI::Token:: (or PPI::) prefix, for diagnostics.
+sub short_class {
+    my ($class) = @_;
+    $class =~ s/^PPI::(?:Token::)?//;
+    return $class;
+}
+
+# Whitespace runs collapsed to one space, for diagnostics.
+sub squash {
+    my ($s) = @_;
+    $s =~ s/\s+/ /g;
+    return $s;
+}
+
+# Top-level statements of a snippet, as "Class: content" strings.
+sub stmts {
+    my $doc = PPI::Document->new(\$_[0]) or return ('NO DOCUMENT');
+    return map { short_class(ref $_) . ': ' . squash($_->content) }
+           grep { $_->isa('PPI::Statement') } $doc->schildren;
+}
+
+# §18, the rest of the shape: perl's try (5.34) takes catch, and from 5.36
+# finally, as ONE self-terminating statement -- `try BLOCK catch (VAR) BLOCK
+# finally BLOCK` -- and Syntax::Keyword::Try also allows `try BLOCK finally
+# BLOCK`.  The finally block belongs to the Statement::Compound, and the
+# statement after it is a statement of its own.
+{
+    is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() } finally { c() }\nd();\n") ],
+        [ "Statement::Include: use feature 'try';",
+          'Statement::Compound: try { a() } catch ($e) { b() } finally { c() }',
+          'Statement: d();' ],
+        'try/catch/finally is one Statement::Compound, the next statement its own' );
+    is_deeply( [ stmts("use Syntax::Keyword::Try;\ntry { a() } finally { c() }\nd();\n") ],
+        [ 'Statement::Include: use Syntax::Keyword::Try;',
+          'Statement::Compound: try { a() } finally { c() }',
+          'Statement: d();' ],
+        'try/finally (Syntax::Keyword::Try) is one Statement::Compound' );
+}
+is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n") ],
+    [ "Statement::Include: use feature 'try';",
+      'Statement::Compound: try { a() } catch ($e) { b() }',
+      'Statement: d();' ],
+    'try/catch without finally ends at its block (control)' );
+
+# §37, the rest of the family: every list operator that takes a block
+# filehandle or program (print, printf, say, exec, system; with or without
+# CORE::) reads a { right after its ( the way it reads it without the
+# parens -- perl -e 'use feature "say"; my $fh = \*STDOUT;
+# say({$fh} "a"); CORE::say({$fh} "b")' prints a and b.  The block is the
+# first element of ONE statement inside the list.
+{
+    my @rows = (
+        [ 'say({$fh} "a");',                'say' ],
+        [ 'CORE::say({$fh} "a");',          'CORE::say' ],
+        [ 'print( {$fh} map { $_ } @d );',  'print with map in the list' ],
+        [ 'system({$prog} "a", "b");',      'system' ],
+        [ 'exec({$prog} "a", "b");',        'exec' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $what ) = @$r;
+        my $doc = PPI::Document->new(\$code);
+        my ($list) = @{ $doc->find('PPI::Structure::List') || [] };
+        my @st = $list ? $list->schildren : ();
+        my $first = @st ? $st[0]->schild(0) : undef;
+        {
+            ok( @st == 1 && ref($st[0]) eq 'PPI::Statement'
+                  && $first && ref($first) eq 'PPI::Structure::Block',
+                "$what: {\$fh} is a Block opening the one plain statement in $code" )
+              or diag 'got: ' . join( ' | ', map { ref($_) . ': ' . squash($_->content) } @st );
+        }
+    }
+}
+{
+    my $doc = PPI::Document->new(\'print({a => 1});');
+    my ($br) = grep { $_->start && $_->start->content eq '{' }
+               @{ $doc->find('PPI::Structure') || [] };
+    is( ref($br), 'PPI::Structure::Constructor',
+        'print({a => 1}) stays an anonymous hash (control)' );
+}
+
+# §6 §10 §29, the whole loop-variable slot of foreach (perly.y's FOR rules):
+# `for [my|our|state] $x`, a dereference (`for $$f`, `for ${$r}`,
+# `for ${*$f}`), a refaliasing variable (`for \my %h`, `for my \%h`,
+# `for \$x`) and the n-at-a-time list of 5.36 (`for my ($q, $r)`) all read
+# `( LIST ) BLOCK` next.  Each is ONE Statement::Compound of type foreach,
+# and the statement after it is its own.
+{
+    my @shapes = (
+        [ 'for $$f (5, 11) { 1 } f();',       '§29' ],
+        [ 'for ${$r} (5, 11) { 1 } f();',     '§29' ],
+        [ 'for ${*$f} (5, 11) { 1 } f();',    '§6' ],
+        [ 'for $$$r (5, 11) { 1 } f();',      '§1' ],
+        [ 'for my ($q, $r) (@l) { 1 } f();',  '§10' ],
+        [ 'for \my %h (@l) { 1 } f();',       '§10' ],
+        [ 'for my \%h (@l) { 1 } f();',       '§10' ],
+        [ 'for \my $x (@l) { 1 } f();',       '§10' ],
+        [ 'for \$x (@l) { 1 } f();',          '§10' ],
+        [ 'L: for \our @a (@l) { 1 } f();',   '§10' ],
+    );
+    for my $r (@shapes) {
+        my ( $code, $sect ) = @$r;
+        ( my $loop = $code ) =~ s/ f\(\);$//;
+        my $doc = PPI::Document->new(\$code);
+        my ($cmp) = $doc ? grep { $_->isa('PPI::Statement::Compound') } $doc->schildren : ();
+        {
+            is_deeply( [ stmts($code) ], [ "Statement::Compound: $loop", 'Statement: f();' ],
+                "$code: the loop is one Statement::Compound, f(); its own statement" );
+            is( $cmp && $cmp->type, 'foreach', "$code: the compound is a foreach" );
+        }
+    }
+    for my $code ( 'for my $x (@l) { 1 } f();', 'for $x qw(a b) { 1 } f();',
+                   'for (my $i = 0; $i < 3; $i++) { 1 } f();', 'for (@l) { 1 } f();' ) {
+        ( my $loop = $code ) =~ s/ f\(\);$//;
+        is_deeply( [ stmts($code) ], [ "Statement::Compound: $loop", 'Statement: f();' ],
+            "$code: one compound, then f(); (control)" );
+    }
+}
+
+# §17 §36, the rest of the family: a [ or { right after a term subscripts
+# it -- perl reads a dereference block (${$r}[0], ${a}[1], @{$r}[0, 1],
+# %{$r}{'a'}) and a key/value slice (%h{'a'}, %a[0, 1]) the way it reads
+# $a[1] and @h{'a'}.  The brackets are a Structure::Subscript.
+{
+    my @rows = (
+        [ 'my $v = ${a}[1];',          '[', '§36' ],
+        [ 'my $v = ${$r}[0];',         '[', '§17' ],
+        [ 'my @v = @{$r}[0, 1];',      '[', '§17' ],
+        [ 'my %v = %{$r}[0, 1];',      '[', '§17' ],
+        [ 'my %v = %{$r}{"a", "b"};',  '{', '§17' ],
+        [ 'my %v = %h{"a", "b"};',     '{', '§17' ],
+        [ 'my %v = %a[0, 1];',         '[', '§17' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $open, $sect ) = @$r;
+        my $doc = PPI::Document->new(\$code);
+        my @br  = grep { $_->start && $_->start->content eq $open }
+                  @{ $doc->find('PPI::Structure') || [] };
+        is( ref( $br[-1] ), 'PPI::Structure::Subscript',
+            "$code: the last $open...  is a Structure::Subscript ($sect)" );
+    }
+    for my $r ( [ 'print {$fh} [1];', '[', 'PPI::Structure::Constructor',
+                  'after a block filehandle a [ is an anonymous array (control)' ],
+                [ 'my $v = ${$r}{a};', '{', 'PPI::Structure::Subscript',
+                  '${$r}{a} is a Subscript (control)' ],
+                [ 'my @v = @h{"a", "b"};', '{', 'PPI::Structure::Subscript',
+                  '@h{...} is a Subscript (control)' ],
+                [ 'my %v = %$r{"a", "b"};', '{', 'PPI::Structure::Subscript',
+                  '%$r{...} is a Subscript (control)' ] ) {
+        my ( $code, $open, $want, $desc ) = @$r;
+        my $doc = PPI::Document->new(\$code);
+        my @br  = grep { $_->start && $_->start->content eq $open }
+                  @{ $doc->find('PPI::Structure') || [] };
+        is( ref( $br[-1] ), $want, "$code: $desc" );
+    }
+}
+
+# §5 -- a { where a statement starts is a block unless what follows says
+# anonymous hash.  perl's rule (toke.c, the curly look-ahead): a } right
+# away, or a first term that is a string or a word followed by =>, or a
+# string, a number or a word not starting with a lower-case letter
+# followed by a comma -- perl -e 'sub f { { "a", "foo" } } print ref f()'
+# prints HASH, and so do { 1, 2 } and { Foo, 1 }; { foo, 1 }, { $x, 1 }
+# and { 1.5, 2 } are blocks.
+{
+    my @rows = (
+        [ q{{ 'a', 'foo' };},  'PPI::Structure::Constructor', 1 ],
+        [ q{{ "a", 1 };},      'PPI::Structure::Constructor', 1 ],
+        [ q{{ 1, 2 };},        'PPI::Structure::Constructor', 1 ],
+        [ q{{ Foo, 1 };},      'PPI::Structure::Constructor', 1 ],
+        [ q{{ q(a), 1 };},     'PPI::Structure::Constructor', 1 ],
+        [ q{{ foo, 1 };},      'PPI::Structure::Block', 0 ],
+        [ q{{ $x, 1 };},       'PPI::Structure::Block', 0 ],
+        [ q{{ 1.5, 2 };},      'PPI::Structure::Block', 0 ],
+        [ q{{ 'a' };},         'PPI::Structure::Block', 0 ],
+        [ q{{ 'a' => 1 };},    'PPI::Structure::Constructor', 0 ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $row ) = @$r;
+        my $doc = PPI::Document->new(\$code);
+        my ($first) = $doc->schildren;
+        my $br = $first && $first->schild(0);
+        is( ref($br), $want,
+            "$code: the statement-initial { is a " . short_class($want)
+              . ( $row ? " (PCL §5)" : " (control)" ) );
+    }
+}
+
+# §13, the whole of it: the tokens of a document do not depend on the
+# caller's $/.  In slurp mode ($/ undefined, as code that has just read
+# the source is likely to be) a trailing comment absorbs its newline and
+# the newline after __DATA__ / __END__ becomes a Comment.
+{
+    my $src = "# c\nx; # d\n__DATA__\nfoo\n";
+    my $tokens = sub {
+        join '|', map { short_class(ref $_) . '=' . $_->content }
+                  PPI::Document->new(\$src)->tokens;
+    };
+    my $plain   = $tokens->();
+    my $slurped = do { local $/; $tokens->() };
+    my $crlf    = do { local $/ = "\r\n"; $tokens->() };
+    {
+        is( $slurped, $plain, 'the tokens are the same when $/ is undef' );
+        is( $crlf,    $plain, 'the tokens are the same when $/ is "\r\n"' );
+    }
 }

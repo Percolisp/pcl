@@ -134,7 +134,7 @@ our @BUGS = (
    title => '`{ LITERAL , ... }` (anon hash, comma-separated) misclassified as a Block',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'statement position: `{` + a string or word + `,` (yyl_leftcurly 6364-6505: an anon hash) built as Structure::Block' },
-   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_bare_block_is_anon_hash + its three call sites (s527c: PPI fixed on the branch; PExpr::_block_is_hash_constructor stays -- map/grep blocks are a different rule)', commit => '134ced7d', group => 'W', pr => undef },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_bare_block_is_anon_hash + its three call sites (s527c: PPI fixed on the branch; PExpr::_block_is_hash_constructor stays -- map/grep blocks are a different rule)', commit => 'a2f28ed9', group => 'W', pr => undef },
    repro => 'sub f { { \'a\' , \'foo\' } } print f()->{a}, "\\n";',
    perl => "foo\n",
    tokens => {
@@ -147,7 +147,7 @@ our @BUGS = (
    title => '`for ${*$f} (LIST) { }` — LEXER DIES: "Illegal state in \'for\' compound statement"',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'lexer-dies', shape => 'the lexer dies: `for ${*$f} (LIST)` -- a deref block as the foreach variable' },
-   fix => { kind => 'handler', handler => undef, commit => '1c6a13e0', group => 'U', pr => undef },
+   fix => { kind => 'handler', handler => undef, commit => 'a320f21a', group => 'U', pr => undef },
    repro => 'no strict "refs"; our $v; my $f = "v"; for ${*$f} (5,11,33) { print "$v " } print "\\n";',
    perl => "5 11 33 \n",
    tokens => {
@@ -199,7 +199,7 @@ our @BUGS = (
    title => '`for` accepts only `[my] $scalar` as its loop variable — and mis-lexes the rest of the FILE',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'block-owner-split', shape => 'a `for` whose variable slot holds `my (LIST)` or `\\my %h`: the head and block leave the Compound' },
-   fix => { kind => 'handler', handler => 'Pl::Parser2::_repair_nary_foreach', commit => '1c6a13e0', group => 'U', pr => undef },
+   fix => { kind => 'handler', handler => 'Pl::Parser2::_repair_nary_foreach', commit => 'a320f21a', group => 'U', pr => undef },
    repro => 'my @l = (1, 2, 3, 4); for my ($q, $r) (@l) { print "$q$r " } print "x\\n";',
    perl => "12 34 x\n",
    tokens => {
@@ -238,7 +238,7 @@ our @BUGS = (
    title => 'Tokenization of a trailing `__END__`/`__DATA__` section depends on `$/`',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => 'source read with $/ undefined: a final __END__/__DATA__ line gains a newline' },
-   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_trim_invented_tail + its two _ppi_parse calls (s527c: PPI fixed on the branch)', commit => '9d33245a', group => 'X', pr => undef },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_trim_invented_tail + its two _ppi_parse calls (s527c: PPI fixed on the branch)', commit => '3a08ed1f', group => 'X', pr => undef },
    repro => 'print "x\\n";
 __END__
 ',
@@ -296,7 +296,7 @@ a
    title => 'A SUBSCRIPT after a deref or a KV slice is structured as something else',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'a `[` / `{` subscript after a deref block `${$r}` or a KV slice `%h{...}` built as Constructor/Block' },
-   fix => { kind => 'handler', handler => undef, deleted => 'Pl::PExpr::_retag_braced_deref_subscript + the Block/Constructor alternatives of the four KV-slice predicates (s527c: PPI fixed on the branch)', commit => 'ab3ccfc9', group => 'V', pr => undef },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::PExpr::_retag_braced_deref_subscript + the Block/Constructor alternatives of the four KV-slice predicates (s527c: PPI fixed on the branch)', commit => '75fc24e8', group => 'V', pr => undef },
    repro => 'my $r = [5]; my $v = ${$r}[0]; print "$v\\n";',
    perl => "5\n",
    tokens => {
@@ -309,7 +309,7 @@ a
    title => '`finally { … }` is not part of the `try` statement — and eats the next one',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'continuation-split', shape => '`finally BLOCK` after try/catch starts a new statement and swallows the next one' },
-   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser2::_repair_try_finally + the _lower_block finally join (s527c: PPI fixed on the branch)', commit => 'ab6fb665', group => 'T', pr => undef },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser2::_repair_try_finally + the _lower_block finally join (s527c: PPI fixed on the branch)', commit => '4e021b91', group => 'T', pr => undef },
    repro => 'use feature \'try\'; no warnings;
 try { die "e\\n" } catch ($e) { print "caught $e" } finally { print "fin\\n" }
 print "after\\n";
@@ -460,7 +460,7 @@ $Ｘ = 1; print "$Ｘ\\n";
    title => 'A DEREFERENCE as the `foreach` loop variable fails the LEXER: "Illegal state in \'for\' compound statement"',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'lexer-dies', shape => 'the lexer dies: `for $$f (LIST)` -- a dereference as the foreach variable' },
-   fix => { kind => 'handler', handler => undef, commit => '1c6a13e0', group => 'U', pr => undef },
+   fix => { kind => 'handler', handler => undef, commit => 'a320f21a', group => 'U', pr => undef },
    repro => 'our $z = 7; my $f = "z"; no strict "refs"; my @seen; for $$f (5, 11) { push @seen, $$f } print "@seen $z\\n";',
    perl => "5 11 7\n",
    tokens => {
@@ -560,7 +560,7 @@ print g(), "\\n";
    title => 'The `[i]` of a braced element `${name}[i]` is lexed as an anonymous-array CONSTRUCTOR',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'the `[i]` after a braced name `${name}` built as Constructor' },
-   fix => { kind => 'handler', handler => undef, deleted => 'the Constructor branch of Pl::Parser2::_brace_name_refs (s527c: PPI fixed on the branch; the helper stays)', commit => 'ab3ccfc9', group => 'V', pr => undef },
+   fix => { kind => 'handler', handler => undef, deleted => 'the Constructor branch of Pl::Parser2::_brace_name_refs (s527c: PPI fixed on the branch; the helper stays)', commit => '75fc24e8', group => 'V', pr => undef },
    repro => '@a = (1, 2, 3); print ${a}[1], "\\n";',
    perl => "2\n",
    tokens => {
@@ -573,7 +573,7 @@ print g(), "\\n";
    title => '`print({$fh} LIST)` -- the parenthesised block filehandle -- is split into two statements, or its block is a CONSTRUCTOR',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'filehandle-block-split', shape => '`print({$fh} LIST)`: the block filehandle becomes its own Statement::Compound, or a Constructor' },
-   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_repair_paren_block_filehandle (33 lines + comment) and its two calls (_ppi_parse, fragment_doc) (s527c: PPI fixed on the branch)', commit => '5ce95d4a', group => 'Y', pr => undef },
+   fix => { kind => 'handler', handler => undef, deleted => 'Pl::Parser::_repair_paren_block_filehandle (33 lines + comment) and its two calls (_ppi_parse, fragment_doc) (s527c: PPI fixed on the branch)', commit => '56330a40', group => 'Y', pr => undef },
    repro => 'my $fh = \\*STDOUT; print({$fh} "a", "b"); printf({$fh} "%s\\n", "c");',
    perl => "abc\n",
    tokens => {
