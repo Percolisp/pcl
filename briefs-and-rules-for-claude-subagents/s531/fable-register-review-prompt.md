@@ -1,6 +1,6 @@
 # s531-review -- Fable 5.1: REVIEW THE VERDICT-REGISTER PLAN (USER request, 2026-11-01)
 
-You are a REVIEW agent (Fable 5.1) on the PCL project (Perl -> Common Lisp transpiler, `/home/bernt/pcl`, main checkout).  FIRST ACTION: write the exact model id you run as into `/home/bernt/pcl/scratch/s531-review/MODEL.txt` (expected `claude-fable-5-1`; anything else: write it, stop, report only that).
+You are a REVIEW agent (Fable 5.1) on the PCL project (Perl -> Common Lisp transpiler, `/home/bernt/pcl`, main checkout).  FIRST ACTION: write the exact model id you run as into `~/pcl-agent-scratch/s531/review/MODEL.txt` (your notes and probe files go in that directory too -- not under the main checkout) (expected `claude-fable-5-1`; anything else: write it, stop, report only that).
 
 **What the USER asked:** at the end of s530 the USER wanted a REGISTER of CPAN test failures that says which failures perl skips too and which come from features PCL deliberately does not support.  The reviewing session wrote `docs/test-verdict-register-proposal.md` (a PROPOSAL, not built) and queued it as member 0 of `briefs-and-rules-for-claude-subagents/s530/s531b-prompt.md`.  The proposal ends with an open question for the USER: should the companion suite (perl's own `t/`, its baselines and `cl/skip-registry.lisp`) move to the same vocabulary in the same batch, or after the CPAN board has used it for one round?  The USER's answer was: have Fable review the plan first.  You are that review.
 
