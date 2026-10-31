@@ -6,9 +6,9 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: 6a5de5c1953d94e3e7e829b40af80b23a97867ca
-lib-tree: 89a7ca8b98f4b650c2729413b5447c7077916916
-date: 2026-10-29
+branch-sha: ded727c31a80b563524e5875a5d688c8ce599446
+lib-tree: b0f4372bffe97bb89ecdb8c336ff4f6d6a94281e
+date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
@@ -91,3 +91,5 @@ commit: 2e173336 TODO tests: $, and $= under the signatures feature
 commit: 61817c99 Tokenizer: a nameless parameter only inside a signature
 commit: a7f3847f TODO tests: an attribute after a list's anonymous sub or a declaration
 commit: 6a5de5c1 Word, Unknown: a label only at a statement's start; a declaration's attributes
+commit: 9d43dfa9 TODO tests: a typed declaration's attribute
+commit: ded727c3 Tokenizer: a typed declaration's colon introduces attributes

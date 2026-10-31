@@ -22,7 +22,7 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
 
-use Test::More tests => 71;
+use Test::More tests => 72;
 BEGIN { use_ok('Pl::PExpr') };
 
 my $code;
@@ -519,4 +519,19 @@ say "3 ", f() ? "yes" : "no";
 my $p = (sub :prototype($) { 42 }); print "4 ", $p->(), " ", prototype($p) // "u", "\n";
 local $, = "-"; print "5", "a"; print "\n"; $, = undef;
 sub g ($a, $, $c = 3) { "$a$c" } say "6 ", g(1, 2);
+PL
+
+# s527b, the companion's finding (t/op/attrs.t:84): a TYPED declaration's
+# attribute.  Group S taught PCL's PPI the colon after `my $x`, and
+# _strip_decl_decorations stopped reading the bare Word -- but `my A $x : plugh`
+# still lexed as a Word until ded727c3, so `eval 'my A $x : plugh;'` died
+# "unsupported declaration" (and the typed form with a following statement was
+# a Parser2 TODO).  perl: both evals succeed.
+both_agree(<<'PL', 's527b §8: a typed declaration takes an attribute (my A $x : plugh)');
+sub A::MODIFY_SCALAR_ATTRIBUTES { return }
+sub Dog::MODIFY_ARRAY_ATTRIBUTES { return }
+no warnings 'reserved';
+eval 'my A $x : plugh;'; print "1 [$@]\n";
+eval 'my A $x : plugh; 1'; print "2 [$@]\n";
+my Dog @d : shared = (1, 2); print "3 @d\n";
 PL

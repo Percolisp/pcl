@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 193;
+use Test::More tests => 197;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1367,4 +1367,27 @@ for my $code ( "use v5.36;\nsub f (\$, \$y) { 1 }",
         my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
         ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
     }
+}
+
+# §8, a TYPED declaration.  perl's `my CLASS $var : attr` (and `my CLASS
+# ($a, $b) : attr`) has the class name between the declarator and the
+# variable; the colon still introduces the declaration's attributes.
+{
+    my @rows = (
+        [ 'my A $x : plugh;',                 'Attribute=plugh',  'a typed declaration takes an attribute' ],
+        [ 'my Foo::Bar @s :shared = ();',     'Attribute=shared', 'a typed declaration with a qualified class takes an attribute' ],
+        [ 'our Dog ($p, $q) : unique;',       'Attribute=unique', 'a typed declared list takes an attribute' ],
+    );
+    for my $r (@rows) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+# The control: a word before a variable that is not after a declarator keeps
+# the colon an operator (print $x in a ternary).
+{
+    my @t = map { s{^PPI::(?:Token::)?}{}r } toks('my $y = $c ? print $x : 1;');
+    ok( grep( $_ eq 'Operator=:', @t ), 'a ternary after print $x keeps its colon (control)' )
+        or diag "got: @t";
 }

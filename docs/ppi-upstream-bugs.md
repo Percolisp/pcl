@@ -381,7 +381,7 @@ inverse guards.
 
 ## 8. A variable declaration's ATTRIBUTE is not a `Token::Attribute`  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527b: group S, commit `6a5de5c1`; `Tokenizer::_after_declared_variables`: the colon after `my`/`our`/`state` + a variable or list introduces Attribute tokens); `Pl::Parser2::_strip_decl_decorations` STAYS (it is the drop-and-announce semantics) and now reads the Attribute tokens; upstream PR: pending (`PR-S.md`).
+**FIXED on PCL's PPI branch** (s527b: group S, commit `6a5de5c1`; `Tokenizer::_after_declared_variables`: the colon after `my`/`our`/`state` + a variable or list introduces Attribute tokens; a TYPED declaration -- `my Dog $spot : attr` -- by `ded727c3` (s530: the companion run of t/op/attrs.t found `eval q{my A $x : plugh;}` dying, because `_strip_decl_decorations` had stopped reading the Word form); `Pl::Parser2::_strip_decl_decorations` STAYS (it is the drop-and-announce semantics) and now reads the Attribute tokens; upstream PR: pending (`PR-S.md`).
 
 Minimal repro (found s395, task #314 family F-A2 — `t/op/attrs.t`, `t/uni/attrs.t`):
 
