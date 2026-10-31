@@ -4704,8 +4704,13 @@ sub _elem_container_key {
                    $kind =~ /^h_/ ? q(%) : q(@))
       if !$is_slice;
   }
-  my @keys = map { $self->gen_node_form($kids->[$_]) }
-             ($is_slice ? (1 .. $#$kids) : (1));
+  # A hash ELEMENT's key is formed by the ONE key rule the read uses
+  # (_hash_key_form: `$h{a,b}` joins with $;, a bare array is its count) --
+  # `exists $h{@a}` / `delete $h{@a}` keyed on the array itself (#3865).
+  my @keys = $is_slice
+    ? (map { $self->gen_node_form($kids->[$_]) } 1 .. $#$kids)
+    : ($kind =~ /^h_/ ? $self->_hash_key_form($kids->[1])
+                      : $self->gen_node_form($kids->[1]));
   return ($kind, $container, @keys);
 }
 
@@ -4837,6 +4842,14 @@ sub _hash_key_form {
     return ['p-join', '|$;|', ['vector', map { $self->gen_node_form($_) } @$key_kids]]
       if @$key_kids > 1;
   }
+  # A bare ARRAY as the key -- `$h{@a}`, `$h{@$r}`, `$r->{@{...}}` -- is in
+  # SCALAR context (the subscript rule of #3863, PExpr child_context) and keys
+  # on its COUNT; the array operand itself is emitted bare whatever its
+  # context, so the count is asked for here, the way `scalar(@a)` spells it
+  # (#3865).  An array INDEX needs no wrap: p-aref numifies a vector to its
+  # length already.
+  return ['p-scalar', $self->gen_node_form($key_id)]
+    if $self->_is_array_expr_node($key_node, $key_id);
   return $self->gen_node_form($key_id);
 }
 

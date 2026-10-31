@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 144;
+plan tests => 145;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -280,6 +280,46 @@ test_cl('an element subscript is scalar context (#3863)',
      sub ctx { wantarray ? "L" : "S" } my %c = (S => "s", L => "l");
      print join(",", keys %f), " ", join(",", sort keys %h), " $h{q} @l ", $c{ctx()}, "\n";',
     "F p,q 1x 4 5 s\n");
+
+# #3865 (s530a): a bare ARRAY as a hash key is its COUNT -- read, interpolation, store, ->{}, exists, delete, pos, a multi-key exists; outputs probed under perl 5.40.3.
+test_cl('a bare array as a hash KEY keys on its count (#3865)',
+        <<'PL', <<'OUT');
+{
+my @a = (1,2); my %h = (2 => "two", 3 => "three", 0 => "zero"); my @b = (5,6,7); my $r = \@a; my $hr = \%h;
+print "1 ", $h{@a}, "|", "$h{@a}", "\n";
+print "2 ", $b[@a], "|", "$b[@a]", "\n";
+print "3 ", $h{@$r}, "|", $hr->{@a}, "|", $hr->{@$r}, "|", "$hr->{@a}", "\n";
+print "4 ", $h{@{$r}}, "|", $b[@$r], "|", $b[$#a], "\n";
+$h{@a} = "set"; print "5 $h{2}\n";
+my @e; print "6 ", $h{@e}, "\n";
+push @a, 9; print "7 ", $h{@a}, "|", exists $h{@a} ? "e" : "ne", "|", delete $h{@a}, "|", (exists $h{3} ? "still" : "gone"), "\n";
+my %c; $c{@a}++; $c{@a}++; print "8 ", join(",", %c), "\n";
+print "9 ", $h{scalar(@a)} // "u", "|", $h{(@a)} // "u", "\n";
+}
+{
+my @a = (1,2); my %h = (2 => "two"); my %m; $m{1,2} = "mk";
+print "1 ", (exists $m{1,2} ? "e" : "ne"), " ", delete($m{1,2}) // "u", " ", scalar(keys %m), "\n";
+my $r = \%h; print "4 ", (exists $r->{@a} ? "e" : "ne"), "\n";
+my %t; tie my %x, 'Tie::StdHash' if 0; my @k = (5,6,7); $t{@k} = 1; print "5 ", join(",", keys %t), "\n";
+my %p; pos($p{@a}) = undef; $p{@a} = "abc"; $p{@a} =~ /b/g; print "6 ", pos($p{@a}) // "u", "\n";
+my ($x, $y) = (3, 4); my %j; $j{$x, $y} = "xy"; print "7 ", (exists $j{$x, $y} ? "e" : "ne"), "\n";
+}
+PL
+1 two|two
+2 7|7
+3 two|two|two|two
+4 two|7|6
+5 set
+6 zero
+7 three|e|three|gone
+8 3,2
+9 u|u
+1 e mk 0
+4 e
+5 3
+6 2
+7 e
+OUT
 
 # #3866: `warn` with STDERR CLOSED drops the warning, as perl does -- it died
 # with the host's "fd-stream ... is closed" text (Log::Log4perl t/004Config.t).
