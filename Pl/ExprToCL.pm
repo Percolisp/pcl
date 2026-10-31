@@ -2025,11 +2025,18 @@ sub gen_binary_op_form {
     # `|$\||`, `|@#|`, `|${^WARNING_BITS}|` are the PUNCTUATION/caret magic
     # globals, which have always taken the p-setf tail (their places have
     # bespoke setf arms) and must keep taking it.
-    } elsif ($left_flat =~ /(?:^|::)(?:@|\|@(?=[^\W\d]))/) {
+    # The three tests are ANCHORED (#4080): the left side IS a variable -- the
+    # sigil starts the text or follows a package prefix with no paren or
+    # space.  Unanchored, `::$` matched INSIDE `(p-gethash-deref Q::$t "a")` /
+    # `(p-cast-$ Q::$r)` and a store through a qualified scalar took
+    # p-scalar-=, whose `(boundp '<place>)` died on the non-symbol place.
+    # Every other form takes the generic p-setf tail, as its unqualified twin
+    # always did.
+    } elsif ($left_flat =~ /^(?:[^()\s]*::)?(?:@|\|@(?=[^\W\d]))/) {
       return ['p-array-=', $left, $right];
-    } elsif ($left_flat =~ /(?:^|::)(?:%|\|%(?=[^\W\d]))/) {
+    } elsif ($left_flat =~ /^(?:[^()\s]*::)?(?:%|\|%(?=[^\W\d]))/) {
       return $self->_aggregate_assign_value(['p-hash-=', $left, $right], $node_id);
-    } elsif ($left_flat =~ /(?:^|::)(?:\$|\|\$(?=[^\W\d]))/) {
+    } elsif ($left_flat =~ /^(?:[^()\s]*::)?(?:\$|\|\$(?=[^\W\d]))/) {
       return ['p-scalar-=', $left, $right];
     }
     # else: fall through to (p-setf $left $right) at the generic tail.

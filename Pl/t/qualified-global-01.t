@@ -28,7 +28,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -118,3 +118,50 @@ print "[", (defined $main::y ? $main::y : "undef"), "]\n";
 print "[", nm(), "]\n";
 print "[", (defined $::y ? $::y : "undef"), "]\n";
 PL
+
+# #4080 (s530b): an ELEMENT or DEREFERENCE store through a package-QUALIFIED
+# scalar -- `$Q::r->{k} = ...`, `$$Q::r = ...`, and every store through a
+# file-level `our $x` in a package (emitted `Q::$x`) -- took the plain-scalar
+# assignment `p-scalar-=`, whose `(boundp '<place>)` died "is not a symbol" at
+# run time: the three sigil tests of ExprToCL's `=` dispatch matched a `::$`
+# ANYWHERE in the left side's text.  Template::Parser.pm:92 (the TAG_STYLE
+# chain) is the shape that stopped Template-Toolkit loading.
+perl_oracle("#4080 element / deref stores through a qualified or our-aliased scalar", <<'PL');
+package Q;
+our $t;
+our $T = { default => [1, 2] };
+$t->{a} = 1;
+print "r1 $t->{a}\n";
+$T->{template} = $T->{tt2} = $T->{default};
+print "r2 $T->{template}[1] $T->{tt2}[0]\n";
+$Q::r = \$Q::z;
+$$Q::r = 3;
+print "r3 $Q::z\n";
+${$Q::r} = 4;
+print "r4 $Q::z\n";
+$Q::a->[0] = 5;
+${$Q::a}[1] = 6;
+print "r5 @$Q::a\n";
+our $u;
+$u->[2] = 7;
+$u->[0]{k} = 8;
+print "r6 $u->[2] $u->[0]{k}\n";
+$Q::s = 9;
+@Q::arr = (10, 11);
+%Q::h = (k => 12);
+$Q::h{j} = 13;
+$Q::arr[2] = 14;
+print "r7 $Q::s @Q::arr $Q::h{k} $Q::h{j}\n";
+@{$Q::a}[2, 3] = (15, 16);
+@$t{qw(b c)} = (17, 18);
+print "r8 @$Q::a[2,3] $t->{b}$t->{c}\n";
+PL
+
+{
+  my $f  = write_pl("package Q;\nour \$t;\n\$t->{a} = 1;\n\$\$Q::r = 2;\n\$Q::a->[0] = 3;\n\$Q::s = 4;\n");
+  my $cl = PCLCore::transpile("$pl2cl $f");
+  my @bad = $cl =~ /(\(p-scalar-= \(p-\S+)/g;
+  ok(!@bad && $cl =~ /\(p-scalar-= Q::\$s 4\)/,
+     "#4080 shape: no p-scalar-= on a non-variable place; a plain qualified scalar keeps it"
+     . (@bad ? " (found: @bad)" : ""));
+}
