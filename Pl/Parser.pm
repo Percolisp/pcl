@@ -2285,21 +2285,9 @@ sub _process_children {
 
   my @children = $parent->children;
   @children = _named_subs_first(@children) if $opt{subs_first};
-  my %skip;
 
   for my $i (0 .. $#children) {
-    next if $skip{$i};
     my $child = $children[$i];
-
-    # Lookahead: bare block compound statement followed by continue { }
-    if (ref($child) eq 'PPI::Statement::Compound') {
-      my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
-      if ($continue) {
-        $self->_process_compound_statement($child, $continue);
-        $self->_process_trailing_tokens($trailing) if $trailing && @$trailing;
-        next;
-      }
-    }
 
     $self->_process_element($child);
 
@@ -2344,78 +2332,6 @@ sub _named_subs_first {
       || $c->isa('PPI::Statement::Variable') || $c->isa('PPI::Statement::Scheduled');
   }
   return @out;
-}
-
-# Look ahead for a continue { } statement after a bare block compound statement.
-# PPI splits "{ ... } continue { ... }" into two sibling statements for bare blocks.
-# PPI may also include trailing statements in the continue PPI::Statement.
-# Returns ($continue_block, \@trailing_children) if found, () otherwise.
-sub _find_continue_sibling {
-  my ($self, $children, $i, $skip) = @_;
-
-  my $child = $children->[$i];
-
-  # Check if this is a bare block (first significant child is a Block, not a keyword)
-  my $is_bare_block = 0;
-  for my $cc ($child->children) {
-    my $ref = ref($cc);
-    next if $ref eq 'PPI::Token::Whitespace';
-    next if $ref eq 'PPI::Token::Label';
-    if ($ref eq 'PPI::Structure::Block') {
-      $is_bare_block = 1;
-    }
-    last;
-  }
-  return () unless $is_bare_block;
-
-  # Look ahead for continue { } as next non-whitespace sibling
-  for my $j ($i+1 .. $#$children) {
-    my $sibling = $children->[$j];
-    next if ref($sibling) eq 'PPI::Token::Whitespace';
-    if (ref($sibling) eq 'PPI::Statement') {
-      my @sib_kids = $sibling->children;
-      my $k = 0;
-      $k++ while $k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Token::Whitespace';
-      if ($k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Token::Word'
-          && $sib_kids[$k]->content eq 'continue') {
-        my $cont_idx = $k;
-        $k++;
-        $k++ while $k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Token::Whitespace';
-        if ($k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Structure::Block') {
-          my $continue_block = $sib_kids[$k];
-          # Collect trailing children after the continue block (PPI quirk:
-          # PPI may include subsequent statements in the same PPI::Statement)
-          my @trailing;
-          for my $t ($k+1 .. $#sib_kids) {
-            push @trailing, $sib_kids[$t];
-          }
-          $skip->{$j} = 1;
-          return ($continue_block, \@trailing);
-        }
-      }
-    }
-    last;  # Only check immediate next non-whitespace sibling
-  }
-  return ();
-}
-
-# Process trailing PPI tokens that were orphaned when a continue { } statement
-# was consumed by the bare block lookahead. PPI may include subsequent code
-# (e.g., "$ok = 1;") in the same PPI::Statement as the continue block.
-sub _process_trailing_tokens {
-  my ($self, $trailing) = @_;
-
-  # Filter out whitespace-only trailing content
-  my @significant = grep { ref($_) ne 'PPI::Token::Whitespace' } @$trailing;
-  return unless @significant;
-
-  # Create a synthetic PPI::Statement containing the trailing tokens
-  # and process it as an expression statement
-  my $synth = PPI::Statement->new();
-  for my $token (@$trailing) {
-    $synth->add_element($token->clone());
-  }
-  $self->_process_expression_statement($synth);
 }
 
 # Process a single PPI element
@@ -5411,7 +5327,6 @@ sub _process_state_declaration {
 sub _process_compound_statement {
   my $self = shift;
   my $stmt = shift;
-  my $external_continue = shift;  # Optional: continue block from sibling lookahead
 
   # Get the first keyword to determine statement type
   # Also detect any label (LABEL:) before the keyword
@@ -5438,7 +5353,7 @@ sub _process_compound_statement {
   if (!$first_word && $first_block) {
     # Bare block: { ... } possibly with continue { ... }
     # Scan remaining children for continue block (when PPI keeps it as child)
-    my $continue_block = $external_continue;  # May have been found by sibling lookahead
+    my $continue_block;
     my $found_continue = 0;
     for my $child ($stmt->children) {
       my $ref = ref($child);
@@ -6061,9 +5976,7 @@ sub _process_block_in_tail_context {
   my $last_sig = @sig ? $sig[-1] : undef;
 
   my @children = $block->children;
-  my %skip;
   for my $i (0 .. $#children) {
-    next if $skip{$i};
     my $child = $children[$i];
     my $ref   = ref($child);
     next if $ref eq 'PPI::Token::Whitespace';
@@ -6071,15 +5984,6 @@ sub _process_block_in_tail_context {
 
     # Fire the scoped-block hook before each significant statement.
     $self->{_stmt_pre_hook}->($self, $child) if $self->{_stmt_pre_hook};
-
-    if ($ref eq 'PPI::Statement::Compound') {
-      my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
-      if ($continue) {
-        $self->_process_compound_statement($child, $continue);
-        $self->_process_trailing_tokens($trailing) if $trailing && @$trailing;
-        next;
-      }
-    }
 
     if (defined $last_sig && $child == $last_sig) {
       $self->_process_tail_stmt($child, $ret_var);
@@ -6267,16 +6171,6 @@ sub _process_block {
     # significant statement.  The hook opens (let ...) for any 'my'
     # declarations associated with this statement's PPI object.
     $self->{_stmt_pre_hook}->($self, $child) if $self->{_stmt_pre_hook};
-
-    # Lookahead: bare block followed by continue { } as sibling
-    if ($ref eq 'PPI::Statement::Compound') {
-      my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
-      if ($continue) {
-        $self->_process_compound_statement($child, $continue);
-        $self->_process_trailing_tokens($trailing) if $trailing && @$trailing;
-        next;
-      }
-    }
 
     # Intercept last significant child when tail-if is active
     if ($tail_ret_var && defined $tail_last_sig && $child == $tail_last_sig) {

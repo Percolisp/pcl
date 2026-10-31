@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> v-ac
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> v-ad
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: v-ac
-branch-sha: 52c4e102435e40627e1fda13a2870bfb56c8ba8f
-lib-tree: 4874cd8513e0412a0b1090e452d9465f797bb991
+branch: v-ad
+branch-sha: b23d5869c6f7c4ec11caed9a85ec516beb9c697b
+lib-tree: b9dc5cf824e3f4c74c313495ff5dca73bc504dc9
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -54,6 +54,7 @@ fix: AG §20 9e862724 Include: use experimental 'try' and the 5.40 bundle enable
 fix: AH §14 a33452b4 Whitespace: <...> after a statement or map/grep block is a readline
 fix: AG §20 40fed036 Include: defer and class are features PPI tracks
 fix: AI §49 §54 52c4e102 Lexer: the { after a glob, and after a glob's dereference block, subscripts it
+fix: AJ §51 b23d5869 Lexer: a bare block takes a continue block
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -141,3 +142,4 @@ commit: b91ced6c TODO tests: use feature / use experimental 'defer' and 'class'
 commit: 40fed036 Include: defer and class are features PPI tracks
 commit: 1610e60c TODO tests: the Lexer's structure cases from PCL (§48-§54, §57)
 commit: 52c4e102 Lexer: the { after a glob, and after a glob's dereference block, subscripts it
+commit: b23d5869 Lexer: a bare block takes a continue block

@@ -2572,6 +2572,8 @@ Block (it stays: PCL still classifies what PPI leaves ambiguous).  Task #3742.
 
 ## 51. A BARE BLOCK with a `continue` block: `continue` starts a NEW statement  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527e: group AD, commit `d9004351` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AD.md`).  PCL's repair DELETED: the Parser2 orphan-continue join arm and v1's `_find_continue_sibling` + `_process_trailing_tokens` (instrumented to die first: never fired over the corpus).
+
 **Minimal repro** (valid perl; perl 5.40.3 prints `11`):
 
 ```perl

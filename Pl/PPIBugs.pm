@@ -796,9 +796,9 @@ not code
    tasks => [3742] },
  { id => 51, kind => 'structure', dump => 'statements',
    title => 'A BARE BLOCK with a `continue` block: `continue` starts a NEW statement, which swallows the statement after it',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'continuation-split', shape => 'the `continue` after a bare block starts its own statement' },
-   fix => { kind => 'handler', handler => 'Pl::Parser2::_lower_block_1 (the unlabeled `{ } continue { }` join)' },
+   fix => { kind => 'handler', handler => undef, changed => 'DELETED (s527e): Pl::Parser2::_lower_block_1 the unlabeled `{ } continue { }` join arm (+ _lower_compound $sib_cont), v1 Pl::Parser::_find_continue_sibling + _process_trailing_tokens + their three call sites', commit => 'd9004351', group => 'AD', pr => undef },
    repro => 'my $n = 0; { $n++ } continue { $n += 10 } print "$n\\n";
 ',
    perl => "11\\n",

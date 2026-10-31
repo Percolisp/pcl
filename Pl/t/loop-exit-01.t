@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 54;
+plan tests => 55;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run; stderr
 # is kept, because some of these rows are about what lands on it.  $OPT is an
@@ -341,6 +341,17 @@ my $n = 0;
 print "n=$n\n";
 PERL
    '... and a caught `next` ends the loop-once but only AFTER its continue block');
+
+# PPI §51 (s527e): PCL's PPI keeps a bare block's `continue` inside the
+# compound, so the statement after it is a statement of its own -- a
+# declarator or a compound there used to die "Parser2 TODO: non-expression
+# statement after bare-block continue" (the orphan-continue join, deleted).
+is(run_cl(<<'PERL'), "m=22\nn=12\n",
+my $n = 0;
+{ $n++ } continue { $n += 10 } my $m = $n * 2; if ($m) { print "m=$m\n" }
+{ $n++; last } continue { $n += 100 } for my $i (1) { print "n=$n\n" }
+PERL
+   'bare block + continue: a `my` and an `if` / `for` right after it are their own statements (PPI §51)');
 
 is(run_cl(<<'PERL'), "n=3003 g=4\n",
 sub f { next }

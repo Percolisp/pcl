@@ -11380,44 +11380,6 @@ sub _lower_block_1 {
     }
   }
 
-  # -- unlabeled `{ … } continue { … }`: PPI splits the continue off into an
-  # ORPHAN sibling PPI::Statement (a labeled bare block keeps it inside the
-  # compound) and may glom the NEXT statement's tokens into that orphan after
-  # the continue block (there is no `;` to end it).  Join the continue back
-  # onto the compound and lower the glommed trailing tokens as a synthetic
-  # statement — v1's _find_continue_sibling + _process_trailing_tokens.
-  if ($first->isa('PPI::Statement::Compound') && @rest
-      && ref($rest[0]) eq 'PPI::Statement') {
-    my @ck = $first->schildren;
-    shift @ck if @ck && $ck[0]->isa('PPI::Token::Label');
-    my @ok = $rest[0]->schildren;
-    if (@ck && $ck[0]->isa('PPI::Structure::Block')
-        && @ok >= 2
-        && $ok[0]->isa('PPI::Token::Word') && $ok[0]->content eq 'continue'
-        && $ok[1]->isa('PPI::Structure::Block')) {
-      my @och = $rest[0]->children;
-      my ($bi) = grep { $och[$_] == $ok[1] } 0 .. $#och;
-      my @trail = @och[$bi + 1 .. $#och];
-      my @tsig  = grep { $_->significant
-                         && !($_->isa('PPI::Token::Structure') && $_->content eq ';') } @trail;
-      my @rest2 = @rest[1 .. $#rest];
-      my @tforms;
-      if (@tsig) {
-        # Only a plain expression statement can ride here — a declarator or
-        # compound keyword needs its real statement machinery → v1.
-        die "Parser2 TODO: non-expression statement after bare-block continue\n"
-          if join(' ', map { $_->content } @tsig)
-             =~ /(?<![-\$\@\%\w])(?:my|our|local|state|sub|package|use|no|require|if|unless|while|until|for|foreach)\b/;
-        my $synth = PPI::Statement->new;
-        $synth->add_element($_->clone) for @trail;
-        @tforms = $self->_lower_stmt($synth, $vi, @rest2 ? undef : $tail_ctx);
-      }
-      return ($self->_lower_compound($first, $vi, undef, $ok[1]),
-              @tforms,
-              $self->_lower_block(\@rest2, $vi, $tail_ctx));
-    }
-  }
-
   # -- a licensed handle declared in an if/unless/while/until CONDITION
   # (`if (open(my $fh, …)) {…}`) is freed at the exit of the ENCLOSING block,
   # not at the end of the statement (perl, probed: task #2006 (b)).  Its `let`
@@ -12098,7 +12060,7 @@ sub _stmt_has_global_match {
 }
 
 sub _lower_compound {
-  my ($self, $stmt, $vi, $tail_ctx, $sib_cont) = @_;
+  my ($self, $stmt, $vi, $tail_ctx) = @_;
   my @k = $stmt->schildren;
 
   # Optional leading `LABEL:` — rides along on loops (`OUTER: while …`) and
@@ -12112,10 +12074,9 @@ sub _lower_compound {
 
   # Bare block { … } = a loop-once: last/next/redo all work inside it.
   if ($k[0]->isa('PPI::Structure::Block')) {
-    # `LABEL: { … } continue { … }` keeps the continue INSIDE the compound;
-    # the unlabeled form arrives as an ORPHAN sibling statement instead,
-    # joined back by _lower_block's lookahead into $sib_cont.
-    my $cont = $sib_cont;
+    # `{ … } continue { … }` (labelled or not) keeps the continue INSIDE the
+    # compound (PPI §51, fixed on PCL's PPI branch).
+    my $cont;
     my ($ci) = grep { $k[$_]->isa('PPI::Token::Word')
                       && $k[$_]->content eq 'continue' } 0 .. $#k;
     if (defined $ci) {
