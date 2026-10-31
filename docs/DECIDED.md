@@ -11,7 +11,7 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
-## s530 (2026-10-31, Fable; the USER: "Please start. Do 3 subtasks at a time."; 01:4x on the heavy slots: the 4G fence is a ceiling, not a reservation) -- the three s529 checkpoints resumed and merged (MAIN-READY-49 s526w2, -50 s527b, -51 s527c), the s529a batch split by layer (-52 s529b, -53 s529a); three heavy slots
+## s530 (2026-10-31, Fable; the USER asked for three subtasks at a time, and pointed out that the 4 G fence of a heavy slot is a ceiling, not a reservation) -- the three s529 checkpoints resumed and merged (MAIN-READY-49 s526w2, -50 s527b, -51 s527c), the s529a batch split by layer (-52 s529b, -53 s529a); three heavy slots
 - **Heavy slots: THREE, not four** (`~/pcl-agent-scratch/s513/heavy.sh`): measured legs peak ~1.8 G under their 4 G fence with 9 G free, so memory allows more; CPU is the limit (load 11 on 16 cores with two legs, each leg runs 4-8 processes) and the timed runs (the board's 120 s per file, everyday) report false TIMEOUTs on an oversubscribed box.  The two-slot script is kept as `heavy.sh.two-slot-s514`.
 - **The exclusive-waiting marker holds its waiter's pid**; a dead pid is ignored and removed, a trap removes it on TERM/INT/HUP -- a killed waiter blocked slots 2 and 3 for 19 min (found by s529b).
 - **A batch with two disjoint LAYERS may be split into two agents** (`s530/s529a-split.md`: `cl/` vs `Pl/`) when a slot would otherwise sit idle behind a merge dependency; each half runs the whole bar set.
