@@ -172,6 +172,8 @@ fetched copies under `~/.cpan/build`, every missing prerequisite with
 them), so `prove -b` in each dist is the oracle side.  Census and filler
 detail: `docs/session-log.md` (Sessions s526w1 and s526w2).  After half 2 the board is 29 dists / 775 files and takes ~100 min at load 9-12 beside other agents' legs (round 4: ~20 min for 449 files on a quiet box).
 
+Template-Toolkit JOINED in s530b (2026-10-31), after #3856 (s529b) and the three s530b fixes #4080 (a store through a package-qualified scalar), #4081 (an imported `ok` redefined the runtime's own TAP function: #3869's loop and hangs) and #4082 (a slice assignment did not flatten its right side: the grammar's lexer table): every one of its 121 files runs (0 TIMEOUT), 57 PASS / 44 PARTIAL / 20 FAIL with 17 of the FAILs perl's own skips, 428 rows blessed by cause -- #4083 (a method named like a statement modifier, `$factory->if(...)`) holds 314 of them and is the next Template-Toolkit batch.  The dist copy stays BUILT PURE-PERL (above).  `compile2.t` is order-dependent (it reads the `.ttc` files `compile1.t` writes); both of its faces are blessed.  The board is now 30 dists / 896 files and took 79 min on the s530b tree at load 3-15.
+
 ## Release gate (exit criteria)
 - [ ] Every corpus module loads + passes 100% of non-not-supported `t/` tests, 0 crashes.
 - [ ] `prove -j8 Pl/t/` 100% green; sweep fully-passing not regressed.
