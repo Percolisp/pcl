@@ -171,6 +171,10 @@
 #   s523a/-39 (-38 fails 5 6 15 17, -39 fails 5 6 15; run with --no-dist-lib as the board does).  FIXED, KEPT (8): 105oneshot-gzip/zip 3 5 6 7 = the
 #   UNSTABLE flap family above (round 4 and the one-file runs on -43 read the 1-row face + *PLAN*; -41 read the 8-row face with 3 5 6 7 failing).
 # JOINED (s530b, 2026-10-31): Template-Toolkit-3.106-0 (121 t files, its dist copy built PURE-PERL) -- 428 rows, blessed BY CAUSE from the census
+# EDITED (s530b, the tree board run 10:01): Data-Dumper dumper.t 250 + 252 (#3836) LEFT by edit -- they pass on main 6c614dbe in a one-file run
+#   (s530a's #4001: a blessed qr element keeps its box), and on the tree.  Template-Toolkit compile2.t is ORDER-DEPENDENT: it reads the .ttc files
+#   compile1.t writes (#1688), so its face depends on the run order / job count -- the census face (4 ok / 11 not ok) and the board face
+#   (*PLAN* ran 4 of 4, rc 2) are BOTH blessed; the --diff then reports the absent face as FIXED (kept, like IO-Compress 105oneshot #3493).
 #   on the s530b tree (scratch/s530b/tt2.rows.tsv; one-file runs of the 47 failing files read for the cause, scratch/s530b/of2/): #4083 314 (a method
 #   named like a statement modifier, Template::Grammar's $factory->if / ->foreach), #4087 34 (residue NOT REDUCED, symptom per file in the task), #1688
 #   23 (require answers 1: compiled .ttc templates), #4084 22 (map aliases a ref-holding variable: the BLOCKS table), PERL-SKIP 17 (perl skips the same
@@ -1815,8 +1819,6 @@ Data-Dumper-2.183-0	dumper.t	244	glob purity: Dump()	'#$v = {	'#$v = {	NS:use by
 Data-Dumper-2.183-0	dumper.t	246	glob purity: Dump() after eval	'#$v = {	'#$v = {	NS:use bytes (Data::Dumper qquote compares `{ use bytes; length }` with length to pick \x{...}; PCL has no byte view, so wide characters dump as octal escapes -- s526w1)
 Data-Dumper-2.183-0	dumper.t	247	glob purity, useqq: Dump()	'#$v = {	'#$v = {	NS:use bytes (Data::Dumper qquote compares `{ use bytes; length }` with length to pick \x{...}; PCL has no byte view, so wide characters dump as octal escapes -- s526w1)
 Data-Dumper-2.183-0	dumper.t	249	glob purity, useqq: Dump() after eval	'#$v = {	'#$v = {	NS:use bytes (Data::Dumper qquote compares `{ use bytes; length }` with length to pick \x{...}; PCL has no byte view, so wide characters dump as octal escapes -- s526w1)
-Data-Dumper-2.183-0	dumper.t	250	names that are not simple strings: Dump()	'#$3 = {};	'#$3 = {};	#3836 (a blessed qr with a "" overload stringifies as the regex when read from an array element: the name is $(?^:) -- s526w1)
-Data-Dumper-2.183-0	dumper.t	252	names that are not simple strings: Dump() after eval	'#$3 = {};	'#$3 = {};	#3836 (a blessed qr with a "" overload stringifies as the regex when read from an array element: the name is $(?^:) -- s526w1)
 Data-Dumper-2.183-0	dumpperl.t	0	*PLAN*	ran 10 of 31, rc 2	31 row(s)	NS:DynaLoader / XS binary extensions (Data::Dumper's Dumpxs is the XS half; the file stops after row 10 -- s526w1)
 Data-Dumper-2.183-0	huge.t	0	*FILE*	1..0 # SKIP Need ~10 GiB of core for this test (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Need ~10 GiB of core for this test")
 Data-Dumper-2.183-0	quotekeys.t	0	*PLAN*	ran 14 of 18, rc 4	18 row(s)	NS:DynaLoader / XS binary extensions (Data::Dumper's Dumpxs is the XS half; without it the file takes its own "XS version was unavailable" SKIP, whose count (5) is short of the rows it stands for: 14 of 18 run, as under perl without Dumper.so -- s526w1)
@@ -2409,3 +2411,4 @@ Template-Toolkit-3.106-0	zz-pod-kwalitee.t	0	*FILE*	1..0 # SKIP Author tests not
 Template-Toolkit-3.106-0	zz-process-leak.t	0	*FILE*	1..0 # SKIP Developer test (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Developer test")
 Template-Toolkit-3.106-0	zz-stash-xs-leak.t	0	*FILE*	1..0 # SKIP Internal test for developer, add the --dev flag to run (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Internal test for developer, add the --dev flag to run")
 Template-Toolkit-3.106-0	zz-url2.t	0	*FILE*	1..0 # SKIP We can't agree on the right joint for the URL plugin (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "We can't agree on the right joint for the URL plugin")
+Template-Toolkit-3.106-0	compile2.t	0	*PLAN*	ran 4 of 4, rc 2	4 row(s)	#1688 (`require FILE` answers 1: compile2.t reads the compiled .ttc templates compile1.t writes -- ORDER-DEPENDENT face, see the s530b header note -- s530b)
