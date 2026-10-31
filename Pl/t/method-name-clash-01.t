@@ -117,5 +117,42 @@ sub r { E::explain() } sub E::explain { "E-ex" }
 print r(), " ", E::explain(), " ", E->explain, "\n";
 PERL
 
+# #4081 (s530b): the IMPORT twin of #3405.  A sub named like a TAP function
+# that is EXPORTED into (or glob-installed in) a package which only inherits
+# that name from the runtime redefined the runtime's own function program-wide:
+# Template::Test exports an `ok` that calls Test::Builder's ->ok, which is the
+# TAP layer's ok -- now the imported sub, so it re-entered itself until the
+# binding stack ran out (69 Template-Toolkit files, #3869).  The `deep` guard
+# turns the old recursion into a short death.
+test_mc('#4081 an Exporter-imported `ok` that calls Test::Builder->ok (the Template::Test shape)', <<'PERL');
+BEGIN {
+  package Foo;
+  use Test::Builder;
+  require Exporter;
+  our @ISA = ('Exporter');
+  our @EXPORT = ('ok');
+  my $TB = Test::Builder->new;
+  sub ok { my ($ok, $msg) = @_; our $d; die "deep\n" if ++$d > 5; $TB->ok($ok, $msg); return $ok }
+  $INC{'Foo.pm'} = 1;
+}
+use Foo;
+Test::Builder->new->plan(tests => 2);
+ok(1, "one");
+ok(1, "two");
+PERL
+
+test_mc('#4081 a glob-installed `ok` / `is` in main: the call reaches it and the TAP layer keeps its own', <<'PERL');
+package Foo;
+sub ok { our $d; die "deep\n" if ++$d > 5; print "Foo::ok(@_)\n"; Test::Builder->new->ok(@_) }
+sub is { print "Foo::is(@_)\n"; Test::Builder->new->ok($_[0] eq $_[1], $_[2]) }
+package main;
+use Test::Builder;
+BEGIN { *main::ok = \&Foo::ok; *main::is = \&Foo::is; }
+Test::Builder->new->plan(tests => 3);
+ok(1, "one");
+is("a", "a", "two");
+Test::Builder->new->ok(1, "three");
+PERL
+
 
 done_testing;

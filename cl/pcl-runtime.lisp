@@ -28866,7 +28866,7 @@ would consume, so it dies naming the stream (rule 12)."
           ;; Function: set fdefinition in TO-PKG so already-compiled
           ;; lambdas with an interned-but-unbound local symbol get the fn.
           ((fboundp from-sym)
-           (let ((to-sym (intern cl-name to-pkg)))
+           (let ((to-sym (%p-own-code-symbol to-pkg cl-name (fdefinition from-sym))))
              (setf (fdefinition to-sym) (fdefinition from-sym))))
           ;; Symbol exists but no function: still do shadowing-import
           (t
@@ -30993,6 +30993,25 @@ would consume, so it dies naming the stream (rule 12)."
                (clrhash *p-symref-symbol-memo*))
              (intern sym-name pkg))))
 
+(defun %p-own-code-symbol (pkg sym-name incoming)
+  "PKG's OWN symbol for the sub SYM-NAME, about to receive the function
+   INCOMING (an import, a `*name = \\&code` install, a glob copy).  A name PKG
+   only INHERITS is another package's symbol -- for every user package that is
+   :pcl's, whose function is the runtime's own (the TAP layer's pl-ok, ...);
+   setting its fdefinition redefined that built-in PROGRAM-WIDE, so
+   Template::Test's exported `ok`, which calls `$TB->ok`, re-entered itself
+   through Test::Builder's ->ok until the binding stack ran out (#4081).  perl's
+   `*main::ok = \\&Foo::ok` changes main's stash only: the name is SHADOWED
+   first (through %p-symref-intern, which also drops the symbol memo).  An
+   install of the very function the inherited symbol already holds changes
+   nothing and keeps the shared symbol."
+  (multiple-value-bind (sym status) (find-symbol sym-name pkg)
+    (if (and (eq status :inherited)
+             (not (and (fboundp sym) (not (macro-function sym))
+                       (eq (fdefinition sym) incoming))))
+        (%p-symref-intern pkg sym-name t)
+        (intern sym-name pkg))))
+
 ;;; MEMO: (name-string, sigil, perl current package) -> the SYMBOL.  Task #812,
 ;;; sized by sb-sprof (s460ao): ~76 % of a symbolic-reference access is the
 ;;; NAME-STRING work below — `search`ing for "::", %pcl-invert-case, the
@@ -32659,7 +32678,7 @@ would consume, so it dies naming the stream (rule 12)."
       ;; *p-declared-subs* :defined, never fboundp — forward stubs are
       ;; fbound too).  Task #83 (import-into-caller glob installs).
       ((functionp inner)
-       (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
+       (let ((sym (%p-own-code-symbol pkg (%pcl-uname-to-sub uname) inner)))
          (setf (fdefinition sym) inner)
          (setf (gethash sym *p-declared-subs*) :defined)
          (%p-note-sub-install sym :glob)
@@ -32701,7 +32720,7 @@ would consume, so it dies naming the stream (rule 12)."
 
       ;; Fallback: try as CODE if rhs is directly a function
       ((functionp rhs)
-       (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
+       (let ((sym (%p-own-code-symbol pkg (%pcl-uname-to-sub uname) rhs)))
          (setf (fdefinition sym) rhs)
          (setf (gethash sym *p-declared-subs*) :defined)
          (%p-note-sub-install sym :glob))))))
@@ -33004,7 +33023,7 @@ would consume, so it dies naming the stream (rule 12)."
    is what `defined &x` answers in perl after `*x = *neverdefined` (#602)."
   (let ((src-sym (intern (%pcl-uname-to-sub sn) sp)))
     (if (fboundp src-sym)
-        (let ((dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
+        (let ((dst-sym (%p-own-code-symbol dst-pkg (%pcl-uname-to-sub dst-uname) (fdefinition src-sym))))
           (setf (fdefinition dst-sym) (fdefinition src-sym))
           (setf (gethash dst-sym *p-declared-subs*)
                 (or (gethash src-sym *p-declared-subs*) :defined))
