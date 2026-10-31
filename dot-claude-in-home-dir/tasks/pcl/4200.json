@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530 (Fable) at the USER's request: a register that says, for every failing CPAN test, whether perl skips it too, whether it comes from a feature PCL deliberately does not support, or whether it is a PCL bug.\nDesign: docs/test-verdict-register-proposal.md (the measured problem: 138 FAIL files of which 41 are PCL bugs; the cause column is free text -- 18 spellings of the NS rulings, 21 mixed cells, stale causes like the 13 JSON-PP rows citing the closed #1575).\nAbsorbs #4160 (the SKIP verdict).  QUEUED as s531b member 0 (briefs-and-rules-for-claude-subagents/s530/s531b-prompt.md).\nOpen USER question in the proposal: the companion suite (perl's own t/) in the same batch, or after one round.\n",
+   "id" : "4200",
+   "status" : "pending",
+   "subject" : "A VERDICT REGISTER for the CPAN board (and the other test populations): a closed cause vocabulary (PERL-SKIP / PERL-FAILS / NS:<id> / BUG / UNREDUCED / HARNESS), stable not-supported ids, a gate validator, the scoreboard split by class"
+}
