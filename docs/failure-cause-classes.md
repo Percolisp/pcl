@@ -41,6 +41,49 @@ cause can never be mistaken for `other`.  `has_cause` stays the single
 definition of "attributed", so the `unexplained` count in the census is the
 same number the three runners have printed since #993.
 
+## The grammar (s531b; Fable ruling s531 #1)
+
+**A cause is its LEADING MARKER and that marker's KEY; everything after the key
+is the NOTE.**  `PCLCauses::parse_cause` reads it — `($class, $key, $note,
+$legacy)` — and `cause_class` is its wrapper, so the class rule above and the
+grammar are one function.
+
+| the cell starts with | class | key | split (the board's line) |
+|---|---|---|---|
+| `#N ...` | `bug` | task N | ours |
+| `UNREDUCED #N ...` | `unreduced` | task N, the OPEN task holding the hunt | ours |
+| `NS:<id> ...` | `not-supported` | a `docs/not-supported.md` id (`ns-...`, read by `tools/ns-ids.pl`) | ruled |
+| `PARKED:<id> ...` | `parked` | a not-supported id or a DECIDED label (`s485`): a USER scheduling decision | ruled |
+| `PERL-SKIP ...` | `perl-skip` | — | perl's |
+| `PERL-FAILS ...` | `perl-fails` | — (perl fails or TODO-fails the row too) | perl's |
+| `HARNESS #N ...` | `harness` | task N (the board tooling: `run-dist-t.pl`, the scoreboard, the oracle; `cl/pcl-test.lisp` is PCL's product, so its bugs are `#N`) | harness |
+| `UNEXPLAINED ...` | `unexplained` | — (the legal first-bless marker, #993) | — |
+
+* **The note is never classified.**  `UNREDUCED #4087 (looks like NS:caller)`
+  is `unreduced`; `NS:ns-xs -- #233 ...` is `not-supported`.  That is what makes
+  the KEY checkable: one marker, one key, one gate row
+  (`Pl/t/verdict-register-01.t`).
+* **A ruling and a task in one cell** keep s486a's order — the ruling is the
+  class, the task is in the note: `NS:<id> -- #930 ...`.
+* **A cell written before the grammar is LEGACY**: a task-first cell naming a
+  ruling (`#930 (NS:Lvalue subroutines ...)`), `NS:` followed by a section
+  TITLE, a marker-less cell (`partly #752`, `perl itself TODO-fails this
+  row`), `PARKED: free text`, the `not-supported.md §...` spelling.  It is read
+  by s486a's rule exactly as before — no population's census moved when the
+  grammar arrived (measured over all five baselines: 0 class differences) —
+  and `parse_cause` returns it with no key and `$legacy` set.  The validator
+  calls a legacy cell red in a GATE population and counts it in a REPORT one.
+* **The UNREDUCED dumping-ground guard**: its key must be an OPEN task that
+  names the t-file; the CAUSES line prints the UNREDUCED count whenever there
+  is one; `tools/cause-census.pl --hygiene` lists every UNREDUCED row with its
+  task's age.
+* `class_census` always reports s486a's six classes and adds `unreduced` /
+  `perl-fails` / `harness` where they occur; `census_line` and the
+  `--markdown` table print them only then, so a population that cannot spell
+  them (the companion measures perl's verdict as a column of its own) keeps
+  its line.  The share's denominator leaves out `perl-skip`, `perl-fails` and
+  `harness`: those rows are not PCL's to answer.
+
 ## Where the classes are printed
 
 `causes_line`'s third answer **is** `census_line`, so every runner that blesses

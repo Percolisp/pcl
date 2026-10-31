@@ -20,7 +20,8 @@ use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
 use PCLCauses qw(has_cause causes_line read_fail_rows fail_row_line
-                 cause_class class_census census_line);
+                 cause_class class_census census_line
+                 parse_cause class_group);
 use PclTapAlign qw(rowkey_desc);
 
 my $dir = tempdir(CLEANUP => 1);
@@ -85,6 +86,61 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
   is(census_line('CAUSES', class_census([('#1') x 1234, ('UNEXPLAINED') x 2])),
      "CAUSES: 1,234 of 1,236 — not-supported 0, parked 0, bug 1,234, other 0, unexplained 2\n",
      'thousands are commified so a five-figure population stays readable');
+}
+
+# ── parse_cause: THE GRAMMAR (s531b, ruling 1) — (class, key, note, legacy) ─
+{
+  is_deeply([parse_cause('#1452 (a) (LHS lvalues first)')], ['bug', 1452, ' (a) (LHS lvalues first)', 0],
+            'a leading #N is a bug keyed on N; the rest is the note');
+  is_deeply([parse_cause('NS:ns-caller-fidelity -- #233 (a modifier)')],
+            ['not-supported', 'ns-caller-fidelity', ' -- #233 (a modifier)', 0],
+            'NS:<id> is not-supported keyed on the id');
+  is_deeply([parse_cause('PERL-FAILS (the dist marks it TODO)')], ['perl-fails', undef, ' (the dist marks it TODO)', 0],
+            'PERL-FAILS is its own class: perl fails the row too');
+  is_deeply([parse_cause('UNREDUCED #4087 (residue, per file in the task)')],
+            ['unreduced', 4087, ' (residue, per file in the task)', 0],
+            'UNREDUCED #N is ours, keyed on the task that holds the hunt');
+  is_deeply([parse_cause('HARNESS #3923 (the runner marker)')], ['harness', 3923, ' (the runner marker)', 0],
+            'HARNESS #N is the board tooling, keyed on its task');
+  is_deeply([parse_cause('PARKED:s485 pack/unpack')], ['parked', 's485', ' pack/unpack', 0],
+            'PARKED:<label> is keyed on a DECIDED label (or an ns- id)');
+  is_deeply([parse_cause('PERL-SKIP (needs Devel::Hide)')], ['perl-skip', undef, ' (needs Devel::Hide)', 0],
+            'PERL-SKIP has no key');
+  is_deeply([parse_cause('UNEXPLAINED')], ['unexplained', undef, '', 0],
+            'UNEXPLAINED is the legal first-bless marker: in the grammar, still the queue');
+
+  # The note is never classified: the leading marker alone decides.
+  is(cause_class('UNREDUCED #4087 (looks like NS:caller, maybe PERL-SKIP)'), 'unreduced',
+     'the note is never classified: an NS:/PERL-SKIP in an UNREDUCED note does not move the class');
+  is(cause_class('HARNESS #3923 (was #12, PARKED: x)'), 'harness',
+     'the note is never classified: HARNESS keeps its class whatever the note names');
+  is(cause_class('PERL-FAILS (#930, NS:Lvalue subroutines in the dist)'), 'perl-fails',
+     'the note is never classified: PERL-FAILS keeps its class whatever the note names');
+  is(cause_class('NS:ns-xs -- PERL-SKIP on a box with the module, #77'), 'not-supported',
+     'the note is never classified: an NS:<id> cell stays not-supported');
+  is((parse_cause('#77 (then UNREDUCED / HARNESS / PERL-FAILS)'))[0], 'bug',
+     'the note is never classified: the grammar\'s new markers inside a #N note are text');
+
+  # A cell written before the grammar keeps s486a's class and is flagged LEGACY.
+  is_deeply([parse_cause('#221 (NS:Warnings-gated diagnostics are absent)')],
+            ['not-supported', undef, '#221 (NS:Warnings-gated diagnostics are absent)', 1],
+            'a task-first cell naming a ruling: s486a\'s class, no key, legacy (migrated to NS:<id> -- #N ...)');
+  is_deeply([parse_cause('NS:caller() fidelity [DEFERRED] + #233')],
+            ['not-supported', undef, 'caller() fidelity [DEFERRED] + #233', 1],
+            'NS: + a section TITLE: legacy, the title kept as the note for the migration');
+  is_deeply([parse_cause('perl itself TODO-fails this row')], ['other', undef, 'perl itself TODO-fails this row', 1],
+            'a marker-less cell is legacy (`other` here)');
+  is((parse_cause('PARKED: pack/unpack (USER s485)'))[3], 1, 'PARKED: + free text is legacy, still parked');
+  is((parse_cause(''))[3], 1, 'an empty cause is not the UNEXPLAINED marker: legacy');
+
+  is(class_group('unreduced') . '/' . class_group('parked') . '/' . class_group('perl-fails') . '/' . class_group('harness'),
+     "ours/ruled/perl's/harness", 'class_group: the board split (ruling 6)');
+  my $n = class_census(['UNREDUCED #1', 'PERL-FAILS', 'HARNESS #2', '#3']);
+  is("$n->{unreduced}/$n->{'perl-fails'}/$n->{harness}/$n->{bug}", '1/1/1/1',
+     'class_census counts the grammar\'s three where they occur');
+  is(census_line('CAUSES', $n),
+     "CAUSES: 4 of 4 — not-supported 0, parked 0, bug 1, other 0, unreduced 1, perl-fails 1, harness 1, unexplained 0\n",
+     'census_line prints UNREDUCED (and the other two) where they occur');
 }
 
 # ── the six-field format: read, and its inverse ────────────────────────────

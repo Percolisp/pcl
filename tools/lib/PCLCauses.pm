@@ -30,7 +30,8 @@ use strict;
 use warnings;
 use Exporter 'import';
 our @EXPORT_OK = qw(has_cause causes_line read_fail_rows fail_row_line
-                    cause_class class_census census_line CLASSES);
+                    cause_class class_census census_line CLASSES
+                    parse_cause class_group $NS_ID_RX);
 
 # ── THE CLASS RULE (Fable ruling, s486a — recorded verbatim in docs/DECIDED.md
 # under `## s486a`, explained in docs/failure-cause-classes.md) ──────────────
@@ -59,6 +60,91 @@ our @EXPORT_OK = qw(has_cause causes_line read_fail_rows fail_row_line
 # reorder without re-reading that sentence.
 our @CLASSES = qw(not-supported parked bug other unexplained perl-skip);
 
+# ── THE GRAMMAR (s531b, Fable ruling s531 #1; docs/failure-cause-classes.md
+# "The grammar") ─────────────────────────────────────────────────────────────
+#
+# A cause is a LEADING MARKER with its KEY, then a free-text NOTE:
+#
+#   #N ...            bug          keyed on task N (the spelling since #993)
+#   NS:<id> ...       not-supported keyed on a docs/not-supported.md id
+#                                  (`<a id="ns-..."></a>`, tools/ns-ids.pl)
+#   PARKED:<id> ...   parked       keyed on a not-supported id or a DECIDED
+#                                  section label (`s485`)
+#   PERL-SKIP ...     perl-skip    perl skips the file / row too
+#   PERL-FAILS ...    perl-fails   perl fails or TODO-fails the row too
+#   UNREDUCED #N ...  unreduced    ours, not isolated yet; N holds the hunt
+#   HARNESS #N ...    harness      the board tooling, not PCL
+#   UNEXPLAINED ...   unexplained  the legal first-bless marker (#993)
+#
+# Everything after the key is the NOTE, and the note is never classified:
+# that is what makes the key checkable (Pl/t/verdict-register-01.t).
+#
+# A cell written BEFORE the grammar -- a task-first cell naming a ruling
+# (`#930 (NS:Lvalue ...)`), an `NS:` followed by a section TITLE, a
+# marker-less cell, `PARKED: free text`, the `not-supported.md §...` spelling
+# -- is read by s486a's rule exactly as before (so no population's census
+# moves) and comes back with LEGACY set: it is not in the grammar.  The
+# validator calls a legacy cell red in a GATE population and counts it in a
+# REPORT one; tools/migrate-causes.pl rewrites the board's.
+our @GRAMMAR_CLASSES = qw(perl-fails unreduced harness);   # beyond s486a's six
+
+# A not-supported id, as tools/ns-ids.pl reads it from the anchors.
+our $NS_ID_RX = qr/ns-[a-z0-9]+(?:-[a-z0-9]+)*/;
+# A DECIDED section label: `## s485`, `## s486a`, `## s527` ...
+my $DECIDED_RX = qr/s\d+[a-z0-9]*/;
+
+# What each class counts as in the board's split (ruling 6).
+my %GROUP = ('bug' => 'ours', 'unreduced' => 'ours',
+             'not-supported' => 'ruled', 'parked' => 'ruled',
+             'perl-skip' => "perl's", 'perl-fails' => "perl's",
+             'harness' => 'harness',
+             'other' => 'unread', 'unexplained' => 'unread');
+sub class_group { return $GROUP{ $_[0] // '' } // 'unread' }
+
+# s486a's rule, verbatim, for a cell that is not in the grammar.
+sub _s486a_class {
+    my ($cause) = @_;
+    return 'not-supported' if $cause =~ /NS:/ || $cause =~ /not-supported\.md/;
+    return 'parked'        if $cause =~ /PARKED:/;
+    return 'perl-skip'     if $cause =~ /PERL-SKIP/;
+    return 'bug'           if $cause =~ /#\d+/;
+    return 'other';
+}
+
+# parse_cause($cause) -> ($class, $key, $note, $legacy)
+#   $key    the marker's key (a task number, an ns- id, a DECIDED label), or
+#           undef for the keyless markers and for every legacy cell
+#   $note   the text after the key (leading separators kept as written)
+#   $legacy 1 when the cell is not in the grammar (read by s486a's rule)
+sub parse_cause {
+    my ($cause) = @_;
+    if (!has_cause($cause)) {
+        return ('unexplained', undef, $1, 0)
+            if defined $cause && $cause =~ /^UNEXPLAINED(.*)\z/s;
+        return ('unexplained', undef, $cause // '', 1);   # no cause at all
+    }
+    my $c = $cause;
+    return ('not-supported', $1, $2, 0) if $c =~ /^NS:($NS_ID_RX)(?![\w-])(.*)\z/s;
+    return ('parked',        $1, $2, 0) if $c =~ /^PARKED:($NS_ID_RX|$DECIDED_RX)(?![\w-])(.*)\z/s;
+    return ('perl-skip',  undef, $1, 0) if $c =~ /^PERL-SKIP(?![\w-])(.*)\z/s;
+    return ('perl-fails', undef, $1, 0) if $c =~ /^PERL-FAILS(?![\w-])(.*)\z/s;
+    return ('unreduced',     $1, $2, 0) if $c =~ /^UNREDUCED\s+#(\d+)(?!\d)(.*)\z/s;
+    return ('harness',       $1, $2, 0) if $c =~ /^HARNESS\s+#(\d+)(?!\d)(.*)\z/s;
+    if ($c =~ /^#(\d+)(?!\d)(.*)\z/s) {
+        my ($n, $note) = ($1, $2);
+        my $old = _s486a_class($c);
+        # s486a's order for a cell naming a ruling AND a task: the ruling is
+        # the class.  Written task-first, that is the pre-grammar spelling.
+        return ($old, undef, $c, 1) if $old ne 'bug';
+        return ('bug', $n, $note, 0);
+    }
+    # Not in the grammar.  An `NS:` + section TITLE keeps the title as the
+    # note, so the migration can map it to an id without reading the cell a
+    # second way.
+    return ('not-supported', undef, $1, 1) if $c =~ /^NS:\s*(.*)\z/s;
+    return (_s486a_class($c), undef, $c, 1);
+}
+
 # A cause is present when it is a non-blank string that is not the UNEXPLAINED
 # marker.  Called per row by the blessers as well as by the report, so the
 # definition of "attributed" cannot drift between counting and writing.
@@ -69,22 +155,17 @@ sub has_cause {
     return 1;
 }
 
-# THE RULE, as code.  `has_cause` stays the definition of "attributed", so
-# `unexplained` cannot drift away from the count the three runners print.
-sub cause_class {
-    my ($cause) = @_;
-    return 'unexplained' unless has_cause($cause);
-    # not-supported FIRST: a row naming both a section and a task is
-    # not-supported — fixing every filed bug would not make it pass.
-    return 'not-supported' if $cause =~ /NS:/ || $cause =~ /not-supported\.md/;
-    return 'parked'        if $cause =~ /PARKED:/;
-    return 'perl-skip'     if $cause =~ /PERL-SKIP/;
-    return 'bug'           if $cause =~ /#\d+/;
-    return 'other';
-}
+# THE RULE, as code: parse_cause's class.  `has_cause` stays the definition of
+# "attributed", so `unexplained` cannot drift away from the count the three
+# runners print; a legacy cell keeps s486a's class (not-supported FIRST: a row
+# naming both a section and a task is not-supported — fixing every filed bug
+# would not make it pass).
+sub cause_class { return (parse_cause($_[0]))[0] }
 
-# \@causes -> { class => count }, every class present (a zero is a measurement,
-# an absent key is not).
+# \@causes -> { class => count }: s486a's six classes always (a zero is a
+# measurement, an absent key is not), the grammar's three only where they
+# occur -- today only the board can spell them (the companion measures perl's
+# verdict as a column of its own, ruling 8).
 sub class_census {
     my ($causes) = @_;
     my %n = map { ($_ => 0) } @CLASSES;
@@ -100,11 +181,16 @@ sub _commify { my $n = reverse shift; $n =~ s/(\d{3})(?=\d)/$1,/g; return scalar
 # the other three lines wider for nothing.
 sub census_line {
     my ($label, $n) = @_;
-    my $total = 0; $total += $n->{$_} // 0 for @CLASSES;
+    my $total = 0; $total += $n->{$_} // 0 for @CLASSES, @GRAMMAR_CLASSES;
     my $attributed = $total - ($n->{unexplained} // 0);
     my @parts = map { sprintf "%s %s", $_, _commify($n->{$_} // 0) }
                     qw(not-supported parked bug other);
-    push @parts, sprintf("perl-skip %s", _commify($n->{'perl-skip'})) if $n->{'perl-skip'};
+    # The grammar's three and perl-skip print only where they occur.
+    # UNREDUCED in particular is always on the line when there is one: it is
+    # the class that must not become a dumping ground (ruling 1).
+    for my $k ('unreduced', 'perl-skip', 'perl-fails', 'harness') {
+        push @parts, sprintf("%s %s", $k, _commify($n->{$k})) if $n->{$k};
+    }
     push @parts, sprintf("unexplained %s", _commify($n->{unexplained} // 0));
     return sprintf("%s: %s of %s — %s\n", $label, _commify($attributed),
                    _commify($total), join(', ', @parts));

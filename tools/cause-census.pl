@@ -256,12 +256,13 @@ for my $p (@pop) {
 }
 
 # The SHARE: not-supported + parked over everything that is a PCL failure.
-# perl-skip is excluded from the denominator — perl skips the file too, so the
-# row is not PCL's failure to answer.
+# perl's own verdicts (perl-skip, perl-fails) and the board tooling (harness)
+# are excluded from the denominator — the row is not PCL's failure to answer.
+my %NOT_PCLS = map { ($_ => 1) } qw(perl-skip perl-fails harness);
 sub share {
     my ($n) = @_;
     my $denom = 0;
-    $denom += $n->{$_} // 0 for grep { $_ ne 'perl-skip' } @PCLCauses::CLASSES;
+    $denom += $n->{$_} // 0 for grep { !$NOT_PCLS{$_} } keys %$n;
     return ('n/a', 0) unless $denom;
     return (sprintf("%.1f%%", 100 * (($n->{'not-supported'} // 0)
                                    + ($n->{parked} // 0)) / $denom), $denom);
@@ -270,23 +271,27 @@ sub share {
 my ($reg, $reg_note) = registry_count();
 
 if ($MARKDOWN) {
-    print "| population | rows | not-supported | parked | bug | other | unexplained | perl-skip | not-supported + parked |\n";
-    print "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+    # s486a's six columns always; the grammar's three (s531b) only when some
+    # population spells them, so a table of the six keeps its shape.
+    my @cols = qw(not-supported parked bug other unexplained perl-skip);
+    push @cols, grep { $grand{$_} } @PCLCauses::GRAMMAR_CLASSES;
+    my $ncol = @cols + 3;
+    print "| population | rows | ", join(' | ', @cols), " | not-supported + parked |\n";
+    print "|---|", join('|', ('---:') x ($ncol - 1)), "|\n";
     for my $t (@table) {
         if ($t->{missing}) {
-            printf "| %s | *baseline absent: %s* | | | | | | | |\n", $t->{label}, $t->{missing};
+            printf "| %s | *baseline absent: %s* |%s\n", $t->{label}, $t->{missing}, ' |' x ($ncol - 2);
             next;
         }
         my ($sh) = share($t->{n});
-        printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $t->{label},
-            commify($t->{total}), map({ commify($t->{n}{$_} // 0) }
-              qw(not-supported parked bug other unexplained perl-skip)), $sh;
+        print '| ', join(' | ', $t->{label}, commify($t->{total}),
+                         map({ commify($t->{n}{$_} // 0) } @cols), $sh), " |\n";
     }
     my ($gsh, $gden) = share(\%grand);
-    my $gtot = 0; $gtot += $grand{$_} // 0 for @PCLCauses::CLASSES;
-    printf "| **all populations** | **%s** | **%s** | **%s** | **%s** | **%s** | **%s** | **%s** | **%s** |\n",
-        commify($gtot), map({ commify($grand{$_} // 0) }
-          qw(not-supported parked bug other unexplained perl-skip)), $gsh;
+    my $gtot = 0; $gtot += $grand{$_} // 0 for keys %grand;
+    print '| ', join(' | ', '**all populations**',
+                     map({ "**$_**" } commify($gtot),
+                         map({ commify($grand{$_} // 0) } @cols), $gsh)), " |\n";
     print "\nSkip-registry relabels in the sweep: ",
           defined $reg ? commify($reg) . " row(s) ($reg_note)"
                        : "NOT COUNTED ($reg_note)", ".\n";
