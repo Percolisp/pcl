@@ -2289,6 +2289,16 @@ sub _viv_container_form {
 # only shape 'argbox' applies to.  Gating per-arg keeps the context from
 # leaking into arbitrary subtrees (a `~$_` method arg once flipped from
 # string- to numeric-complement under a blanket 'argbox').
+# A glob slot's value (`*x{HASH}`, `*x{ARRAY}`) is a REFERENCE, so a subscript
+# after it dereferences it: `*x{HASH}{k}` == `*x{HASH}->{k}` (the arrow between
+# two subscripts is optional, and since PPI §49 the slot IS a Subscript).
+sub _is_glob_slot_node {
+  my ($self, $kid_id) = @_;
+  my $an = $self->expr_o->get_a_node($kid_id);
+  return $self->expr_o->is_internal_node_type($an)
+      && ($an->{type} // '') eq 'glob_slot';
+}
+
 sub _is_elem_arg {
   my ($self, $kid_id) = @_;
   my $an = $self->expr_o->get_a_node($kid_id);
@@ -4260,6 +4270,8 @@ sub gen_postfix_op_form {
 # @N / @# / rename string ops apply); a nested container is a structural form.
 sub gen_array_access_form {
   my ($self, $node, $node_id, $kids) = @_;
+  return $self->gen_array_ref_access_form($node, $node_id, $kids)
+    if $self->_is_glob_slot_node($kids->[0]);
   my $arr_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($arr_node) eq 'PPI::Token::Symbol'
              || ref($arr_node) eq 'PPI::Token::Magic';
@@ -4864,6 +4876,8 @@ sub _hash_key_form {
 # %# register / rename as strings, nested container structural.
 sub gen_hash_access_form {
   my ($self, $node, $node_id, $kids) = @_;
+  return $self->gen_hash_ref_access_form($node, $node_id, $kids)
+    if $self->_is_glob_slot_node($kids->[0]);
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol'
              || ref($hash_node) eq 'PPI::Token::Magic';
