@@ -3727,6 +3727,22 @@ everyday test mock `local *Pkg::f = sub {…}` safe.  Clearing a CODE slot also
 drops its `*p-declared-subs*` entry, so `defined &X` is false inside the
 scope rather than true-with-nothing-to-call.
 
+**A whole-glob `local *NAME` localizes the IO slot too, and a glob VALUE taken
+in the scope keeps the scope's glob** (normative, s529a, task #3868).  A
+PCL typeglob is a NAME, so the scope's glob is handed over at the restore:
+every glob value `p-make-typeglob` made from the localized name while the
+scope was open is re-pointed at a fresh hidden name (`NAME__PCL_LOCAL_n`,
+still printed `*PKG::NAME`) that receives the scope's four slots and its IO;
+then the old slots, IO and glob alias come back.  A REFERENCE `\*NAME` taken
+in the scope is a ref to the GV and keeps following the name (`p-backslash`
+drops it from the scope).  With no glob value taken, a handle an `open` in
+the scope gave the glob is closed at the scope's end, as perl frees the GP;
+an aliased handle (`local *FH = *STDOUT`, `= $fh`) is never closed.  The
+standard handles and ARGV / ARGVOUT keep their own IO localization.
+
+    sub mk { my $fh = do { local *FH; *FH }; $fh }   # two calls, two handles
+    sub openit { local *FH; open FH, "<", $_[0]; return *FH }   # the GP survives
+
 `foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
 the body and everything it calls see the current element, and the old
 value is restored on exit, including via `last`/`die`. The loop macros

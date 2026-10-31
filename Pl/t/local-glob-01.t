@@ -56,7 +56,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 11;
+plan tests => 15;
 
 # 1. RHS reads @_, which *_ localization would otherwise clear first.
 is(run_pl(<<'PL'), "foobar\n", 'local *_ = \join("",@_) sees old @_');
@@ -138,3 +138,99 @@ PL
 is(run_pl(<<'PL'), "STDOUT|main\n", '*FOO{NAME} and {PACKAGE} still answer the same way');
 print *STDOUT{NAME}, "|", *STDOUT{PACKAGE}, "\n";
 PL
+
+# ── `local *FH` gives the scope a FRESH glob, and a glob VALUE taken in the
+# scope keeps it (#3868, s529a) ─────────────────────────────────────────────
+# A PCL typeglob is a NAME, so every `*FH` named main::FH and two handles opened
+# through `do { local *FH; *FH }` shared one stream (Log::Log4perl's
+# Appender::File wrote every appender into one file).  The scope's glob values
+# are now handed the scope's slots and IO at the restore; a REFERENCE `\*FH`
+# taken in the scope is a ref to the GV and follows the NAME; the IO slot is
+# localized too, and a handle the scope opened is closed at its end unless a
+# glob value kept it.  Every expected line is perl 5.40.3's output.
+my $lg_dir = ($ENV{TMPDIR} || "/tmp") . "/pcl-local-glob-$$";
+mkdir $lg_dir;
+# the programs name their scratch files __DIR__; rd() reads one back as a line
+sub lg { my $s = shift; $s =~ s/__DIR__/$lg_dir/g;
+         'sub rd { open my $r, "<", $_[0] or return "none"; local $/; my $c = <$r>; $c =~ s/\n/;/g; $c }' . "\n" . $s }
+# These rows run a whole PROGRAM (pl2cl), not a fragment: run_pl's
+# parse_code emits into package PCL, where a bareword FH is PCL::FH while
+# `local *FH` names main::FH -- two globs a real program never mixes.
+sub run_file {
+    my $code = shift;
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    my $cl_code = `$FindBin::Bin/../../pl2cl $pl 2>/dev/null`;
+    my ($cfh, $filename) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cfh $cl_code;
+    close $cfh;
+    my $output = `sbcl @sbcl_rt --load "$filename" 2>&1`;
+    $output =~ s/^;.*\n//gm;
+    $output =~ s/^\s*\n//gm;
+    $output =~ s/PCL Runtime loaded\n?//g;
+    return $output;
+}
+
+is(run_file(lg(<<'PL')), "1=[A;] 2=[B;]\nsame-name: eq *main::FH\n", 'do { local *FH; *FH } hands out DISTINCT handles');
+my $d = "__DIR__/a";
+sub mk { my $fh = do { local *FH; *FH; }; return $fh }
+my $a = mk(); my $b = mk();
+open $a, '>', "$d.1" or die; open $b, '>', "$d.2" or die;
+print $a "A\n"; print $b "B\n"; close $a; close $b;
+print "1=[", rd("$d.1"), "] 2=[", rd("$d.2"), "]\n";
+print "same-name: ", ($a eq $b ? "eq" : "ne"), " ", "$a", "\n";
+PL
+
+is(run_file(lg(<<'PL')), "outer=[out;via-ref;] inner=[]\nio before==after: same inside==before: diff\nl1\nl1\nl2\n", 'the IO slot is localized; \*FH follows the name, return *FH keeps the scope glob');
+my $d = "__DIR__/b";
+open FH, '>', "$d.outer" or die;
+sub pr { print FH $_[0] }
+my ($io_before, $io_inside, $io_after, $ref);
+$io_before = *FH{IO};
+{ local *FH; open FH, '>', "$d.inner" or die; pr("in\n"); $io_inside = *FH{IO}; $ref = \*FH; }
+pr("out\n");
+$io_after = *FH{IO};
+print {$ref} "via-ref\n";
+close FH;
+print "outer=[", rd("$d.outer"), "] inner=[", rd("$d.inner"), "]\n";
+print "io before==after: ", ($io_before == $io_after ? "same" : "diff"), " inside==before: ", ($io_inside == $io_before ? "same" : "diff"), "\n";
+sub openit { local *FH; open FH, '<', $_[0] or die; return *FH }
+open my $w, '>', "$d.x" or die; print $w "l1\nl2\n"; close $w;
+my $g1 = openit("$d.x"); my $g2 = openit("$d.x");
+my $l1 = <$g1>; my $l2 = <$g2>; my $l3 = <$g1>;
+print "$l1$l2$l3";
+PL
+
+is(run_file(lg(<<'PL')), "2000\nalias\nstdout alive\nboom|K;\n4.0 open\n4.1 closed\nC;\n", 'a scope-opened handle closes at the scope end; aliases and the outer handle survive');
+my $d = "__DIR__/c";
+open my $w, '>', "$d.y" or die; print $w "Y\n"; close $w;
+sub slurp { local *FH; open FH, '<', $_[0] or die "slurp: $!"; local $/; my $c = <FH>; $c }
+my $n = 0; for (1..2000) { $n++ if slurp("$d.y") eq "Y\n" }
+print "$n\n";
+{ local *FH = *STDOUT; print FH "alias\n"; }
+print "stdout alive\n";
+open FH, '>', "$d.k" or die;
+eval { local *FH; open FH, '>', "$d.k2" or die; die "boom\n" };
+print FH "K\n"; close FH;
+chomp(my $e = $@); print "$e|", rd("$d.k"), "\n";
+open FH, '>', "$d.c" or die;
+for my $c (0, 1) { local *FH if $c; print "4.$c ", (defined fileno(FH) ? "open" : "closed"), "\n"; }
+print FH "C\n"; close FH;
+print rd("$d.c"), "\n";
+PL
+
+is(run_file(lg(<<'PL')), "o=[O;] i=[I;]\nsv hv *main::FH\nouter-undef code\n", 'nested scopes, and the scope glob carries its scalar / hash / code slots');
+my $d = "__DIR__/d";
+my ($o, $i);
+{ local *FH; $o = *FH; { local *FH; $i = *FH; } }
+open $o, '>', "$d.o" or die; open $i, '>', "$d.i" or die;
+print $o "O\n"; print $i "I\n"; close $o; close $i;
+print "o=[", rd("$d.o"), "] i=[", rd("$d.i"), "]\n";
+sub mkh { local *FH; ${*FH} = "sv"; ${*FH}{k} = "hv"; return *FH }
+my $h = mkh(); print ${*$h}, " ", ${*$h}{k}, " ", "$h", "\n";
+sub mkc { local *FH; *FH = sub { "code" }; return *FH }
+my $cg = mkc(); print((defined &FH ? "outer-defined" : "outer-undef"), " ", *{$cg}{CODE}->(), "\n");
+PL
+
+system('rm', '-rf', $lg_dir);

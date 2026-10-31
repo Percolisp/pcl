@@ -18888,6 +18888,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Filehandle storage - maps symbols to CL streams
 (defvar *p-filehandles* (make-hash-table :test 'eq))
 
+(defvar *p-local-glob-frames* nil
+  "The open `local *NAME` scopes, innermost first: one p-local-glob-frame per
+   scope, pushed by %p-glob-save and removed by %p-glob-restore (task #3868;
+   the commentary is at the frame's defstruct, beside p-typeglob).")
+
 (defvar *p-fh-glob-aliases* (make-hash-table :test 'eq)
   "`*DST = *SRC` made while SRC had NO open handle (#2666): DST symbol -> SRC
    symbol.  perl's glob assignment shares the whole glob, so a handle SRC
@@ -20311,8 +20316,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; later method call on it went elsewhere (task #197).  Key it by the
     ;; glob's own name, which is how %p-resolve-fh reaches a glob handle.
     ((and (p-box-p fh) (p-typeglob-p (p-box-value fh)))
-     (setf (gethash (%p-typeglob-handle-key (p-box-value fh)) *p-filehandles*)
-           stream))
+     (%p-fh-register (%p-typeglob-handle-key (p-box-value fh)) stream))
     ((and (p-box-p fh)
           (stringp (p-box-value fh))
           (plusp (length (p-box-value fh))))
@@ -20322,7 +20326,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
              stream)))
     ((p-box-p fh) (%p-note-handle-name fh stream) (box-set fh stream))
-    (t            (setf (gethash fh *p-filehandles*) stream))))
+    (t            (%p-fh-register fh stream))))
+
+(defun %p-fh-register (key stream)
+  "Register STREAM as the IO of the glob whose handle key is KEY -- and, inside
+   a `local *NAME` scope for that glob, note it as the scope's own handle
+   (%p-local-glob-leave closes it when the scope ends, #3868).  Returns STREAM."
+  (setf (gethash key *p-filehandles*) stream)
+  (when *p-local-glob-frames* (%p-local-glob-opened key stream))
+  stream)
 
 ;;; THE LEXICAL IS AUTOVIVIFIED BEFORE THE OPEN IS ATTEMPTED (task #1271).
 ;;; perl creates the handle first and opens into it, so a FAILED
@@ -30440,6 +30452,9 @@ would consume, so it dies naming the stream (rule 12)."
     ;; stored in a scalar (my $g = *foo).  A glob REF numifies to its address
     ;; (GLOB(0x..)); a bare glob numifies to 0.  Both share box-value=typeglob.
     ((p-typeglob-p val)
+     ;; `\*FH` inside a `local *FH` scope is a ref to the GV, which follows
+     ;; the NAME after the scope -- not one of the scope's glob values (#3868)
+     (when *p-local-glob-frames* (%p-local-glob-unnote val))
      (let ((b (make-p-box val)))
        (setf (p-box-is-ref b) t)
        b))
@@ -32426,6 +32441,28 @@ would consume, so it dies naming the stream (rule 12)."
   package   ; CL package object
   name)     ; upcased Perl name string, e.g. "FOO"
 
+;;; `local *NAME` GIVES THE SCOPE A FRESH GLOB, AND A GLOB VALUE TAKEN IN THE
+;;; SCOPE KEEPS IT (task #3868).  perl's `local *FH` saves FH's GP and installs
+;;; an empty one; the restore puts the old GP back, and a glob VALUE copied out
+;;; while the scope was open (`do { local *FH; *FH }`, `return *FH`) still holds
+;;; the scope's GP -- the pre-gensym anonymous-handle idiom (Log::Log4perl's
+;;; Appender::File, old Template, IO::Handle-less modules).  A PCL typeglob is a
+;;; NAME (package + name), so every such value named main::FH and two handles
+;;; opened through it shared one stream.  The frames below record, per open
+;;; scope, the glob values p-make-typeglob makes from the localized name; the
+;;; restore re-points them at a fresh hidden name holding the scope's slots and
+;;; IO (%p-local-glob-leave).  A REFERENCE `\*FH` taken in the scope is a ref to
+;;; the GV, which follows the NAME (probed: it sees the old handle after the
+;;; scope), so p-backslash takes it out of the frame (%p-local-glob-unnote).
+;;; The frame list itself, *p-local-glob-frames*, is defined beside
+;;; *p-filehandles* (p-backslash reads it, and is compiled before this point).
+(defstruct (p-local-glob-frame (:constructor %make-p-local-glob-frame (&key ss))
+                               (:conc-name %p-lgf-))
+  ss              ; the SCALAR slot symbol: names the glob (its package, $UNAME)
+  (full nil)      ; T once %p-glob-clear emptied the WHOLE glob (kind :all)
+  (values '())    ; the glob values made from the name while the scope was open
+  (opened nil))   ; the stream an `open` in the scope gave the glob (%p-fh-register)
+
 ;;; THE TWO SPELLINGS OF A CARET VARIABLE, and the one step where they meet.
 ;;;
 ;;; perl names a caret variable by a CONTROL CHARACTER: $^R IS ${"\cR"} and its
@@ -32461,7 +32498,9 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((pkg (or (%pcl-find-package pkg-str)
                  ;; Package may not exist yet; create it lazily
                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
-    (make-p-typeglob pkg (%pcl-invert-case name-str))))
+    (let ((g (make-p-typeglob pkg (%pcl-invert-case name-str))))
+      (when *p-local-glob-frames* (%p-local-glob-note g))
+      g)))
 
 (defun %p-glob-rhs-slot-kind (rhs)
   "WHICH SLOT of a typeglob a glob-assignment RHS names: :code, :scalar,
@@ -33012,6 +33051,130 @@ would consume, so it dies naming the stream (rule 12)."
                        (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))
                    (%pcl-invert-case name-str)))
 
+(defun %p-local-glob-frame-of (g)
+  "The innermost open `local *NAME` frame whose glob is the one typeglob G
+   names, or NIL."
+  (let ((pkg (p-typeglob-package g)) (un (p-typeglob-name g)))
+    (dolist (f *p-local-glob-frames* nil)
+      (let ((ss (%p-lgf-ss f)))
+        (when (and (eq (symbol-package ss) pkg)
+                   (= (length (symbol-name ss)) (1+ (length un)))
+                   (string= un (symbol-name ss) :start2 1))
+          (return f))))))
+
+(defun %p-local-glob-note (g)
+  "Record the glob VALUE G (just made by p-make-typeglob) in the scope that
+   localized its whole glob, so the scope's restore hands that glob to it."
+  (let ((f (%p-local-glob-frame-of g)))
+    (when (and f (%p-lgf-full f))
+      (push g (%p-lgf-values f)))))
+
+(defun %p-local-glob-unnote (g)
+  "`\\*FH`: G is the GV itself, which keeps following the name."
+  (let ((f (%p-local-glob-frame-of g)))
+    (when f
+      (setf (%p-lgf-values f) (delete g (%p-lgf-values f) :test #'eq)))))
+
+(defun %p-local-glob-opened (key stream)
+  "An `open` registered STREAM under handle KEY: if the innermost open scope
+   localizing that glob emptied it, STREAM is the scope's own handle."
+  (dolist (f *p-local-glob-frames*)
+    (when (eq (%p-glob-io-sym (%p-lgf-ss f)) key)
+      (when (%p-lgf-full f) (setf (%p-lgf-opened f) stream))
+      (return))))
+
+(defun %p-local-glob-std-p (scalar-sym)
+  "The globs whose IO `local` already localizes through its own state: the
+   standard handles (%p-std-local-enter) and ARGV / ARGVOUT
+   (%p-local-glob-io-bindings)."
+  (and (eq (symbol-package scalar-sym) (%pcl-find-package "main"))
+       (member (%pcl-invert-case (subseq (symbol-name scalar-sym) 1))
+               '("STDIN" "STDOUT" "STDERR" "ARGV" "ARGVOUT")
+               :test #'string=)))
+
+(defun %p-local-glob-clear-io (scalar-sym)
+  "`local *NAME` emptying the WHOLE glob (kind :all): mark the scope's frame,
+   and empty the IO slot too -- a handle opened in the scope is the scope's,
+   and the one open outside it is untouched (%p-local-glob-leave puts it back).
+   Only from a `local` (the innermost frame names this glob)."
+  (let ((f (car *p-local-glob-frames*)))
+    (when (and f (eq (%p-lgf-ss f) scalar-sym))
+      (setf (%p-lgf-full f) t)
+      (unless (%p-local-glob-std-p scalar-sym)
+        (let ((io-sym (%p-glob-io-sym scalar-sym)))
+          (remhash io-sym *p-filehandles*)
+          (remhash io-sym *p-fh-glob-aliases*))))))
+
+(defun %p-local-glob-handoff (frame code-sym scalar-sym array-sym hash-sym)
+  "Move the scope's glob -- the four slots and the IO -- to a fresh hidden name
+   and re-point every glob value FRAME recorded at it, keeping the perl-visible
+   name (`*main::FH`).  The caller restores the old glob afterwards."
+  (let* ((pkg (symbol-package scalar-sym))
+         (un (subseq (symbol-name scalar-sym) 1))
+         (fresh (%pcl-invert-case
+                 (format nil "~A__PCL_LOCAL_~D" (%pcl-invert-case un)
+                         (incf *p-anon-fh-seq*))))
+         (io-sym (%p-glob-io-sym scalar-sym))
+         (fresh-io (intern fresh pkg)))
+    (multiple-value-bind (fc fs fa fh) (%p-glob-syms-in pkg fresh)
+      (when (fboundp code-sym)
+        (setf (fdefinition fc) (fdefinition code-sym))
+        (let ((d (gethash code-sym *p-declared-subs*)))
+          (when d (setf (gethash fc *p-declared-subs*) d))))
+      (when (boundp scalar-sym) (setf (symbol-value fs) (symbol-value scalar-sym)))
+      (when (boundp array-sym) (setf (symbol-value fa) (symbol-value array-sym)))
+      (when (boundp hash-sym) (setf (symbol-value fh) (symbol-value hash-sym))))
+    (multiple-value-bind (s present) (gethash io-sym *p-filehandles*)
+      (when present (setf (gethash fresh-io *p-filehandles*) s)))
+    (multiple-value-bind (a present) (gethash io-sym *p-fh-glob-aliases*)
+      (when present (setf (gethash fresh-io *p-fh-glob-aliases*) a)))
+    (dolist (g (%p-lgf-values frame))
+      (let ((shown (cons (%p-glob-perl-package g) (%p-glob-perl-name g))))
+        (setf (p-typeglob-name g) fresh
+              (gethash g *p-glob-display-names*) shown)))))
+
+(defun %p-local-glob-io-shared-p (io-sym stream)
+  "True when STREAM, the scope's IO, is also some other handle's -- a glob
+   alias (`local *FH = *STDOUT`), a standard stream, or another name's entry --
+   so the scope's end must not close it."
+  (or (nth-value 1 (gethash io-sym *p-fh-glob-aliases*))
+      (eq stream *standard-output*) (eq stream *error-output*)
+      (eq stream *standard-input*)
+      (block found
+        (maphash (lambda (k v)
+                   (when (and (eq v stream) (not (eq k io-sym)))
+                     (return-from found t)))
+                 *p-filehandles*)
+        nil)))
+
+(defun %p-local-glob-leave (saved code-sym scalar-sym array-sym hash-sym)
+  "The IO half of a `local *NAME` restore (task #3868), run before the slots
+   are restored.  For a scope that emptied the whole glob: hand the scope's
+   glob to the glob values made in it (%p-local-glob-handoff); with none, a
+   handle an `open` in the scope gave it is CLOSED, as perl frees the scope's
+   GP -- never one the scope only ALIASED (`local *FH = *STDOUT`, `= $fh`);
+   then the old IO entry and alias come back.  A TIE placeholder made in the
+   scope is %p-glob-restore-tied-io's business."
+  (let* ((frame (aref saved 11))
+         (tail (member frame *p-local-glob-frames* :test #'eq)))
+    (when tail (setf *p-local-glob-frames* (cdr tail)))
+    (when (and (%p-lgf-full frame) (not (%p-local-glob-std-p scalar-sym)))
+      (let* ((io-sym (%p-glob-io-sym scalar-sym))
+             (cur (gethash io-sym *p-filehandles*)))
+        (unless (typep cur 'p-tied-handle-stream)
+          (cond ((%p-lgf-values frame)
+                 (%p-local-glob-handoff frame code-sym scalar-sym array-sym hash-sym))
+                ((and (streamp cur) (eq cur (%p-lgf-opened frame))
+                      (not (eq cur (aref saved 9)))
+                      (not (%p-local-glob-io-shared-p io-sym cur)))
+                 (%p-close-impl io-sym)))
+          (if (aref saved 9)
+              (setf (gethash io-sym *p-filehandles*) (aref saved 9))
+              (remhash io-sym *p-filehandles*))
+          (if (aref saved 10)
+              (setf (gethash io-sym *p-fh-glob-aliases*) (aref saved 10))
+              (remhash io-sym *p-fh-glob-aliases*)))))))
+
 (defun %p-glob-save (code-sym scalar-sym array-sym hash-sym)
   "Snapshot the four glob slots for a later local restore.  Returns an opaque
    vector of had-bound flags + saved values.
@@ -33022,13 +33185,20 @@ would consume, so it dies naming the stream (rule 12)."
    permanently :defined after the scope — restoring the function slot but not
    the answer to the question the function slot exists for (s449s; the static
    and the run-time-named spellings were both wrong, probed vs perl)."
+  (let ((frame (%make-p-local-glob-frame :ss scalar-sym))
+        (io-sym (%p-glob-io-sym scalar-sym)))
+    (push frame *p-local-glob-frames*)
   (vector (fboundp code-sym)   (when (fboundp code-sym)   (fdefinition code-sym))
           (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
           (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
           (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))
           (gethash code-sym *p-declared-subs*)
           ;; slot 9: the IO entry, for %p-glob-restore-tied-io (task #2590)
-          (gethash (%p-glob-io-sym scalar-sym) *p-filehandles*)))
+            ;; and the IO localization (#3868); slot 10 its glob alias (#2666)
+            (gethash io-sym *p-filehandles*)
+            (gethash io-sym *p-fh-glob-aliases*)
+            ;; slot 11: the scope's frame (%p-local-glob-leave)
+            frame)))
 
 (defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym &optional (kind :all))
   "Reset glob slots to fresh empties (Perl: local *foo starts fresh).
@@ -33065,10 +33235,15 @@ would consume, so it dies naming the stream (rule 12)."
     (let ((hsh (%p-glob-empty-slot "%")))
       (setf (symbol-value hash-sym) hsh
             (gethash hsh *p-removed-agg-slots*) t)))
+  (when (eq kind :all)
+    (%p-local-glob-clear-io scalar-sym))
   (values))
 
 (defun %p-glob-restore (saved code-sym scalar-sym array-sym hash-sym)
-  "Restore the four glob slots from a %p-glob-save snapshot."
+  "Restore the four glob slots from a %p-glob-save snapshot -- and, for a
+   scope that emptied the whole glob, its IO slot, after handing the scope's
+   glob to every glob VALUE made in it (%p-local-glob-leave, #3868)."
+  (%p-local-glob-leave saved code-sym scalar-sym array-sym hash-sym)
   (if (aref saved 0) (setf (fdefinition code-sym) (aref saved 1))
       (when (fboundp code-sym) (fmakunbound code-sym)))
   (if (aref saved 8) (setf (gethash code-sym *p-declared-subs*) (aref saved 8))
