@@ -957,6 +957,18 @@ unblessed scalar, exactly as perl's SV-attached stash does not travel
 with the value. The *identity* of an object is the underlying
 hash/array/referent — two references to it share blessing.
 
+**A copy of a reference into a NEW element is a new container, blessed or
+not** (normative, s529a, task #3824).  The array construction arm
+(`[$x]`, `@a = ($x)`, `push`/`unshift`/`splice`) and the hash construction
+arm store a fresh box holding the SAME referent with the source box's class
+slot and `is-ref` flag (`%p-ref-container-copy` = `%p-container-snapshot`),
+never the variable's box itself: a later `$x = 8` does not reach the element
+and `$a[0] = 3` does not reach `$x`.  A blessed PLAIN scalar (a `bless \$x`
+referent) is not a reference and copies its value, unblessed, as `box-set`
+does.  Example: `my $s = bless {}, "K"; my $t = [$s]; $s = 8; ref $t->[0]`
+is `K`.  Residue: an ARRAY / CODE referent keeps its class on each container,
+so a re-bless through one copy is not seen by another (filed, s529a).
+
 **A SCALAR'S OWN STASH IS NOT THE CLASS OF WHAT IT HOLDS (normative,
 s483b/#1619).**  `ref(R)` reports the blessing of R's *referent itself*,
 so a scalar that merely HOLDS a blessed reference is not blessed: with

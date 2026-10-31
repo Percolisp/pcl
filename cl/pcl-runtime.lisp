@@ -9474,32 +9474,26 @@ per element."
           ((and (p-magic-cell-p inner)
                 (not (eq (p-magic-cell-kind inner) :defelem)))
            (%p-vpush (make-p-box (funcall (p-magic-cell-getter inner))) arr))
-          ;; Blessed box: preserve as-is (class must not be lost)
-          ((p-box-class item) (%p-vpush item arr))
-          ;; Scalar/nested reference (box-in-box, e.g. \$x or \\$x): the depth of
-          ;; box nesting encodes the reference type (SCALAR vs REF), so we must
-          ;; NOT add or remove a box layer here.  Store the reference box as-is.
-          ((p-box-p inner) (%p-vpush item arr))
-          ;; Reference to a raw object (array-ref, hash-ref, code-ref, qr//; the
-          ;; glob is the arm just below):
-          ;; copy the scalar CONTAINER while keeping the SAME underlying object.
-          ;; Perl's [$x] / @a=($x) copies the scalar; if $x is later reassigned
-          ;; (box-set mutates the original box in place) the stored copy must not
-          ;; follow it.  A fresh box around the same object is a distinct container
-          ;; pointing at the same referent — and does not change the ref type
-          ;; (still ARRAY/HASH/CODE/…), since the object itself is unchanged.
-          ;; A typeglob takes the same fresh-container copy as its siblings, but
-          ;; the flag comes with it: for a glob the REF-ness lives on the
-          ;; container (is-ref), not on the object, so a copy that drops it
-          ;; turns `\*foo` into a bare glob (#423) — the one raw-object kind
-          ;; whose ref type is NOT decided by the object alone.
-          ((p-typeglob-p inner)
-           (%p-vpush (%p-glob-container-copy item) arr))
-          ((or (and (vectorp inner) (not (stringp inner)))
+          ;; A REFERENCE -- to a scalar (box-in-box, \$x or \\$x), a glob, or a
+          ;; raw object (array, hash, code, qr//), blessed or not: copy the
+          ;; scalar CONTAINER while keeping the SAME referent.  Perl's [$x] /
+          ;; @a=($x) / push copies the scalar; if $x is later reassigned
+          ;; (box-set mutates the original box in place) the stored copy must
+          ;; not follow it.  Storing ITEM itself made the element the VARIABLE
+          ;; (#3824: `my $t = [$s]; $s = 8` emptied $t->[0] for a blessed $s,
+          ;; and `$cc[0] = 3` rewrote the variable) -- which is what the old
+          ;; "blessed box: preserve as-is" and "scalar ref: as-is" arms did.
+          ;; The copy keeps the nesting depth (SCALAR vs REF), the class and
+          ;; the is-ref flag: %p-ref-container-copy is the one copy rule.
+          ;; A blessed PLAIN scalar (a `bless \$x' referent) is not a reference
+          ;; and falls to the value-copy arms below, unblessed, as box-set does.
+          ((or (p-box-p inner)
+               (p-typeglob-p inner)
+               (and (vectorp inner) (not (stringp inner)))
                (hash-table-p inner)
                (functionp inner)
                (p-regex-match-p inner))
-           (%p-vpush (make-p-box inner) arr))
+           (%p-vpush (%p-ref-container-copy item) arr))
           ;; Dualvar ($!/Scalar::Util::dualvar): copy keeping both halves.
           ((%pcl-dualvar-p item)
            (%p-vpush (%p-dualvar-copy item) arr))
@@ -9507,18 +9501,20 @@ per element."
           (t (%p-vpush (make-p-box inner) arr))))
       (%p-vpush (make-p-box item) arr)))
 
-(defun %p-glob-container-copy (item)
-  "A fresh container for the typeglob in box ITEM, CARRYING its is-ref flag.
-   For a glob the REF-ness lives on the container, not on the object, so a
-   copy that drops the flag turns `\*foo` into a bare glob (#423), and one
-   that wraps ITEM whole nests the ref a level deeper than every reader of a
-   slot expects (#3372: `%h = (k => \*STDIN)` then `close $_[0]` on
-   `f($h{k})` found no handle).  The ONE copy rule for both construction
-   arms: the array's (%p-flatten-list's element walk) and the hash's
-   (%p-make-hash-entry)."
-  (let ((nb (make-p-box (p-box-value item))))
-    (setf (p-box-is-ref nb) (p-box-is-ref item))
-    nb))
+(defun %p-ref-container-copy (item)
+  "A fresh container for the REFERENCE in box ITEM: the same referent (box
+   VALUE) with ITEM's container flags -- %p-container-snapshot, the list
+   assignment's copy rule, so the three construction paths cannot drift.  For
+   a glob the REF-ness lives on the container, not on the object, so a copy
+   that drops the flag turns `\*foo` into a bare glob (#423), and one that
+   wraps ITEM whole nests the ref a level deeper than every reader of a slot
+   expects (#3372: `%h = (k => \*STDIN)` then `close $_[0]` on `f($h{k})`
+   found no handle).  For an ARRAY / CODE / glob payload the class slot is the
+   only place the blessing is recorded, so a copy that drops it unblesses the
+   object -- and storing ITEM itself to keep it aliased the variable (#3824).
+   Used by both construction arms: the array's (%p-array-store-scalar) and the
+   hash's (%p-make-hash-entry)."
+  (%p-container-snapshot item (p-box-value item)))
 
 (defun %p-make-hash-entry (v)
   "Create a fresh entry box from V for storage in a hash, preserving bless class
@@ -9547,7 +9543,7 @@ per element."
   (cond
     ;; a glob ref: the flag travels on a flat copy, as in the array arm (#3372)
     ((and (p-box-p v) (p-typeglob-p (p-box-value v)))
-     (%p-glob-container-copy v))
+     (%p-ref-container-copy v))
     ((and (p-box-p v) (p-box-is-ref v))
      (make-p-box v))
     ;; Dualvar ($!/Scalar::Util::dualvar): keep both numeric and string halves.
