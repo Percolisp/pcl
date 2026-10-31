@@ -762,6 +762,12 @@ sub p_pack {
     my $result = '';
     my $ai = 0;
     _pack_tmpl($tmpl, \$ai, \@args, \$result, 0, 0);
+    # A template that BEGINS with U is U0 (character) mode: the packed UTF-8
+    # bytes are the characters of the result (perlfunc pack; #3650).
+    # (The regex runs only for a template that starts with white space.)
+    my $c0 = substr($tmpl, 0, 1);
+    utf8::decode($result)
+        if $c0 eq q(U) || ($c0 le q( ) && $tmpl =~ /\A[ \t\n\r\f]+U/);
     return $result;
 }
 
@@ -1165,6 +1171,9 @@ sub _next_format_item {
 sub p_unpack {
     my ($tmpl, $s) = @_;
     $s = '' unless defined $s;
+    # A template whose FIRST character is U is U0 (character) mode, as an
+    # explicit U0 prefix is (perlfunc pack; #3650).
+    my $lead_u = substr($tmpl, 0, 1) eq 'U';
     # Strip leading whitespace and #-comments before prefix detection
     $tmpl =~ s/\A(?:[ \t\n\r\f,]|#[^\n]*\n?)*//;
     # %N checksum detection
@@ -1173,7 +1182,7 @@ sub p_unpack {
         $checksum_width = length($1) ? int($1) : 16;
     }
     # U0 UTF-8 byte mode
-    my $utf8_mode = ($tmpl =~ s/^U0//);
+    my $utf8_mode = ($tmpl =~ s/^U0//) || $lead_u;
     # Strip leading whitespace again in case %32 was followed by spaces
     $tmpl =~ s/\A(?:[ \t\n\r\f,]|#[^\n]*\n?)*// if $checksum_width;
     _pack_check_brackets($tmpl);

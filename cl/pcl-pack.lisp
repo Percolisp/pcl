@@ -13,36 +13,38 @@
    ("main" "!" 496 "unknown")
    ("main" "!" 525 "unknown")
    ("main" "!" 742 "unknown")
-   ("main" "$" 1005 "unknown")
-   ("main" "$" 1006 "unknown")
-   ("main" "$" 1007 "unknown")
-   ("main" "$" 1017 "unknown")
-   ("main" "$" 1036 "unknown")
-   ("main" "$" 1037 "unknown")
-   ("main" "$" 1038 "unknown")
-   ("main" "$" 1040 "unknown")
+   ("main" "$" 1000 "unknown")
+   ("main" "$" 1001 "unknown")
+   ("main" "$" 1011 "unknown")
+   ("main" "$" 1012 "unknown")
+   ("main" "$" 1013 "unknown")
+   ("main" "$" 1023 "unknown")
+   ("main" "$" 1042 "unknown")
+   ("main" "$" 1043 "unknown")
    ("main" "$" 1044 "unknown")
-   ("main" "$" 1056 "unknown")
-   ("main" "$" 1057 "unknown")
-   ("main" "$" 1060 "unknown")
-   ("main" "$" 1061 "unknown")
-   ("main" "$" 1069 "unknown")
-   ("main" "$" 1071 "unknown")
-   ("main" "$" 1072 "unknown")
-   ("main" "$" 1079 "unknown")
-   ("main" "$" 1091 "unknown")
-   ("main" "$" 1095 "unknown")
+   ("main" "$" 1046 "unknown")
+   ("main" "$" 1050 "unknown")
+   ("main" "$" 1062 "unknown")
+   ("main" "$" 1063 "unknown")
+   ("main" "$" 1066 "unknown")
+   ("main" "$" 1067 "unknown")
+   ("main" "$" 1075 "unknown")
+   ("main" "$" 1077 "unknown")
+   ("main" "$" 1078 "unknown")
+   ("main" "$" 1085 "unknown")
    ("main" "$" 1097 "unknown")
-   ("main" "$" 1106 "unknown")
-   ("main" "$" 1108 "unknown")
-   ("main" "$" 1109 "unknown")
-   ("main" "$" 1110 "unknown")
-   ("main" "$" 1118 "unknown")
-   ("main" "$" 1120 "unknown")
-   ("main" "$" 1121 "unknown")
+   ("main" "$" 1101 "unknown")
+   ("main" "$" 1103 "unknown")
+   ("main" "$" 1112 "unknown")
+   ("main" "$" 1114 "unknown")
+   ("main" "$" 1115 "unknown")
+   ("main" "$" 1116 "unknown")
+   ("main" "$" 1124 "unknown")
+   ("main" "$" 1126 "unknown")
    ("main" "$" 1127 "unknown")
-   ("main" "$" 1129 "unknown")
-   ("main" "$" 1130 "unknown")
+   ("main" "$" 1133 "unknown")
+   ("main" "$" 1135 "unknown")
+   ("main" "$" 1136 "unknown")
    ("main" "$" 136 "unknown")
    ("main" "$" 137 "unknown")
    ("main" "$" 230 "unknown")
@@ -123,58 +125,56 @@
    ("main" "$" 710 "unknown")
    ("main" "$" 713 "unknown")
    ("main" "$" 714 "unknown")
-   ("main" "$" 772 "unknown")
-   ("main" "$" 773 "unknown")
-   ("main" "$" 780 "unknown")
-   ("main" "$" 782 "unknown")
-   ("main" "$" 791 "unknown")
-   ("main" "$" 793 "unknown")
-   ("main" "$" 794 "unknown")
+   ("main" "$" 778 "unknown")
+   ("main" "$" 779 "unknown")
+   ("main" "$" 786 "unknown")
+   ("main" "$" 788 "unknown")
+   ("main" "$" 797 "unknown")
    ("main" "$" 799 "unknown")
-   ("main" "$" 802 "unknown")
-   ("main" "$" 806 "unknown")
-   ("main" "$" 809 "unknown")
+   ("main" "$" 800 "unknown")
+   ("main" "$" 805 "unknown")
+   ("main" "$" 808 "unknown")
    ("main" "$" 812 "unknown")
-   ("main" "$" 816 "unknown")
-   ("main" "$" 819 "unknown")
+   ("main" "$" 815 "unknown")
+   ("main" "$" 818 "unknown")
    ("main" "$" 822 "unknown")
+   ("main" "$" 825 "unknown")
    ("main" "$" 828 "unknown")
-   ("main" "$" 833 "unknown")
-   ("main" "$" 835 "unknown")
-   ("main" "$" 838 "unknown")
+   ("main" "$" 834 "unknown")
+   ("main" "$" 839 "unknown")
+   ("main" "$" 841 "unknown")
    ("main" "$" 844 "unknown")
-   ("main" "$" 849 "unknown")
-   ("main" "$" 852 "unknown")
-   ("main" "$" 853 "unknown")
+   ("main" "$" 850 "unknown")
+   ("main" "$" 855 "unknown")
    ("main" "$" 858 "unknown")
+   ("main" "$" 859 "unknown")
    ("main" "$" 864 "unknown")
-   ("main" "$" 865 "unknown")
+   ("main" "$" 870 "unknown")
    ("main" "$" 871 "unknown")
-   ("main" "$" 875 "unknown")
-   ("main" "$" 876 "unknown")
+   ("main" "$" 877 "unknown")
    ("main" "$" 881 "unknown")
-   ("main" "$" 884 "unknown")
-   ("main" "$" 934 "unknown")
-   ("main" "$" 938 "unknown")
-   ("main" "$" 939 "unknown")
-   ("main" "$" 943 "unknown")
+   ("main" "$" 882 "unknown")
+   ("main" "$" 887 "unknown")
+   ("main" "$" 890 "unknown")
+   ("main" "$" 940 "unknown")
+   ("main" "$" 944 "unknown")
+   ("main" "$" 945 "unknown")
    ("main" "$" 949 "unknown")
-   ("main" "$" 951 "unknown")
-   ("main" "$" 952 "unknown")
-   ("main" "$" 953 "unknown")
-   ("main" "$" 956 "unknown")
+   ("main" "$" 955 "unknown")
    ("main" "$" 957 "unknown")
    ("main" "$" 958 "unknown")
-   ("main" "$" 980 "unknown")
-   ("main" "$" 982 "unknown")
-   ("main" "$" 983 "unknown")
+   ("main" "$" 959 "unknown")
+   ("main" "$" 962 "unknown")
+   ("main" "$" 963 "unknown")
+   ("main" "$" 964 "unknown")
+   ("main" "$" 986 "unknown")
    ("main" "$" 988 "unknown")
+   ("main" "$" 989 "unknown")
    ("main" "$" 994 "unknown")
-   ("main" "$" 995 "unknown")
-   ("main" "_next_format_item" 1162 "list-call")
-   ("main" "_next_format_item" 1195 "list-call")
-   ("main" "_pack_check_brackets" 1162 "list-call")
-   ("main" "_pack_check_brackets" 1179 "list-call")
+   ("main" "_next_format_item" 1168 "list-call")
+   ("main" "_next_format_item" 1204 "list-call")
+   ("main" "_pack_check_brackets" 1168 "list-call")
+   ("main" "_pack_check_brackets" 1188 "list-call")
    ("main" "_pack_check_brackets" 739 "list-call")
    ("main" "_pack_check_brackets" 761 "list-call")
    ("main" "_pack_emit_int" 406 "list-call")
@@ -185,40 +185,40 @@
    ("main" "_pack_emit_int" 530 "list-call")
    ("main" "_pack_emit_int" 635 "list-call")
    ("main" "_pack_emit_int" 640 "list-call")
-   ("main" "_pack_find_group_end" 1014 "list-call")
-   ("main" "_pack_find_group_end" 1143 "list-call")
-   ("main" "_pack_find_group_end" 1157 "list-call")
+   ("main" "_pack_find_group_end" 1020 "list-call")
+   ("main" "_pack_find_group_end" 1149 "list-call")
+   ("main" "_pack_find_group_end" 1163 "list-call")
    ("main" "_pack_find_group_end" 161 "list-call")
    ("main" "_pack_find_group_end" 177 "list-call")
    ("main" "_pack_find_group_end" 406 "list-call")
    ("main" "_pack_find_group_end" 429 "list-call")
-   ("main" "_pack_find_group_end" 797 "list-call")
-   ("main" "_pack_find_group_end" 910 "list-call")
+   ("main" "_pack_find_group_end" 803 "list-call")
+   ("main" "_pack_find_group_end" 916 "list-call")
    ("main" "_pack_float32" 406 "list-call")
    ("main" "_pack_float32" 648 "list-call")
    ("main" "_pack_float32" 650 "list-call")
    ("main" "_pack_float64" 406 "list-call")
    ("main" "_pack_float64" 656 "list-call")
    ("main" "_pack_float64" 658 "list-call")
-   ("main" "_pack_parse_count" 1143 "list-call")
-   ("main" "_pack_parse_count" 1161 "list-call")
+   ("main" "_pack_parse_count" 1149 "list-call")
+   ("main" "_pack_parse_count" 1167 "list-call")
    ("main" "_pack_parse_count" 161 "list-call")
    ("main" "_pack_parse_count" 186 "list-call")
    ("main" "_pack_parse_count" 406 "list-call")
    ("main" "_pack_parse_count" 435 "list-call")
    ("main" "_pack_parse_count" 453 "list-call")
-   ("main" "_pack_parse_count" 797 "list-call")
-   ("main" "_pack_parse_count" 916 "list-call")
-   ("main" "_pack_parse_count" 968 "list-call")
+   ("main" "_pack_parse_count" 803 "list-call")
+   ("main" "_pack_parse_count" 922 "list-call")
+   ("main" "_pack_parse_count" 974 "list-call")
    ("main" "_pack_parse_mods" 406 "list-call")
    ("main" "_pack_parse_mods" 432 "list-call")
    ("main" "_pack_parse_mods" 450 "list-call")
-   ("main" "_pack_parse_mods" 797 "list-call")
-   ("main" "_pack_parse_mods" 913 "list-call")
-   ("main" "_pack_parse_mods" 966 "list-call")
-   ("main" "_pack_skip_ws" 1030 "list-call")
-   ("main" "_pack_skip_ws" 1143 "list-call")
-   ("main" "_pack_skip_ws" 1153 "list-call")
+   ("main" "_pack_parse_mods" 803 "list-call")
+   ("main" "_pack_parse_mods" 919 "list-call")
+   ("main" "_pack_parse_mods" 972 "list-call")
+   ("main" "_pack_skip_ws" 1036 "list-call")
+   ("main" "_pack_skip_ws" 1149 "list-call")
+   ("main" "_pack_skip_ws" 1159 "list-call")
    ("main" "_pack_skip_ws" 161 "list-call")
    ("main" "_pack_skip_ws" 172 "list-call")
    ("main" "_pack_skip_ws" 406 "list-call")
@@ -227,13 +227,13 @@
    ("main" "_pack_skip_ws" 443 "list-call")
    ("main" "_pack_skip_ws" 451 "list-call")
    ("main" "_pack_skip_ws" 560 "list-call")
-   ("main" "_pack_skip_ws" 797 "list-call")
-   ("main" "_pack_skip_ws" 905 "list-call")
-   ("main" "_pack_skip_ws" 918 "list-call")
-   ("main" "_pack_skip_ws" 923 "list-call")
-   ("main" "_pack_skip_ws" 964 "list-call")
-   ("main" "_pack_skip_ws" 967 "list-call")
-   ("main" "_pack_skip_ws" 969 "list-call")
+   ("main" "_pack_skip_ws" 803 "list-call")
+   ("main" "_pack_skip_ws" 911 "list-call")
+   ("main" "_pack_skip_ws" 924 "list-call")
+   ("main" "_pack_skip_ws" 929 "list-call")
+   ("main" "_pack_skip_ws" 970 "list-call")
+   ("main" "_pack_skip_ws" 973 "list-call")
+   ("main" "_pack_skip_ws" 975 "list-call")
    ("main" "_pack_str_one" 406 "list-call")
    ("main" "_pack_str_one" 473 "list-call")
    ("main" "_pack_str_one" 475 "list-call")
@@ -251,7 +251,7 @@
    ("main" "_pack_tmpl" 575 "list-call")
    ("main" "_pack_tmpl" 739 "list-call")
    ("main" "_pack_tmpl" 764 "list-call")
-   ("main" "_pack_type_info" 1103 "list-call")
+   ("main" "_pack_type_info" 1109 "list-call")
    ("main" "_pack_type_info" 161 "list-call")
    ("main" "_pack_type_info" 209 "list-call")
    ("main" "_pack_type_info" 406 "list-call")
@@ -260,45 +260,45 @@
    ("main" "_pack_type_info" 499 "list-call")
    ("main" "_pack_type_info" 528 "list-call")
    ("main" "_pack_type_info" 632 "list-call")
-   ("main" "_pack_type_info" 797 "list-call")
-   ("main" "_pack_type_info" 930 "list-call")
-   ("main" "_pack_type_info" 975 "list-call")
+   ("main" "_pack_type_info" 803 "list-call")
+   ("main" "_pack_type_info" 936 "list-call")
+   ("main" "_pack_type_info" 981 "list-call")
    ("main" "_pack_utf8_char" 406 "list-call")
    ("main" "_pack_utf8_char" 673 "list-call")
    ("main" "_pack_utf8_char" 678 "list-call")
-   ("main" "_unpack_float32" 1119 "list-call")
-   ("main" "_unpack_float32" 1121 "list-call")
-   ("main" "_unpack_float32" 797 "list-call")
-   ("main" "_unpack_float64" 1128 "list-call")
-   ("main" "_unpack_float64" 1130 "list-call")
-   ("main" "_unpack_float64" 797 "list-call")
-   ("main" "_unpack_read_int" 1005 "list-call")
-   ("main" "_unpack_read_int" 1006 "list-call")
-   ("main" "_unpack_read_int" 1107 "list-call")
-   ("main" "_unpack_read_int" 1109 "list-call")
-   ("main" "_unpack_read_int" 797 "list-call")
-   ("main" "_unpack_read_int" 938 "list-call")
-   ("main" "_unpack_read_int" 982 "list-call")
-   ("main" "_unpack_str" 1012 "list-call")
-   ("main" "_unpack_str" 1138 "list-call")
-   ("main" "_unpack_str" 797 "list-call")
-   ("main" "_unpack_tmpl" 1016 "list-call")
-   ("main" "_unpack_tmpl" 1018 "list-call")
-   ("main" "_unpack_tmpl" 1039 "list-call")
-   ("main" "_unpack_tmpl" 1043 "list-call")
+   ("main" "_unpack_float32" 1125 "list-call")
+   ("main" "_unpack_float32" 1127 "list-call")
+   ("main" "_unpack_float32" 803 "list-call")
+   ("main" "_unpack_float64" 1134 "list-call")
+   ("main" "_unpack_float64" 1136 "list-call")
+   ("main" "_unpack_float64" 803 "list-call")
+   ("main" "_unpack_read_int" 1011 "list-call")
+   ("main" "_unpack_read_int" 1012 "list-call")
+   ("main" "_unpack_read_int" 1113 "list-call")
+   ("main" "_unpack_read_int" 1115 "list-call")
+   ("main" "_unpack_read_int" 803 "list-call")
+   ("main" "_unpack_read_int" 944 "list-call")
+   ("main" "_unpack_read_int" 988 "list-call")
+   ("main" "_unpack_str" 1018 "list-call")
+   ("main" "_unpack_str" 1144 "list-call")
+   ("main" "_unpack_str" 803 "list-call")
+   ("main" "_unpack_tmpl" 1022 "list-call")
+   ("main" "_unpack_tmpl" 1024 "list-call")
    ("main" "_unpack_tmpl" 1045 "list-call")
-   ("main" "_unpack_tmpl" 1162 "list-call")
-   ("main" "_unpack_tmpl" 1198 "list-call")
-   ("main" "_unpack_tmpl" 1210 "list-call")
-   ("main" "_unpack_tmpl" 1213 "list-call")
-   ("main" "_unpack_tmpl" 797 "list-call")
-   ("main" "_unpack_utf8_char" 783 "list-call")
-   ("main" "_unpack_utf8_char" 872 "list-call")
-   ("main" "chr" 1162 "builtin")
-   ("main" "chr" 1184 "builtin")
-   ("main" "chr" 1185 "builtin")
-   ("main" "chr" 1186 "builtin")
-   ("main" "chr" 1187 "builtin")
+   ("main" "_unpack_tmpl" 1049 "list-call")
+   ("main" "_unpack_tmpl" 1051 "list-call")
+   ("main" "_unpack_tmpl" 1168 "list-call")
+   ("main" "_unpack_tmpl" 1207 "list-call")
+   ("main" "_unpack_tmpl" 1219 "list-call")
+   ("main" "_unpack_tmpl" 1222 "list-call")
+   ("main" "_unpack_tmpl" 803 "list-call")
+   ("main" "_unpack_utf8_char" 789 "list-call")
+   ("main" "_unpack_utf8_char" 878 "list-call")
+   ("main" "chr" 1168 "builtin")
+   ("main" "chr" 1193 "builtin")
+   ("main" "chr" 1194 "builtin")
+   ("main" "chr" 1195 "builtin")
+   ("main" "chr" 1196 "builtin")
    ("main" "chr" 261 "builtin")
    ("main" "chr" 270 "builtin")
    ("main" "chr" 271 "builtin")
@@ -348,16 +348,16 @@
    ("main" "chr" 710 "builtin")
    ("main" "chr" 713 "builtin")
    ("main" "chr" 714 "builtin")
-   ("main" "chr" 783 "builtin")
-   ("main" "chr" 860 "builtin")
-   ("main" "chr" 861 "builtin")
-   ("main" "chr" 862 "builtin")
-   ("main" "defined" 1028 "builtin")
-   ("main" "defined" 1078 "builtin")
-   ("main" "defined" 1095 "builtin")
-   ("main" "defined" 1097 "builtin")
-   ("main" "defined" 1162 "builtin")
-   ("main" "defined" 1167 "builtin")
+   ("main" "chr" 789 "builtin")
+   ("main" "chr" 866 "builtin")
+   ("main" "chr" 867 "builtin")
+   ("main" "chr" 868 "builtin")
+   ("main" "defined" 1034 "builtin")
+   ("main" "defined" 1084 "builtin")
+   ("main" "defined" 1101 "builtin")
+   ("main" "defined" 1103 "builtin")
+   ("main" "defined" 1168 "builtin")
+   ("main" "defined" 1173 "builtin")
    ("main" "defined" 161 "builtin")
    ("main" "defined" 187 "builtin")
    ("main" "defined" 188 "builtin")
@@ -370,15 +370,15 @@
    ("main" "defined" 460 "builtin")
    ("main" "defined" 557 "builtin")
    ("main" "defined" 608 "builtin")
-   ("main" "defined" 797 "builtin")
-   ("main" "defined" 898 "builtin")
-   ("main" "defined" 899 "builtin")
-   ("main" "die" 1033 "builtin")
-   ("main" "die" 1060 "builtin")
-   ("main" "die" 1071 "builtin")
-   ("main" "die" 1083 "builtin")
-   ("main" "die" 1142 "builtin")
-   ("main" "die" 1143 "builtin")
+   ("main" "defined" 803 "builtin")
+   ("main" "defined" 904 "builtin")
+   ("main" "defined" 905 "builtin")
+   ("main" "die" 1039 "builtin")
+   ("main" "die" 1066 "builtin")
+   ("main" "die" 1077 "builtin")
+   ("main" "die" 1089 "builtin")
+   ("main" "die" 1148 "builtin")
+   ("main" "die" 1149 "builtin")
    ("main" "die" 127 "builtin")
    ("main" "die" 139 "builtin")
    ("main" "die" 144 "builtin")
@@ -417,15 +417,15 @@
    ("main" "die" 733 "builtin")
    ("main" "die" 737 "builtin")
    ("main" "die" 742 "builtin")
-   ("main" "die" 783 "builtin")
-   ("main" "die" 797 "builtin")
-   ("main" "die" 884 "builtin")
-   ("main" "die" 900 "builtin")
-   ("main" "die" 924 "builtin")
-   ("main" "die" 928 "builtin")
-   ("main" "die" 936 "builtin")
-   ("main" "die" 943 "builtin")
-   ("main" "die" 980 "builtin")
+   ("main" "die" 789 "builtin")
+   ("main" "die" 803 "builtin")
+   ("main" "die" 890 "builtin")
+   ("main" "die" 906 "builtin")
+   ("main" "die" 930 "builtin")
+   ("main" "die" 934 "builtin")
+   ("main" "die" 942 "builtin")
+   ("main" "die" 949 "builtin")
+   ("main" "die" 986 "builtin")
    ("main" "hex" 314 "builtin")
    ("main" "hex" 362 "builtin")
    ("main" "hex" 363 "builtin")
@@ -433,28 +433,28 @@
    ("main" "hex" 369 "builtin")
    ("main" "hex" 370 "builtin")
    ("main" "hex" 371 "builtin")
-   ("main" "if" 1107 "builtin")
-   ("main" "if" 1119 "builtin")
-   ("main" "if" 1128 "builtin")
+   ("main" "if" 1113 "builtin")
+   ("main" "if" 1125 "builtin")
+   ("main" "if" 1134 "builtin")
    ("main" "if" 161 "builtin")
    ("main" "if" 406 "builtin")
-   ("main" "if" 783 "builtin")
-   ("main" "if" 797 "builtin")
+   ("main" "if" 789 "builtin")
+   ("main" "if" 803 "builtin")
    ("main" "index" 127 "builtin")
    ("main" "index" 139 "builtin")
    ("main" "index" 144 "builtin")
    ("main" "index" 151 "builtin")
    ("main" "index" 221 "builtin")
    ("main" "index" 249 "builtin")
-   ("main" "index" 797 "builtin")
-   ("main" "index" 949 "builtin")
-   ("main" "int" 1069 "builtin")
-   ("main" "int" 1106 "builtin")
-   ("main" "int" 1118 "builtin")
-   ("main" "int" 1127 "builtin")
-   ("main" "int" 1162 "builtin")
-   ("main" "int" 1173 "builtin")
-   ("main" "int" 1206 "builtin")
+   ("main" "index" 803 "builtin")
+   ("main" "index" 955 "builtin")
+   ("main" "int" 1075 "builtin")
+   ("main" "int" 1112 "builtin")
+   ("main" "int" 1124 "builtin")
+   ("main" "int" 1133 "builtin")
+   ("main" "int" 1168 "builtin")
+   ("main" "int" 1182 "builtin")
+   ("main" "int" 1215 "builtin")
    ("main" "int" 161 "builtin")
    ("main" "int" 205 "builtin")
    ("main" "int" 212 "builtin")
@@ -473,48 +473,48 @@
    ("main" "int" 693 "builtin")
    ("main" "int" 701 "builtin")
    ("main" "int" 709 "builtin")
-   ("main" "int" 783 "builtin")
-   ("main" "int" 797 "builtin")
-   ("main" "int" 801 "builtin")
-   ("main" "int" 806 "builtin")
-   ("main" "int" 811 "builtin")
-   ("main" "int" 816 "builtin")
-   ("main" "int" 821 "builtin")
+   ("main" "int" 789 "builtin")
+   ("main" "int" 803 "builtin")
+   ("main" "int" 807 "builtin")
+   ("main" "int" 812 "builtin")
+   ("main" "int" 817 "builtin")
    ("main" "int" 822 "builtin")
    ("main" "int" 827 "builtin")
    ("main" "int" 828 "builtin")
    ("main" "int" 833 "builtin")
-   ("main" "int" 837 "builtin")
-   ("main" "int" 838 "builtin")
+   ("main" "int" 834 "builtin")
+   ("main" "int" 839 "builtin")
    ("main" "int" 843 "builtin")
    ("main" "int" 844 "builtin")
    ("main" "int" 849 "builtin")
-   ("main" "int" 856 "builtin")
+   ("main" "int" 850 "builtin")
+   ("main" "int" 855 "builtin")
+   ("main" "int" 862 "builtin")
    ("main" "last" 102 "builtin")
-   ("main" "last" 1021 "builtin")
-   ("main" "last" 1040 "builtin")
-   ("main" "last" 1108 "builtin")
-   ("main" "last" 1120 "builtin")
-   ("main" "last" 1129 "builtin")
+   ("main" "last" 1027 "builtin")
+   ("main" "last" 1046 "builtin")
+   ("main" "last" 1114 "builtin")
+   ("main" "last" 1126 "builtin")
+   ("main" "last" 1135 "builtin")
    ("main" "last" 158 "builtin")
    ("main" "last" 173 "builtin")
    ("main" "last" 425 "builtin")
    ("main" "last" 443 "builtin")
    ("main" "last" 570 "builtin")
-   ("main" "last" 855 "builtin")
-   ("main" "last" 906 "builtin")
-   ("main" "last" 935 "builtin")
-   ("main" "last" 964 "builtin")
-   ("main" "last" 988 "builtin")
-   ("main" "length" 1031 "builtin")
+   ("main" "last" 861 "builtin")
+   ("main" "last" 912 "builtin")
+   ("main" "last" 941 "builtin")
+   ("main" "last" 970 "builtin")
+   ("main" "last" 994 "builtin")
+   ("main" "length" 1037 "builtin")
    ("main" "length" 105 "builtin")
    ("main" "length" 111 "builtin")
-   ("main" "length" 1143 "builtin")
-   ("main" "length" 1151 "builtin")
-   ("main" "length" 1162 "builtin")
-   ("main" "length" 1173 "builtin")
-   ("main" "length" 1197 "builtin")
-   ("main" "length" 1209 "builtin")
+   ("main" "length" 1149 "builtin")
+   ("main" "length" 1157 "builtin")
+   ("main" "length" 1168 "builtin")
+   ("main" "length" 1182 "builtin")
+   ("main" "length" 1206 "builtin")
+   ("main" "length" 1218 "builtin")
    ("main" "length" 127 "builtin")
    ("main" "length" 133 "builtin")
    ("main" "length" 161 "builtin")
@@ -543,26 +543,26 @@
    ("main" "length" 619 "builtin")
    ("main" "length" 720 "builtin")
    ("main" "length" 727 "builtin")
-   ("main" "length" 765 "builtin")
    ("main" "length" 771 "builtin")
+   ("main" "length" 777 "builtin")
    ("main" "length" 78 "builtin")
-   ("main" "length" 783 "builtin")
    ("main" "length" 789 "builtin")
-   ("main" "length" 797 "builtin")
+   ("main" "length" 795 "builtin")
+   ("main" "length" 803 "builtin")
    ("main" "length" 85 "builtin")
-   ("main" "length" 901 "builtin")
-   ("main" "length" 903 "builtin")
-   ("main" "next" 1024 "builtin")
-   ("main" "next" 1048 "builtin")
-   ("main" "next" 1063 "builtin")
-   ("main" "next" 1074 "builtin")
+   ("main" "length" 907 "builtin")
+   ("main" "length" 909 "builtin")
+   ("main" "next" 1030 "builtin")
+   ("main" "next" 1054 "builtin")
+   ("main" "next" 1069 "builtin")
    ("main" "next" 1080 "builtin")
-   ("main" "next" 1082 "builtin")
-   ("main" "next" 1099 "builtin")
-   ("main" "next" 1112 "builtin")
-   ("main" "next" 1123 "builtin")
-   ("main" "next" 1132 "builtin")
-   ("main" "next" 1139 "builtin")
+   ("main" "next" 1086 "builtin")
+   ("main" "next" 1088 "builtin")
+   ("main" "next" 1105 "builtin")
+   ("main" "next" 1118 "builtin")
+   ("main" "next" 1129 "builtin")
+   ("main" "next" 1138 "builtin")
+   ("main" "next" 1145 "builtin")
    ("main" "next" 191 "builtin")
    ("main" "next" 193 "builtin")
    ("main" "next" 200 "builtin")
@@ -590,8 +590,8 @@
    ("main" "next" 690 "builtin")
    ("main" "next" 710 "builtin")
    ("main" "next" 716 "builtin")
-   ("main" "ord" 1162 "builtin")
-   ("main" "ord" 1183 "builtin")
+   ("main" "ord" 1168 "builtin")
+   ("main" "ord" 1192 "builtin")
    ("main" "ord" 278 "builtin")
    ("main" "ord" 287 "builtin")
    ("main" "ord" 288 "builtin")
@@ -602,44 +602,44 @@
    ("main" "ord" 390 "builtin")
    ("main" "ord" 391 "builtin")
    ("main" "ord" 392 "builtin")
-   ("main" "ord" 765 "builtin")
-   ("main" "ord" 773 "builtin")
-   ("main" "ord" 780 "builtin")
-   ("main" "ord" 783 "builtin")
-   ("main" "ord" 797 "builtin")
-   ("main" "ord" 801 "builtin")
-   ("main" "ord" 802 "builtin")
-   ("main" "ord" 811 "builtin")
-   ("main" "ord" 812 "builtin")
-   ("main" "ord" 821 "builtin")
-   ("main" "ord" 822 "builtin")
+   ("main" "ord" 771 "builtin")
+   ("main" "ord" 779 "builtin")
+   ("main" "ord" 786 "builtin")
+   ("main" "ord" 789 "builtin")
+   ("main" "ord" 803 "builtin")
+   ("main" "ord" 807 "builtin")
+   ("main" "ord" 808 "builtin")
+   ("main" "ord" 817 "builtin")
+   ("main" "ord" 818 "builtin")
    ("main" "ord" 827 "builtin")
    ("main" "ord" 828 "builtin")
-   ("main" "ord" 837 "builtin")
-   ("main" "ord" 838 "builtin")
+   ("main" "ord" 833 "builtin")
+   ("main" "ord" 834 "builtin")
    ("main" "ord" 843 "builtin")
    ("main" "ord" 844 "builtin")
-   ("main" "ord" 853 "builtin")
-   ("main" "ord" 858 "builtin")
-   ("main" "ord" 876 "builtin")
-   ("main" "ord" 877 "builtin")
-   ("main" "ord" 885 "builtin")
-   ("main" "ord" 944 "builtin")
-   ("main" "ord" 989 "builtin")
+   ("main" "ord" 849 "builtin")
+   ("main" "ord" 850 "builtin")
+   ("main" "ord" 859 "builtin")
+   ("main" "ord" 864 "builtin")
+   ("main" "ord" 882 "builtin")
+   ("main" "ord" 883 "builtin")
+   ("main" "ord" 891 "builtin")
+   ("main" "ord" 950 "builtin")
+   ("main" "ord" 995 "builtin")
    ("main" "pop" 720 "builtin")
    ("main" "pop" 737 "builtin")
    ("main" "pop" 744 "builtin")
    ("main" "pop" 747 "builtin")
-   ("main" "push" 1162 "builtin")
-   ("main" "push" 1208 "builtin")
-   ("main" "push" 1210 "builtin")
-   ("main" "push" 1213 "builtin")
+   ("main" "push" 1168 "builtin")
+   ("main" "push" 1217 "builtin")
+   ("main" "push" 1219 "builtin")
+   ("main" "push" 1222 "builtin")
    ("main" "push" 720 "builtin")
    ("main" "push" 737 "builtin")
    ("main" "push" 739 "builtin")
    ("main" "push" 740 "builtin")
-   ("main" "return" 1154 "builtin")
-   ("main" "return" 1162 "builtin")
+   ("main" "return" 1160 "builtin")
+   ("main" "return" 1168 "builtin")
    ("main" "return" 161 "builtin")
    ("main" "return" 231 "builtin")
    ("main" "return" 247 "builtin")
@@ -664,32 +664,34 @@
    ("main" "return" 77 "builtin")
    ("main" "scalar" 406 "builtin")
    ("main" "scalar" 420 "builtin")
-   ("main" "split" 1162 "builtin")
-   ("main" "split" 1182 "builtin")
-   ("main" "sprintf" 783 "builtin")
-   ("main" "sprintf" 801 "builtin")
-   ("main" "sprintf" 803 "builtin")
-   ("main" "sprintf" 811 "builtin")
-   ("main" "sprintf" 813 "builtin")
-   ("main" "sub" 1162 "builtin")
-   ("main" "sub" 1198 "builtin")
-   ("main" "sub" 1210 "builtin")
-   ("main" "sub" 1213 "builtin")
+   ("main" "split" 1168 "builtin")
+   ("main" "split" 1191 "builtin")
+   ("main" "sprintf" 789 "builtin")
+   ("main" "sprintf" 807 "builtin")
+   ("main" "sprintf" 809 "builtin")
+   ("main" "sprintf" 817 "builtin")
+   ("main" "sprintf" 819 "builtin")
+   ("main" "sub" 1168 "builtin")
+   ("main" "sub" 1207 "builtin")
+   ("main" "sub" 1219 "builtin")
+   ("main" "sub" 1222 "builtin")
    ("main" "sub" 314 "builtin")
    ("main" "sub" 389 "builtin")
    ("main" "sub" 394 "builtin")
-   ("main" "sub" 783 "builtin")
-   ("main" "sub" 858 "builtin")
-   ("main" "substr" 1015 "builtin")
-   ("main" "substr" 1029 "builtin")
-   ("main" "substr" 1032 "builtin")
+   ("main" "sub" 789 "builtin")
+   ("main" "sub" 864 "builtin")
+   ("main" "substr" 1000 "builtin")
+   ("main" "substr" 1021 "builtin")
+   ("main" "substr" 1035 "builtin")
+   ("main" "substr" 1038 "builtin")
    ("main" "substr" 105 "builtin")
    ("main" "substr" 114 "builtin")
-   ("main" "substr" 1143 "builtin")
-   ("main" "substr" 1155 "builtin")
-   ("main" "substr" 1160 "builtin")
-   ("main" "substr" 1162 "builtin")
+   ("main" "substr" 1149 "builtin")
+   ("main" "substr" 1161 "builtin")
+   ("main" "substr" 1166 "builtin")
+   ("main" "substr" 1168 "builtin")
    ("main" "substr" 117 "builtin")
+   ("main" "substr" 1176 "builtin")
    ("main" "substr" 127 "builtin")
    ("main" "substr" 137 "builtin")
    ("main" "substr" 161 "builtin")
@@ -750,55 +752,56 @@
    ("main" "substr" 729 "builtin")
    ("main" "substr" 737 "builtin")
    ("main" "substr" 738 "builtin")
-   ("main" "substr" 765 "builtin")
-   ("main" "substr" 773 "builtin")
+   ("main" "substr" 739 "builtin")
+   ("main" "substr" 768 "builtin")
+   ("main" "substr" 771 "builtin")
+   ("main" "substr" 779 "builtin")
    ("main" "substr" 78 "builtin")
-   ("main" "substr" 780 "builtin")
-   ("main" "substr" 783 "builtin")
-   ("main" "substr" 793 "builtin")
-   ("main" "substr" 797 "builtin")
-   ("main" "substr" 801 "builtin")
-   ("main" "substr" 802 "builtin")
-   ("main" "substr" 805 "builtin")
+   ("main" "substr" 786 "builtin")
+   ("main" "substr" 789 "builtin")
+   ("main" "substr" 799 "builtin")
+   ("main" "substr" 803 "builtin")
+   ("main" "substr" 807 "builtin")
+   ("main" "substr" 808 "builtin")
    ("main" "substr" 811 "builtin")
-   ("main" "substr" 812 "builtin")
-   ("main" "substr" 815 "builtin")
+   ("main" "substr" 817 "builtin")
+   ("main" "substr" 818 "builtin")
    ("main" "substr" 821 "builtin")
-   ("main" "substr" 822 "builtin")
    ("main" "substr" 827 "builtin")
    ("main" "substr" 828 "builtin")
-   ("main" "substr" 837 "builtin")
-   ("main" "substr" 838 "builtin")
+   ("main" "substr" 833 "builtin")
+   ("main" "substr" 834 "builtin")
    ("main" "substr" 843 "builtin")
    ("main" "substr" 844 "builtin")
-   ("main" "substr" 853 "builtin")
-   ("main" "substr" 858 "builtin")
-   ("main" "substr" 865 "builtin")
+   ("main" "substr" 849 "builtin")
+   ("main" "substr" 850 "builtin")
+   ("main" "substr" 859 "builtin")
+   ("main" "substr" 864 "builtin")
    ("main" "substr" 87 "builtin")
-   ("main" "substr" 876 "builtin")
-   ("main" "substr" 877 "builtin")
-   ("main" "substr" 885 "builtin")
-   ("main" "substr" 907 "builtin")
-   ("main" "substr" 921 "builtin")
+   ("main" "substr" 871 "builtin")
+   ("main" "substr" 882 "builtin")
+   ("main" "substr" 883 "builtin")
+   ("main" "substr" 891 "builtin")
+   ("main" "substr" 913 "builtin")
    ("main" "substr" 927 "builtin")
-   ("main" "substr" 944 "builtin")
-   ("main" "substr" 951 "builtin")
+   ("main" "substr" 933 "builtin")
+   ("main" "substr" 950 "builtin")
    ("main" "substr" 957 "builtin")
-   ("main" "substr" 965 "builtin")
-   ("main" "substr" 972 "builtin")
-   ("main" "substr" 989 "builtin")
+   ("main" "substr" 963 "builtin")
+   ("main" "substr" 971 "builtin")
+   ("main" "substr" 978 "builtin")
    ("main" "substr" 99 "builtin")
-   ("main" "substr" 994 "builtin")
+   ("main" "substr" 995 "builtin")
    ("main" "undef" 161 "builtin")
    ("main" "undef" 175 "builtin")
    ("main" "undef" 221 "builtin")
    ("main" "undef" 231 "builtin")
    ("main" "undef" 406 "builtin")
    ("main" "undef" 427 "builtin")
-   ("main" "undef" 797 "builtin")
-   ("main" "undef" 908 "builtin")
+   ("main" "undef" 803 "builtin")
+   ("main" "undef" 914 "builtin")
    ("main" "unless" 720 "builtin")
-   ("main" "unless" 797 "builtin")
+   ("main" "unless" 803 "builtin")
    ("main" "unshift" 406 "builtin")
    ("main" "unshift" 481 "builtin")
    ("main" "unshift" 511 "builtin")
@@ -807,8 +810,8 @@
    ("main" "unshift" 547 "builtin")
    ("main" "unshift" 693 "builtin")
    ("main" "unshift" 712 "builtin")
-   ("main" "wantarray" 1162 "builtin")
-   ("main" "wantarray" 1215 "builtin")
+   ("main" "wantarray" 1168 "builtin")
+   ("main" "wantarray" 1224 "builtin")
    ("main" "warn" 127 "builtin")
    ("main" "warn" 141 "builtin")
    ("main" "warn" 148 "builtin")
@@ -816,7 +819,9 @@
    ("main" "warn" 314 "builtin")
    ("main" "warn" 378 "builtin")
    ("main" "warn" 78 "builtin")
-   ("main" "warn" 93 "builtin"))
+   ("main" "warn" 93 "builtin")
+   ("utf8" "decode" 739 "unknown")
+   ("utf8" "decode" 769 "unknown"))
  '(("main" "_pack_type_info" nil 60)
    ("main" "_pack_skip_ws" nil 83)
    ("main" "_pack_find_group_end" nil 109)
@@ -834,11 +839,13 @@
    ("main" "_pack_tmpl" nil 415)
    ("main" "_pack_check_brackets" nil 724)
    ("main" "p_pack" nil 758)
-   ("main" "_unpack_utf8_char" nil 769)
-   ("main" "_unpack_str" nil 787)
-   ("main" "_unpack_tmpl" nil 896)
-   ("main" "_next_format_item" nil 1149)
-   ("main" "p_unpack" nil 1165))))
+   ("main" "_unpack_utf8_char" nil 775)
+   ("main" "_unpack_str" nil 793)
+   ("main" "_unpack_tmpl" nil 902)
+   ("main" "_next_format_item" nil 1155)
+   ("main" "p_unpack" nil 1171))))
+
+(pcl:p-defpackage :utf8)
 
 (p-declare-sub pl-_pack_type_info :body)
 (p-declare-sub pl-_pack_skip_ws :body)
@@ -896,6 +903,7 @@
 (p-defcell $byte (make-p-box nil))
 (p-defcell $bytes (make-p-box nil))
 (p-defcell $c (make-p-box nil))
+(p-defcell $c0 (make-p-box nil))
 (p-defcell $ce (make-p-box nil))
 (p-defcell $ch (make-p-box nil))
 (p-defcell $chain (make-p-box nil))
@@ -958,6 +966,7 @@
 (p-defcell $k (make-p-box nil))
 (p-defcell $lc (make-p-box nil))
 (p-defcell $le (make-p-box nil))
+(p-defcell $lead_u (make-p-box nil))
 (p-defcell $len (make-p-box nil))
 (p-defcell $line_len (make-p-box nil))
 (p-defcell $lo (make-p-box nil))
@@ -1017,9 +1026,9 @@
 (p-defcell @result (make-array 0 :adjustable t :fill-pointer 0))
 (p-defcell @stk (make-array 0 :adjustable t :fill-pointer 0))
 
-(p-defcell $CAN_ENDIAN__file__2799343942728177000 (make-p-box nil) :perl "$CAN_ENDIAN" :why :captured)
-(p-defcell $CAN_SHRIEK__file__2799343942728177001 (make-p-box nil) :perl "$CAN_SHRIEK" :why :captured)
-(p-defcell $MAX_GROUP_DEPTH__file__2799343942728177002 (make-p-box nil) :perl "$MAX_GROUP_DEPTH" :why :captured)
+(p-defcell $CAN_ENDIAN__file__3545767092431946000 (make-p-box nil) :perl "$CAN_ENDIAN" :why :captured)
+(p-defcell $CAN_SHRIEK__file__3545767092431946001 (make-p-box nil) :perl "$CAN_SHRIEK" :why :captured)
+(p-defcell $MAX_GROUP_DEPTH__file__3545767092431946002 (make-p-box nil) :perl "$MAX_GROUP_DEPTH" :why :captured)
 (p-defcell $pcl_pack_comma_warned (make-p-box nil))
 
 (p-eval-always (p-note-inc "strict"))
@@ -1161,7 +1170,7 @@
 (p-sub pl-_pack_parse_mods
   (&rest %_args)
   (:writes-args nil
-    :captures ($CAN_ENDIAN__file__2799343942728177000 $CAN_SHRIEK__file__2799343942728177001)
+    :captures ($CAN_ENDIAN__file__3545767092431946000 $CAN_SHRIEK__file__3545767092431946001)
     :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :nonlocal_exit.return))
   (p-args-body :copy (block nil
       (p-let
@@ -1191,11 +1200,11 @@
                         (p-if (p-str-eq $m "!")
                           (progn
                             (p-if
-                              (p-! (p->= (p-index $CAN_SHRIEK__file__2799343942728177001 $ch) 0))
+                              (p-! (p->= (p-index $CAN_SHRIEK__file__3545767092431946001 $ch) 0))
                               (p-die :loc
                                 "cl/pack-impl.pl line 139"
                                 (p-string-concat "'!' allowed only after types "
-                                  $CAN_SHRIEK__file__2799343942728177001
+                                  $CAN_SHRIEK__file__3545767092431946001
                                   " in "
                                   $ctx
                                   (p-esc "\\n"))))
@@ -1215,13 +1224,13 @@
                               (p-if
                                 (p-!
                                   (p-||
-                                    (p->= (p-index $CAN_ENDIAN__file__2799343942728177000 $ch)
+                                    (p->= (p-index $CAN_ENDIAN__file__3545767092431946000 $ch)
                                       0)
                                     (p-str-eq $ch "(")))
                                 (p-die :loc
                                   "cl/pack-impl.pl line 144"
                                   (p-string-concat "'>' allowed only after types "
-                                    $CAN_ENDIAN__file__2799343942728177000
+                                    $CAN_ENDIAN__file__3545767092431946000
                                     " in "
                                     $ctx
                                     (p-esc "\\n"))))
@@ -1257,13 +1266,13 @@
                                 (p-if
                                   (p-!
                                     (p-||
-                                      (p->= (p-index $CAN_ENDIAN__file__2799343942728177000 $ch)
+                                      (p->= (p-index $CAN_ENDIAN__file__3545767092431946000 $ch)
                                         0)
                                       (p-str-eq $ch "(")))
                                   (p-die :loc
                                     "cl/pack-impl.pl line 151"
                                     (p-string-concat "'<' allowed only after types "
-                                      $CAN_ENDIAN__file__2799343942728177000
+                                      $CAN_ENDIAN__file__3545767092431946000
                                       " in "
                                       $ctx
                                       (p-esc "\\n"))))
@@ -1871,7 +1880,7 @@
 (p-sub pl-_pack_tmpl
   (&rest %_args)
   (:writes-args nil
-    :captures ($MAX_GROUP_DEPTH__file__2799343942728177002)
+    :captures ($MAX_GROUP_DEPTH__file__3545767092431946002)
     :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.native))
   (p-args-body :copy (block nil
       (p-let
@@ -1889,7 +1898,7 @@
             @_))
         (p-void-ctx (p-if (p-! (p-defined $out_base)) (p-my-= $out_base 0))
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
-          (p-if (p-> $depth $MAX_GROUP_DEPTH__file__2799343942728177002)
+          (p-if (p-> $depth $MAX_GROUP_DEPTH__file__3545767092431946002)
             (p-die :loc
               "cl/pack-impl.pl line 419"
               (p-esc "Too deeply nested ()-groups in pack\\n")))
@@ -2889,7 +2898,9 @@
 
 (p-sub pl-p_pack
   (&rest %_args)
-  (:wantarray-insensitive t :writes-args nil :needs (:dynamic_scope.local))
+  (:wantarray-insensitive t
+    :writes-args nil
+    :needs (:dynamic_scope.local :regex.literal :regex.native))
   (p-args-body :copy (block nil
       (p-void-ctx
         (p-let
@@ -2909,7 +2920,15 @@
                   (p-backslash $result)
                   0
                   0)
-                (p-caller-ctx (p-tail-value $result))))))))))
+                (p-let (($c0 :str (%pcl-to-string-strict (p-substr $tmpl 0 1) "$c0")))
+                  (p-if
+                    (p-|| (p-str-eq $c0 "U")
+                      (p-&& (p-str-le $c0 " ")
+                        (p-scalar-ctx
+                          (p-=~ $tmpl
+                            (p-regex :pat "\\A[ \\t\\n\\r\\f]+U" :flags "" :tier :native)))))
+                    (utf8::pl-decode $result))
+                  (p-caller-ctx (p-tail-value $result)))))))))))
 
 (p-sub pl-_unpack_utf8_char
   (&rest %_args)
@@ -3299,7 +3318,7 @@
                                             (p-while $more
                                               (p-if (p->= (p-cast-$ $si_ref :strict) $slen)
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 884"
+                                                  "cl/pack-impl.pl line 890"
                                                   (p-esc
                                                     "Unterminated compressed integer in unpack\\n")))
                                               (p-let
@@ -3326,7 +3345,7 @@
 (p-sub pl-_unpack_tmpl
   (&rest %_args)
   (:writes-args nil
-    :captures ($MAX_GROUP_DEPTH__file__2799343942728177002)
+    :captures ($MAX_GROUP_DEPTH__file__3545767092431946002)
     :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.subst :regex.native))
   (p-args-body
     (block nil
@@ -3346,9 +3365,9 @@
             @_))
         (p-void-ctx (p-if (p-! (p-defined $group_base)) (p-my-= $group_base 0))
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
-          (p-if (p-> $depth $MAX_GROUP_DEPTH__file__2799343942728177002)
+          (p-if (p-> $depth $MAX_GROUP_DEPTH__file__3545767092431946002)
             (p-die :loc
-              "cl/pack-impl.pl line 900"
+              "cl/pack-impl.pl line 906"
               (p-esc "Too deeply nested ()-groups in unpack\\n")))
           (p-let (($slen :box (make-p-box nil)))
             (p-my-= $slen (p-length $s))
@@ -3406,7 +3425,7 @@
                                     (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
                                     (p-if (p->= $ti $tlen)
                                       (p-die :loc
-                                        "cl/pack-impl.pl line 924"
+                                        "cl/pack-impl.pl line 930"
                                         (p-esc "Code missing after '/' in unpack\\n")))
                                     (let ((*package* *package*))
                                       (block nil
@@ -3421,7 +3440,7 @@
                                                       :flags ""
                                                       :tier :native))))
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 928"
+                                                "cl/pack-impl.pl line 934"
                                                 (p-esc
                                                   "'/' does not take a repeat count in unpack\\n"))))
                                           :next)))
@@ -3443,7 +3462,7 @@
                                                   $slen)
                                                 (progn (p-if (p-! (p-> $depth 0)) (p-last))
                                                   (p-die :loc
-                                                    "cl/pack-impl.pl line 936"
+                                                    "cl/pack-impl.pl line 942"
                                                     (p-esc
                                                       "length/code after end of string in unpack\\n"))))
                                               (p-my-= $slash_n
@@ -3460,7 +3479,7 @@
                                                 (p-while $more
                                                   (p-if (p->= (p-cast-$ $si_ref :strict) $slen)
                                                     (p-die :loc
-                                                      "cl/pack-impl.pl line 943"
+                                                      "cl/pack-impl.pl line 949"
                                                       (p-esc
                                                         "Unterminated compressed integer in unpack\\n")))
                                                   (p-let
@@ -3586,7 +3605,7 @@
                                                                     $dnb)
                                                                   $slen)
                                                                 (p-die :loc
-                                                                  "cl/pack-impl.pl line 980"
+                                                                  "cl/pack-impl.pl line 986"
                                                                   (p-esc
                                                                     "length/code after end of string in unpack\\n")))
                                                               (p-my-= $slash_n
@@ -3776,7 +3795,7 @@
                                                       :flags ""
                                                       :tier :native)))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 1033"
+                                                  "cl/pack-impl.pl line 1039"
                                                   (p-esc
                                                     "()-group starts with a count in unpack\\n"))))))
                                         (p-if $all
@@ -3836,7 +3855,7 @@
                                           (p-if
                                             (p-> (p-+ (p-cast-$ $si_ref :strict) $nrep) $slen)
                                             (p-die :loc
-                                              "cl/pack-impl.pl line 1060"
+                                              "cl/pack-impl.pl line 1066"
                                               (p-esc "'x' outside of string in unpack\\n")))
                                           (p-incf (p-cast-$ $si_ref :strict-lv) $nrep))))
                                     (p-next)))
@@ -3852,7 +3871,7 @@
                                       (progn
                                         (p-if (p-> $nrep (p-cast-$ $si_ref :strict))
                                           (p-die :loc
-                                            "cl/pack-impl.pl line 1071"
+                                            "cl/pack-impl.pl line 1077"
                                             (p-esc "'X' outside of string in unpack\\n")))
                                         (p-decf (p-cast-$ $si_ref :strict-lv) $nrep)))
                                     (p-next)))
@@ -3870,7 +3889,7 @@
                                     (p-str-eq $ch "D"))
                                   (progn
                                     (p-die :loc
-                                      "cl/pack-impl.pl line 1083"
+                                      "cl/pack-impl.pl line 1089"
                                       (p-string-concat "Invalid type '"
                                         $ch
                                         (p-esc "' in unpack\\n")))))
@@ -4007,10 +4026,10 @@
                                       (p-next)))
                                   (p-if (p-str-eq $ch "/")
                                     (p-die :loc
-                                      "cl/pack-impl.pl line 1142"
+                                      "cl/pack-impl.pl line 1148"
                                       (p-esc "'/' must follow a numeric type in unpack\\n")))
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 1143"
+                                    "cl/pack-impl.pl line 1149"
                                     (p-string-concat "Invalid type '"
                                       $ch
                                       (p-esc "' in unpack\\n"))))))))))))))))))))
@@ -4054,132 +4073,136 @@
       (p-let (($tmpl :box (make-p-box nil)) ($s :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $tmpl $s) @_))
         (p-void-ctx (p-if (p-! (p-defined $s)) (p-my-= $s ""))
-          (p-=~ $tmpl
-            (p-subst :pat "\\A(?:[ \\t\\n\\r\\f,]|#[^\\n]*\\n?)*"
-              :rep ""
-              :flags ""
-              :tier :native))
-          (p-let (($checksum_width :box (make-p-box nil)))
-            (p-my-= $checksum_width 0)
-            (p-if (p-=~ $tmpl (p-subst :pat "^%(\\d*)" :rep "" :flags "" :tier :native))
-              (progn (p-my-= $checksum_width (p-if (p-length $1) (p-int $1) 16))))
-            (p-let
-              (($utf8_mode :str
-                  (%pcl-to-string-strict
-                    (p-=~ $tmpl (p-subst :pat "^U0" :rep "" :flags "" :tier :native))
-                    "$utf8_mode")))
-              (p-if $checksum_width
-                (p-=~ $tmpl
-                  (p-subst :pat "\\A(?:[ \\t\\n\\r\\f,]|#[^\\n]*\\n?)*"
-                    :rep ""
-                    :flags ""
-                    :tier :native)))
-              (pl-_pack_check_brackets $tmpl)
-              (p-if $utf8_mode
-                (progn
-                  (p-let (($bytes :scalar ""))
-                    (p-foreach-raw ($c (p-split (p-regex :pat "" :flags "" :tier :native) $s))
-                      :my
-                      t
-                      (p-let (($code :box (make-p-box nil)))
-                        (p-my-= $code (p-ord $c))
-                        (p-if (p-< $code #x80)
-                          (progn (p-.=-raw $bytes (p-chr $code)))
-                          (p-if (p-< $code #x800)
-                            (progn
-                              (p-.=-raw $bytes
-                                (p-. (p-chr (p-bit-or #xC0 (p->> $code 6)))
-                                  (p-chr (p-bit-or #x80 (p-bit-and $code #x3F))))))
-                            (p-if (p-< $code #x10000)
+          (p-let (($lead_u :scalar (p-str-eq (p-substr $tmpl 0 1) "U")))
+            (p-=~ $tmpl
+              (p-subst :pat "\\A(?:[ \\t\\n\\r\\f,]|#[^\\n]*\\n?)*"
+                :rep ""
+                :flags ""
+                :tier :native))
+            (p-let (($checksum_width :box (make-p-box nil)))
+              (p-my-= $checksum_width 0)
+              (p-if (p-=~ $tmpl (p-subst :pat "^%(\\d*)" :rep "" :flags "" :tier :native))
+                (progn (p-my-= $checksum_width (p-if (p-length $1) (p-int $1) 16))))
+              (p-let
+                (($utf8_mode :str
+                    (%pcl-to-string-strict
+                      (p-|| (p-=~ $tmpl (p-subst :pat "^U0" :rep "" :flags "" :tier :native))
+                        $lead_u)
+                      "$utf8_mode")))
+                (p-if $checksum_width
+                  (p-=~ $tmpl
+                    (p-subst :pat "\\A(?:[ \\t\\n\\r\\f,]|#[^\\n]*\\n?)*"
+                      :rep ""
+                      :flags ""
+                      :tier :native)))
+                (pl-_pack_check_brackets $tmpl)
+                (p-if $utf8_mode
+                  (progn
+                    (p-let (($bytes :scalar ""))
+                      (p-foreach-raw ($c (p-split (p-regex :pat "" :flags "" :tier :native) $s))
+                        :my
+                        t
+                        (p-let (($code :box (make-p-box nil)))
+                          (p-my-= $code (p-ord $c))
+                          (p-if (p-< $code #x80)
+                            (progn (p-.=-raw $bytes (p-chr $code)))
+                            (p-if (p-< $code #x800)
                               (progn
                                 (p-.=-raw $bytes
-                                  (p-.
-                                    (p-. (p-chr (p-bit-or #xE0 (p->> $code 12)))
-                                      (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 6) #x3F))))
+                                  (p-. (p-chr (p-bit-or #xC0 (p->> $code 6)))
                                     (p-chr (p-bit-or #x80 (p-bit-and $code #x3F))))))
-                              (progn
-                                (p-.=-raw $bytes
-                                  (p-.
-                                    (p-.
-                                      (p-. (p-chr (p-bit-or #xF0 (p->> $code 18)))
-                                        (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 12) #x3F))))
-                                      (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 6) #x3F))))
-                                    (p-chr (p-bit-or #x80 (p-bit-and $code #x3F)))))))))))
-                    (p-my-= $s $bytes))))
-              (p-let ((@result :array (make-array 0 :adjustable t :fill-pointer 0)))
-                (p-let (($si :box (make-p-box nil)))
-                  (p-my-= $si 0)
-                  (p-if $checksum_width
-                    (progn
-                      (p-let
-                        (($cs_tmpl :box (make-p-box nil)) ($rest_tmpl :box (make-p-box nil)))
-                        (p-scalar-ctx
-                          (p-list-= (vector $cs_tmpl $rest_tmpl)
-                            (p-list-ctx (pl-_next_format_item $tmpl))))
-                        (p-let (($checksum :box (make-p-box nil) :captured t))
-                          (p-my-= $checksum 0)
-                          (p-if (p-length $cs_tmpl)
-                            (progn
-                              (pl-_unpack_tmpl $cs_tmpl
-                                $s
-                                (p-backslash $si)
-                                (p-anon-sub "main"
-                                  (lambda (&rest %_args)
-                                    (let
-                                      ((@_ (p-flatten-args %_args))
-                                        (*pcl-current-package* "main")
-                                        (*pcl-caller-wantarray* *wantarray*))
-                                      (p-sub-frame (block nil (p-incf $checksum (p-aref @_ 0)))))))
-                                0
-                                0
-                                1)))
-                          (p-let (($mod :scalar 1))
-                            (p-foreach-range-raw ($_ 1 $checksum_width)
-                              (p-*=-raw $mod 2 :numeric))
-                            (p-let (($q :box (make-p-box nil)))
-                              (p-my-= $q (p-int (p-/ $checksum $mod)))
-                              (p-if (p-> (p-* $q $mod) $checksum) (p-post-- $q))
-                              (p-push @result (p-- $checksum (p-* $q $mod)))
-                              (p-if (p-length $rest_tmpl)
+                              (p-if (p-< $code #x10000)
                                 (progn
-                                  (pl-_unpack_tmpl $rest_tmpl
-                                    $s
-                                    (p-backslash $si)
-                                    (p-anon-sub "main"
-                                      (lambda (&rest %_args)
-                                        (let
-                                          ((@_ (p-flatten-args %_args))
-                                            (*pcl-current-package* "main")
-                                            (*pcl-caller-wantarray* *wantarray*))
-                                          (p-sub-frame
-                                            (block nil (p-push @result (p-aref @_ 0)))))))
-                                    0
-                                    0
-                                    0))))))))
-                    (progn
-                      (pl-_unpack_tmpl $tmpl
-                        $s
-                        (p-backslash $si)
-                        (p-anon-sub "main"
-                          (lambda (&rest %_args)
-                            (let
-                              ((@_ (p-flatten-args %_args))
-                                (*pcl-current-package* "main")
-                                (*pcl-caller-wantarray* *wantarray*))
-                              (p-sub-frame (block nil (p-push @result (p-aref @_ 0)))))))
-                        0
-                        0
-                        0)))
-                  (p-caller-ctx (p-tail-value (p-if (p-wantarray) @result (p-aref @result 0)))))))))))))
+                                  (p-.=-raw $bytes
+                                    (p-.
+                                      (p-. (p-chr (p-bit-or #xE0 (p->> $code 12)))
+                                        (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 6) #x3F))))
+                                      (p-chr (p-bit-or #x80 (p-bit-and $code #x3F))))))
+                                (progn
+                                  (p-.=-raw $bytes
+                                    (p-.
+                                      (p-.
+                                        (p-. (p-chr (p-bit-or #xF0 (p->> $code 18)))
+                                          (p-chr
+                                            (p-bit-or #x80 (p-bit-and (p->> $code 12) #x3F))))
+                                        (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 6) #x3F))))
+                                      (p-chr (p-bit-or #x80 (p-bit-and $code #x3F)))))))))))
+                      (p-my-= $s $bytes))))
+                (p-let ((@result :array (make-array 0 :adjustable t :fill-pointer 0)))
+                  (p-let (($si :box (make-p-box nil)))
+                    (p-my-= $si 0)
+                    (p-if $checksum_width
+                      (progn
+                        (p-let
+                          (($cs_tmpl :box (make-p-box nil)) ($rest_tmpl :box (make-p-box nil)))
+                          (p-scalar-ctx
+                            (p-list-= (vector $cs_tmpl $rest_tmpl)
+                              (p-list-ctx (pl-_next_format_item $tmpl))))
+                          (p-let (($checksum :box (make-p-box nil) :captured t))
+                            (p-my-= $checksum 0)
+                            (p-if (p-length $cs_tmpl)
+                              (progn
+                                (pl-_unpack_tmpl $cs_tmpl
+                                  $s
+                                  (p-backslash $si)
+                                  (p-anon-sub "main"
+                                    (lambda (&rest %_args)
+                                      (let
+                                        ((@_ (p-flatten-args %_args))
+                                          (*pcl-current-package* "main")
+                                          (*pcl-caller-wantarray* *wantarray*))
+                                        (p-sub-frame
+                                          (block nil (p-incf $checksum (p-aref @_ 0)))))))
+                                  0
+                                  0
+                                  1)))
+                            (p-let (($mod :scalar 1))
+                              (p-foreach-range-raw ($_ 1 $checksum_width)
+                                (p-*=-raw $mod 2 :numeric))
+                              (p-let (($q :box (make-p-box nil)))
+                                (p-my-= $q (p-int (p-/ $checksum $mod)))
+                                (p-if (p-> (p-* $q $mod) $checksum) (p-post-- $q))
+                                (p-push @result (p-- $checksum (p-* $q $mod)))
+                                (p-if (p-length $rest_tmpl)
+                                  (progn
+                                    (pl-_unpack_tmpl $rest_tmpl
+                                      $s
+                                      (p-backslash $si)
+                                      (p-anon-sub "main"
+                                        (lambda (&rest %_args)
+                                          (let
+                                            ((@_ (p-flatten-args %_args))
+                                              (*pcl-current-package* "main")
+                                              (*pcl-caller-wantarray* *wantarray*))
+                                            (p-sub-frame
+                                              (block nil (p-push @result (p-aref @_ 0)))))))
+                                      0
+                                      0
+                                      0))))))))
+                      (progn
+                        (pl-_unpack_tmpl $tmpl
+                          $s
+                          (p-backslash $si)
+                          (p-anon-sub "main"
+                            (lambda (&rest %_args)
+                              (let
+                                ((@_ (p-flatten-args %_args))
+                                  (*pcl-current-package* "main")
+                                  (*pcl-caller-wantarray* *wantarray*))
+                                (p-sub-frame (block nil (p-push @result (p-aref @_ 0)))))))
+                          0
+                          0
+                          0)))
+                    (p-caller-ctx (p-tail-value (p-if (p-wantarray) @result (p-aref @result 0))))))))))))))
 
 (pcl::p-eval-always (pcl::p-detect-end "cl/pack-impl.pl"))
 (p-run-compile-phase-blocks)
 
-(p-scalar-= $CAN_ENDIAN__file__2799343942728177000 "sSiIlLqQjJfFdDpP")
+(p-scalar-= $CAN_ENDIAN__file__3545767092431946000 "sSiIlLqQjJfFdDpP")
 
-(p-scalar-= $CAN_SHRIEK__file__2799343942728177001 "sSiIlLnNvVxX.@")
+(p-scalar-= $CAN_SHRIEK__file__3545767092431946001 "sSiIlLnNvVxX.@")
 
-(p-scalar-= $MAX_GROUP_DEPTH__file__2799343942728177002 100)
+(p-scalar-= $MAX_GROUP_DEPTH__file__3545767092431946002 100)
 
 (p-scalar-= $pcl_pack_comma_warned 0)
 
