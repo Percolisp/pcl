@@ -770,7 +770,7 @@ not code
    title => 'A GLOB SLOT `*NAME{THING}` (`*STDOUT{IO}`, `*x{HASH}`): the `{THING}` is built as a BLOCK, where perl subscripts the glob',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'the `{SLOT}` after a glob symbol `*NAME` built as Block' },
-   fix => { kind => 'handler', handler => undef, changed => 'Pl::PExpr::parse: $is_typeglob_slot reads Symbol + Subscript and is caught before the X{} handler (s527e: PPI fixed on the branch; the Block reading is gone)', commit => 'eb14f83d', group => 'AC', pr => undef },
+   fix => { kind => 'handler', handler => undef, changed => 'Pl::PExpr::parse: $is_typeglob_slot reads Symbol + Subscript and is caught before the X{} handler (s527e: PPI fixed on the branch; the Block reading is gone)', commit => '52c4e102', group => 'AI', pr => undef },
    repro => 'our %x = (a => 1); my $h = *x{HASH}; print $h->{a}, "\\n";
 ',
    perl => "1\\n",
@@ -784,7 +784,7 @@ not code
    title => 'An ANONYMOUS HASH right after a list operator or named unary (`die { ... }`, `exists { ... }->{k}`, `map {a => $_}, LIST`) is built as a BLOCK',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'a `{` where perl expects a term (XTERM) or a map/grep block opening with `WORD =>` built as Block' },
-   fix => { kind => 'handler', handler => 'Pl::PExpr::_block_is_hash_constructor', changed => 'STAYS (s527e): PPI now decides the XTERM and map/grep look-ahead cases; the predicate still classifies what PPI leaves a Block (a map BLOCK whose body is a pair)', commit => '4f1e7ea8', group => 'AE', pr => undef },
+   fix => { kind => 'handler', handler => 'Pl::PExpr::_block_is_hash_constructor', changed => 'STAYS (s527e): PPI now decides the XTERM and map/grep look-ahead cases; the predicate still classifies what PPI leaves a Block (a map BLOCK whose body is a pair)', commit => 'dd90e749', group => 'AK', pr => undef },
    repro => 'eval { die { code => 42 } }; print $@->{code}, "\\n";
 ',
    perl => "42\\n",
@@ -798,7 +798,7 @@ not code
    title => 'A BARE BLOCK with a `continue` block: `continue` starts a NEW statement, which swallows the statement after it',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'continuation-split', shape => 'the `continue` after a bare block starts its own statement' },
-   fix => { kind => 'handler', handler => undef, changed => 'DELETED (s527e): Pl::Parser2::_lower_block_1 the unlabeled `{ } continue { }` join arm (+ _lower_compound $sib_cont), v1 Pl::Parser::_find_continue_sibling + _process_trailing_tokens + their three call sites', commit => 'd9004351', group => 'AD', pr => undef },
+   fix => { kind => 'handler', handler => undef, changed => 'DELETED (s527e): Pl::Parser2::_lower_block_1 the unlabeled `{ } continue { }` join arm (+ _lower_compound $sib_cont), v1 Pl::Parser::_find_continue_sibling + _process_trailing_tokens + their three call sites', commit => 'b23d5869', group => 'AJ', pr => undef },
    repro => 'my $n = 0; { $n++ } continue { $n += 10 } print "$n\\n";
 ',
    perl => "11\\n",
@@ -840,7 +840,7 @@ not code
    title => 'The dereference block of a glob cast after `require` (`require *{"name"}`) is built as a hash CONSTRUCTOR',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'the block of `*{` after require built as Constructor (the `use constant {` rule)' },
-   fix => { kind => 'handler', handler => undef, commit => 'eb14f83d', group => 'AC', pr => undef },
+   fix => { kind => 'handler', handler => undef, commit => '52c4e102', group => 'AI', pr => undef },
    repro => 'eval { require *{"\\0a"} }; print $@ ? "died\\n" : "lived\\n";
 ',
    perl => "died\\n",

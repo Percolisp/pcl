@@ -2526,7 +2526,7 @@ over the four populations (s527e M0), the largest single kind.
 
 ## 49. A GLOB SLOT `*NAME{THING}` (`*STDOUT{IO}`, `*x{HASH}`): the `{THING}` is built as a BLOCK  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527e: group AC, commit `eb14f83d` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).  PCL's `$is_typeglob_slot` reads the Subscript (the Block reading is gone), so `*x{HASH}{a}` is no longer dropped.
+**FIXED on PCL's PPI branch** (s527e: group AI, commit `52c4e102` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).  PCL's `$is_typeglob_slot` reads the Subscript (the Block reading is gone), so `*x{HASH}{a}` is no longer dropped.
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `1`):
 
@@ -2551,7 +2551,7 @@ recorded in the #2610 detector table as an unknown bareword call.  Tasks #3741,
 
 ## 50. An ANONYMOUS HASH right after a list operator or named unary is built as a BLOCK  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527e: group AE, commit `4f1e7ea8` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AE.md`).  `Pl::PExpr::_block_is_hash_constructor` STAYS (a map BLOCK whose body is a pair is still PPI's Block, and PCL classifies it); guard `Pl/t/anon-hash-term-01.t` (row 1 FAILS on the base: `map { Foo, $_ }, LIST` / `map {}, LIST` / `map { "k" => $_ }, LIST` lost their hashes).
+**FIXED on PCL's PPI branch** (s527e: group AK, commit `dd90e749` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AK.md`).  `Pl::PExpr::_block_is_hash_constructor` STAYS (a map BLOCK whose body is a pair is still PPI's Block, and PCL classifies it); guard `Pl/t/anon-hash-term-01.t` (row 1 FAILS on the base: `map { Foo, $_ }, LIST` / `map {}, LIST` / `map { "k" => $_ }, LIST` lost their hashes).
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `42`):
 
@@ -2574,7 +2574,7 @@ Block (it stays: PCL still classifies what PPI leaves ambiguous).  Task #3742.
 
 ## 51. A BARE BLOCK with a `continue` block: `continue` starts a NEW statement  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527e: group AD, commit `d9004351` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AD.md`).  PCL's repair DELETED: the Parser2 orphan-continue join arm and v1's `_find_continue_sibling` + `_process_trailing_tokens` (instrumented to die first: never fired over the corpus).
+**FIXED on PCL's PPI branch** (s527e: group AJ, commit `b23d5869` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AJ.md`).  PCL's repair DELETED: the Parser2 orphan-continue join arm and v1's `_find_continue_sibling` + `_process_trailing_tokens` (instrumented to die first: never fired over the corpus).
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `11`):
 
@@ -2639,7 +2639,7 @@ method syntax"; the s417 `class NAME ;` refusal).  Task #3747.
 
 ## 54. The dereference block of a glob cast after `require` is built as a hash CONSTRUCTOR  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527e: group AC, commit `eb14f83d` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).  PCL had no repair.
+**FIXED on PCL's PPI branch** (s527e: group AI, commit `52c4e102` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).  PCL had no repair.
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `died`):
 
@@ -2659,7 +2659,7 @@ block).  From `t/op/require_errors.t:256`.
 
 ## 57. A `{` after a glob symbol is a BLOCK -- the same bug as §49  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527e: group AC, commit `eb14f83d` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).
+**FIXED on PCL's PPI branch** (s527e: group AI, commit `52c4e102` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).
 
 Filed twice: #3741 from the expect-state checker's measurement (s525p) and
 #3964 from s527b's hand-over (s527c).  One rule, one fix and one registry row
