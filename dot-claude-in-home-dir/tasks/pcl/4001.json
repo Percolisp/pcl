@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s529a (Opus agent, 2026-10-31) while fixing #3824.  PRE-EXISTING (the base 77c7d9d7 gives the same).\n\nAn ARRAY ELEMENT holding a BLESSED qr// reads back as an unblessed Regexp.\n\nREPRO (scratch/s529a/pr/b4.pl):\n    my $o4 = bless qr/x/, 'K';\n    my @c4 = ($o4); print ref($c4[0]), \"\\n\";     # perl K, PCL Regexp\n    my $t = [$o4];  print ref($t->[0]), \"\\n\";    # perl K, PCL Regexp\n    my $c = $o4;    print ref($c), \"\\n\";         # K both\n    my %h = (k => $o4); print ref($h{k}), \"\\n\";  # K both\n\nMECHANISM (read, not changed): the element STORE keeps the class (the box is a %p-container-snapshot\nsince #3824), but the READ, p-aref-unbox-elem, returns the box only for an arrayref / hashref /\ncoderef / box-in-box / glob ref / dualvar / handle payload -- a regex payload is unboxed to the raw\np-regex-match, whose ref() is Regexp.  The hash twin %p-hash-unbox-elem keeps the box for a blessed\nslot and is right.  Likely fix: one arm in p-aref-unbox-elem, `(and (p-box-p elem) (p-box-class elem))`\nor the regex payload specifically -- it is a hot read path, so keep the test after the common arms and\nmeasure.\n",
+   "id" : "4001",
+   "status" : "pending",
+   "subject" : "an array ELEMENT holding a BLESSED qr// reads back as Regexp: p-aref-unbox-elem unboxes a regex payload and drops the container class"
+}
