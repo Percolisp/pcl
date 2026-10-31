@@ -3673,10 +3673,23 @@ sub _process_use_base {
   $self->_with_bucket('declarations', sub {
     $self->_emit(global_decl_form($isa_sym, "(make-array 0 :adjustable t :fill-pointer 0)"));
   });
-  for my $parent (@parents) {
-    $self->_emit("(p-push $isa_sym \"$parent\")");
-  }
-  $self->_emit("");
+  # The push itself runs at BEGIN time, at the statement's OWN source position
+  # (task #3860, RULED s528): base.pm / parent.pm run inside the `use`, so a
+  # call that runs before the package section -- or a `use base` inside
+  # `BEGIN { package X; ... }` -- sees the parents.  It was a RUN-time push, so
+  # `MyX->new` above `package MyX; use base ...` found an empty @ISA.  The
+  # `definitions` bucket is where a BEGIN block's p-BEGIN goes, interleaved by
+  # source position with the sub definitions (Parser2's `sched => 1` route for
+  # every Statement::Include) -- exactly what a user-written
+  # `BEGIN { push @ISA, ... }` in its place gets.  A cached program run sees it
+  # too: the script fasl is built under *pcl-fasl-build*, where p-BEGIN fires
+  # at that fasl's load in source order (measured s528).
+  $self->_with_bucket('definitions', sub {
+    $self->_emit("(p-BEGIN");
+    $self->_emit("  (p-push $isa_sym \"$_\")") for @parents;
+    $self->_emit(")");
+    $self->_emit("");
+  });
 }
 
 # The import list of `use base`/`use parent`, FLATTENED in source order — the
@@ -10047,6 +10060,13 @@ sub _process_scheduled_block {
   my $saved_pkg_stack = [@{$self->environment->package_stack}];
   my $prev_pkg        = $self->environment->current_package();
   my $process = sub {
+    # The package the block's emitted form is READ in -- the enclosing
+    # section's -- for the qualification sites keyed on it
+    # (_reader_pkg_differs): a `package MyX; use base "P";` inside
+    # `BEGIN { }` pushed onto main's @ISA (task #3860), because the inner
+    # (in-package :MyX) does not take effect at read time.  Set exactly as
+    # parse_block_as_function sets it for a do{}/eval{} body.
+    local $self->{_seam_outer_pkg} = $prev_pkg;
     $self->_block_depth($self->_block_depth + 1);
     # A `local` inside the block opens a (let …) that wraps the rest of the
     # block and is closed by whoever owns the scope.  _process_children does

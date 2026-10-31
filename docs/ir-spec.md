@@ -3852,6 +3852,20 @@ var ⇒ plain lexical binding, no localization at all).
   ```perl
   { package Bar; use base 'Implement'; local $\ = ""; Bar->hi }   # Implement::hi; @main::ISA stays empty
   ```
+- **`use base` / `use parent` set `@ISA` at BEGIN time, at the statement's
+  own source position (normative, s529b, task #3860).**  The pushes are one
+  `(p-BEGIN (p-push @ISA "P") ...)` in the definitions stream -- exactly the
+  form a user-written `BEGIN { push @ISA, "P" }` in its place gets -- so code
+  that runs before the package section, and a BEGIN after the `use`, see the
+  parents; a cached program sees them because its fasl is built under
+  `*pcl-fasl-build*`, where `p-BEGIN` fires at the fasl's load (§9).  The
+  parent `require`, `p-defpackage` and `p-defclass` stay in the preamble.  Inside
+  `BEGIN { package X; ... }` the push names X's `@ISA` qualified (the BEGIN form
+  is read in the enclosing section's package).
+
+  ```perl
+  my $p = Blurb->new;  package Blurb; use base 'Pod::Simple::Methody';   # Blurb->new resolves through @ISA
+  ```
 - `SUPER::name` dispatches starting *after* the current sub's home
   package in the linearization, and **finishes the lookup exactly like an
   ordinary method call** (s446m, #533): UNIVERSAL and UNIVERSAL's own
