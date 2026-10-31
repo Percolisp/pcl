@@ -1,0 +1,59 @@
+From 11d31c3fcee237236e8855c1bc261e375ef3c8e5 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 09:57:39 +0200
+Subject: [PATCH 95/99] Lexer: CORE::__END__ / CORE::__DATA__ start an End /
+ Data statement
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads CORE::__END__ and CORE::__DATA__ as the same separators as
+the bare spellings (toke.c yyl_data_handle):
+
+    printf %s "print 1;\nCORE::__END__\nnot code\n" | perl    # 1
+
+The tokenizer makes both a Separator already; the statement class table
+keyed only the bare spellings, so the CORE:: Separator sat in a plain
+PPI::Statement.  Two table entries.
+
+Fixes PCL §44 (the statement half) in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Lexer.pm | 5 ++++-
+ t/ppi_bugs_pcl.t | 3 +--
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index bb026098..66ac3b64 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -374,9 +374,12 @@ my %STATEMENT_CLASSES = (
+ 	'return'    => 'PPI::Statement::Break',
+ 	'goto'      => 'PPI::Statement::Break',
+ 
+-	# Special sections of the file
++	# Special sections of the file; CORE:: spells the same separators
++	# (toke.c yyl_data_handle)
+ 	'__DATA__'  => 'PPI::Statement::Data',
+ 	'__END__'   => 'PPI::Statement::End',
++	'CORE::__DATA__' => 'PPI::Statement::Data',
++	'CORE::__END__'  => 'PPI::Statement::End',
+ );
+ 
+ sub _statement {
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 6c6f8641..54569895 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1668,8 +1668,7 @@ TODO: {
+         ok( grep( $_ eq "Separator=CORE::$m", @t ), "CORE::$m is a Separator" ) or diag "got: @t";
+     }
+ }
+-TODO: {
+-    local $TODO = 'PCL §44: the CORE:: spelling sits in a plain Statement';
++{
+     for my $m (qw(__END__ __DATA__)) {
+         my $doc = PPI::Document->new(\"print 1;\nCORE::$m\nnot code\n");
+         my @s = map { ref $_ } $doc->schildren;
+-- 
+2.53.0
+

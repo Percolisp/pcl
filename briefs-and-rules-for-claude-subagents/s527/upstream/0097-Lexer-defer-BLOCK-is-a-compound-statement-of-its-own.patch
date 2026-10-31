@@ -1,0 +1,96 @@
+From 118032302cc5cbc640b4914d03611a49f7d46ec7 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 10:02:29 +0200
+Subject: [PATCH 97/99] Lexer: defer BLOCK is a compound statement of its own
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Under the defer feature (perl 5.36) `defer BLOCK` is a statement that
+ends at its block (perly.y: barestmt: KW_DEFER mblock):
+
+    perl -E 'use feature "defer"; no warnings; { defer { print "b\n" } print "a\n" }'
+    # a, then b
+
+The Lexer built one plain statement from the word, the block and the
+next statement.  `defer` now opens a PPI::Statement::Compound under its
+feature, exactly as `try` does; the compound takes the block and ends
+there, and Compound->type answers defer.  Without the feature defer
+stays an ordinary word.
+
+Fixes PCL §52 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Lexer.pm              | 10 +++++++++-
+ lib/PPI/Statement/Compound.pm |  5 +++++
+ t/ppi_bugs_pcl.t              |  3 +--
+ 3 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 66ac3b64..a2976c07 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -428,8 +428,10 @@ sub _statement {
+ 
+ 	# Is it a token in our known classes list
+ 	my $content = $Token->content;
++	# try and defer open a compound statement only under their feature
+ 	my $class =
+-	  ( $content eq 'try' and ( $self->{features_stack}[-1] || {} )->{try} )
++	  ( ( $content eq 'try' or $content eq 'defer' )
++		and ( $self->{features_stack}[-1] || {} )->{$content} )
+ 	  ? 'PPI::Statement::Compound'
+ 	  : $STATEMENT_CLASSES{$content};
+ 
+@@ -921,6 +923,12 @@ sub _continues {
+ 		}
+ 	}
+ 
++	if ( $type eq 'defer' ) {
++		# defer BLOCK (perly.y: KW_DEFER mblock): the block ends it
++		return $LastChild->isa('PPI::Token::Word')
++		  && $Token->isa('PPI::Token::Structure') && $Token->content eq '{';
++	}
++
+ 	# Handle the common continue case
+ 	if ( $LastChild->isa('PPI::Token::Word') and $LastChild->content eq 'continue' ) {
+ 		# LABEL while (EXPR) BLOCK continue ...
+diff --git a/lib/PPI/Statement/Compound.pm b/lib/PPI/Statement/Compound.pm
+index d6bd2730..1548c7c7 100644
+--- a/lib/PPI/Statement/Compound.pm
++++ b/lib/PPI/Statement/Compound.pm
+@@ -99,6 +99,9 @@ regardless of whether they were declared using C<'for'> or C<'foreach'>.
+ 
+ All of the compounds are a variation on one of these four.
+ 
++Under their features, C<'try'> (try BLOCK catch ... finally ...) and
++C<'defer'> (defer BLOCK, perl 5.36) are compound statements too.
++
+ Returns the simple string C<'if'>, C<'for'>, C<'foreach'> or C<'while'>,
+ or C<undef> if the type cannot be determined.
+ 
+@@ -133,6 +136,8 @@ sub type {
+ 	if ($Element->isa('PPI::Token::Word')) {
+ 		return 'try'
+ 			if $content eq 'try' && $self->presumed_features->{try};
++		return 'defer'
++			if $content eq 'defer' && $self->presumed_features->{defer};
+ 		return $TYPES{$content};
+ 	}
+ 	return 'continue' if $Element->isa('PPI::Structure::Block');
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 7dddea36..e0ab0a4b 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1835,8 +1835,7 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;'
+ 
+ # §52 -- under the defer feature (perl 5.36) `defer BLOCK` is a statement
+ # that ends at its block: the print after it is the next statement.
+-TODO: {
+-    local $TODO = 'PCL §52: defer BLOCK swallows the next statement';
++{
+     my $doc = PPI::Document->new(\q{use feature 'defer'; { defer { print "b\n" } print "a\n"; }});
+     my ($blk) = grep { $_->isa('PPI::Statement::Compound') } $doc->schildren;
+     my @in = $blk ? map { squash( $_->content ) } $blk->schild(0)->schildren : ();
+-- 
+2.53.0
+
