@@ -31,7 +31,7 @@ use warnings;
 use Exporter 'import';
 our @EXPORT_OK = qw(has_cause causes_line read_fail_rows fail_row_line
                     cause_class class_census census_line CLASSES
-                    parse_cause class_group $NS_ID_RX baseline_causes);
+                    parse_cause class_group $NS_ID_RX baseline_causes task_state);
 
 # ── THE CLASS RULE (Fable ruling, s486a — recorded verbatim in docs/DECIDED.md
 # under `## s486a`, explained in docs/failure-cause-classes.md) ──────────────
@@ -194,6 +194,38 @@ sub census_line {
     push @parts, sprintf("unexplained %s", _commify($n->{unexplained} // 0));
     return sprintf("%s: %s of %s — %s\n", $label, _commify($attributed),
                    _commify($total), join(', ', @parts));
+}
+
+# ── a task KEY's state, read from a task store (s531b, ruling 2) ───────────
+# task_state($store, $n) -> ($state, $status, $text)
+#   $state  'open' | 'closed' | 'missing' | 'idless' | 'unreadable' | 'unknown'
+#   $text   the task's subject + description (for the UNREDUCED naming check)
+# The store spells six statuses (completed, done = closed; pending, open,
+# in_progress, in-progress = open); a file without an `id` equal to its name
+# is `idless`.  ONE reading for the gate row and tools/migrate-causes.pl.
+my %TASK_CLOSED = map { ($_ => 1) } qw(completed done);
+my %TASK_OPEN   = map { ($_ => 1) } qw(pending open in_progress in-progress);
+my %TASK_SEEN;
+sub task_state {
+    my ($store, $n) = @_;
+    my $memo = "$store\0$n";
+    return @{ $TASK_SEEN{$memo} } if $TASK_SEEN{$memo};
+    my $path = "$store/$n.json";
+    my @r;
+    if (!-e $path) { @r = ('missing', '', '') }
+    else {
+        require JSON::PP;
+        my $j = eval { local $/; open my $f, '<:raw', $path or die "$!\n"; JSON::PP->new->utf8->decode(<$f>) };
+        if (!$j)                                         { @r = ('unreadable', '', '') }
+        elsif (!defined $j->{id} || $j->{id} ne $n)       { @r = ('idless', $j->{status} // '', '') }
+        else {
+            my $st = $j->{status} // '';
+            my $text = join ' ', $j->{subject} // '', $j->{description} // '';
+            @r = ($TASK_CLOSED{$st} ? 'closed' : $TASK_OPEN{$st} ? 'open' : 'unknown', $st, $text);
+        }
+    }
+    $TASK_SEEN{$memo} = \@r;
+    return @r;
 }
 
 # ── the four blessed row baselines, read for their CAUSE ───────────────────

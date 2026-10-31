@@ -45,9 +45,8 @@ use warnings;
 use Test::More;
 use FindBin qw($RealBin);
 use lib "$RealBin/../../tools/lib";
-use JSON::PP ();
 use File::Basename qw(basename);
-use PCLCauses qw(parse_cause baseline_causes);
+use PCLCauses qw(parse_cause baseline_causes task_state);
 use PCLNsIds qw(read_ids);
 
 my $root   = "$RealBin/../..";
@@ -64,23 +63,18 @@ if (open my $fh, '<:raw', "$root/docs/DECIDED.md") {
     while (<$fh>) { $decided{$1} = 1 if /^## (s\d+[a-z0-9]*)\b/ }
 }
 
-# Task status, normalised: the store spells six statuses.
-my %CLOSED = map { ($_ => 1) } qw(completed done);
-my %OPEN   = map { ($_ => 1) } qw(pending open in_progress in-progress);
+# Task status, normalised by PCLCauses::task_state (six spellings in the store).
 my %task;
 sub task_problem {
     my ($n) = @_;
-    return $task{$n} if exists $task{$n};
-    my $path = "$store/$n.json";
-    return $task{$n} = "task #$n does not exist ($path)" unless -e $path;
-    my $j = eval { local $/; open my $f, '<:raw', $path or die "$!\n"; JSON::PP->new->utf8->decode(<$f>) };
-    return $task{$n} = "task #$n is unreadable: $@" unless $j;
-    return $task{$n} = "task #$n has no id field" unless defined $j->{id} && $j->{id} eq $n;
-    my $st = $j->{status} // '(none)';
-    return $task{$n} = "task #$n is $st (closed): re-cause the row (CLOSE-WITH-ROWS)" if $CLOSED{$st};
-    return $task{$n} = "task #$n has an unknown status '$st'" unless $OPEN{$st};
-    $task{"text$n"} = join ' ', $j->{subject} // '', $j->{description} // '';
-    return $task{$n} = '';
+    my ($state, $st, $text) = task_state($store, $n);
+    $task{"text$n"} = $text;
+    return "task #$n does not exist ($store/$n.json)"                   if $state eq 'missing';
+    return "task #$n is unreadable"                                     if $state eq 'unreadable';
+    return "task #$n has no id field"                                   if $state eq 'idless';
+    return "task #$n is $st (closed): re-cause the row (CLOSE-WITH-ROWS)" if $state eq 'closed';
+    return "task #$n has an unknown status '$st'"                       if $state eq 'unknown';
+    return '';
 }
 
 sub id_problem {
