@@ -31791,26 +31791,50 @@ would consume, so it dies naming the stream (rule 12)."
       (let ((r (and w (p-box-value w))))
         (and (p-box-p r) r)))))
 
-(defvar *p-handle-stash* (make-hash-table :test 'eq :weakness :key)
-  "A FILEHANDLE'S STASH: the class `bless $fh, \"C\"` gives a lexical handle,
-   keyed by the STREAM (or socket) the scalar holds (task #2056).  perl's
-   `open my $fh` puts a reference to a GLOB in $fh and bless marks that GLOB,
-   so every copy of $fh -- a `return $fh`, `my $c = $fh` -- is the same object
-   of class C.  PCL's payload IS that glob, so the class goes on the payload,
-   never only on the variable's box (a copy reads the payload, not the box).
-   Weak by key: the entry goes with the stream.")
+(defvar *p-referent-stash* (make-hash-table :test 'eq :weakness :key)
+  "THE STASH OF A REFERENT THAT CANNOT CARRY ONE ITSELF: the class `bless'
+   gave a filehandle (the STREAM or socket, task #2056), a GLOB (#3433), an
+   ARRAY (the raw vector) or a CODE object (the function) -- keyed by that
+   payload, which IS the referent (ir-spec §2.6).  perl blesses the REFERENT,
+   so every reference to it -- a `return $o', `my $c = $o', an element copy
+   `@l = ($o)', a second `\\@a' -- sees the class, and a re-bless through any
+   one of them shows through all of them (#4000).  The box's class slot is
+   only the CACHE box-set copies around; it goes stale on a re-bless and is
+   absent on a copy made before the bless, so every class READER asks this
+   table first (%p-referent-stash-class).  A HASH referent keeps its class in
+   its own :__class__ key and a scalar referent in *p-sv-stash*.  Weak by
+   key: the entry goes with the referent.")
 
-(declaim (inline %p-handle-stash-class))
-(defun %p-handle-stash-class (v)
-  "The class `bless' gave the filehandle payload V -- or the GLOB V, which is
-   what a glob ref (`Symbol::gensym', `\\do { local *FH }', `\\*FH') holds
-   (#3433) -- or NIL (#2056).  The
-   count test first: ref()/dispatch reach here for every unblessed handle
-   (readline asks), and a weak-table lookup is not free -- with no blessed
-   handle in the image it costs one fixnum compare."
-  (and (plusp (hash-table-count *p-handle-stash*))
-       (or (%p-handle-payload-p v) (p-typeglob-p v))
-       (gethash v *p-handle-stash*)))
+(declaim (inline %p-referent-stash-p))
+(defun %p-referent-stash-p (v)
+  "Is V a payload whose class lives in *p-referent-stash*: a raw ARRAY
+   vector, a CODE function, a filehandle payload or a typeglob?"
+  (or (and (vectorp v) (not (stringp v)))
+      (functionp v)
+      (%p-handle-payload-p v)
+      (p-typeglob-p v)))
+
+(declaim (inline %p-referent-stash-class))
+(defun %p-referent-stash-class (v)
+  "The class `bless' gave the referent V (an array vector, a function, a
+   filehandle payload, or the GLOB a glob ref holds), or NIL (#2056, #3433,
+   #4000).  The count test first: ref()/dispatch reach here for every
+   unblessed array / code / handle reference, and a weak-table lookup is not
+   free -- with nothing of these blessed in the image it costs one fixnum
+   compare."
+  (and (plusp (hash-table-count *p-referent-stash*))
+       (%p-referent-stash-p v)
+       (gethash v *p-referent-stash*)))
+
+(declaim (inline %p-held-referent-class))
+(defun %p-held-referent-class (holder v)
+  "The stash of the referent V that the box HOLDER holds (an array vector, a
+   function, a filehandle payload, a glob), or NIL (#2056, #3433, #4000).  A
+   bare GLOB VALUE held in a scalar (`my $v = *$g', an @_ slot, `$$rval') is
+   not a reference: it stringifies as `*PKG::NAME' whatever class its glob
+   carries -- only the REF (HOLDER is-ref) reads it (#3516)."
+  (and (or (p-box-is-ref holder) (not (p-typeglob-p v)))
+       (%p-referent-stash-class v)))
 
 (defvar *p-sv-stash* (make-hash-table :test 'eq :weakness :key)
   "A SCALAR'S OWN STASH: the class `bless \\$x, \"C\"` writes on the SV $x
@@ -31905,14 +31929,16 @@ would consume, so it dies naming the stream (rule 12)."
       ;; perl reads SvSTASH(SvRV), and the referent's own stash is what
       ;; %p-referent-class answers above (#1619: reading the slot here
       ;; made ref(\\$obj) answer the object's class instead of REF).
+      ;; A wrapper V holding an ARRAY / CODE / glob referent: the referent's
+      ;; own stash outranks V's slot, which is only the cache of it and goes
+      ;; stale on a re-bless through another copy (#4000).
       ((p-box-p v) (or (%p-referent-class box)
-                       (and (not (p-box-is-ref box)) (p-box-class v))))
-      ;; A filehandle payload IS the glob perl blesses (#2056).  A bare
-      ;; GLOB VALUE held in a scalar (`my $v = *$g`, an @_ slot, `$$rval`)
-      ;; is not a reference: it stringifies as `*PKG::NAME` whatever class
-      ;; its glob carries -- only the REF (is-ref set) reads it (#3516).
-      ((and (or (p-box-is-ref box) (not (p-typeglob-p v)))
-            (%p-handle-stash-class v)))
+                       (and (not (p-box-is-ref box))
+                            (or (%p-held-referent-class v (p-box-value v))
+                                (p-box-class v)))))
+      ;; The referent itself (an array vector, a function, a filehandle
+      ;; payload -- the glob perl blesses, #2056 -- or a glob).
+      ((%p-held-referent-class box v))
       (t nil))))
 
 (defun %p-fetch-once (x)
@@ -32016,9 +32042,12 @@ would consume, so it dies naming the stream (rule 12)."
       ;; — `my $w; my $r = \$w; ref($w)` answered ARRAY for a never-assigned
       ;; scalar (#2341 made every never-written dereferenced `my $x;` a box,
       ;; which is what exposed it; the undef payload is not a reference).
-      ((or (consp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
+      ((or (consp inner) (and (vectorp inner) (not (stringp inner))))
+       ;; A RAW array referent (an element or argument copied before the
+       ;; bless) still answers its own stash (#4000).
+       (or (%p-referent-stash-class inner) "ARRAY"))
       ;; Code reference
-      ((functionp inner) "CODE")
+      ((functionp inner) (or (%p-referent-stash-class inner) "CODE"))
       ;; Typeglob payload.  A glob VALUE is not a reference at all in perl —
       ;; `$g = *foo` makes the SV a GV, and ref($g) is "" — so only an is-ref
       ;; box answers GLOB.  A RAW typeglob is a glob VALUE by the same
@@ -35390,8 +35419,12 @@ would consume, so it dies naming the stream (rule 12)."
              (progn
                (setf (p-box-class inner) class-name)
                (let ((rv (p-box-value inner)))
-                 (when (hash-table-p rv)
-                   (setf (gethash :__class__ rv) class-name))))))
+                 (cond
+                   ((hash-table-p rv)
+                    (setf (gethash :__class__ rv) class-name))
+                   ;; An ARRAY / CODE referent: its own stash (#4000).
+                   ((or (and (vectorp rv) (not (stringp rv))) (functionp rv))
+                    (setf (gethash rv *p-referent-stash*) class-name)))))))
        ;; The variable/wrapper write stays as the cache box-set copies
        ;; around (fast "is this an object" checks read it).
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
@@ -35401,12 +35434,13 @@ would consume, so it dies naming the stream (rule 12)."
       ((or (null inner) (eq inner *p-undef*) (stringp inner) (numberp inner))
        (%p-die-error nil "Can't bless non-reference value"))
       (t
-       ;; A filehandle or a GLOB: the class goes on the payload, which is
-       ;; the glob perl blesses (#2056, #3433: a copy of a gensym / `\do {
-       ;; local *FH }' ref is re-blessed through the glob, not through the
-       ;; variable) -- and on the box below, as for any ref.
-       (when (or (%p-handle-payload-p inner) (p-typeglob-p inner))
-         (setf (gethash inner *p-handle-stash*) class-name))
+       ;; A filehandle, a GLOB, an ARRAY or a CODE referent: the class goes
+       ;; on the payload, which is what perl blesses (#2056, #3433: a copy
+       ;; of a gensym / `\do { local *FH }' ref is re-blessed through the
+       ;; glob, not through the variable; #4000: every copy of an array or
+       ;; code ref sees the re-bless) -- and on the box below, the cache.
+       (when (%p-referent-stash-p inner)
+         (setf (gethash inner *p-referent-stash*) class-name))
        ;; Array, code, or other ref type - store class on the box
        (if (p-box-p ref)
            (setf (p-box-class ref) class-name)
@@ -35434,8 +35468,9 @@ would consume, so it dies naming the stream (rule 12)."
          (and (p-box-class obj)
               (%p-ref-shaped-p (p-box-value obj))
               (p-box-class obj))))
-    ;; A raw filehandle payload: its own stash (#2056).
-    ((%p-handle-stash-class obj))
+    ;; A raw filehandle payload (#2056), array vector or function (#4000):
+    ;; the referent's own stash.
+    ((%p-referent-stash-class obj))
     (t nil)))
 
 (defparameter +p-handle-class+ "IO::Handle"

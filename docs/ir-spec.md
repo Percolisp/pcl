@@ -949,9 +949,16 @@ class cached on a wrapper or variable box. Those cached `class` slots
 still exist — `p-bless` writes them and `box-set` copies them — but only
 as caches for fast is-object checks; the referent is the truth, which is
 what makes a second `\$x` wrapper and a re-bless through one alias
-behave, and what XS reads as `SvSTASH(SvRV(rv))`. Array/code/glob refs
-keep the class on the wrapper box (their raw referents cannot carry a
-slot). `box-set` copies a class only when the assigned *value* is itself
+behave, and what XS reads as `SvSTASH(SvRV(rv))`. **The class of an
+ARRAY, CODE, filehandle or GLOB referent belongs to the referent**
+(normative, s530a, task #4000): those raw referents (the vector, the
+function, the stream, the glob) cannot carry a slot, so `p-bless` writes
+the weak table `*p-referent-stash*` keyed by the referent, and every class
+reader (`%p-target-class`, `p-get-class`, `p-ref` on a raw payload) asks it
+before any wrapper's slot, which is only the cache.  A re-bless through any
+copy, or a bless after an unblessed copy was taken, is seen through every
+copy: `my $o = bless [], "P"; my @l = ($o); bless $o, "Q"; ref $l[0]` is
+`Q`. `box-set` copies a class only when the assigned *value* is itself
 a reference: copying a plain value out of a blessed referent yields an
 unblessed scalar, exactly as perl's SV-attached stash does not travel
 with the value. The *identity* of an object is the underlying
@@ -966,8 +973,8 @@ never the variable's box itself: a later `$x = 8` does not reach the element
 and `$a[0] = 3` does not reach `$x`.  A blessed PLAIN scalar (a `bless \$x`
 referent) is not a reference and copies its value, unblessed, as `box-set`
 does.  Example: `my $s = bless {}, "K"; my $t = [$s]; $s = 8; ref $t->[0]`
-is `K`.  Residue: an ARRAY / CODE referent keeps its class on each container,
-so a re-bless through one copy is not seen by another (filed, s529a).
+is `K`.  (The s529a residue -- an ARRAY / CODE class on each container -- is
+closed by the referent stash above, s530a.)
 
 **A SCALAR'S OWN STASH IS NOT THE CLASS OF WHAT IT HOLDS (normative,
 s483b/#1619).**  `ref(R)` reports the blessing of R's *referent itself*,
