@@ -36,3 +36,5 @@ Box rebooted (uptime 2 min at 00:29); HEAVY.holder.1 held a dead pid (s527c's cu
 ## 10:0x -- container 17/17 on main (MAIN-READY-56) -> PUSHED.
 
 ## 10:4x -- s530c MERGED = MAIN-READY-57 `d8e387f2` (Fable rebased it over the notes commit).  Fable: gate 346 / 11,644 PASS on the combined tree (its own full gate predated s527e); corpus-diff vs 2857cd7f = the claimed 16 files (spot-checked vec.t / time.t: `p-regex-from-parts` -> `p-qr-from-parts` only); lib: Encode.pm (#4060).  Probe c1: `use re '/x'` main wrong / tree = perl; `local $h{@a}`, qr rebless, reftype GLOB tree = perl; `"@{name[0,2]}"` INTERPOLATED still dies on the tree (code spellings fixed) -> **#4140 FILED** (the InterpScan residue of #3864).  Pushed (no vendor/installer change).
+
+## 10:5x -- **s527g LAUNCHED** (tokenizer rows: #4100, §43, §42, §40 format; IDs 4141-4159; gen v2-9500) beside s527f on the pcl branch; s527f told.  Running: s530b, s527f, s527g.
