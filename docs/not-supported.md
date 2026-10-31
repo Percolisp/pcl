@@ -399,10 +399,16 @@ the s522 ruling, task #1510 / #3511 / #3321):
 * **Deleting a sub** writes through, in every spelling — `delete $Pkg::{n}`,
   `delete @Pkg::{LIST}`, `delete @{"Pkg::"}{LIST}`, through a `\%{"Pkg::"}`
   ref: each snapshot is registered in `*p-stash-pkg-table*` and `p-delete` (the
-  one path; a slice goes through it per key) unbinds the sub, so a RUN-TIME
-  lookup (`defined &{"Pkg::n"}`, `*{"Pkg::n"}{CODE}`, method dispatch) misses
-  it while a COMPILED `defined &Pkg::n` keeps seeing it — perl's op pins the
-  glob.
+  one path; a slice goes through it per key) MARKS the sub (s531a, #3831: it
+  used to unbind it, which killed every compiled call), so a RUN-TIME lookup
+  (`defined &{"Pkg::n"}`, `*{"Pkg::n"}{CODE}`, method dispatch, `can`) misses
+  it while a call compiled before the delete still reaches it and a literal
+  `defined &Pkg::n` answers by WHEN it was compiled (#3696: loaded before the
+  delete, true; after, false) — perl's op pins the glob.  Residue: a later
+  install under the name un-marks the SAME symbol, so code compiled before
+  the delete sees the new sub where perl's pinned glob keeps the old one, and
+  `*P::n = sub {...}` compiled in the same statement as the delete reaches
+  the stash again where perl's assignment goes to the removed glob.
 * **A stash alias** `*A:: = *B::` is recorded once and redirects RUN-TIME name
   resolution (bless — `ref` names B —, method calls, `isa`, `can`, symbolic
   refs, `%A::`) to B's stash.  Names bound at COMPILE time stay with A's own

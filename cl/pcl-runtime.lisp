@@ -1502,6 +1502,31 @@
                                ,(%p-param-init p '(if %_args (%p-param-copy (pop %_args)) (p-undef)))))
          ,@body))))
 
+(defvar *p-stash-deleted* (make-hash-table :test 'eq :weakness :key)
+  "Symbols whose glob a stash delete removed: symbol -> T.  A package
+   VARIABLE's (#3691) and, since #3831, a SUB's -- `delete $Pkg::{name}` of a
+   CODE entry marks `pl-name` and leaves its function in place.  The run-time
+   lookups BY NAME treat a marked symbol as absent (the stash view,
+   %p-symref-sym, %p-live-sub-p: method resolution, can, symbolic calls, the
+   glob's CODE slot); COMPILED code keeps the same symbol, so a call compiled
+   before the delete still reaches the sub, as perl's op keeps its pinned glob.
+   A symbolic WRITE un-marks a variable; a sub install (%p-note-sub-install)
+   un-marks a sub.")
+
+(declaim (inline %p-stash-deleted-p))
+(defun %p-stash-deleted-p (sym)
+  "True when a stash delete removed SYM's glob (*P-STASH-DELETED*); one
+   count test while nothing was ever deleted."
+  (and (plusp (hash-table-count *p-stash-deleted*))
+       (gethash sym *p-stash-deleted*)))
+
+(declaim (inline %p-live-sub-p))
+(defun %p-live-sub-p (sym)
+  "True when SYM has a function that a RUN-TIME lookup by name finds: fbound
+   and not removed from its stash (#3831).  Method resolution, can, symbolic
+   calls and the glob's CODE slot ask this, never fboundp alone."
+  (and (fboundp sym) (not (%p-stash-deleted-p sym))))
+
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
 ;;; Only creates the stub if the function isn't already defined.
@@ -1520,7 +1545,7 @@
    p-declare-sub's forward-declaration stubs (which ARE fbound).  The ONE
    reading of that question — `\\&foo`, the never-declared-call fallback, the
    package sub scan and `sort NAME`'s entry check all ask it."
-  (and (fboundp sym) (not (eq (gethash sym *p-declared-subs*) :stub))))
+  (and (%p-live-sub-p sym) (not (eq (gethash sym *p-declared-subs*) :stub))))
 
 (defun %p-autoload-symbol (sym)
   "The AUTOLOAD sub that SYM's OWN package would run for a body-less plain
@@ -2101,6 +2126,9 @@
    :set-prototype with SYM the FUNCTION): the visible-prototype index is stale,
    and the detector (#2610), when a table is active, compares it."
   (incf *p-sub-table-epoch*)
+  ;; A NEW sub under a name a stash delete removed is visible again (#3831).
+  (when (and (symbolp sym) (%p-stash-deleted-p sym))
+    (remhash sym *p-stash-deleted*))
   (when *p-detect-active* (%p-detect-check sym kind))   ; #2610, an instrument
   nil)
 
@@ -4658,13 +4686,6 @@
 ;;; These three functions implement the core of `use overload` dispatch.
 ;;; p-find-overload is called from every overloadable operator — it must be fast.
 ;;; The common case (non-blessed value) short-circuits at p-box-p with no allocation.
-
-(defvar *p-stash-deleted* (make-hash-table :test 'eq :weakness :key)
-  "Package-variable symbols whose glob a stash delete removed (#3691): symbol
-   -> T.  The run-time lookups BY NAME treat a marked symbol as absent (the
-   stash view, %p-symref-sym); compiled code -- and every top-level form read
-   after the delete -- keeps reading the same symbol, so nothing is ever
-   unbound.  A symbolic WRITE un-marks the name.")
 
 (declaim (inline %p-isa-symbol))
 (defun %p-isa-symbol (pkg)
@@ -16185,6 +16206,7 @@ which is one of #1140's escape spellings (probed)."
          +p-stash-unsupported-tail+)))
     nil))
 
+(declaim (special *pcl-own-method-cache*))   ; defined with method dispatch below
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value
    Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
@@ -16223,12 +16245,16 @@ which is one of #1140's escape spellings (probed)."
          (when stash-pkg
            (let ((sym (%p-resolve-sub-symbol
                        (concatenate 'string stash-pkg "::" k))))
-             ;; The *p-declared-subs* entry STAYS: a COMPILED `defined
-             ;; &Pkg::name` keeps seeing the sub (perl's op pins the glob),
-             ;; while every RUN-TIME name lookup misses -- the symbolic
-             ;; predicates treat :defined-but-unbound as gone (#3511).
+             ;; MARKED, never unbound (#3831): a call COMPILED before the
+             ;; delete keeps reaching the sub (perl's op pins the glob, and
+             ;; YAML::Tiny calls refaddr after deleting it), while every
+             ;; RUN-TIME name lookup misses (%p-live-sub-p).  The
+             ;; *p-declared-subs* entry STAYS, so a COMPILED `defined
+             ;; &Pkg::name` keeps seeing the sub (#3511).  The own-method
+             ;; cache answers a hit without asking the mark, so it is dropped.
              (when (and sym (fboundp sym))
-               (fmakunbound sym)))))
+               (setf (gethash sym *p-stash-deleted*) t)
+               (clrhash *pcl-own-method-cache*)))))
        (multiple-value-bind (v found) (gethash k h)
          (cond
            ;; A %SIG signal slot (#2107): perl's delete is its clear-magic —
@@ -25162,7 +25188,7 @@ would consume, so it dies naming the stream (rule 12)."
   "The function a handler NAME (\"main::h\") denotes, or NIL when no such sub
    is defined — perl then does nothing (it warns only under `use warnings')."
   (let ((sym (%p-resolve-sub-symbol name)))
-    (and sym (fboundp sym) (symbol-function sym))))
+    (and sym (%p-live-sub-p sym) (symbol-function sym))))
 
 (defun %p-sig-die-by-default (signo)
   "Take SIGNO's DEFAULT action now, as the kernel would have: reset the
@@ -30726,7 +30752,7 @@ would consume, so it dies naming the stream (rule 12)."
           ;; task #503, the two would have named different packages.
           (multiple-value-bind (sym perl-pkg bare-name)
               (%p-resolve-sub-symbol fn)
-            (let ((fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
+            (let ((fn-val (when (and sym (%p-live-sub-p sym)) (symbol-function sym))))
               (if fn-val
                   (apply fn-val args)
                   ;; No body at that name: this is "a plain call reached no
@@ -31073,7 +31099,7 @@ would consume, so it dies naming the stream (rule 12)."
     (if (functionp v)
         v
         (let ((sym (%p-resolve-sub-symbol (stringify-value v))))
-          (and sym (fboundp sym) (symbol-function sym))))))
+          (and sym (%p-live-sub-p sym) (symbol-function sym))))))
 
 (defun %p-glob-slot-place (glob sigil init)
   "The value bound to GLOB's SIGIL slot symbol (\"@\" array / \"%\" hash),
@@ -33457,7 +33483,7 @@ would consume, so it dies naming the stream (rule 12)."
       (cond
         ((string= slot-s "CODE")
          (let ((sym (find-sym "PL-")))
-           (when (fboundp sym) (make-p-box (fdefinition sym)))))
+           (when (%p-live-sub-p sym) (make-p-box (fdefinition sym)))))
         ((string= slot-s "SCALAR")
          (let ((sym (find-sym "$")))
            (when (boundp sym) (make-p-box (symbol-value sym)))))
@@ -34462,27 +34488,56 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; Subroutine Reflection (exists &sub, defined &sub, undef &sub)
 ;;; ============================================================
 
-(defun p-sub-exists (pkg-str name-str)
-  "Perl exists &funcname — 1 if the sub has been declared or defined, else the
-   DEFINED empty string (it was undef; see p-exists, #1173)."
-  (let* ((pkg (%pcl-find-package pkg-str))
-         (sym (when pkg
-                (find-symbol (%pcl-cl-sub-name name-str)
-                             pkg))))
+;;; A LITERAL `defined &Pkg::name` / `exists &Pkg::name` BINDS ITS GLOB WHEN IT
+;;; IS COMPILED (task #3696, with #3831's mark).  perl's op looks the name up
+;;; once, at compile time: compiled BEFORE a stash delete it keeps the old glob
+;;; (still defined), compiled AFTER it gets a fresh empty one (not defined until
+;;; a sub is installed again).  PCL's compile-and-load unit is the top-level
+;;; form, loaded in source order (a text load, a fasl, a string eval alike), so
+;;; the two macros below capture, at LOAD time of the form that holds them
+;;; (load-time-value), whether the name had already been deleted -- and a site
+;;; loaded after the delete reads the stash's current answer, the mark.
+
+(defun %p-sub-reflect-symbol (pkg-str name-str)
+  "The symbol a literal `&Pkg::name` reflection names, or NIL."
+  (let ((pkg (%pcl-find-package pkg-str)))
+    (when pkg
+      (find-symbol (%pcl-cl-sub-name name-str) pkg))))
+
+(defun %p-sub-deleted-at-load (pkg-str name-str)
+  "T when a stash delete had removed PKG-STR::NAME-STR when the site loaded."
+  (let ((sym (%p-sub-reflect-symbol pkg-str name-str)))
+    (and sym (%p-stash-deleted-p sym) t)))
+
+(defun %p-sub-exists-1 (pkg-str name-str after-delete)
+  "p-sub-exists' run-time half; AFTER-DELETE as %p-sub-deleted-at-load."
+  (let ((sym (%p-sub-reflect-symbol pkg-str name-str)))
     (make-p-box (p-bool (and sym
+                             (not (and after-delete (%p-stash-deleted-p sym)))
                              (or (gethash sym *p-declared-subs*)
                                  (fboundp sym)))))))
 
-(defun p-sub-defined (pkg-str name-str)
-  "Perl defined &funcname — true only if sub has an actual body (not a stub)."
-  (let* ((pkg (%pcl-find-package pkg-str))
-         (sym (when pkg
-                (find-symbol (%pcl-cl-sub-name name-str)
-                             pkg))))
+(defun %p-sub-defined-1 (pkg-str name-str after-delete)
+  "p-sub-defined's run-time half; AFTER-DELETE as %p-sub-deleted-at-load."
+  (let ((sym (%p-sub-reflect-symbol pkg-str name-str)))
     (if (and sym
+             (not (and after-delete (%p-stash-deleted-p sym)))
              (eq (gethash sym *p-declared-subs*) :defined))
         (make-p-box 1)
         (make-p-box nil))))
+
+(defmacro p-sub-exists (pkg-str name-str)
+  "Perl exists &funcname — 1 if the sub has been declared or defined, else the
+   DEFINED empty string (it was undef; see p-exists, #1173).  The glob is the
+   one the site saw when it LOADED (see the note above, #3696)."
+  `(%p-sub-exists-1 ,pkg-str ,name-str
+                    (load-time-value (%p-sub-deleted-at-load ,pkg-str ,name-str))))
+
+(defmacro p-sub-defined (pkg-str name-str)
+  "Perl defined &funcname — true only if sub has an actual body (not a stub).
+   The glob is the one the site saw when it LOADED (see the note above, #3696)."
+  `(%p-sub-defined-1 ,pkg-str ,name-str
+                     (load-time-value (%p-sub-deleted-at-load ,pkg-str ,name-str))))
 
 (defun p-undef-sub (pkg-str name-str)
   "Perl undef &funcname — remove sub body; sub still 'exists' afterward."
@@ -34517,11 +34572,13 @@ would consume, so it dies naming the stream (rule 12)."
         ((or (stringp v) (numberp v))
          (let ((sym (%p-resolve-sub-symbol v)))
            (and sym
-                (or (fboundp sym)
+                (or (%p-live-sub-p sym)
                     (let ((st (gethash sym *p-declared-subs*)))
-                      ;; :defined with no function = deleted from its stash
-                      ;; (p-delete): gone for a run-time lookup (#3511)
-                      (and st (not (eq st :defined)))))
+                      ;; :defined with no function = undef'd or deleted from
+                      ;; its stash (a deleted sub is MARKED, #3831): gone for
+                      ;; a run-time lookup (#3511)
+                      (and st (not (eq st :defined))
+                           (not (%p-stash-deleted-p sym)))))
                 t)))
         (t nil))))))
 
@@ -34554,11 +34611,11 @@ would consume, so it dies naming the stream (rule 12)."
       ((or (stringp v) (numberp v))
        (let* ((sym (%p-resolve-sub-symbol v))
               (status (and sym (gethash sym *p-declared-subs*))))
-         ;; fboundp in both arms: a stash delete (p-delete) leaves the
-         ;; :defined status for a COMPILED `defined &name` and unbinds the
-         ;; function, which is what a run-time lookup must see (#3511).
+         ;; A stash delete (p-delete) leaves the :defined status for a
+         ;; COMPILED `defined &name` and MARKS the symbol, which is what a
+         ;; run-time lookup must see (#3511, #3831: %p-live-sub-p).
          (if (and sym
-                  (fboundp sym)
+                  (%p-live-sub-p sym)
                   (or (eq status :defined) (null status)))
              (make-p-box 1)
              (make-p-box nil))))
@@ -36033,7 +36090,7 @@ would consume, so it dies naming the stream (rule 12)."
          ;; Look in current package for user-defined sub, NOT in :pcl (which has built-ins)
          (func-sym (find-symbol func-name *package*)))
     (cond
-      ((and func-sym (eq (symbol-package func-sym) *package*) (fboundp func-sym))
+      ((and func-sym (eq (symbol-package func-sym) *package*) (%p-live-sub-p func-sym))
        ;; User sub exists - call it to get the object
        (funcall func-sym))
       ;; A QUALIFIED name (`Types::Standard::Str()->m`, the sub installed at
@@ -36198,7 +36255,7 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((tbl (gethash raw-class *pcl-own-method-cache*)))
     (when tbl
       (let ((sym (gethash method-name tbl)))
-        (when (and sym (fboundp sym)) (symbol-function sym))))))
+        (when (and sym (%p-live-sub-p sym)) (symbol-function sym))))))
 
 (defun %pcl-own-method-cache-put (raw-class method-name sym)
   (let ((tbl (gethash raw-class *pcl-own-method-cache*)))
@@ -36220,7 +36277,7 @@ would consume, so it dies naming the stream (rule 12)."
    redefinition — see its comment."
   (let* ((pkg (%pcl-find-package class-name))
          (sym (and pkg (find-symbol sub-name pkg))))
-    (when (and sym (eq (symbol-package sym) pkg) (fboundp sym))
+    (when (and sym (eq (symbol-package sym) pkg) (%p-live-sub-p sym))
       sym)))
 
 (defun %pcl-no-op-import-result ()
@@ -36452,7 +36509,7 @@ would consume, so it dies naming the stream (rule 12)."
                  (t (when target-pkg
                       (let ((fn (find-symbol (%pcl-cl-sub-name meth-part)
                                              target-pkg)))
-                        (when (and fn (fboundp fn))
+                        (when (and fn (%p-live-sub-p fn))
                           (return-from p-method-call (apply fn resolved-obj args)))))
                     ;; Package doesn't exist — standard "can't locate" error
                     (let ((pkg-known (%pcl-find-package pkg-part)))
@@ -36472,7 +36529,7 @@ would consume, so it dies naming the stream (rule 12)."
             (target-pkg
              (let ((fn (find-symbol (%pcl-cl-sub-name meth-part)
                                     target-pkg)))
-               (when (and fn (fboundp fn))
+               (when (and fn (%p-live-sub-p fn))
                  (return-from p-method-call (apply fn resolved-obj args)))))
             ;; Package not found — give proper error instead of falling through
             (t
@@ -36521,7 +36578,7 @@ would consume, so it dies naming the stream (rule 12)."
                     ;; Inherited symbols (e.g. pcl:p-push) must be ignored so
                     ;; that a class without a PUSH method doesn't accidentally
                     ;; call the pcl built-in instead of signalling "no method".
-                    (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+                    (when (and fn (eq (symbol-package fn) pkg) (%p-live-sub-p fn))
                       (return-from p-method-call (apply fn resolved-obj args)))))))
             ;; UNIVERSAL is an implicit parent of all Perl classes.
             ;; After CLOS MRO fails, try UNIVERSAL's @ISA chain.
@@ -36533,7 +36590,7 @@ would consume, so it dies naming the stream (rule 12)."
                                 (fn2 (when pkg2
                                        (find-symbol sub-name
                                                     pkg2))))
-                           (if (and fn2 (eq (symbol-package fn2) pkg2) (fboundp fn2))
+                           (if (and fn2 (eq (symbol-package fn2) pkg2) (%p-live-sub-p fn2))
                                (return-from p-method-call (apply fn2 resolved-obj args))
                                (let* ((isa2 (when pkg2 (%p-isa-symbol pkg2)))
                                       (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
@@ -36570,7 +36627,7 @@ would consume, so it dies naming the stream (rule 12)."
                             (fn  (when pkg
                                    (find-symbol sub-name
                                                 pkg))))
-                       (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+                       (if (and fn (eq (symbol-package fn) pkg) (%p-live-sub-p fn))
                            (return-from p-method-call (apply fn resolved-obj args))
                            ;; Recurse through @ISA
                            (let* ((isa-sym (when pkg (%p-isa-symbol pkg)))
@@ -36639,7 +36696,7 @@ would consume, so it dies naming the stream (rule 12)."
              (when (member cls visited :test #'equal) (return-from walk nil))
              (let* ((pkg (find-package (%pcl-invert-case cls)))
                     (al (when pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
-               (if (and al (eq (symbol-package al) pkg) (fboundp al))
+               (if (and al (eq (symbol-package al) pkg) (%p-live-sub-p al))
                    (cons cls al)
                    (let* ((isa-sym (when pkg (%p-isa-symbol pkg)))
                           (isa-val (when (and isa-sym (boundp isa-sym))
@@ -36710,7 +36767,7 @@ would consume, so it dies naming the stream (rule 12)."
   (unless (member cls-str visited :test #'equal)
     (let* ((pkg (%pcl-find-package cls-str))
            (fn  (and pkg (find-symbol sub-name pkg))))
-      (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+      (if (and fn (eq (symbol-package fn) pkg) (%p-live-sub-p fn))
           (symbol-function fn)
           (let* ((isa-sym (and pkg (%p-isa-symbol pkg)))
                  (isa-val (and isa-sym (boundp isa-sym) (symbol-value isa-sym))))
@@ -36820,7 +36877,7 @@ would consume, so it dies naming the stream (rule 12)."
                   (cpkg (find-package pkg-name)))
              (when cpkg
                (let ((fn (find-symbol sub-name cpkg)))
-                 (when (and fn (fboundp fn))
+                 (when (and fn (%p-live-sub-p fn))
                    (return-from p-super-call (apply fn obj args)))))))
          ;; Nothing in the parent chain: finish the lookup the way perl does
          ;; (UNIVERSAL, the built-ins, then a perl-shaped die) — #533.  There
@@ -36834,7 +36891,7 @@ would consume, so it dies naming the stream (rule 12)."
                            (fn (when cpkg
                                  (find-symbol sub-name
                                               cpkg))))
-                      (if (and fn (eq (symbol-package fn) cpkg) (fboundp fn))
+                      (if (and fn (eq (symbol-package fn) cpkg) (%p-live-sub-p fn))
                           (return-from p-super-call (apply fn obj args))
                           (let* ((isa2 (when cpkg (%p-isa-symbol cpkg)))
                                  (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
@@ -36893,7 +36950,7 @@ would consume, so it dies naming the stream (rule 12)."
     (dolist (cls (%pcl-isa-ancestry class-name) nil)
       (let* ((pkg (%pcl-find-package cls))
              (fn  (when pkg (find-symbol (%pcl-cl-sub-name method-str) pkg))))
-        (when (and fn (eq (symbol-package fn) pkg) (fboundp fn)
+        (when (and fn (eq (symbol-package fn) pkg) (%p-live-sub-p fn)
                    ;; A forward-declaration STUB is fboundp but not a real method
                    ;; (Perl wouldn't have compiled it yet) — ignore it, matching
                    ;; p-stash.  See docs/declaration-ordering-fix-plan.md.

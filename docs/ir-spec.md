@@ -3847,8 +3847,18 @@ var ⇒ plain lexical binding, no localization at all).
   prints `01`; `delete` returns the glob.  A symbolic WRITE after the delete
   un-marks the name and shares the old cell (perl: a new variable;
   not-supported.md).  Every delete spelling
-  reaches `p-delete`, which unbinds the sub for RUN-TIME lookups while a
-  compiled `defined &P::n` keeps it.  `*A:: = *B::` lowers to
+  reaches `p-delete`; deleting a SUB marks `pl-n` the same way (s531a,
+  #3831), never unbinding it: a call COMPILED before the delete keeps reaching
+  the sub (perl's op holds the glob -- YAML::Tiny deletes its imported
+  `refaddr` at the end of the file and calls it later), while every RUN-TIME
+  lookup by name (`%p-live-sub-p`: method resolution, `can`, a symbolic call,
+  symbolic `defined` / `exists`, `*{"P::n"}{CODE}`, the view) misses, and a
+  sub installed again under the name un-marks it.  A LITERAL `defined &P::n`
+  / `exists &P::n` binds its glob when its top-level form LOADS
+  (`load-time-value`, #3696): loaded before the delete it still answers true,
+  loaded after it reads the mark -- `use Scalar::Util qw(reftype); sub r {
+  reftype($_[0]) } BEGIN { delete $main::{reftype} } print r([]), defined
+  &main::reftype ? 1 : 0` prints `ARRAY0`.  `*A:: = *B::` lowers to
   `(p-stash-assign "A" (p-stash "B"))`, which records A as an alias of B's
   stash once: run-time name resolution (bless, method calls, `isa`, `can`,
   symbolic refs) answers B for A, `ref` of an object blessed into A is B, and

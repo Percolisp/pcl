@@ -253,8 +253,8 @@ ir-spec §10 row **introspection** — §7; `p-caller` returns package but file/
 | `p-ref` | function | `(val)` | — | — | — | — | — | — | — |
 | `p-reftype` | function | `(val)` | — | — | — | — | — | — | — |
 | `p-stash` | function | `(pkg-name)` | — | — | — | — | — | — | — |
-| `p-sub-defined` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
-| `p-sub-exists` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
+| `p-sub-defined` | macro | `(pkg-str name-str)` | — | — | — | — | — | — | — |
+| `p-sub-exists` | macro | `(pkg-str name-str)` | — | — | — | — | — | — | — |
 | `p-undef-sub` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
 | `pl-__SUB__` | function | `nil` | — | — | — | — | — | — | — |
 
