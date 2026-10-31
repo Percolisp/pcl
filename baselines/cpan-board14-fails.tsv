@@ -1838,8 +1838,7 @@ YAML-PP-v0.39.0-0	38.schema-ixhash.t	0	*FILE*	1..0 # SKIP Tie::IxHash not instal
 YAML-PP-v0.39.0-0	45.binary.t	3	roundtrip_binary			#1389 (utf8::is_utf8 answers 1 for every string: roundtrip_binary's byte string is dumped as text -- s526w2)
 YAML-PP-v0.39.0-0	49.include.t	2	YAML::PP object was destroyed correctly	'1'	eq '0'	NS:DESTROY at scope exit (#2370, PARKED USER s495: "YAML::PP object was destroyed correctly" counts a DESTROY call -- s526w2)
 YAML-PP-v0.39.0-0	52.preserve.t	0	*PLAN*	ran 5 of no plan, rc 2	a plan	#3852 (Not a SCALAR reference after YAML::PP preserve's tied containers are built; not reduced -- s526w2)
-YAML-PP-v0.39.0-0	54.glob.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#3854 (a blessed ref to a glob-holding scalar: reftype REF, the glob's name and *{$o}{ARRAY} -- s526w2)
-YAML-PP-v0.39.0-0	54.glob.t	1	valid			#3854 (a blessed ref to a glob-holding scalar: reftype REF, the glob's name and *{$o}{ARRAY} -- s526w2)
+YAML-PP-v0.39.0-0	54.glob.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#4104 (after #3854 the file passes subtest `valid` and dies right after it: Can't locate object method "descend" via package "main" -- Test::Deep; s530c)
 Pod-Simple-3.47-0	00about.t	19				NS:Code points above U+10FFFF (perl's extended UTF-8) -- Pod::Simple::RTF's my_qr probe string "\x{110000}" is a literal PCL cannot build, so the module dies at load (probe prtf.pl) -- s526w2
 Pod-Simple-3.47-0	JustPod_corpus.t	0	*FILE*	1..0 # SKIP : Encode was not built (rc=0)	0 row(s)	#1705 ($Config{extensions} is empty, so the test's "Encode was not built" guard skips the file; perl runs it -- s526w2)
 Pod-Simple-3.47-0	corpus.t	0	*FILE*	1..0 # SKIP Encode was not built (rc=0)	0 row(s)	#1705 ($Config{extensions} is empty, so the test's "Encode was not built" guard skips the file; perl runs it -- s526w2)

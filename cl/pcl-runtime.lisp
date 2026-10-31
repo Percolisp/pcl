@@ -32171,6 +32171,10 @@ would consume, so it dies naming the stream (rule 12)."
                   ;; scalar (`bless \$h, "S"` with a ref in $h is REF).  This
                   ;; is the ONE site that wants the PLAIN variant — every
                   ;; wrong-kind-deref site wants the broad one (#1628).
+                  ;; The referent scalar holds a glob VALUE: it is a GV, so
+                  ;; the blessed ref is a GLOB ref -- p-ref's own arm for the
+                  ;; unblessed spelling (task #3854).
+                  ((%p-glob-value-box-p (%p-ref-referent val)) "GLOB")
                   ((p-box-p inner) (if (%p-plain-scalar-referent-p val)
                                        "SCALAR"
                                        "REF"))
@@ -32853,6 +32857,12 @@ would consume, so it dies naming the stream (rule 12)."
       ;; A DIRHANDLE too (task #3517): its value is PCL's (index . entries)
       ;; record, which the name arm below stringified into `*main::0 . ..`.
       ((%p-dirhandle-record-p inner) (%p-stream-glob inner))
+      ;; A SCALAR REFERENCE whose referent holds a glob VALUE (`$$r = *foo'
+      ;; makes the referent SV a GV): `*{$r}' is that glob -- blessed or not,
+      ;; so it never goes through the reference's STRING (`Foo=GLOB(0x…)'
+      ;; read back as a glob name, task #3854; YAML::PP's glob loading).
+      ((let ((r (%p-scalar-ref-referent name-box)))
+         (and r (p-typeglob-p (p-box-value r)) (p-box-value r))))
       (t
        ;; Unqualified → the package in effect: %p-glob-dynamic-name, the one
        ;; reading every dynamic-glob path shares.

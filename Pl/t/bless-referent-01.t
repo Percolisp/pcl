@@ -48,7 +48,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 15;
+plan tests => 16;
 
 # One SBCL launch for the whole family: each line prints one answer.
 my $prog = <<'EOF';
@@ -110,6 +110,13 @@ open(my $fh5, '<', $0) or die; bless $fh5, 'Z';
 opendir(my $dh5, '.') or die; my $n5 = 0; $n5++ while defined(readdir *$dh5);
 print "t15:", via_arg($$fh5), " ", "" . *$fh5, " ", *$fh5{NAME}, " ", *$fh5{PACKAGE},
       " ", two_deep($$fh5), " ", "" . *$dh5, " ", ($n5 > 2 ? "read" : "none"), "\n";
+{ no strict 'refs'; use Scalar::Util qw(reftype);
+  our $gv16 = "Hola"; our @gv16 = (3, 14);
+  my $v16; my $o16 = bless \$v16, "Foo"; $$o16 = *{"main::gv16"};
+  my $w16 = *{"main::gv16"}; my $p16 = bless \$w16, "Bar";
+  my $gg16 = *{$o16}; my $ar16 = *{$o16}{ARRAY};
+  print "t16:", reftype($o16), " ", ref($o16), " ", reftype($p16), " $gg16 @$ar16 ",
+        ${*{$o16}{SCALAR}}, "\n"; }
 EOF
 
 my $out = run_cl($prog);
@@ -148,3 +155,5 @@ like $out, qr/^t14:SCALAR same SCALAR SCALAR SCALAR GLOB 1$/m,
     'a plain store replaces a glob ref; $$g = \\$s is the glob assignment (#3519)';
 like $out, qr/^t15:\*main::\$fh5 \*main::\$fh5 \$fh5 main \*main::\$fh5 \*main::\$dh5 read$/m,
     'a lexical handle\'s glob is named after its variable: *main::$fh (#3517)';
+like $out, qr/^t16:GLOB Foo GLOB \*main::gv16 3 14 Hola$/m,
+    'a BLESSED ref to a scalar holding a glob VALUE is a GLOB ref, and *{$o} is that glob (#3854)';
