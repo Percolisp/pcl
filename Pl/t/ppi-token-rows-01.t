@@ -123,6 +123,11 @@ both_agree('my @b = sort </nonexistent-s527g/x-1/y/*.pl>; print scalar(@b), "\n"
            '§14 #4100: sort </abs/x-1/y/*.pl> -- a -DIGIT in the glob');
 both_agree('open my $fh, "<", \"l1\nl2\n"; sub g { return <$fh> } my @g = g(); print scalar(@g), "\n"; print reverse </nonexistent-s527g/*>; print "e\n";',
            '§14 #4100: return <$fh>, reverse <glob>');
+# ...and after a USER sub, which only a declaration makes a list operator:
+# PPI keeps the less-than and PCL's source-level glob repair
+# (_repair_glob_pattern_cascade) also reads the y/ derail.
+both_agree('sub foo { scalar @_ } my $n = foo <./*>; print $n > 0 ? "y\n" : "n\n"; my @b = foo </nonexistent-s527g/x-1/y/*.pl>; print "next @b\n";',
+           '§14 #4100: foo </abs/x-1/y/*.pl> after a user sub');
 
 # §43 (s527g, group AL) -- a lexical sub named like a quote-like operator
 # or x is called by its bare name in its scope; after its block the keyword

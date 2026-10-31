@@ -8176,8 +8176,12 @@ sub _repair_glob_pattern_cascade_pass {
     # `_ends_term`'s braces: perl's own glob patterns are written that way, and
     # the shapes a wrong "term position" could otherwise reach — `$#a < 3 && $s
     # =~ /a>b/` was the breaking case — all have spaces in them.
+    # The Regexp need not start with the `/`: a `-DIGIT` in the path makes the
+    # `/` after it a division and a following `y/` (or `s/`, `tr/`, `m/`) the
+    # quote-like that swallows the `>` (#4100: `foo </tmp/x-1/y/*.pl>` after a
+    # USER sub -- after a builtin PCL's PPI lexes the glob itself, §14d).
     next unless $close && $close->isa('PPI::Token::Regexp')
-             && $close->content =~ m{\A/};
+             && $close->content =~ m{\A(?:/|(?:y|tr|s|m)\W)};
     next if $pat eq '' || $pat =~ /[\s<]/;
     (my $esc = $pat) =~ s/"/\\"/g;
     $lt->set_content('glob("' . $esc . '")');
