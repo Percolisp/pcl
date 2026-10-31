@@ -746,7 +746,7 @@ not code
    title => '`WORD :` inside a ternary\'s middle operand (`0 ? ref shift : shift`) lexes `shift :` as a Label; perl allows a label only under XSTATE',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Label', content => '', pred => 'not_xstate', check => 'label-not-at-statement-start' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_ternary_label_bug', commit => '2d912294', group => 'Z', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::PExpr::_fix_ppi_ternary_label_bug (s527d: PPI fixed on the branch)', commit => '2d912294', group => 'Z', pr => undef },
    repro => 'sub f { my $c = 0 ? ref shift : shift; return $c } print f(5), "\\n";',
    perl => "5\n",
    tokens => {

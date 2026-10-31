@@ -6624,10 +6624,6 @@ sub cleanup_for_parsing {
   # TODO: File bug report with PPI project.
   @no_ws = $self->_fix_ppi_negative_number_bug(\@no_ws);
 
-  # PPI BUG WORKAROUND: PPI parses "word :" in ternary as Label instead of
-  # Word + Operator. Split labels back into their components when preceded by "?".
-  @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
-
   # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
   # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
   @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
@@ -6765,52 +6761,6 @@ sub _fix_ppi_negative_number_bug {
         push @result, $minus_op, $pos_num;
         next;
       }
-    }
-
-    push @result, $token;
-  }
-
-  return @result;
-}
-
-
-# PPI BUG WORKAROUND: In ternary expressions like "cond ? foo : bar",
-# PPI sometimes parses "foo :" as a Label instead of Word + Operator.
-# This happens when there's a space before the colon.
-# We detect Labels that follow "?" and split them back into Word + ":".
-sub _fix_ppi_ternary_label_bug {
-  my $self   = shift;
-  my $tokens = shift;
-
-  my @result;
-  my $seen_question = 0;
-
-  for (my $i = 0; $i < @$tokens; $i++) {
-    my $token = $tokens->[$i];
-
-    # Track if we've seen a ? (ternary operator)
-    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq '?') {
-      $seen_question = 1;
-    }
-
-    # Check if this is a Label after a ? (likely part of ternary)
-    if (ref($token) eq 'PPI::Token::Label' && $seen_question) {
-      my $content = $token->content;
-      # Label content is like "word :" or "word:" - extract the word
-      if ($content =~ /^(\w+)\s*:\s*$/) {
-        my $word = $1;
-        # Split into Word and : operator
-        my $word_token  = bless { content => $word }, 'PPI::Token::Word';
-        my $colon_token = bless { content => ':' }, 'PPI::Token::Operator';
-        push @result, $word_token, $colon_token;
-        $seen_question = 0;  # Reset after finding the colon
-        next;
-      }
-    }
-
-    # Reset seen_question after we've processed a complete ternary
-    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq ':') {
-      $seen_question = 0;
     }
 
     push @result, $token;
