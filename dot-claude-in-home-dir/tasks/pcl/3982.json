@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s527d (2026-10-31), found probing §9.  `\"ab\" =~ /(a)/; print \"$#{+}\\n\";` -- perl 5.40.3 prints 1; PCL (main df8e1ec9 and the s527d tree alike) drops the print statement loudly ('Handle single node of unknown type').  The CODE spelling `$#{+}` and `$#+` work; only the interpolated braced form fails -- Pl::InterpScan / StringInterpolation's `$#{...}` arm does not ask Pl::PExpr::braced_punct_magic_name.  Pre-existing; the PPI side (§9) is not involved (strings are PCL's own scan).",
+   "id" : "3982",
+   "status" : "pending",
+   "subject" : "PCL: \\\"$#{+}\\\" / \\\"$#{-}\\\" inside a double-quoted string DROPS the statement (Handle single node of unknown type)"
+}

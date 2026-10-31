@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530 (Fable), from a merge probe of s527d; PRE-EXISTING on main 0fb05a79 and identical on s527d's tree.\n\nReproducer (two lines in one file):\n  my @b = sort </tmp/claude-1000/x-1/y/*.pl>; print scalar(@b),\"\\n\";\n  my @c = sort </tmp/claude-1000/x1/*.pl>; print scalar(@c),\"\\n\";\nperl: 1 / 0.  PCL: dies at load with `invalid number of arguments: 5` in\n  (P-. \"/tmp/claude-1000/x-1/y/*.pl>; print scalar(\" #() ...)\n-- the `<` after `sort` was lexed as less-than and everything up to the NEXT line's `>` became a string operand.\nControls (all agree with perl): `sort </etc/host*>`, `sort <*.pl>`, `<ABS/x-1/*.pl>` without sort, `reverse </etc/host*>`.\nThe trigger looks like the `-1` (a NUMBER after `-` inside the would-be glob: the term-end rule? a `-N` repair?).\nBisect which layer decides first: PPI on the vendored lib (dump the tokens) vs PCL's `_fix_ppi_glob_after_block`\nand the `<...>`-after-a-list-operator repair s527d kept (the `*>` arm).\nWhere it belongs: Â§14 territory (`<...>` after a block / a list operator).  If PPI mis-lexes, it is a token row\nfor the next PPI batch (catalogue + report + registry first); if PPI is right and PCL's repair splits it, a PCL fix.\nAlso: the failure is a Lisp backtrace, not a tidy one-line error (the USER's rule: errors fail where perl's do, and are tidy).\n",
+   "id" : "4100",
+   "status" : "pending",
+   "subject" : "LOUD (Lisp backtrace): `sort </ABS/x-1/*.pl>` -- a glob after `sort` whose path holds `-DIGIT` is read as less-than; the source up to the NEXT `>` becomes one string operand"
+}

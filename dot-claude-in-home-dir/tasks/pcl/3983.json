@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s527d (2026-10-31), found by the WIDE emission-ab (t/op/lexsub.t:850).  `use feature \"lexical_subs\"; no warnings; { my $x = 43; my sub y :prototype() {$x}; print y, \"\\n\"; }` -- perl 5.40.3 prints 43; PCL prints 0, on main df8e1ec9 AND on the s527d tree (SILENT WRONG both ways).  PPI (vendored, and 1.291): `Word(my) Word(sub) Word(y) Operator(:) Word(prototype) Structure(() ...` -- the attribute is not a Token::Attribute after `my sub NAME` (it is after `sub NAME`).  Site: Token/Unknown.pm __TOKENIZER__is_an_attribute: the named-sub test accepts `sub NAME` only after nothing / a Structure / an empty Whitespace, not after `my` / `our` / `state` (Token/Whitespace.pm's prototype test already lists the lexical case).  s527d deleted Parser2's sub-name Word merge (§41), which used to glue `y` + `prototype` into `yprototype__lexsub__77`; the tree emits `y__lexsub__77` + a `y__lexsub__77prototype` sub -- wrong both ways, same output (0).  Fix on the branch (a token-file row): the lexical-sub case in __TOKENIZER__is_an_attribute + a report row; then PCL's lowering of a lexical sub's :prototype() checked vs perl (the `print y` -- y is also the transliteration keyword, see §43 #3750).",
+   "id" : "3983",
+   "status" : "pending",
+   "subject" : "PPI: a LEXICAL sub's attribute (`my sub y :prototype() {...}`) is Operator(:) + Word, not an Attribute; PCL then prints the wrong value silently"
+}

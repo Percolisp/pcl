@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530a (Opus agent, 2026-10-31) as the residue of #3865.  PRE-EXISTING.\n\n`local $h{@a}` (and `local $h{@a} = V`) keys on the ARRAY itself where perl keys on its COUNT -- the `local` element forms are lowered by the v1 TEXT seam (Pl/Parser.pm, the p-local-hash-elem / p-local-hash-elem-init sites near 2574, 3401, 4471-4483), which parses the subscript as a free-standing expression and never reaches ExprToCL's _hash_key_form, the one key rule #3865 fixed for the read, the store, exists and delete.\n\n    my @a = (1,2); our %h = (2 => \"two\"); { local $h{@a} = \"loc\"; print \"$h{2}\\n\"; }\n  perl 5.40.3: loc        PCL (s530a): two        (emission: (p-local-hash-elem-init %h @a \"loc\"))\nProbe scratch/s530a/pr/c3.pl row 2.  The natural owner is the codegen review's C2 (close the text seam one statement kind per session, `local` first): once `local` lowers through ExprToCL the key rule applies by construction; a fix in Parser.pm's text path would be a second copy of the rule (CLAUDE.md rule 11).\n",
+   "id" : "4062",
+   "status" : "pending",
+   "subject" : "`local $h{@a}` keys on the array, not its COUNT: the local element forms are lowered by the v1 text seam, which never reaches the #3865 key rule -- silent wrong"
+}

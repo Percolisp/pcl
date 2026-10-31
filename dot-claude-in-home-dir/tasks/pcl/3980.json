@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s527d (2026-10-31).  `prove tools/t/ppi-expect-check.t` on a `git archive df8e1ec9` extraction (main's code) fails rows 1 5 7 9 11 12: `§4 flagged: my $m = 7%-3;`, `§12 flagged: $s += length($k)*length($k);`, `§28 flagged: my $x = $_.2;`, `§25 flagged: my $z = length(\"abc\")-length(\"a\");` and the two tool rows built on them.  The test asserts the expect-state checker FLAGS those shapes, but PCL's vendored PPI (branch pcl, groups A B F J) now lexes them like perl, so there is nothing to flag.  Not in the gate (tools/t).  Fix: the test picks its flagged shapes from registry rows that are still unfixed (fixed_in undef) or runs those rows with PCL_SYSTEM_PPI=1 -- never weaken it to 'not flagged'.",
+   "id" : "3980",
+   "status" : "pending",
+   "subject" : "tools/t/ppi-expect-check.t fails 6 of 12 rows on main: its §4 §12 §25 §28 \"flagged\" shapes are lexed correctly by PCL's PPI since s527a/s527b"
+}
