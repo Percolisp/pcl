@@ -73,15 +73,11 @@ sub rows_of {
 }
 
 # sweep: file <TAB> num <TAB> description <TAB> got <TAB> expected <TAB> cause
-sub sweep_baseline {
-    my @rows;
-    my $r = rows_of("$bl/fail-baseline.tsv", sub {
-        my ($f, $num, $d, $got, $exp, $c) = split /\t/, $_[0], 6;
-        return undef unless defined $d;
-        return ["$f\t$d", $c];
-    });
-    return $r;
-}
+# The four blessed row baselines are LOCATED by PCLCauses::baseline_causes
+# (one table of where each keeps its cause) and READ by parse_cause.
+sub kc { my $r = PCLCauses::baseline_causes(@_) or return undef;
+         return [ map { [$_->{key}, $_->{cause}, $_->{fields}] } @$r ] }
+sub sweep_baseline { return kc("$bl/fail-baseline.tsv", 'sweep') }
 
 # ── the sweep, row-weighted when a run's log is there ──────────────────────
 # The join key is (file, description), the same one tools/sweep-diff.pl uses;
@@ -158,25 +154,17 @@ sub registry_count {
 
 # ── the populations ────────────────────────────────────────────────────────
 sub companion_population {
-    my $r = rows_of("$bl/perl-suite-fails.tsv", sub {
-        my ($rel, $num, $pv, $cv, $key, $c) = split /\t/, $_[0], 6;
-        return undef unless defined $key;
-        return ["$rel\t$key", $c];
-    });
-    return $r ? { weight => 'row', rows => $r,
+    my $r = kc("$bl/perl-suite-fails.tsv", 'companion');
+    return $r ?{ weight => 'row', rows => $r,
                   note => 'one blessed line per diverging TAP row' }
               : { missing => "$bl/perl-suite-fails.tsv" };
 }
 
 sub board_population {
     my ($assert, $file) = (0, 0);
-    my $r = rows_of("$bl/cpan-board14-fails.tsv", sub {
-        my ($dist, $t, $num, $desc, $got, $exp, $c) = split /\t/, $_[0], 7;
-        return undef unless defined $desc;
-        (defined $desc && $desc eq '*FILE*') ? $file++ : $assert++;
-        return ["$dist $t\t" . (length $desc ? $desc : "#$num"), $c];
-    });
+    my $r = kc("$bl/cpan-board14-fails.tsv", 'board');
     return { missing => "$bl/cpan-board14-fails.tsv" } unless $r;
+    ($_->[2][3] eq '*FILE*') ? $file++ : $assert++ for @$r;
     return { weight => 'row', rows => $r,
              note => "$assert failing assertion(s) + $file *FILE* row(s)" };
 }
@@ -211,16 +199,15 @@ sub xdiff_population {
 sub shortfall_population {
     my ($half) = @_;
     my (@rows, %files);
-    my $r = rows_of("$bl/row-shortfall.tsv", sub {
-        my ($key, $n, $c) = split /\t/, $_[0], 3;
-        return undef unless defined $n && $n =~ /^\d+$/;
+    my $r = kc("$bl/row-shortfall.tsv", 'shortfall');
+    return { missing => "$bl/row-shortfall.tsv" } unless defined $r;
+    for my $s (@$r) {
+        my ($key, $n, $c) = @{ $s->[2] };
         my $which = $key =~ m{^perl-tests/} ? 'perl-tests' : 't';
-        return undef unless $which eq $half;
+        next unless $which eq $half;
         $files{$key}++;
         push @rows, [$key, $c] for 1 .. $n;
-        return undef;
-    });
-    return { missing => "$bl/row-shortfall.tsv" } unless defined $r;
+    }
     return { weight => 'row', rows => \@rows,
              note => scalar(keys %files) . " file(s)" };
 }

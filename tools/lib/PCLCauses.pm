@@ -31,7 +31,7 @@ use warnings;
 use Exporter 'import';
 our @EXPORT_OK = qw(has_cause causes_line read_fail_rows fail_row_line
                     cause_class class_census census_line CLASSES
-                    parse_cause class_group $NS_ID_RX);
+                    parse_cause class_group $NS_ID_RX baseline_causes);
 
 # ── THE CLASS RULE (Fable ruling, s486a — recorded verbatim in docs/DECIDED.md
 # under `## s486a`, explained in docs/failure-cause-classes.md) ──────────────
@@ -194,6 +194,43 @@ sub census_line {
     push @parts, sprintf("unexplained %s", _commify($n->{unexplained} // 0));
     return sprintf("%s: %s of %s — %s\n", $label, _commify($attributed),
                    _commify($total), join(', ', @parts));
+}
+
+# ── the four blessed row baselines, read for their CAUSE ───────────────────
+# ONE table of where each baseline keeps its cause, shared by
+# tools/cause-census.pl and the gate row Pl/t/verdict-register-01.t, so the
+# column is located in one place as well as read by one function (rule 11).
+#   board      dist, t-file, num, description, got, expected, CAUSE
+#   companion  rel, perl#, perl verb, PCL verb, rowkey, CAUSE
+#   sweep      file, num, description, got, expected, CAUSE
+#   shortfall  key, count, CAUSE                 (weighted by its count)
+my %BASELINE = (
+    board     => { n => 7, need => 3, key => sub { "$_[0] $_[1]\t" . (length $_[3] ? $_[3] : "#$_[2]") } },
+    companion => { n => 6, need => 4, key => sub { "$_[0]\t$_[4]" } },
+    sweep     => { n => 6, need => 2, key => sub { "$_[0]\t$_[2]" } },
+    shortfall => { n => 3, need => 1, key => sub { $_[0] } },
+);
+
+# baseline_causes($path, $format) -> [ { key, cause, fields => [...], line } ]
+# or undef when the file cannot be read (a missing baseline is NO
+# information, never a clean zero).  `need` is the index of the last field a
+# row must have; a shortfall row also needs a numeric count.
+sub baseline_causes {
+    my ($path, $format) = @_;
+    my $f = $BASELINE{$format} or die "baseline_causes: unknown format $format\n";
+    open my $fh, '<:raw', $path or return undef;
+    my @rows;
+    while (my $line = <$fh>) {
+        next if $line =~ /^\s*#/ || $line !~ /\S/;
+        chomp $line;
+        my @v = split /\t/, $line, $f->{n};
+        next unless defined $v[ $f->{need} ];
+        next if $format eq 'shortfall' && $v[1] !~ /^\d+$/;
+        push @rows, { key => $f->{key}->(@v), cause => $v[ $f->{n} - 1 ],
+                      fields => \@v, line => $. };
+    }
+    close $fh;
+    return \@rows;
 }
 
 # ── the companion's ROW-level fail baseline (baselines/perl-suite-fails.tsv) ──

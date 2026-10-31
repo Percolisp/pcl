@@ -84,6 +84,39 @@ grammar are one function.
   its line.  The share's denominator leaves out `perl-skip`, `perl-fails` and
   `harness`: those rows are not PCL's to answer.
 
+## The KEY is checked: `Pl/t/verdict-register-01.t` and CLOSE-WITH-ROWS
+
+A gate row (pure perl, ~1 s) checks every cause's **key**, never every
+`#NNNN` in the note (432 board cells mention a closed task somewhere, mostly
+as history; 21 had a bad key when it arrived):
+
+* every cause is in the grammar (a legacy cell is red);
+* every `NS:` / `PARKED:` id exists in `docs/not-supported.md` and is not
+  RETIRED, and `tools/ns-ids.pl --check` is clean;
+* every `#N` / `UNREDUCED #N` / `HARNESS #N` key is a file in the TREE's task
+  store (`dot-claude-in-home-dir/tasks/pcl`) with an `id`, whose status is not
+  `completed` / `done` (the store spells six statuses; a missing or id-less
+  file is red);
+* an `UNREDUCED` key's task names the t-file.
+
+It is the GATE for the CPAN board (`baselines/cpan-board14-fails.tsv`) and a
+REPORT — counts printed with `note`, never a failing row — for
+`perl-suite-fails.tsv`, `fail-baseline.tsv` and `row-shortfall.tsv`, until
+#1836's batch moves them (ruling 8).  The task checks are authoritative in a
+clone (CI, the merge) and ADVISORY (TODO rows) in a git worktree, whose store
+is a checkout as old as its branch; `PCL_VERDICT_STRICT=1` makes them the gate
+anywhere and `PCL_TASK_STORE=DIR` reads another store (the live one is
+`~/.claude/tasks/pcl`).
+
+**CLOSE-WITH-ROWS (Fable ruling s531 #3)** is what makes a closed-task gate row
+safe: **a task is closed only in a commit that also leaves or re-causes every
+row keyed on it**, on the strength of a one-file run.  The agent does it inside
+its batch; the reviewing session's close-at-merge then finds no rows.  The
+merge-order trap, named: batch Y adds rows keyed on T while batch X closes T —
+Y's final rebase turns the row red and Y re-causes at the rebase (seconds, no
+SBCL).  A task closed as a duplicate or superseded is the same event: its rows
+move to the successor.
+
 ## Where the classes are printed
 
 `causes_line`'s third answer **is** `census_line`, so every runner that blesses
