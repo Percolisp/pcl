@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530c (Opus agent, 2026-10-31).  PRE-EXISTING (base 0fb05a79 gives the same).  Found when #3859 let Pod-Simple t/fcodes_s.t run past its old stop: its rows 13-34 (Pod::Simple::Text output) now RUN and fail on this.\n\n    use Text::Wrap; local $Text::Wrap::huge = 'overflow';\n    my $o = Text::Wrap::wrap(\"  \", \"  \", \"abc\\n\"); $o =~ s/\\n/\\\\n/g; print \"[$o]\\n\";\n  perl 5.40.3: [  abc\\n]        PCL: [  abc]          (also \"abc def\\nghi\\n\" -> PCL drops the LAST newline only)\nProbe scratch/s530c/pr/wrap1.pl.  Pod::Simple::Text::emit_par is `wrap($indent, $indent, $self->{'Thispara'} .= \"\\n\")` + print \"\\n\", so every paragraph ends \"\\n\" where perl's ends \"\\n\\n\".\n\nNARROWED (scratch/s530c/pr/wrap2-4.pl, all IDENTICAL to perl): the two regexes of wrap()'s loop with their captures and pos, the loop itself replicated in a script (`while ($t !~ /\\G(?:$break)*\\Z/gc) {...} $r .= $remainder` gives \"  abc\\n\" under PCL too), Text::Tabs::expand(\"abc\\n\"), the map/join that builds $t.  So the difference is in what the transpiled core Text/Wrap.pm does that the replica does not: candidates `use re 'taint'` in the sub, the `local $Text::Wrap::huge` read through the package global, `$lead`/`$nl` initialisation, or the `pos($t) ne length($t)` tail.  Next step: transpile Text/Wrap.pm (`./pl2cl --module`) and bisect by copying wrap() into a script.\nROWS: Pod-Simple-3.47 t/fcodes_s.t rows 13-34 (22 rows, blessed to this task by s530c).\n",
+   "id" : "4103",
+   "status" : "pending",
+   "subject" : "Text::Wrap::wrap drops the LAST trailing newline of its text (`wrap(\"  \",\"  \",\"abc\\n\")` is \"  abc\" where perl gives \"  abc\\n\") -- silent wrong; every Pod::Simple::Text paragraph ends one newline short (Pod-Simple fcodes_s.t rows 13-34)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530 (Fable), from the merge probe of s530c.  The INTERPOLATED residue of #3864 (s530c fixed the CODE spellings).\n\n  our %name = (KEY => \"kv\"); our @name = (7,8,9);\n  print \"@{name[0,2]}\\n\";      # perl: 7 9      PCL (main AND s530c's tree): dies \"Undefined subroutine &main::name called\"\nControls on s530c's tree, all = perl: `${name{KEY}}`, `${name[1]}`, `my @x = @{name[0,2]}` (code).\nNot checked yet: \"${name{KEY}}\" / \"${name[1]}\" inside a string.\nWhere: the interpolation path (`Pl/InterpScan.pm` -- interpolation scanning happens there or not at all, standing rule) does not apply #3864's canonicalization (`${NAME{...}}` / `${NAME[...]}` / `@{NAME[...]}` = the element / slice; the one exception `${sub {...}}`).  Route the interpolated braced operand through the SAME point s530c's fix uses (rule 11), not a copy.\nLOUD (a die), not silent.\n",
+   "id" : "4140",
+   "status" : "pending",
+   "subject" : "LOUD: interpolated `\"@{name[0,2]}\"` (and likely \"${name{KEY}}\") still dies \"Undefined subroutine &main::name\" -- the string-interpolation residue of #3864 (code spellings fixed by s530c)"
+}

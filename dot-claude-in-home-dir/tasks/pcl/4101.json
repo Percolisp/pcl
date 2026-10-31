@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530c (Opus agent, 2026-10-31) as the residue of #4042.  PRE-EXISTING (base 0fb05a79) and NOT fixed by #4042, which merges the `use re '/FLAGS'` defaults into every pattern the FILE compiles.\n\n    { use re '/i'; print \"s \", (eval q{\"Q\" =~ /q/} ? \"ok\" : \"no\"), \"\\n\"; }\n  perl 5.40.3: s ok        PCL (s530c tree): s no\nProbe scratch/s530c/pr/re1.pl row s.\n\nperl compiles a string eval with the hints of the eval SITE (%^H included), so the pragma's default modifiers reach the eval text's patterns.  PCL hands the eval text's transpile the site's FEATURES (#364: `_eval_site_features` -> pl2cl's `<features>` wire line -> Parser2 `eval_features`) but not the `re` hints.  Fix shape: the eval site's `re_pragma_at` state (Pl::Parser2) joins the site facts (a pseudo-feature token such as `re-flags:i`), and `re_pragma_at` on an eval document starts from it instead of from nothing; it is then part of the eval cache key like the features already are.  `use re 'eval'` would ride the same token.\n",
+   "id" : "4101",
+   "status" : "pending",
+   "subject" : "a STRING eval compiled inside `use re '/FLAGS'` does not inherit the default modifiers (`{ use re \"/i\"; eval q{\"Q\" =~ /q/} }` is false) -- the eval site hands the transpile its features, not its re hints"
+}
