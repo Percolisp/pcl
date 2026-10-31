@@ -1,0 +1,17 @@
+# s531 shared box (2026-11-01 00:5x, the reviewing session on Opus 5.5) -- a CONTINUATION of s513's protocol (`s513/SHARED-BOX.md` + addenda `s515/`..`s530/SHARED-BOX.md`), not a new one.  `s530/SHARED-BOX.md` stands WHOLE (THREE heavy slots, the 60-minute / exit-75 rule, the probe rule, the waiter trap) except where this file amends it.
+
+Main at launch: **`9c450fa2`** = MAIN-READY-60 + the s530 notes.  Main's last CODE sha = **`ade297e7`** (the corpus-diff / emission-ab / inverse-guard reference for every s531 batch, never `main`).  Generation on main **v2-9700** (s527f took it -- the s531a brief's "v2-9700" is STALE).  `vendor/PPI` = branch `pcl` **`9286f7c0`** = the bare repo's head.  CI was green at the end of s530.  **THE BOX REBOOTED** (uptime 1 min at 00:52): `/tmp` is gone; `HEAVY.holder*` are empty; `HEAVY.queue` entries before 00:50 today are history.
+
+THE USER'S WORD TODAY: **three subtasks at a time, Opus 5.5 at xhigh effort** -- plus ONE Fable 5.1 subtask the USER asked for by name (the review of the verdict-register plan, `s531/fable-register-review-prompt.md`; docs only, no heavy legs).
+* **s531a** -- the CPAN board's whole-file failures, part 1 (`s530/s531a-prompt.md`): #3282 #1815 #3831+#3696 #1688 #1705 #3821.  Worktree isolation from main.  IDs 4161-4179.  **Generation v2-9800** (amended).
+* **s531c** -- compiler/runtime correctness behind the board rows (`s531/s531c-prompt.md`): #4083 (316 Template-Toolkit rows) #4103 #3851 #4140 #4101 #4020.  Worktree isolation from main.  IDs 4201-4219.  **Generation v2-9900.**
+* **Fable register review** -- `docs/test-verdict-register-proposal.md` + s531b member 0.  Its outcome shapes **s531b**, which is HELD until the review is in.
+* QUEUED after them: **s531b** split in two -- **s531b** = the verdict register #4200 alone (absorbs #4160), launched after the review with the review's amendments; **s531d** = s531b's members 1-10 (the one-file causes), launched into the next free slot.  And a PPI-rows batch: #3962 (`map { {` -- a Lexer row, `_curly`), §48 list slice (#3740), §40 `format`, §42.
+
+RULES FOR THIS ROUND:
+1. **Board rows and the register.**  s531a and s531c edit rows of `baselines/cpan-board14-fails.tsv` in TODAY's free-text cause format.  The register batch (s531b, later) migrates whatever main holds at ITS final rebase -- so s531a / s531c do NOT anticipate the new vocabulary; they edit rows as the s526w2 rule says (a FIXED row leaves BY EDIT citing the task; a re-caused row names the new task).
+2. **Neighbours.**  s531a works the require / `@INC` path, stash-delete vs compiled call, `%Config`, the case-folded class names; s531c works the statement-modifier split, InterpScan, glob-alias prototypes, string-eval hints, the stash glob's HASH slot.  #3831/#3696 (s531a) and #4020 (s531c) are both STASH code: different functions; whoever finds the other's function in its diff names it in the report as FLAGGED.  Neither batch touches the PPI files (`vendor/PPI`, `Pl/PPIBugs.pm`, `Pl/PPIExpect.pm`, the `_repair_*` / `_fix_ppi_*` / `_merge_*` subs, `docs/ppi-*`).
+3. **Re-run only what a rebase can move** (s530 lesson): after a rebase over another batch's merge, corpus-diff + the targeted gate + the one-file board runs; the full gate / sweep / everyday ONCE, at the end.  The reviewing session's merge gate runs on the combined tree.
+4. **Merge order**: whichever is MERGE-READY first; the second renumbers its generation ABOVE main's and regenerates the artifacts (COMMON).
+
+Running notes: `s531/PAUSE-s531.md`.
