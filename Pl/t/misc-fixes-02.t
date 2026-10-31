@@ -981,9 +981,10 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (�
 }
 {
     my $doc = PPI::Document->new(\'@{+}');
-    ok( $doc && grep { $_->isa('PPI::Token::Cast') } $doc->tokens,
-        'CANARY: PPI still lexes `@{+}` as Cast+Block instead of folding it to '
-      . 'the magic @+ — if this FAILS, drop braced_punct_magic_name '
+    ok( $doc && !(grep { $_->isa('PPI::Token::Cast') } $doc->tokens)
+        && (grep { $_->isa('PPI::Token::Magic') && $_->content eq '@{+}' } $doc->tokens),
+        'FIXED ON PCL\'S PPI BRANCH (s527d, group AF): `@{+}` is ONE Magic token keeping '
+      . 'the braces; Pl::Parser::_canonical_spaced_symbols reads it as @+ '
       . '(ppi-upstream-bugs.md §9)' );
 }
 {
@@ -1043,10 +1044,11 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (�
     # in Pl::Parser stands in for.
     my $doc = PPI::Document->new(\"use v5.40;\ntry { f() } catch (\$e) { g() }\nh();\n");
     my @s = grep { $_->isa('PPI::Statement') } $doc->schildren;
-    ok( $doc && !(grep { $_->content =~ /^h\(/ } @s),
-        'CANARY: PPI still ignores `try` in the version bundles (and in `use '
-      . 'experimental`) — if this FAILS, drop _pcl_feature_include_cb\'s bundle '
-      . 'and experimental arms (ppi-upstream-bugs.md §20)' );
+    ok( $doc && (grep { $_->content =~ /^h\(/ } @s),
+        'FIXED ON PCL\'S PPI BRANCH (s527d, group AG): `use v5.40` enables `try` for '
+      . 'PPI itself, so h() is its own statement; _pcl_feature_include_cb STAYS for '
+      . 'what PPI does not model (a bundle REPLACES the feature set, `no feature;`, '
+      . '`:5.NN`) (ppi-upstream-bugs.md §20)' );
 }
 {
     my $doc = PPI::Document->new(\'my $r = $a ^^ $b;');
