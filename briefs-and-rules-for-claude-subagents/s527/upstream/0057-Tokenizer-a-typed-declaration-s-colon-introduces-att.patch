@@ -1,7 +1,7 @@
 From ded727c31a80b563524e5875a5d688c8ce599446 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 02:50:12 +0200
-Subject: [PATCH 57/85] Tokenizer: a typed declaration's colon introduces
+Subject: [PATCH 57/89] Tokenizer: a typed declaration's colon introduces
  attributes
 
 perl's typed lexical -- my Dog $spot : attr, our Dog ($p, $q) : attr --

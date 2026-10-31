@@ -1,0 +1,69 @@
+From b23d5869c6f7c4ec11caed9a85ec516beb9c697b Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:33:00 +0200
+Subject: [PATCH 88/89] Lexer: a bare block takes a continue block
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A bare block is a loop that runs once (perlsyn), and perl's grammar gives
+it a continue block like any other loop (perly.y: block cont):
+
+    perl -e '{ $n++ } continue { $n += 10 } print "$n\n"'    # 11
+
+_continues ended a statement made of one block unconditionally, so the
+`continue` started a new plain statement that swallowed its block and
+the statement after it.  A bare block's compound now continues on the
+word `continue`; the rest of the continue form (the block, then the end)
+is the existing labelled-block path (`L: { } continue { }`).
+
+Fixes PCL §51 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Lexer.pm | 11 ++++++++++-
+ t/ppi_bugs_pcl.t |  3 +--
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 085172bd..f7fc33b7 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -749,12 +749,21 @@ sub _continues {
+ 
+ 	# Handle the simple block case
+ 	# { print 1; }
++	# A bare block is a loop that runs once, so it takes a continue block
++	# like the labelled form below (perly.y: block cont)
++	# { print 1; } continue { print 2; }
+ 	if (
+ 		$Statement->schildren == 1
+ 		and
+ 		$Statement->schild(0)->isa('PPI::Structure::Block')
+ 	) {
+-		return '';
++		return (
++			$Statement->isa('PPI::Statement::Compound')
++			and
++			$Token->isa('PPI::Token::Word')
++			and
++			$Token->content eq 'continue'
++		) ? 1 : '';
+ 	}
+ 
+ 	# Alrighty then, there are six implied-end statement types:
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 883d982a..26978a79 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1824,8 +1824,7 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;'
+ # §51 -- a bare block is a loop that runs once, so it takes a continue
+ # block (perly.y: block cont): `{ $n++ } continue { $n += 10 }` is one
+ # statement, and the statement after it is its own.
+-TODO: {
+-    local $TODO = 'PCL §51: the continue of a bare block starts a new statement';
++{
+     is_deeply( [ stmts('{ $n++ } continue { $n += 10 } print "$n\n";') ],
+                [ 'Statement::Compound: { $n++ } continue { $n += 10 }',
+                  'Statement: print "$n\n";' ],
+-- 
+2.53.0
+

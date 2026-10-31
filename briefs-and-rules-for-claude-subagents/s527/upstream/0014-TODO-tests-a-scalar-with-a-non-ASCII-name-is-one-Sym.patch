@@ -1,7 +1,7 @@
 From ba8fd795e1c5b843afa7fbe7217a281f1d5e32a5 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:44:31 +0300
-Subject: [PATCH 14/85] TODO tests: a $ scalar with a non-ASCII name is one
+Subject: [PATCH 14/89] TODO tests: a $ scalar with a non-ASCII name is one
  Symbol
 
 Under use utf8 a variable name may be made of any word characters, and

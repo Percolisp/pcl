@@ -84,3 +84,15 @@ with a space; **AE** §39 a spaced sigil `$ name`; **AF** §9 `@{+}` / `${ + }` 
 (upstream PR #361's change, credited) + the 5.40 bundle, then `defer` and
 `class` tracked as features; **AH** §14 `<...>` after a statement or map/grep
 block.  t/ppi_bugs_pcl.t: 253 -> 275 rows (twin of PCL's docs/ppi-bug-report.t).
+
+## s527e (2026-10-31): the branch is now 89 commits, head dd90e749
+
+`0001-*.patch` .. `0089-*.patch` and `pcl-branch.bundle` regenerated from the
+whole branch (`git format-patch origin/master..pcl`).  One TODO-tests commit
+for the Lexer's structure rows §48-§54 + §57 (`1610e60c`, 20 rows), then three
+fixes, PPI's suite green after every commit, plain and AUTHOR_TESTING=1:
+**AI** §49 §54 §57 the `{` after a glob, and after a glob's dereference block,
+subscripts it (`PR-AI.md`); **AJ** §51 a bare block takes a continue block
+(`PR-AJ.md`); **AK** §50 an anonymous hash where perl expects a term -- die /
+warn / exists / delete, and the map / grep look-ahead (`PR-AK.md`).  §48 (the
+list slice), §52 (`defer`) and §53 (`class`) stay TODO rows.

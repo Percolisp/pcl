@@ -1,7 +1,7 @@
 From 555ef6afe1bbe9fe55fbcd9cc5e93dadd9e6e68f Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 20:54:11 +0200
-Subject: [PATCH 27/85] TODO test: a { after a block's } opens the next block
+Subject: [PATCH 27/89] TODO test: a { after a block's } opens the next block
 
 perl-tests/array.t has two bare blocks in a row and then *trit = *scile;
 the brace scan of the previous commit took the second { for a chained

@@ -1,7 +1,7 @@
 From 21394cc363589cef1af1f86fbf5b59d0fe38f39f Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:37:51 +0300
-Subject: [PATCH 07/85] Singletons: add ^^, perl 5.40's logical exclusive or
+Subject: [PATCH 07/89] Singletons: add ^^, perl 5.40's logical exclusive or
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,0 +1,106 @@
+From 52c4e102435e40627e1fda13a2870bfb56c8ba8f Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:16:29 +0200
+Subject: [PATCH 87/89] Lexer: the { after a glob, and after a glob's
+ dereference block, subscripts it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`*STDOUT{IO}`, `*x{HASH}` and `*{"x"}{HASH}` read the IO / HASH slot of
+a glob: a glob is a complete term, and perl's lexer reads a { after a
+term as a subscript (toke.c yyl_leftcurly under XOPERATOR) -- the rule
+_curly already applies after $foo, @foo and %foo, and after a $, @ or %
+dereference block.  PPI built a Structure::Block, so `*x{HASH}{a}` had
+a Block after a Block.  Now a Structure::Subscript.
+
+Also `require *{"name"}`: the rule that makes `use constant { ... }` a
+hash constructor (a { right after use / no / require and the module
+name) fired on require's cast, so the glob cast's dereference block
+became a Constructor.  It now applies only when the { does not follow a
+cast; the block is a Block, as everywhere else after a cast.
+
+Fixes PCL §49 and §54 in t/ppi_bugs_pcl.t (PCL §57 is the same bug as §49).
+---
+ lib/PPI/Lexer.pm | 23 +++++++++++++++++------
+ t/ppi_bugs_pcl.t |  6 ++----
+ 2 files changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index a4330eff..085172bd 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1179,13 +1179,14 @@ sub _hash_comma_head {
+ 	return $Token->isa('PPI::Token::Word') && $content !~ /\A[a-z]/;
+ }
+ 
+-# Is the last child of the parent the block of a dereference -- a $, @ or
+-# % cast before it, as in ${$ref}, @{$ref}, %{$ref} or ${name}?  A [ or {
+-# right after it subscripts it, as after the symbol it stands for.
++# Is the last child of the parent the block of a dereference -- a $, @, %
++# or * cast before it, as in ${$ref}, @{$ref}, %{$ref}, ${name} or
++# *{"name"}?  A [ or { right after it subscripts it, as after the symbol
++# it stands for.
+ sub _deref_block {
+ 	my $Parent = shift;
+ 	my $prior  = $Parent->schild(-2) or return '';
+-	return $prior->isa('PPI::Token::Cast') && $prior->content =~ /^[\$\@\%]\z/;
++	return $prior->isa('PPI::Token::Cast') && $prior->content =~ /^[\$\@\%\*]\z/;
+ }
+ 
+ # Given a parent element, and a [ token to open a structure, determine
+@@ -1301,6 +1302,11 @@ sub _curly {
+ 			# $foo{}, @foo{}, %foo{} (a key/value slice)
+ 			return 'PPI::Structure::Subscript';
+ 		}
++		if ( $content =~ /^\*/ and $Element->isa('PPI::Token::Symbol') ) {
++			# *STDOUT{IO}, *x{HASH}: a glob is a complete term, and the
++			# { after a term subscripts it (toke.c: XOPERATOR)
++			return 'PPI::Structure::Subscript';
++		}
+ 		if ( $Element->isa('PPI::Token::Cast') and $Element->content =~ /^(?:\@|\%|\*)/ ) {
+ 			my $prior = $Parent->schild(-2);
+ 			if ( $prior and $prior->isa('PPI::Token::Operator') and $prior->content eq '->' ) {
+@@ -1337,8 +1343,13 @@ sub _curly {
+ 		return 'PPI::Structure::Block';
+ 	}
+ 
+-	# Are we the second or third argument of use
+-	if ( $Parent->isa('PPI::Statement::Include') ) {
++	# Are we the second or third argument of use -- right after the
++	# module name or its version?  (After a cast, as in require *{"name"},
++	# the { opens the cast's dereference block, below.)
++	if ( $Parent->isa('PPI::Statement::Include')
++		and $Element
++		and !$Element->isa('PPI::Token::Cast') )
++	{
+ 		if ( $Parent->schildren == 2 ||
+ 		    $Parent->schildren == 3 &&
+ 			$Parent->schild(2)->isa('PPI::Token::Number')
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 737aa526..883d982a 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1791,8 +1791,7 @@ for my $code ( 'my $r = [1];', 'foo([1, 2]);' ) {
+ # §49 §57 -- a GLOB SLOT: *NAME is a complete term, so the { after it
+ # subscripts the glob (toke.c yyl_leftcurly under XOPERATOR):
+ # `*STDOUT{IO}`, `*x{HASH}`, `*main::f{CODE}`.
+-TODO: {
+-    local $TODO = 'PCL §49: the {SLOT} of a glob is a Block';
++{
+     for my $code ( 'print ref(*STDOUT{IO});', 'my $h = *x{HASH};',
+                    'my $c = *main::f{CODE};', 'my $v = *x{HASH}{a};' ) {
+         my @c = bracket_classes( $code, '{' );
+@@ -1859,8 +1858,7 @@ TODO: {
+ 
+ # §54 -- `*{EXPR}` names a glob through a dereference block (toke.c
+ # yyl_star: the cast's block is a block), also as require's argument.
+-TODO: {
+-    local $TODO = 'PCL §54: the block of a glob cast after require is a Constructor';
++{
+     my @c = bracket_classes( 'require *{"\0a"};', '{' );
+     is( $c[0], 'PPI::Structure::Block', 'require *{"..."}: the dereference block is a Block' );
+ }
+-- 
+2.53.0
+

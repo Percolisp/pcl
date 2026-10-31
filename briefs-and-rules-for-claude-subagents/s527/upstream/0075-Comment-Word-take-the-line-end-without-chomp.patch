@@ -1,7 +1,7 @@
 From 9b10612698ec3e5f67482a26440a69ca45cd7572 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:00:41 +0200
-Subject: [PATCH 75/85] Comment, Word: take the line end without chomp
+Subject: [PATCH 75/89] Comment, Word: take the line end without chomp
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,7 +1,7 @@
 From bd99765fe424ed825d0f2d54960a15af9c63bc3f Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:53:35 +0200
-Subject: [PATCH 67/85] TODO tests: the tokens of a document do not depend on
+Subject: [PATCH 67/89] TODO tests: the tokens of a document do not depend on
  $/
 
 The tokenizer splits its source on "\n" and then chomps a few pieces

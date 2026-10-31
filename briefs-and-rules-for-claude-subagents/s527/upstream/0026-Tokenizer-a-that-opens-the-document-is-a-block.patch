@@ -1,7 +1,7 @@
 From 0a536af53fa1c9b4bb96b12451bcdb3ac3e82eb6 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 20:48:20 +0200
-Subject: [PATCH 26/85] Tokenizer: a { that opens the document is a block
+Subject: [PATCH 26/89] Tokenizer: a { that opens the document is a block
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

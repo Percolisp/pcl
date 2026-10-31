@@ -1,7 +1,7 @@
 From e5b464883bb05e2fa94254771719fe9c887d0483 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:29:26 +0200
-Subject: [PATCH 40/85] TODO tests: an indented here-doc's indentation stops at
+Subject: [PATCH 40/89] TODO tests: an indented here-doc's indentation stops at
  its terminator
 
 perl strips the whitespace that stands BEFORE the terminator on its line.

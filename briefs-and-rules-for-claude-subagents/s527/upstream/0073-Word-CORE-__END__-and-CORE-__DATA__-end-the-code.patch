@@ -1,7 +1,7 @@
 From cf13afb5a785b63a5f379ce73d876ae7aa8fcd32 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:00:11 +0200
-Subject: [PATCH 73/85] Word: CORE::__END__ and CORE::__DATA__ end the code
+Subject: [PATCH 73/89] Word: CORE::__END__ and CORE::__DATA__ end the code
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

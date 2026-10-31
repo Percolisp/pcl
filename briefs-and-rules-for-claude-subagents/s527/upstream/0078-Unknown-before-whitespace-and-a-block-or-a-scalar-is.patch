@@ -1,7 +1,7 @@
 From bc7d176bc7bf16209ae27cadbc61b2a182b8355f Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:02:50 +0200
-Subject: [PATCH 78/85] Unknown: & before whitespace and a block or a scalar is
+Subject: [PATCH 78/89] Unknown: & before whitespace and a block or a scalar is
  the code sigil
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

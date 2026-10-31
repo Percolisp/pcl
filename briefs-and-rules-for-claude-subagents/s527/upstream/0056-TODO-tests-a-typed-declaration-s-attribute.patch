@@ -1,7 +1,7 @@
 From 9d43dfa928457f19920ee6b7d6606d0e1b68f2ec Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 02:49:51 +0200
-Subject: [PATCH 56/85] TODO tests: a typed declaration's attribute
+Subject: [PATCH 56/89] TODO tests: a typed declaration's attribute
 
 perl's typed lexical -- my Dog $spot : attr, our Dog ($p, $q) : attr --
 puts the class name between the declarator and the variable, and the
