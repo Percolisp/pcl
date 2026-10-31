@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-29",
+   "description" : "Filed and fixed by s527b (2026-10-29), M3, while fixing §22/§35 (the same rule at one more site).  docs/ppi-upstream-bugs.md §56, registry row §56, report rows (6) in docs/ppi-bug-report.t + the branch's t/ppi_bugs_pcl.t.\n\nperl 5.40.3:  $_ = \"x\"; BEGIN { 1 } /x/ and print \"m\\n\"; { 1 } /x/ and print \"b\\n\"; my @a = grep { 1 } /(x)/; print \"@a\\n\";  ->  m / b / x\nPPI 1.291 (and the branch before group O): Operator(/) Word(x) Operator(/) -- a division; on main PCL DROPS the statement (\"Handle single node of unknown type\").\n\nFix (branch pcl, group O: 89306003 tests, c1058d05 fix): Token::Whitespace's / arm asks Tokenizer::_after_statement_block (the test group N's - arm uses): after the } of a block that opens a statement (bare, labelled) or follows a word (BEGIN, END, map, grep, sort, a sub's name) a / starts a match; after a subscript, a dereference block, an anonymous sub, return { } or an operator's { } it still divides.\n\n=== DONE (s527b) === fixed at the source, no PCL repair existed (the statement was dropped loudly before).\n",
+   "id" : 3942,
+   "status" : "completed",
+   "subject" : "PPI lexes a / after a statement block's } as a division (BEGIN { } /x/, { 1 } /x/, grep { 1 } /(x)/) -- §56; FIXED on PCL's PPI branch (group O)\n"
+}

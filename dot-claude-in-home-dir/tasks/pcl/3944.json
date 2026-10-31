@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "Filed by s527b (2026-10-31, s530) from the WIDE emission-ab probe of t/op/attrs.t:451 (RT 126257 `foo(sub : bar {})`, which PCL's PPI now lexes with its Attribute -- on main the label repair DROPPED the attribute there).\n\nperl 5.40.3 calls an anonymous sub's attribute handler ONCE, at COMPILE time (with the prototype CV); PCL's `__pcl_set_attributes` wrap calls it at RUN time, once per evaluation of the `sub` expression.\n\n    print \"0 start\\n\";\n    sub MODIFY_CODE_ATTRIBUTES { print \"attr @_[2..$#_]\\n\"; () }\n    for (1..2) { my $s = sub : bar { 1 }; }\n    print \"9 end\\n\";\n\nperl: `attr bar` / `0 start` / `9 end`.  main (13720073-era runpcl) and the s527b tree alike: `0 start` / `attr bar` / `attr bar` / `9 end`.  PRE-EXISTING on the ordinary attributed-anon-sub path (#3162's design: the wrap is an expression); s527b only made more spellings reach it (`(sub :ATTR {...})` at expression start, Â§7).  An unhandled attribute perl REJECTS at compile time is likewise a run-time event here.\n\nFix sketch: lift the handler call for a CONSTANT attribute list to load time (the eval-when of the enclosing unit), keyed by the anon sub's source position; the per-evaluation wrap then only records lvalue/method/const.  Probe the closure case first (perl passes the PROTOTYPE CV, not each closure).  Low priority: no CPAN board row is known to depend on it.  Probe file: worktree agent-a743b493df5814081 scratch/s527b/p6.pl.\n",
+   "id" : "3944",
+   "status" : "pending",
+   "subject" : "An anonymous sub's attribute handler (MODIFY_CODE_ATTRIBUTES) runs at RUN time once per evaluation; perl calls it once at COMPILE time"
+}

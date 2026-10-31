@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "Filed by s527b (2026-10-31, s530) from the expect-check after-measurement.  The expect-state checker (Pl/PPIExpect.pm, tools/ppi-expect-check.pl) does not know the Attribute tokens PCL's PPI now emits (group S, Â§8): after a declared variable, `:` followed by an ATTRIBUTE token is not taken into XATTRDECL (its `$PSEUDO_STEP{XOPERATOR}` arm tests for a following WORD only -- the 1.291 stream), so the `:` reads as a ternary colon, the Attribute keeps XTERM and the `=` after it is flagged `missing-operand`:\n\n    my $pid2 : shared = 0;                         t/op/getpid.t:30,31\n    my ($cows, @go, %bong) : teapots = qw[ ... ];   t/op/attrs.t:348, t/uni/attrs.t:190\n    eval { foo(my $x : bar); };                     t/op/attrs.t:445,447,449 (`)` flagged)\n\nand the class syntax's `class X :isa(Y) {` flags the `(` as `paren-after-term` (t/class/inherit.t, 6 rows).  13 FALSE rows in raw and pcl mode alike (the stream is perl's).  Fix: the XOPERATOR pseudo-step takes `:` + Attribute into XATTRDECL WITHOUT a flag (the Word case keeps its Â§8 flag for a system PPI), and an Attribute followed by `(` is one attribute with arguments.  Inert instrument, no emission.  Context: s527b's expect-check raw 1,256 -> 1,280 / pcl 1,206 -> 1,230 = 96 rows gone (fixed kinds) + 120 new, of which 105 are t/op/write.t (the base stream derailed at write.t:132 `@<<` into a 24-row cascade; the fixed stream reaches every `format` body -- the known format-body gap, s527d), these 13, and 2 brace-class rows at magic.t:254 (`*@{HASH}` -- PPI makes the `{` after any glob Symbol a Block, `*x{HASH}` too: a Lexer row, pre-existing).\n",
+   "id" : "3946",
+   "status" : "pending",
+   "subject" : "The expect-state checker flags PCL's PPI's Attribute tokens: `my $x : shared = 0` reads as missing-operand (13 false rows after group S)"
+}
