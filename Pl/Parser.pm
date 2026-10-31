@@ -450,7 +450,7 @@ sub _canonical_spaced_symbols {
   return if defined $src && $src !~ /\$[ \t]|[\$\@%]\{/;   # the source names none
   my $syms = $doc->find(sub {
     ($_[1]->isa('PPI::Token::Symbol') || $_[1]->isa('PPI::Token::Magic'))
-      && $_[1]->content =~ /^(?:\$[ \t]|[\$\@%]\{\s*[^\w\s{}^]\s*\}\z)/
+      && $_[1]->content =~ /^(?:\$[ \t]|[\$\@%]\{\s*[^\w\s{}]\s*\}\z)/
   }) || [];
   for my $tok (@$syms) {
     my $c = $tok->content;

@@ -426,7 +426,7 @@ ANNOUNCES the drop (rule 12, effect-only). Unblocked `t/op/attrs.t` 0 → 28 and
 
 ## 9. `${ PUNCTUATION }` is a variable, but lexes as Cast + Block  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527d: group AF, commit `320d7a97` on branch `pcl`, vendored as vendor/PPI -- the Magic token keeps the braced text (`@{+}`); PCL reads the plain spelling through `Pl::Parser::_canonical_spaced_symbols` (the registry row's `want` changed to the braced text)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AF.md`).
+**FIXED on PCL's PPI branch** (s527d: group AF, commit `320d7a97` on branch `pcl`, vendored as vendor/PPI -- the Magic token keeps the braced text (`@{+}`); PCL reads the plain spelling through `Pl::Parser::_canonical_spaced_symbols`; a name outside PPI's %MAGIC (`%{^}`) still lexes as Cast + Block, so `Pl::PExpr::_fold_braced_punct_magic` STAYS (the registry row's `want` changed to the braced text)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AF.md`).
 
 Minimal repro (found s395 — `t/re/pat_rt_report.t`, 2513 rows behind it):
 

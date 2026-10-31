@@ -693,6 +693,7 @@ sub parse {
   }
 
   $e            = $self->cleanup_for_parsing($e);
+  $self->_fold_braced_punct_magic($e);
   $self->_retag_magic_array_index($e);
   $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
@@ -5096,6 +5097,43 @@ sub braced_punct_magic_name {
   my ($sigil, $inner) = @_;
   return undef unless defined $inner && $inner =~ /\A\s*([^\w\s])\s*\z/;
   return $sigil . $1;
+}
+
+# The token-level half.  PPI produces a single Token::Magic for the identifier
+# and CARET spellings (`${^CAPTURE}`), but for the punctuation ones it produces
+# Cast + Structure::Block holding a lone Operator, because `+` is an operator
+# everywhere else it appears.
+#
+# A deref block holding exactly ONE Operator token can never be an expression —
+# `+` alone is not one — so the reading is unambiguous and this is a pure
+# re-tokenization: fold the pair into the Magic token PPI itself makes for the
+# bare spelling.  ONE pre-pass, so both consumers see an ordinary magic
+# variable (rule 11): the term machinery below, and the INTERPOLATION path,
+# which compiles a reference's source text back through this same parser.
+#
+# Before this, `@{+}` in code silently produced an EMPTY list, and inside a
+# regex it died in ExprToCL::_interp_ref_form ("cannot compile interpolated
+# regex reference '@{+}'") — which was re/pat_rt_report.t's whole file, 2513
+# rows held hostage by four assertions that spell @+ and @- that way (#314).
+# STAYS after s527d: PCL's PPI (group AF) folds a braced name that is in
+# its %MAGIC into one Magic token (read by Pl::Parser::_canonical_spaced_symbols),
+# but not the others -- `%{^}` still arrives as Cast + Block (deleting this
+# dropped Pl/t/punct-array-glob-01.t's `%{^}` rows).
+sub _fold_braced_punct_magic {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i + 1 < scalar(@$e); $i++) {
+    my $cast = $e->[$i];
+    next unless ref($cast) eq 'PPI::Token::Cast'
+             && $cast->content =~ /^[\$\@\%]$/;
+    my $blk = $e->[$i + 1];
+    next unless ref($blk) eq 'PPI::Structure::Block' && $blk->start eq '{';
+    my @inner = grep { !$_->isa('PPI::Token::Whitespace') }
+                map  { $_->isa('PPI::Statement') ? $_->schildren : $_ } $blk->children;
+    next unless @inner == 1 && ref($inner[0]) eq 'PPI::Token::Operator';
+    my $name = braced_punct_magic_name($cast->content, $inner[0]->content)
+      or next;
+    splice @$e, $i, 2, PPI::Token::Magic->new($name);
+  }
 }
 
 # `$#-` / `$#+` — the last index of the magic arrays @- and @+.  PPI lexes
