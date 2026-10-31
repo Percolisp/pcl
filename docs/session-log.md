@@ -2,6 +2,31 @@
 
 Append new entries at the top. One section per session.
 
+## Session 530 (Fable, 2026-10-31) -- TWELVE batches merged (MAIN-READY-49..60), three heavy slots, the CPAN whole-file FAIL review + the verdict-register proposal, the speed A/B
+
+**The USER's word:** three subtasks at a time (later in the day: no more subtasks this session).  The box had rebooted; the three s529 checkpoints (s526w2, s527b, s527c) resumed from `s530/resume-*.md`.
+
+**Merged, in order** (each: Fable's gate on the combined tree, corpus-diff against main's CODE sha, `lib/**` emission-ab, probes perl -> main -> tree on the claimed rows; vendor changes also install-pcl.t + the container test before the push):
+- **-49 s526w2** -- the board widens by YAML-PP, Pod-Simple, Log-Log4perl (29 dists / 775 files, 78,256 ok); nine fillers.
+- **-50 s527b** -- PPI tokenizer groups J-S (`pcl` ded727c3), twelve PCL repairs deleted (-1,081 lines), YAML::PP no longer a dependency, #1817.
+- **-51 s527c** -- PPI Lexer groups T-Y (§18 finally, foreach loop variables, subscripts after a deref, `{ STRING, ...}`, `$/`, §37 with PPI's fixture updated under the s529 ruling); t/op/for.t runs.
+- **-52 s529b / -53 s529a** -- the s529a correctness batch SPLIT BY LAYER to keep three agents busy: #3870 #3860 #3856 (Pl/) and #3824 #3868 #3524 #3923 (cl/); #4000 accepted as #3824's side effect.
+- **-54 s527d** -- PPI tokenizer batch 4 (`$ name`, `CORE::__END__`, `& {BLOCK}`, `@{+}`, `foo::::bar`, `use experimental 'try'`, `<...>` after a block, defer/class as features).
+- **-55 s530a** -- #4000 rebless half, #4001, #3963, #3865, #3945, #4040.
+- **-56 s527e** -- PPI Lexer groups AI-AK (`*x{HASH}`, a bare block's `continue`, anon hash where perl expects a term); Fable rebased it over s530a and regenerated the artifacts.
+- **-57 s530c** -- #4042 `use re '/FLAGS'`, #3859 `&NAME(LIST)`, #3864, #4062, #4060, #3854; #4140 filed from the merge probe.
+- **-58 s530b** -- Template-Toolkit joins the board (3/10/108 with 31 timeouts -> 57/45/19, 0 timeouts) after #4080 #4081 #4082 fixed both halves of #3869.
+- **-59 s527g** -- PPI #4100 (`sort </x-1/*>`) and §43 (keyword-named lexical subs).
+- **-60 s527f** -- PPI §44 statement class, §52 `defer` and §53 `class` STRUCTURE (both refused per statement, perl-shaped), `_core_separator_statements` deleted.  PPI bug report: **291 ok of 304** (14 of 91 on stock PPI 1.291).
+
+**The box: THREE heavy slots** (the USER: the 4 G fence is a ceiling, not a reservation; measured legs peak ~1.8 G, CPU is the limit).  The exclusive-waiting marker now holds its waiter's pid and is removed by a trap (a killed waiter had blocked slots 2 and 3 for 19 min).  Fable broke its own rule once (an exclusive container leg queued behind a whole-board leg, exit 75 after 60 min); the rule stands: an exclusive merge leg only when no long bounded leg holds a slot.  `cl/pcl-runtime.lisp` formatted ONCE to the format hook's style (132 lines, whitespace only, verified outside strings).
+
+**The USER's questions:** (1) *the CPAN whole-file failures*: 138 FAIL files = 69 perl skips too + 4 already fixed + 2 perl fails + 22 ruled not-supported + **41 real in 18 causes** -> queued as `s530/s531a-prompt.md` + `s530/s531b-prompt.md`; (2) *the speed*: 66 bench rows main / session start / main, no change (the one outlier, sigarith, re-measured with the interleaved runtime A/B = noise); (3) *a register of perl-skips and ruled-out features*: `docs/test-verdict-register-proposal.md` (#4200), queued as s531b member 0 with one open USER question.  Also discussed: v0.2.0 after the PPI batches land (the USER's call).
+
+**Found and filed by Fable:** #4100 (became s527g's), #4140 (the interpolated residue of #3864), #4160 (absorbed by #4200).  Two orphaned SBCLs from a finished agent's probe killed (asleep 5 h).
+
+**Gate at the end:** 346 files / 11,660 rows PASS; sweep 18,761 +0; EVERYDAY 116 of 122; CI green on every push.
+
 ## Session s527f (Opus agent, 2026-10-31) -- PCL's PATCHED PPI, Lexer batch 5: §44's statement half (AA), §52 `defer` (AM), §53 `class` (AN) fixed on `pcl-s527f`; `_core_separator_statements` deleted; §48 left registered
 
 - **§44** (#3981): PPI's `%STATEMENT_CLASSES` maps `CORE::__END__` / `CORE::__DATA__` to Statement::End / ::Data (group AA's second fix commit `49a24b96`).  `Pl::Parser::_core_separator_statements` made INERT (died where it would act; never fired) and then DELETED with its two call sites; corpus-diff IDENTICAL after each.
