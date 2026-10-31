@@ -287,7 +287,7 @@ our @CONTRADICTIONS = (
  [ 'Operator',  '',                  '*',     'sole_in_deref_block',  'punct-name-in-braces',       'Magic(@+) (the ${ NAME } fold)', 9, 'yyl_dollar 5376 scan_ident: `{` + punctuation + `}` is a name' ],
  # ── after a bare sigil (XCAST): `{`, a name, or another sigil must follow ──
  [ 'Word',      '',                  'XCAST', 'adj_nonascii',         'cast-then-word',             'Symbol($NAME)',             23, 'yyl_dollar 5376 scan_ident (a UTF-8 IDFIRST name)' ],
- [ 'Word',      '',                  'XCAST', '',                     'cast-then-word',             'Symbol($NAME)',             '', 'yyl_dollar 5376 scan_ident' ],
+ [ 'Word',      '',                  'XCAST', '',                     'cast-then-word',             'Symbol($NAME)',             39, 'yyl_dollar 5376 scan_ident' ],
  [ 'Operator',  '',                  'XCAST', 'cast_is_star',         'cast-then-punct',            'Symbol(*NAME)',             26, 'yyl_star 6031 scan_ident: a punctuation glob name' ],
  [ 'Operator',  '',                  'XCAST', '',                     'cast-then-punct',            'Symbol(@NAME)',             24, 'yyl_snail 6690 scan_ident: a punctuation array name' ],
  [ 'Number',    '',                  'XCAST', '',                     'cast-then-number',           'Symbol(@1)',                '', 'scan_ident: a digit-run name' ],
@@ -304,7 +304,7 @@ our @CONTRADICTIONS = (
  [ 'Operator',  qr/^\*\*?=?$/,       'TERM',  'next_is_scalar',       'star-as-multiply',           'Cast(*)',                   38, 'yyl_star 6031: not XOPERATOR => scan_ident, a glob' ],
  [ 'Operator',  qr/^\*\*?=?$/,       'TERM',  '',                     'star-as-multiply',           'Symbol(*NAME)',             26, 'yyl_star 6031: not XOPERATOR => scan_ident, a glob' ],
  [ 'Operator',  qr/^&=?$/,           'TERM',  'next_is_scalar',       'ampersand-as-bitand',        'Cast(&)',                   38, 'yyl_ampersand 6608: not XOPERATOR => scan_ident, a code call' ],
- [ 'Operator',  qr/^&=?$/,           'TERM',  '',                     'ampersand-as-bitand',        'Cast(&)',                   '', 'yyl_ampersand 6608' ],
+ [ 'Operator',  qr/^&=?$/,           'TERM',  '',                     'ampersand-as-bitand',        'Cast(&)',                   45, 'yyl_ampersand 6608' ],
  [ 'Operator',  qr/^x=?$/,           'TERM',  '',                     'x-as-repetition',            'Word(x) (a call)',          19, 'KEY_x 8889-8899: not XOPERATOR => just_a_word' ],
  [ 'Operator',  '~~',                'XTERM', '',                     'smartmatch-for-complements', 'Operator(~) Operator(~)',   21, 'yyl_tilde 6795: `~~` only under XOPERATOR/XTERMORDORDOR' ],
  [ 'Operator',  '^',                 'TERM',  'prev_adj_caret',       'logical-xor-split',          'Operator(^^)',              16, 'yyl_caret 6101: `^^` is one token (OROR, OP_XOR)' ],
@@ -314,7 +314,7 @@ our @CONTRADICTIONS = (
  [ 'Structure', qr/^[;,)\]}]$/,      'TERM!', '',                     'missing-operand',            'a term',                    '', 'perly: an operator needs its right term' ],
  [ 'Label',     qr/^sub\s*:$/,       'TERM',  '',                     'label-not-at-statement-start','Word(sub) Operator(:) Attribute', 7, 'a label only under XSTATE; `sub` is never a label' ],
  [ 'Label',     '',                  '*',     'not_xstate',           'label-not-at-statement-start','an expression',            '', 'a label only under XSTATE' ],
- [ 'Word',      '',                  'XATTRBLOCK', '',                'word-after-sub-name',        'one sub NAME',              '', 'yyl_sub 5535 scan_word6: the sub name is ONE word (`main::::x`)' ],
+ [ 'Word',      '',                  'XATTRBLOCK', '',                'word-after-sub-name',        'one sub NAME',              41, 'yyl_sub 5535 scan_word6: the sub name is ONE word (`main::::x`)' ],
  [ 'Prototype', '',                  '*',     'not_xattr',            'prototype-out-of-place',     'a list',                    '', 'yyl_sub 5535' ],
  # ── operator position: the terms PPI built where an operator stands ──
  [ 'Symbol',    qr/^\*/,             'OP',    '',                     'glob-for-multiply',          'Operator(*) Word',          12, 'yyl_star 6044-6062: XOPERATOR => Mop(OP_MULTIPLY)' ],
@@ -1096,7 +1096,7 @@ sub _word_in_term_position {
   },
   DATA     => sub {   # __END__ / __DATA__ as a WORD: PPI did not end the code (a Separator would have)
     my ($w, $c) = @_;
-    _flag($w, $c, 'data-marker-as-word', 'Separator (yyl_data_handle 6996: the code ends)', '');
+    _flag($w, $c, 'data-marker-as-word', 'Separator (yyl_data_handle 6996: the code ends)', 44);
     $w->{stop} = 1;
   },
 );
@@ -1119,7 +1119,7 @@ sub _skip_format {
   }
   return _set($w, 'XSTATE') unless defined $end;
   $w->{skip}{$_} = 1 for $c->{i} + 1 .. $end;
-  _flag($w, $c, 'format-body-lexed-as-code', 'format picture text (scan_formline)', '',
+  _flag($w, $c, 'format-body-lexed-as-code', 'format picture text (scan_formline)', 40,
         'PPI tokenizes the format body as code');
   my $top = _top_stmt($c->{t});
   $w->{cascade_region}{refaddr $top} = 1 if $top;

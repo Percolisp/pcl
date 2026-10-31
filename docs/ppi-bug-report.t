@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 253;
+use Test::More tests => 265;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1599,4 +1599,78 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
         is( $slurped, $plain, 'the tokens are the same when $/ is undef' );
         is( $crlf,    $plain, 'the tokens are the same when $/ is "\r\n"' );
     }
+}
+
+# §39 -- whitespace may stand between a sigil and its name (toke.c
+# scan_ident skips it): `my $ bits = 5; print $bits` prints 5.
+{
+    for my $r ( [ 'my $ bits = 5;', 'Symbol=$ bits' ], [ '$ x = 1;', 'Symbol=$ x' ] ) {
+        my ( $code, $want ) = @$r;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: the sigil and its name are one Symbol" ) or diag "got: @t";
+    }
+}
+
+# §40 -- a format body is picture text up to the line holding a lone `.`
+# (toke.c scan_formline), never code:
+# `format STDOUT =\nhello world\n.\nwrite;` prints hello world.
+{
+    my @t = map { short_class($_) } toks("format STDOUT =\nhello world\n.\nwrite;\n");
+    ok( !grep( $_ eq 'Word=hello', @t ), 'the picture line of a format is not code' ) or diag "got: @t";
+}
+
+# §41 -- an empty package segment is part of the name (toke.c scan_word6):
+# `sub foo::::bar { 7 } print foo::::bar()` prints 7.
+{
+    for my $code ( 'sub foo::::bar { 7 }', 'foo::::bar();' ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq 'Word=foo::::bar', @t ), "$code: foo::::bar is one Word" ) or diag "got: @t";
+    }
+}
+
+# §42 -- a here-doc introduced inside a quote-like body takes its body
+# from the lines after the statement, as anywhere else:
+# `$_ = "a"; s/a/<<END/e;\nfoo\nEND\nprint;` prints foo.
+{
+    my @t = map { short_class($_) } toks("\$_ = 'a'; s/a/<<END/e;\nfoo\nEND\nprint;\n");
+    ok( !grep( $_ eq 'Word=END', @t ), 's/a/<<END/e: the here-doc body is not code' ) or diag "got: @t";
+}
+
+# §43 -- a lexical sub may be named like a keyword, and its name is then
+# a sub call: `my sub s { "S@_" } print s(1)` prints S1.
+{
+    my @t = map { short_class($_) } toks('my sub s { "S@_" } print s(1), "\n";');
+    ok( !grep( /^Regexp::Substitute=/, @t ), 'my sub s ... s(1): a call, not a substitution' ) or diag "got: @t";
+}
+
+# §44 -- CORE::__END__ and CORE::__DATA__ end the code like __END__ and
+# __DATA__: `print "x\n";\nCORE::__END__\nnot code` prints x.
+{
+    for my $m (qw(__END__ __DATA__)) {
+        my @t = map { short_class($_) } toks("print 1;\nCORE::$m\nnot code\n");
+        ok( grep( $_ eq "Separator=CORE::$m", @t ), "CORE::$m is a Separator" ) or diag "got: @t";
+    }
+}
+
+# §45 -- `&` where a term is expected is the code sigil even before a
+# space and a block (toke.c yyl_ampersand): `& {sub { print "ok\n" }};`
+# prints ok.
+{
+    my @t = map { short_class($_) } toks('& {sub { print "ok\n" }};');
+    is( $t[0], 'Cast=&', '& {BLOCK} at a statement start: & is a Cast' ) or diag "got: @t";
+}
+
+# §46 -- the old package separator ' may open a sub name:
+# `sub 'Hello'_he_said { "hi" } print Hello::_he_said()` prints hi.
+{
+    my @t = map { short_class($_) } toks(q{sub 'Hello'_he_said { "hi" }});
+    ok( grep( $_ eq q{Word='Hello'_he_said}, @t ), q{sub 'Hello'_he_said: the name is one Word} ) or diag "got: @t";
+}
+
+# §47 -- `WORD :` inside a ternary's middle operand is a word and the
+# colon, never a label (a label only where a statement starts):
+# `my $c = 0 ? ref shift : shift` is the second shift.
+{
+    my @t = map { short_class($_) } toks('sub f { my $c = 0 ? ref shift : shift; $c }');
+    ok( !grep( /^Label=/, @t ), '0 ? ref shift : shift: no label in a ternary' ) or diag "got: @t";
 }

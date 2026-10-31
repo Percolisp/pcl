@@ -2288,6 +2288,139 @@ PCL's `_repair_statement_start_glob_cast` was deleted in s527b (corpus-diff iden
 ---
 
 
+## 39. A SPACED sigil `$ name` is split into Cast + Word  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl 5.40.3 prints `5`): `my $ bits = 5; print $bits, "\n";`
+perl's `scan_ident` (toke.c, reached from `yyl_dollar`) skips whitespace
+between a sigil and its identifier, so `$ bits` IS `$bits` (perl's own
+t/op/caller.t:279, t/re/pat_rt_report.t:568 `$ i++`, t/op/signatures.t:1037
+across a newline).  **PPI**: `Word[my] Cast[$] Word[bits] …`; a name PPI lexes
+as something else goes further wrong (`$ x` an operator, `$ s` a substitution).
+**Expected**: one `Symbol[$ bits]` -- PPI's `Symbol::canonical` already strips
+the whitespace, so the text stays round-trip.  **PCL**: `Pl::Parser::_fix_spaced_sigils`
+merges Cast + Word on the tree and re-parses (Word names only).  Registry §39,
+checker `cast-then-word`; task #3744.
+
+---
+
+## 40. A FORMAT body is tokenized as CODE  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `hello world` then `after`):
+
+```perl
+format STDOUT =
+hello world
+.
+write;
+print "after\n";
+```
+
+perl reads everything after `format NAME =` up to a line holding a lone `.`
+as picture text (`scan_formline`).  **PPI**: `Word[format] Word[STDOUT]
+Operator[=] Word[hello] Word[world] Operator[.] Word[write] …` -- the body is
+code, and the statement runs on through the `.` into `write;`.  With a real
+picture line (`@<< @>>`) the body is casts and comparison operators.
+**Expected**: the body as ONE picture-text token (the sibling of a here-doc
+body), the statement ended at the `.` line.  **PCL**: `Pl::Parser::_strip_format_blocks`
+blanks the format's lines in the SOURCE before PPI sees it (formats are
+not-supported, `docs/not-supported.md`).  Registry §40, checker
+`format-body-lexed-as-code`; task #3745.
+
+---
+
+## 41. A name with an EMPTY package segment (`foo::::bar`) is split into two Words  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `7`): `sub foo::::bar { 7 } print foo::::bar(), "\n";`
+perl's `scan_word6` takes `::` runs inside a name (t/base/lex.t `foo::::::bar`).
+**PPI**: `Word[foo::] Word[::bar]`, twice.  **Expected**: `Word[foo::::bar]`.
+**PCL**: no repair; the transpile happens to print 7.  Registry §41, checker
+`word-after-sub-name`; task #3748.
+
+---
+
+## 42. A HERE-DOC introduced inside a quote-like body does not consume its body  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `foo`):
+
+```perl
+$_ = "a"; s/a/<<END/e;
+foo
+END
+print;
+```
+
+A here-doc's body starts on the line after the statement that holds the `<<`,
+wherever the introducer sits -- an `s///e` replacement, a `(?{ })` block, a
+call inside either.  **PPI**: `Regexp::Substitute[s/a/<<END/e]` and then the
+body as code: `Word[foo] Word[END] Word[print]`.  **Expected**: the body lines
+belong to the substitution; `print;` is the next statement.  **PCL**: no
+repair; the body becomes code and the program dies ("Undefined subroutine
+&main::END").  Registry §42 (not attributable by the checker); task #3749.
+
+---
+
+## 43. A LEXICAL SUB named like a keyword keeps the keyword lexing  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `S1`):
+`use feature "lexical_subs"; no warnings; my sub s { "S@_" } print s(1), "\n";`
+Since 5.18 a `my sub` / `state sub` / `our sub` may take a keyword's name, and
+in its scope the bare name is the sub (t/op/lexsub.t, t/op/lvref.t:644).
+**PPI**: `Word[print] Regexp::Substitute[s(1), "\n";…]`.  **Expected**:
+`Word[s] Structure[(] Number[1] Structure[)]`.  **PCL**: SILENT WRONG (an
+empty line).  Registry §43 (the stream is a valid substitution, so the checker
+cannot see it); task #3750.
+
+---
+
+## 44. `CORE::__END__` / `CORE::__DATA__` is a Word, not a Separator  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `x`): `print "x\n";` then a line `CORE::__END__`
+then `not code`.  perl ends the code at either spelling (`yyl_data_handle`,
+t/op/coreamp.t:1225).  **PPI**: `Word[CORE::__END__] Operator[not] Word[code]`.
+**Expected**: `Separator[CORE::__END__]` and the rest an End (Data) section.
+**PCL**: no repair; dies "Undefined subroutine &main::__END__".  Registry §44,
+checker `data-marker-as-word`; task #3751.
+
+---
+
+## 45. `& {BLOCK}` with a space after the `&` is a bitwise and  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `ok`): `& {sub { print "ok\n" }};`
+Where a term is expected `&` is the code sigil (`yyl_ampersand`: not
+XOPERATOR => `scan_ident`), whitespace or not (t/op/goto.t:569).  **PPI**:
+`Operator[&] Structure::Block{…}`.  **Expected**: `Cast[&]` and the braces a
+dereference block.  **PCL**: the statement is DROPPED loudly ("Fell through").
+Registry §45, checker `ampersand-as-bitand`; task #3752.
+
+---
+
+## 46. The old package separator `'` opening a SUB NAME lexes as a quote  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**Minimal repro** (perl prints `hi`):
+`no warnings; sub 'Hello'_he_said { "hi" } print Hello::_he_said(), "\n";`
+After `sub` perl reads a name, and `'` is (deprecated, still valid in 5.40) a
+package separator (t/comp/parser.t:456).  **PPI**: `Word[sub]
+Quote::Single['Hello'] Word[_he_said]`.  **Expected**: `Word['Hello'_he_said]`.
+**PCL**: the statement is DROPPED loudly.  Registry §46; task #3754.
+
+---
+
+## 47. `WORD :` inside a ternary's middle operand lexes as a Label  [CONFIRMED 1.291; FIXED on PCL's branch by group S]
+
+**Minimal repro** (perl prints `5`):
+`sub f { my $c = 0 ? ref shift : shift; return $c } print f(5), "\n";`
+(YAML::Tiny lib/YAML/Tiny.pm:171/214).  **PPI 1.291**: `Word[ref] Label[shift :]
+Word[shift]`.  **Expected**: `Word[shift] Operator[:] Word[shift]` -- a label
+only under XSTATE.  This is the shape the "Possibly FIXED upstream" entry
+below (#357) was looking for: the ternary MIDDLE operand after a
+named-unary operator, where the previous significant token is a Word.
+**FIXED on PCL's PPI branch** (s527b group S, commit `6a5de5c1`: a label only
+at a statement's start; the regression row is group Z, `2d912294`, s527d); upstream PR: pending (PR-Z).  PCL's
+`Pl::PExpr::_fix_ppi_ternary_label_bug` was the workaround.  Registry §47;
+tasks #357, #3755.
+
+---
+
 ## 55. A method name after `->`, a postfix `++`/`--` and the `}` of a subscript or a dereference block END A TERM, but PPI lexes what follows as a term  [CONFIRMED 1.291]
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `20 10 0`):
@@ -2354,7 +2487,7 @@ still divides.  Report rows: the six `§56` rows at the end of
 
 ## Possibly FIXED upstream — verify before trusting
 
-* **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`
+* **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`
   exists for it, but on 1.291 six spellings (`$c ? foo : bar` at statement
   start, in a list, in a call, ALL-CAPS, with parens, without spaces) all lex
   CORRECTLY.  Either the trigger is narrower than the comment says or PPI fixed
