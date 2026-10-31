@@ -44,6 +44,10 @@ use Pl::ClassicSort ();   # registers the Kind-B pass `classic-sort' (task #996)
 use Pl::CLForm qw(raw raw_wrap cl_sym cl_pkg);
 use Pl::GlobalPartition qw(global_decl_form);
 
+# The `use re` hints a string eval inherits from its site, bound by parse()
+# for one unit's compile (#4101; _eval_re_seed / re_pragma_at below).
+our $RE_SEED;
+
 has filename => (is => 'ro', predicate => 1);
 # The name the PROGRAM calls this source (`pl2cl --as NAME`, tasks #2460/#2461):
 # what __FILE__, a die/warn location and the drop announcement say.  `pcl -e`
@@ -145,7 +149,7 @@ sub _build_fallback_parser {
 sub _eval_feature_seed {
   my ($self) = @_;
   my @feats = grep { $_ ne 'strict_refs' && $_ ne 'unicode_strings'
-                      && $_ ne 'current_sub' }
+                      && $_ ne 'current_sub' && !/\Are-/ }
                  @{ $self->eval_features // [] }
     or return ();
   return (feature_mods => { map +($_ => 'perl'), @feats });
@@ -185,6 +189,14 @@ sub _scan_eval_site_features {
       if Pl::Parser::unicode_strings_at($us, $w->location);
     push @on, 'current_sub'
       if Pl::Parser::feature_at($cs, $w->location);
+    # #4101: the `use re` hints too -- perl compiles the eval text with the
+    # site's %^H, so `use re '/FLAGS'`'s default modifiers and `use re 'eval'`
+    # reach its patterns.  Pseudo-features `re-flags:LETTERS` / `re-eval`
+    # (never PPI's: _eval_feature_seed filters them); the eval's own compile
+    # starts re_pragma_at from them ($RE_SEED).  Read off the ONE scope walk.
+    my $re = re_pragma_at($w);
+    push @on, "re-flags:$re->{flags}" if $re->{flags} ne '';
+    push @on, 're-eval' if $re->{eval};
     next if !@on;
     for (my $p = $w->parent; $p; $p = $p->parent) {
       next if !$p->isa('PPI::Statement');
@@ -1575,6 +1587,11 @@ sub parse {
   # starts empty, so a `--server` process answering many string evals never
   # carries one file's renames into the next.
   _reset_rename_manifest();
+  # #4101: the `use re` hints this unit inherits from its eval SITE (undef
+  # for a file) -- re_pragma_at's starting state for the whole compile, every
+  # fragment re-parse of the eval text included; `local` so a nested unit's
+  # compile starts from its own.
+  local $RE_SEED = $self->_eval_re_seed;
   # #2610: the detector table, emitted for every program and module unit
   # (never a string eval's) since s514d -- see _detect_table_form.
   $self->environment->{detect_calls} = {} if !$self->eval_mode;
@@ -13450,7 +13467,10 @@ sub _re_eval_in_scope { return re_pragma_at($_[0])->{eval} }
 # answered from a per-document flag, so the common case costs one parent walk.
 sub re_pragma_at {
   my ($tok) = @_;
-  my $none = { eval => 0, flags => '' };
+  # A string eval's compile starts from its SITE's state (#4101, $RE_SEED);
+  # its own `use re` / `no re` statements apply on top, in source order.
+  my $none = $RE_SEED ? { eval => $RE_SEED->{eval}, flags => $RE_SEED->{flags} }
+                      : { eval => 0, flags => '' };
   my @chain;
   my $node = $tok;
   while (my $parent = $node->parent) {
@@ -13464,6 +13484,7 @@ sub re_pragma_at {
   }) ? 1 : 0);
   return $none unless $node->{_pcl_has_re_pragma};
   my %st = (eval => 0, bits => {}, charset => '');
+  _re_seed_state(\%st, $RE_SEED) if $RE_SEED;
   for my $pair (@chain) {
     my ($parent, $inner) = @$pair;
     for my $sib ($parent->schildren) {
@@ -13479,6 +13500,36 @@ sub re_pragma_at {
   $flags .= join '', map { $b->{$_} ? $_ : '' } qw(n p);
   $flags .= $st{charset} if $st{charset} ne '' && $st{charset} ne 'd';
   return { eval => $st{eval}, flags => $flags };
+}
+
+# THE INHERITED `use re` STATE of a string eval (#4101): perl compiles the
+# eval text with its site's hints, so the site's default modifiers and
+# `use re 'eval'` are in force from the text's first statement.  The site
+# hands them over as the pseudo-features `re-flags:LETTERS` / `re-eval`
+# (_scan_eval_site_features); parse() binds $RE_SEED to them for the unit.
+sub _eval_re_seed {
+  my ($self) = @_;
+  return undef unless $self->eval_mode;
+  my ($flags, $eval) = ('', 0);
+  for my $f (@{ $self->eval_features // [] }) {
+    if ($f =~ /\Are-flags:(\w+)\z/) { $flags = $1 }
+    elsif ($f eq 're-eval')         { $eval  = 1 }
+  }
+  return ($flags ne '' || $eval) ? { flags => $flags, eval => $eval } : undef;
+}
+
+# The walk's state from a seed's LETTERS, the inverse of re_pragma_at's
+# answer: a second `x` is `xx`, a trailing a / aa / l / u is the charset.
+sub _re_seed_state {
+  my ($st, $seed) = @_;
+  $st->{eval} = $seed->{eval} ? 1 : 0;
+  my $nx = 0;
+  for my $c ($seed->{flags} =~ /(aa|.)/g) {
+    if ($c =~ /\A(?:[lu]|aa?)\z/) { $st->{charset} = $c; next }
+    $c = 'xx' if $c eq 'x' && ++$nx == 2;
+    $st->{bits}{$c} = 1;
+  }
+  return;
 }
 
 # Apply ONE `use re ...` / `no re ...` statement to the walk's state (re.pm's

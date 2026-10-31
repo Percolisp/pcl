@@ -84,6 +84,24 @@ my @rows = (
    q{my $q0 = qr/Q/; { use re '/i'; print "qo ", ("q" =~ $q0 ? "ok" : "no"), "\n"; }}],
   ['sx', 'split under /x',
    q{{ use re '/x'; my @w = split / , /, "a,b , c"; print "sx @w\n"; }}],
+  # #4101: a STRING EVAL compiled in the scope inherits the defaults (perl
+  # compiles the eval text with the site's hints) -- one pseudo-feature per
+  # fact through the #364 site channel, so the eval cache keys on it too
+  # (rows v1 and v2 are the SAME eval text at two sites).
+  ['v1', 'a string eval inside the scope inherits /i',
+   q{{ use re '/i'; print "v1 ", (eval q{"Q" =~ /q/} ? "ok" : "no"), "\n"; }}],
+  ['v2', '... the same eval text outside the scope does not',
+   q{print "v2 ", (eval q{"Q" =~ /q/} ? "ok" : "no"), "\n";}],
+  ['v3', 'an eval under an inner `no re` does not',
+   q{{ use re '/i'; { no re '/i'; print "v3 ", (eval q{"Q" =~ /q/} ? "ok" : "no"), "\n"; } }}],
+  ['v4', 'the eval text\'s own `no re` turns it off',
+   q{{ use re '/i'; print "v4 ", (eval q{ no re '/i'; "Q" =~ /q/ } ? "ok" : "no"), "\n"; }}],
+  ['v5', 'a nested eval inherits through the outer one; /x; split',
+   q{{ use re '/i'; print "v5 ", (eval q{ eval q{"Q" =~ /q/} } ? "ok" : "no"), (eval q{ join ",", split /b/, "aBc" }), "\n"; }}],
+  ['v6', 'qr// and a run-time pattern inside the eval',
+   q{{ use re '/x'; my $p = "a b"; print "v6 ", (eval q{ my $r = qr/a b/; ("ab" =~ $r) . ("ab" =~ $p) }), "\n"; }}],
+  ['v7', 'a sub defined outside the scope calling eval does not',
+   q{sub ef { eval q{"Q" =~ /q/} ? "ok" : "no" } { use re '/i'; print "v7 ", ef(), "\n"; }}],
 );
 
 plan tests => scalar(@rows) + 1;
