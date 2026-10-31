@@ -463,26 +463,6 @@ sub _canonical_spaced_symbols {
   return;
 }
 
-# `CORE::__END__` / `CORE::__DATA__` end the code exactly like `__END__` /
-# `__DATA__` (docs/ppi-upstream-bugs.md §44).  PCL's PPI makes the token a
-# Separator (group AA), but PPI's Lexer still picks the End / Data STATEMENT
-# class by the bare spelling, so the Separator sits in a plain PPI::Statement.
-# Give that statement the class every PCL consumer asks for.  A REPAIR for a
-# Lexer bug whose fix is not on the branch yet (task #3981, s527e's file):
-# delete it when the Lexer table knows the CORE:: spellings.
-sub _core_separator_statements {
-  my ($doc, $src) = @_;
-  return if defined $src && $src !~ /CORE::__(?:END|DATA)__/;
-  for my $st (grep { ref($_) eq 'PPI::Statement' } $doc->schildren) {
-    my $first = $st->schild(0) or next;
-    next unless $first->isa('PPI::Token::Separator');
-    my $c = $first->content;
-    die "s527f INERT: _core_separator_statements would act on $c\n"
-      if $c eq 'CORE::__DATA__' || $c eq 'CORE::__END__';
-  }
-  return;
-}
-
 # Perl allows whitespace between a sigil and its identifier (`my $ bits = …`
 # is the variable $bits — perl's own caller.t line 279 uses this).  PPI
 # tokenizes that as a Cast token followed by a bare Word, and PCL then emits
@@ -839,7 +819,6 @@ sub _ppi_parse {
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
   _canonical_spaced_symbols($doc, $src) if $doc;
-  _core_separator_statements($doc, $src) if $doc;
   _reclassify_bare_vwords($doc) if $doc;
   # A DIAGNOSTIC, not a repair — deliberately NOT one of the in-place
   # passes above, so `fragment_doc`'s re-parses do not announce a construct
@@ -883,7 +862,6 @@ sub fragment_doc {
   my $doc = _ppi_new($src, %opt);
   return undef unless $doc;
   _canonical_spaced_symbols($doc, $src);
-  _core_separator_statements($doc, $src);
   _reclassify_bare_vwords($doc);
   return $doc;
 }
