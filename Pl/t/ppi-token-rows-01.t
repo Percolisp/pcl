@@ -72,6 +72,13 @@ both_agree('my $r = eval q{my $ z = 6; $z + 1}; print "$r\n";',
 both_agree('sub foo::::bar { 7 } print foo::::bar(), "\n";',
            '§41: sub foo::::bar and its call');
 
+# §44 -- CORE::__END__ / CORE::__DATA__ end the code (and the data section
+# is DATA's).
+both_agree(qq{print "x\\n";\nCORE::__END__\nnot code\n},
+           '§44: CORE::__END__ ends the code');
+both_agree(qq{print scalar(<DATA>);\nCORE::__DATA__\nline one\nline two\n},
+           '§44: CORE::__DATA__ starts the DATA section');
+
 # §45 -- & before whitespace and a block / a scalar is the code sigil.
 both_agree('& {sub { print "ok\n" }};',
            '§45: & {BLOCK} calls the code');

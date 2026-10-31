@@ -463,6 +463,27 @@ sub _canonical_spaced_symbols {
   return;
 }
 
+# `CORE::__END__` / `CORE::__DATA__` end the code exactly like `__END__` /
+# `__DATA__` (docs/ppi-upstream-bugs.md §44).  PCL's PPI makes the token a
+# Separator (group AA), but PPI's Lexer still picks the End / Data STATEMENT
+# class by the bare spelling, so the Separator sits in a plain PPI::Statement.
+# Give that statement the class every PCL consumer asks for.  A REPAIR for a
+# Lexer bug whose fix is not on the branch yet (task #3981, s527e's file):
+# delete it when the Lexer table knows the CORE:: spellings.
+sub _core_separator_statements {
+  my ($doc, $src) = @_;
+  return if defined $src && $src !~ /CORE::__(?:END|DATA)__/;
+  for my $st (grep { ref($_) eq 'PPI::Statement' } $doc->schildren) {
+    my $first = $st->schild(0) or next;
+    next unless $first->isa('PPI::Token::Separator');
+    my $c = $first->content;
+    bless $st, $c eq 'CORE::__DATA__' ? 'PPI::Statement::Data'
+             : $c eq 'CORE::__END__'  ? 'PPI::Statement::End'
+             : next;
+  }
+  return;
+}
+
 # Perl allows whitespace between a sigil and its identifier (`my $ bits = …`
 # is the variable $bits — perl's own caller.t line 279 uses this).  PPI
 # tokenizes that as a Cast token followed by a bare Word, and PCL then emits
@@ -663,11 +684,7 @@ sub _brace_glob_slot_symbol {
 # They are a STATIC table on purpose — PCL must compile `use v5.40; try` the
 # same way whatever perl it happens to run under — and `Pl/t/feature-pragma-01.t`
 # re-derives them from the running perl so a drift fails a row.
-# `defer` (5.36) and `class` (5.38) are in NO numbered bundle (only `:all`):
-# 9e9 says so, so a version bundle turns them OFF, `no feature;` resets them
-# and `use feature`/`use experimental` name them (PPI tracks them since s527d,
-# PPI group AG, for the lexer rules of `defer {` and `class NAME`).
-our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039, defer => 9e9, class => 9e9);
+our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039);
 
 sub _pcl_feature_include_cb {
   my ($inc) = @_;
@@ -817,6 +834,7 @@ sub _ppi_parse {
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
   _canonical_spaced_symbols($doc, $src) if $doc;
+  _core_separator_statements($doc, $src) if $doc;
   _reclassify_bare_vwords($doc) if $doc;
   # A DIAGNOSTIC, not a repair — deliberately NOT one of the in-place
   # passes above, so `fragment_doc`'s re-parses do not announce a construct
@@ -860,6 +878,7 @@ sub fragment_doc {
   my $doc = _ppi_new($src, %opt);
   return undef unless $doc;
   _canonical_spaced_symbols($doc, $src);
+  _core_separator_statements($doc, $src);
   _reclassify_bare_vwords($doc);
   return $doc;
 }
