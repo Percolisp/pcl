@@ -782,9 +782,9 @@ not code
    tasks => [3741, 3964] },
  { id => 50, kind => 'structure', dump => 'structure',
    title => 'An ANONYMOUS HASH right after a list operator or named unary (`die { ... }`, `exists { ... }->{k}`, `map {a => $_}, LIST`) is built as a BLOCK',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'a `{` where perl expects a term (XTERM) or a map/grep block opening with `WORD =>` built as Block' },
-   fix => { kind => 'handler', handler => 'Pl::PExpr::_block_is_hash_constructor' },
+   fix => { kind => 'handler', handler => 'Pl::PExpr::_block_is_hash_constructor', changed => 'STAYS (s527e): PPI now decides the XTERM and map/grep look-ahead cases; the predicate still classifies what PPI leaves a Block (a map BLOCK whose body is a pair)', commit => '4f1e7ea8', group => 'AE', pr => undef },
    repro => 'eval { die { code => 42 } }; print $@->{code}, "\\n";
 ',
    perl => "42\\n",

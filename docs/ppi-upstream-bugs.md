@@ -2551,6 +2551,8 @@ recorded in the #2610 detector table as an unknown bareword call.  Tasks #3741,
 
 ## 50. An ANONYMOUS HASH right after a list operator or named unary is built as a BLOCK  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527e: group AE, commit `4f1e7ea8` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AE.md`).  `Pl::PExpr::_block_is_hash_constructor` STAYS (a map BLOCK whose body is a pair is still PPI's Block, and PCL classifies it); guard `Pl/t/anon-hash-term-01.t` (row 1 FAILS on the base: `map { Foo, $_ }, LIST` / `map {}, LIST` / `map { "k" => $_ }, LIST` lost their hashes).
+
 **Minimal repro** (valid perl; perl 5.40.3 prints `42`):
 
 ```perl
