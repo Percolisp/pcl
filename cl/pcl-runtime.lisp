@@ -1035,7 +1035,7 @@
   saved        ; the contents it had when tied -- perl hides them, untie restores
   (iter nil)   ; each(): NIL = start afresh, else the key NEXTKEY continues from
   (hidden nil)) ; T: a tie that IMPLEMENTS a core behaviour (a restricted hash,
-                ; lib/Hash/Util.pm, #3163) -- tied() answers undef, as perl does
+                                        ; lib/Hash/Util.pm, #3163) -- tied() answers undef, as perl does
 
 (defmethod print-object ((r p-tie-rec) stream)
   (print-unreadable-object (r stream :type t :identity t)))
@@ -1308,7 +1308,7 @@
       (error "p-anon-sub: expected a package string and a LAMBDA form, not ~S ~S"
              pkg lambda-form))
     `(sb-int:named-lambda ,(concatenate 'string pkg "::__ANON__") ,lambda-list
-       ,@body)))
+                          ,@body)))
 
 (defun %p-anon-sub-package (fn)
   "The package the anonymous sub FN was compiled in (p-anon-sub's name), or NIL."
@@ -1395,12 +1395,12 @@
                      `((%p-register-prototype (symbol-function local-sym) ,proto))))
          (install
           `(let* ((local-sym (%p-reserve-sub-name ',name))
-                 ;; Per-sub constants, computed ONCE at definition:
-                 ;; recomputing them per call (case-inversion + concatenate /
-                 ;; gethash) was measured at ~150ns per call — the single
-                 ;; largest sub-call cost.
-                 (%%perl-name (%p-sub-perl-name local-sym))
-                 (%%home-pkg  (pcl-pkg-perl-name (symbol-package local-sym))))
+                  ;; Per-sub constants, computed ONCE at definition:
+                  ;; recomputing them per call (case-inversion + concatenate /
+                  ;; gethash) was measured at ~150ns per call — the single
+                  ;; largest sub-call cost.
+                  (%%perl-name (%p-sub-perl-name local-sym))
+                  (%%home-pkg  (pcl-pkg-perl-name (symbol-package local-sym))))
              (setf (gethash local-sym *p-declared-subs*) :defined)
              (setf (symbol-function local-sym)
                    (lambda ,params
@@ -5308,19 +5308,19 @@
       (let ((lo (%p-pow10 (1- prec)))
             (hi (%p-pow10 prec))
             (p (floor (* (log a) 0.4342944819032518d0))))
-      (loop
-       (let ((d (%p-scaled-round m e (- (1- prec) p))))
-         (cond ((< d lo) (decf p))
-               ((> d hi) (incf p))
-               ((= d hi) (return (values lo (1+ p))))
-               ;; D = 10^(PREC-1) is ambiguous: either P is right, or P is one
-               ;; too HIGH and the value just below 10^P rounded UP to it
-               ;; (9.99999999999999e-5, whose log said -4).  One digit finer
-               ;; decides: if that also carries, P stands.
-               ((= d lo)
-                (let ((d2 (%p-scaled-round m e (- prec p))))
-                  (return (if (>= d2 hi) (values lo p) (values d2 (1- p))))))
-               (t (return (values d p))))))))))
+        (loop
+         (let ((d (%p-scaled-round m e (- (1- prec) p))))
+           (cond ((< d lo) (decf p))
+                 ((> d hi) (incf p))
+                 ((= d hi) (return (values lo (1+ p))))
+                 ;; D = 10^(PREC-1) is ambiguous: either P is right, or P is one
+                 ;; too HIGH and the value just below 10^P rounded UP to it
+                 ;; (9.99999999999999e-5, whose log said -4).  One digit finer
+                 ;; decides: if that also carries, P stands.
+                 ((= d lo)
+                  (let ((d2 (%p-scaled-round m e (- prec p))))
+                    (return (if (>= d2 hi) (values lo p) (values d2 (1- p))))))
+                 (t (return (values d p))))))))))
 
 (defun %p-decimal-exponent (a prec)
   "The decimal exponent C's `%.<PREC>g' — and therefore perl's `%.15g'
@@ -10065,7 +10065,7 @@ per element."
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-self-reverse-form-p
- (place value)
+      (place value)
     "True when VALUE is `reverse PLACE` -- `(p-reverse PLACE)`, possibly under
      p-list-ctx -- for a symbol PLACE: perl's in-place reverse (task #155)."
     (let ((v (if (and (consp value) (eq (first value) 'p-list-ctx)
@@ -17132,11 +17132,11 @@ carries a continue block.  Every other foreach is emitted exactly as before."
     (cond
       ((eq var '|$\\|)
        `(let ((*p-loop-frozen-ors*
-                (or *p-loop-frozen-ors* (make-p-box (unbox |$\\|)))))
+               (or *p-loop-frozen-ors* (make-p-box (unbox |$\\|)))))
           ,form))
       ((eq var '|$/|)
        `(let ((*p-loop-frozen-rs*
-                (or *p-loop-frozen-rs* (make-p-box (unbox |$/|)))))
+               (or *p-loop-frozen-rs* (make-p-box (unbox |$/|)))))
           ,form))
       (t form))))
 
@@ -17201,7 +17201,7 @@ drift apart the way two copies would."
                            (if cellp
                                `(progn
                                   (%p-cell-set ',var
-                                    (,elt-fn ,vec ,i))
+                                               (,elt-fn ,vec ,i))
                                   ,@iter-forms)
                                `(let ((,var (,elt-fn ,vec ,i)))
                                   ,@iter-forms))
@@ -19673,10 +19673,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    VALUE-PRODUCING — every character read through it would be wrong — so it dies
    naming itself (rule 12) rather than quietly decoding as something else, which
    is what PCL did for every encoding before #1115."
-(or (%p-encoding-ef-lookup name)
-    (%p-unsupported-value "open layer"
-                          (format nil ":encoding(~A)" (string-trim " " name))
-                          "SBCL has no codec for it")))
+  (or (%p-encoding-ef-lookup name)
+      (%p-unsupported-value "open layer"
+                            (format nil ":encoding(~A)" (string-trim " " name))
+                            "SBCL has no codec for it")))
 
 (defun %p-encoding-ef-lookup (name)
   "THE codec table (rule 11): the external format for perl encoding NAME, or
@@ -19970,8 +19970,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       ((not (open-stream-p target)) nil)
       ((not (sb-sys:fd-stream-p target)) (list "scalar"))
       (t
-        (append (subseq (list "unix" "perlio") 0 (- 2 (%p-layer-pops target)))
-                (%p-layer-spelling target))))))
+       (append (subseq (list "unix" "perlio") 0 (- 2 (%p-layer-pops target)))
+               (%p-layer-spelling target))))))
 
 (defun %p-layer-ef-or-announce (layers default site)
   "%p-layer-ef for the two callers with no perl-visible failure to give: the
@@ -21345,23 +21345,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; avoid an sb-int:closed-stream-error abort.
     ;; perl's eof is a BOOLEAN (#3242): the answer goes through p-bool.
     (p-bool
-    (if (and stream (open-stream-p stream))
-        (handler-case
-            (let ((ch (peek-char nil stream nil :eof)))
-              (if (eq ch :eof) t nil))
-          ;; A perl-level die passing through is the caller's (rule 11 — the
-          ;; same re-raise %p-read-impl and %p-getc-impl do).
-          (p-exception (e) (error e))
-          ;; A read that FAILS reads as EOF too, and for the same reason a
-          ;; closed handle does: perl answers TRUE for a handle it cannot read
-          ;; from.  `eof` on a DIRECTORY handle is the case that costs — the
-          ;; peek-char reached SBCL's unhandled simple-stream-error and KILLED
-          ;; THE PROGRAM, where perl answers 1 (task #1237, the third entry of
-          ;; the family after getc).  `$!` is left alone: perl's eof does not
-          ;; report the directory (probed 5.40.3 with $! cleared after the
-          ;; open — errno 0), which is why this is not a %p-read-fail call.
-          (error () t))
-        t))))
+     (if (and stream (open-stream-p stream))
+         (handler-case
+             (let ((ch (peek-char nil stream nil :eof)))
+               (if (eq ch :eof) t nil))
+           ;; A perl-level die passing through is the caller's (rule 11 — the
+           ;; same re-raise %p-read-impl and %p-getc-impl do).
+           (p-exception (e) (error e))
+           ;; A read that FAILS reads as EOF too, and for the same reason a
+           ;; closed handle does: perl answers TRUE for a handle it cannot read
+           ;; from.  `eof` on a DIRECTORY handle is the case that costs — the
+           ;; peek-char reached SBCL's unhandled simple-stream-error and KILLED
+           ;; THE PROGRAM, where perl answers 1 (task #1237, the third entry of
+           ;; the family after getc).  `$!` is left alone: perl's eof does not
+           ;; report the directory (probed 5.40.3 with $! cleared after the
+           ;; open — errno 0), which is why this is not a %p-read-fail call.
+           (error () t))
+         t))))
 
 (defmacro p-eof (&rest args)
   "Perl eof - check end of file. Bareword filehandle is auto-quoted."
@@ -21877,25 +21877,25 @@ would consume, so it dies naming the stream (rule 12)."
                 (%p-io-errno-fail 2)                              ; ENOENT
                 (let ((target target0))
                   (prog1
-                    (cond
-                      ((not (sb-sys:fd-stream-p target)) t)
-                      ;; ALREADY IN THAT DISCIPLINE: nothing to do.  EQUAL, not
-                      ;; EQ — the byte format is a LIST, `(:latin-1 :replacement
-                      ;; #\?)`, and SBCL hands back an EQUAL copy, never the same
-                      ;; object (measured).  So this test never fired and
-                      ;; `binmode($fh)` on a handle that was ALREADY bytes went
-                      ;; down the rebuild path, which DUPS THE DESCRIPTOR AND
-                      ;; CLOSES THE ORIGINAL: every other name for that handle
-                      ;; (`my $g = $fh; binmode($g)`) was left holding a closed
-                      ;; stream and its next print silently wrote nothing.
-                      ((equal (stream-external-format target) ef) t)
-                      (t (let ((std (%p-std-descriptor target)))
-                           (cond
-                             (std (ignore-errors (finish-output target))
-                                  (setf (svref *p-std-efs* std) ef)
-                                  (%p-std-rebuild std))
-                             (t (%p-rebuild-fd-stream fh target ef))))
-                         t))
+                      (cond
+                        ((not (sb-sys:fd-stream-p target)) t)
+                        ;; ALREADY IN THAT DISCIPLINE: nothing to do.  EQUAL, not
+                        ;; EQ — the byte format is a LIST, `(:latin-1 :replacement
+                        ;; #\?)`, and SBCL hands back an EQUAL copy, never the same
+                        ;; object (measured).  So this test never fired and
+                        ;; `binmode($fh)` on a handle that was ALREADY bytes went
+                        ;; down the rebuild path, which DUPS THE DESCRIPTOR AND
+                        ;; CLOSES THE ORIGINAL: every other name for that handle
+                        ;; (`my $g = $fh; binmode($g)`) was left holding a closed
+                        ;; stream and its next print silently wrote nothing.
+                        ((equal (stream-external-format target) ef) t)
+                        (t (let ((std (%p-std-descriptor target)))
+                             (cond
+                               (std (ignore-errors (finish-output target))
+                                    (setf (svref *p-std-efs* std) ef)
+                                    (%p-std-rebuild std))
+                               (t (%p-rebuild-fd-stream fh target ef))))
+                           t))
                     ;; the pop count follows the HANDLE: a standard handle's
                     ;; stream was just rebuilt, so it is read back from FH.
                     (let ((now (%p-live-stream fh)))
@@ -23589,13 +23589,13 @@ would consume, so it dies naming the stream (rule 12)."
    p-kill's: `unlink @files` deleted nothing and answered 0 (#2923)."
   (let ((count 0))
     (loop for f across (p-flatten-args files) do
-      (handler-case
-          (progn
-            (sb-posix:unlink (%p-path-string f))
-            (incf count))
-        (sb-posix:syscall-error (e)
-          (setf *p-stored-errno* (sb-posix:syscall-errno e)))
-        (error () (%pcl-save-errno))))
+          (handler-case
+              (progn
+                (sb-posix:unlink (%p-path-string f))
+                (incf count))
+            (sb-posix:syscall-error (e)
+              (setf *p-stored-errno* (sb-posix:syscall-errno e)))
+            (error () (%pcl-save-errno))))
     count))
 
 (defun %p-fileno-impl (fh)
@@ -24767,14 +24767,14 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((m (truncate (to-number mode)))
         (count 0))
     (loop for f across (p-flatten-args files) do
-      (let ((v (if (p-box-p f) (p-box-value f) f)))
-        (handler-case
-            (progn
-              (if (streamp v)
-                  (sb-posix:fchmod (sb-sys:fd-stream-fd v) m)
-                  (sb-posix:chmod (%p-path-string f) m))
-              (incf count))
-          (error () (%pcl-save-errno) nil))))
+          (let ((v (if (p-box-p f) (p-box-value f) f)))
+            (handler-case
+                (progn
+                  (if (streamp v)
+                      (sb-posix:fchmod (sb-sys:fd-stream-fd v) m)
+                      (sb-posix:chmod (%p-path-string f) m))
+                  (incf count))
+              (error () (%pcl-save-errno) nil))))
     count))
 
 (defun p-umask (&optional mode)
@@ -24820,14 +24820,14 @@ would consume, so it dies naming the stream (rule 12)."
         (g (%pcl-chown-id gid))
         (count 0))
     (loop for f across (p-flatten-args files) do
-      (let ((v (if (p-box-p f) (p-box-value f) f)))
-        (handler-case
-            (progn
-              (if (streamp v)
-                  (sb-posix:fchown (sb-sys:fd-stream-fd v) u g)
-                  (sb-posix:chown (%p-path-string f) u g))
-              (incf count))
-          (error () (%pcl-save-errno) nil))))
+          (let ((v (if (p-box-p f) (p-box-value f) f)))
+            (handler-case
+                (progn
+                  (if (streamp v)
+                      (sb-posix:fchown (sb-sys:fd-stream-fd v) u g)
+                      (sb-posix:chown (%p-path-string f) u g))
+                  (incf count))
+              (error () (%pcl-save-errno) nil))))
     count))
 
 (defun p-utime (&optional atime mtime &rest files)
@@ -24845,15 +24845,15 @@ would consume, so it dies naming the stream (rule 12)."
              (%pcl-to-integer (to-number mtime))))
         (count 0))
     (loop for f across (p-flatten-args files) do
-      (handler-case
-          (progn
-            (if (and a m)
-                (sb-posix:utime (%p-path-string f) a m)
-                (sb-posix:utime (%p-path-string f)))
-            (incf count))
-        (sb-posix:syscall-error (e)
-          (setf *p-stored-errno* (sb-posix:syscall-errno e)))
-        (error () (%pcl-save-errno))))
+          (handler-case
+              (progn
+                (if (and a m)
+                    (sb-posix:utime (%p-path-string f) a m)
+                    (sb-posix:utime (%p-path-string f)))
+                (incf count))
+            (sb-posix:syscall-error (e)
+              (setf *p-stored-errno* (sb-posix:syscall-errno e)))
+            (error () (%pcl-save-errno))))
     count))
 
 ;;; ============================================================
@@ -33198,12 +33198,12 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((frame (%make-p-local-glob-frame :ss scalar-sym))
         (io-sym (%p-glob-io-sym scalar-sym)))
     (push frame *p-local-glob-frames*)
-  (vector (fboundp code-sym)   (when (fboundp code-sym)   (fdefinition code-sym))
-          (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
-          (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
-          (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))
-          (gethash code-sym *p-declared-subs*)
-          ;; slot 9: the IO entry, for %p-glob-restore-tied-io (task #2590)
+    (vector (fboundp code-sym)   (when (fboundp code-sym)   (fdefinition code-sym))
+            (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
+            (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
+            (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))
+            (gethash code-sym *p-declared-subs*)
+            ;; slot 9: the IO entry, for %p-glob-restore-tied-io (task #2590)
             ;; and the IO localization (#3868); slot 10 its glob alias (#2666)
             (gethash io-sym *p-filehandles*)
             (gethash io-sym *p-fh-glob-aliases*)
@@ -33497,8 +33497,8 @@ would consume, so it dies naming the stream (rule 12)."
                  nil
                  `((p-glob-assign ,pkg-str ,name-str ,rv)))
            (let ((,st ,(if (eq rhs-form :none)
-                         `(%p-std-local-enter ,pkg-str ,name-str)
-                         nil)))
+                           `(%p-std-local-enter ,pkg-str ,name-str)
+                           nil)))
              (unwind-protect
                   ,(let ((io (%p-local-glob-io-bindings pkg-str name-str))
                          ;; `local *NAME` as the LAST statement of a block is its
@@ -35265,9 +35265,9 @@ would consume, so it dies naming the stream (rule 12)."
                    ;; bareword in the eval text can spell, so it is not sent.
                    (when (and (stringp proto) bare (symbol-package sym)
                               (not (find-if (lambda (c)
-                                               (or (char= c #\=)
-                                                   (%p-wire-space-p c)))
-                                             bare)))
+                                              (or (char= c #\=)
+                                                  (%p-wire-space-p c)))
+                                            bare)))
                      (let ((text (%p-proto-text proto)))
                        (push (cons bare text)
                              (gethash (symbol-package sym) by-pkg))
@@ -38418,7 +38418,7 @@ would consume, so it dies naming the stream (rule 12)."
      (cons :sequence
            (loop for x in (cdr node)
                  when (and (consp x) (eq (car x) :flags))
-                   do (setf m (%pcl-mbol-flags (cdr x) m))
+                 do (setf m (%pcl-mbol-flags (cdr x) m))
                  collect (%pcl-mbol-node x m))))
     ((eq (car node) :group)
      (let ((flags (butlast (cdr node)))
@@ -38782,7 +38782,7 @@ would consume, so it dies naming the stream (rule 12)."
    belt only."
   (let ((s (if (simple-string-p str) str (coerce str 'simple-string))))
     (%p-with-real-start (start)
-      (funcall (the function scanner) s start (or end (length s))))))
+                        (funcall (the function scanner) s start (or end (length s))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; perl's global-match advance rule — ONE reading (task #1719)
@@ -38834,9 +38834,9 @@ would consume, so it dies naming the stream (rule 12)."
    pattern that cannot match empty — the whole rule costs one test and the
    scan is still a direct tail call, as it was before the rule existed."
   (%p-with-real-start (pos)
-    (if minend
-        (%p-minend-scan scanner minend-key str pos end)
-        (funcall (the function scanner) str pos end))))
+                      (if minend
+                          (%p-minend-scan scanner minend-key str pos end)
+                          (funcall (the function scanner) str pos end))))
 
 (defun %p-global-scanner (scanner minend-key &optional counter always)
   "A cl-ppcre scanner closure that iterates the way perl's global match does,
@@ -39652,14 +39652,14 @@ would consume, so it dies naming the stream (rule 12)."
             ;; of a second whole scan of the subject (task #1719).
             (if global-p
                 (if (find #\\ (the string replacement))
-                  ;; a template (\N, \&): cl-ppcre builds it
-                  (let ((n (list 0)))
-                    (setf result (cl-ppcre:regex-replace-all
-                                  (%p-global-scanner scanner minend-key n)
-                                  str replacement))
-                    (when (stringp result) (setf count (car n))))
-                  (multiple-value-setq (result count)
-                    (%p-subst-replace-all scanner minend-key str replacement)))
+                    ;; a template (\N, \&): cl-ppcre builds it
+                    (let ((n (list 0)))
+                      (setf result (cl-ppcre:regex-replace-all
+                                    (%p-global-scanner scanner minend-key n)
+                                    str replacement))
+                      (when (stringp result) (setf count (car n))))
+                    (multiple-value-setq (result count)
+                      (%p-subst-replace-all scanner minend-key str replacement)))
                 (progn
                   (setf result (cl-ppcre:regex-replace scanner str replacement))
                   (when (and (stringp result) (cl-ppcre:scan scanner str))
@@ -40323,8 +40323,8 @@ would consume, so it dies naming the stream (rule 12)."
    PCL does not model -- that is a VALUE, so it dies (rule 12)."
   (loop for (k v) on opts by #'cddr
         when (and (string= (pcl::to-string k) "details") (pcl::p-true-p v))
-          do (pcl::%p-unsupported-value "PerlIO::get_layers" "details => 1"
-                                        "layer details are not modelled"))
+        do (pcl::%p-unsupported-value "PerlIO::get_layers" "details => 1"
+                                      "layer details are not modelled"))
   (let* ((s (and fh (ignore-errors (pcl::%p-live-stream fh))))
          (l (and s (pcl::%p-layer-list s))))
     (if (eq pcl::*wantarray* t)
@@ -40753,10 +40753,10 @@ would consume, so it dies naming the stream (rule 12)."
          ,@body))))
 (defun pl-can (&rest args)
   (%with-builtin-args (obj method) args "UNIVERSAL::can(object-ref, method)"
-    (pcl::%p-can-answer obj method)))
+                      (pcl::%p-can-answer obj method)))
 (defun pl-isa (&rest args)
   (%with-builtin-args (obj class) args "UNIVERSAL::isa(reference, kind)"
-    (%universal-isa obj class)))
+                      (%universal-isa obj class)))
 (defun %universal-isa (obj class)
   ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
   ;; @ISA: when TYPE names a builtin reference type (ARRAY/HASH/SCALAR/CODE/GLOB/
@@ -40786,11 +40786,11 @@ would consume, so it dies naming the stream (rule 12)."
 ;; overriding isa answers it; without one it is UNIVERSAL::isa (#2083).
 (defun pl-DOES (&rest args)
   (%with-builtin-args (obj class) args "invocant->DOES(kind)"
-    (let* ((cls (pcl::%pcl-invocant-class obj))
-           (fn  (and cls (pcl::%p-isa-override cls))))
-      (if fn
-          (funcall fn obj (pcl::to-string class))
-          (%universal-isa obj class)))))
+                      (let* ((cls (pcl::%pcl-invocant-class obj))
+                             (fn  (and cls (pcl::%p-isa-override cls))))
+                        (if fn
+                            (funcall fn obj (pcl::to-string class))
+                            (%universal-isa obj class)))))
 
 ;;; UNIVERSAL::VERSION — the method every class inherits (tasks #1743/#1818).
 ;;; It was a stub that always answered undef and never performed the check, so
