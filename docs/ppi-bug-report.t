@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 295;
+use Test::More tests => 298;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1833,4 +1833,32 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;' 
 {
     my @c = bracket_classes( 'require *{"\0a"};', '{' );
     is( $c[0], 'PPI::Structure::Block', 'require *{"..."}: the dereference block is a Block' );
+}
+
+# §14, the list-operator half: after a builtin that takes an operand (sort,
+# reverse, print, return) perl expects a term, so `<...>` is a readline or a
+# glob whatever it holds (toke.c yyl_leftpointy), even a path with a -DIGIT
+# in it: `my @b = sort </tmp/x-1/y/*.pl>; print 1;` globs and prints 1.
+# Read as a less-than, the -1 became a Number and the y/ a transliteration
+# that swallowed the next statement.
+{
+    my @t = map { short_class($_) } toks('my @b = sort </tmp/x-1/y/*.pl>; print 1;');
+    is( $t[4], 'QuoteLike::Readline=</tmp/x-1/y/*.pl>',
+        'sort </tmp/x-1/y/*.pl>: the glob after sort is one readline' ) or diag "got: @t";
+}
+
+# §43, more spellings: a lexical sub named like a quote-like operator or
+# like the x operator is called by its bare name in its scope (toke.c
+# yyl_keylookup looks in the pad first) -- `my sub y { "Y@_" } my sub x
+# { "X@_" } print y(2), x(5)` prints Y2X5 -- while after a term x is still
+# the repetition operator and after the block's } the keyword is back:
+# `{ my sub s { 1 } } s/a/b/` substitutes.
+{
+    my @t = map { short_class($_) } toks('my sub y { 1 } my sub x { 2 } print y(2), x(5), 3 x 2;');
+    my @ops = grep { /^(?:Regexp::Transliterate|Operator=x)/ } @t;
+    is_deeply( \@ops, ['Operator=x'], 'my sub y / my sub x: y(2) and x(5) are calls, 3 x 2 repeats' ) or diag "got: @t";
+}
+{
+    my @t = map { short_class($_) } toks('{ my sub s { 1 } s(1); } s/a/b/;');
+    is( $t[-2], 'Regexp::Substitute=s/a/b/', 'after the block of my sub s, s/a/b/ substitutes again' ) or diag "got: @t";
 }

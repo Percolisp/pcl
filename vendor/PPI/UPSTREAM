@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s527g
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: dd90e749ef77bc85e59b87f30091f103ac40f75a
-lib-tree: 88373f24beed365d7c4579a57504f55e6a0fb7f3
+branch: pcl-s527g
+branch-sha: c4d0da867d2937cdca0cbfa6b0ede9a8bc90d47c
+lib-tree: 0339d59a7418442eb206a55ef7729f0e33f81170
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -56,6 +56,8 @@ fix: AG §20 40fed036 Include: defer and class are features PPI tracks
 fix: AI §49 §54 52c4e102 Lexer: the { after a glob, and after a glob's dereference block, subscripts it
 fix: AJ §51 b23d5869 Lexer: a bare block takes a continue block
 fix: AK §50 dd90e749 Lexer: an anonymous hash where perl expects a term
+fix: AH §14 5c74a167 Whitespace: <...> after an operator or a builtin list operator is a readline
+fix: AL §43 c4d0da86 Tokenizer: a lexical sub named like a keyword is called by its bare name
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -145,3 +147,7 @@ commit: 1610e60c TODO tests: the Lexer's structure cases from PCL (§48-§54, §
 commit: 52c4e102 Lexer: the { after a glob, and after a glob's dereference block, subscripts it
 commit: b23d5869 Lexer: a bare block takes a continue block
 commit: dd90e749 Lexer: an anonymous hash where perl expects a term
+commit: 30d7356c TODO tests: <...> after a builtin list operator is a readline, also when the glob holds -DIGIT
+commit: 5c74a167 Whitespace: <...> after an operator or a builtin list operator is a readline
+commit: 585ea9dd TODO tests: a lexical sub named like a quote-like operator or x is a call
+commit: c4d0da86 Tokenizer: a lexical sub named like a keyword is called by its bare name

@@ -114,11 +114,22 @@ both_agree(qq{use experimental "try"; no warnings;\ntry { die "e\\n" } catch (\$
 # §14, the after-a-block half: <$fh> after a map block is a readline.
 both_agree('open my $fh, "<", \"a\nb\n"; my %h; my @l = map { $h{$_}++ } <$fh>; print scalar(@l), "\n";',
            '§14: map { ... } <$fh>');
-# ...and the half PPI does NOT fix: after a list operator the glob is still
-# mis-lexed, and its last `*` + `>` arrive as the glob Symbol `*>` that
-# Pl::PExpr::_fix_ppi_glob_after_block reads (deleting that arm divided by
-# zero here).
+# s527g (#4100): after a BUILTIN list operator PPI now lexes the glob too
+# (group AH, 5c74a167) -- also when the path holds a -DIGIT, which used to
+# cascade into a transliteration that swallowed the next statement.
 both_agree('my @b = sort <./*>; print @b > 0 ? "y\n" : "n\n";',
-           '§14: sort <./*> (after a list operator: PCL\'s repair)');
+           '§14: sort <./*> (after a list operator)');
+both_agree('my @b = sort </nonexistent-s527g/x-1/y/*.pl>; print scalar(@b), "\n"; print "next\n";',
+           '§14 #4100: sort </abs/x-1/y/*.pl> -- a -DIGIT in the glob');
+both_agree('open my $fh, "<", \"l1\nl2\n"; sub g { return <$fh> } my @g = g(); print scalar(@g), "\n"; print reverse </nonexistent-s527g/*>; print "e\n";',
+           '§14 #4100: return <$fh>, reverse <glob>');
+
+# §43 (s527g, group AL) -- a lexical sub named like a quote-like operator
+# or x is called by its bare name in its scope; after its block the keyword
+# is back.
+both_agree(q{use feature "lexical_subs"; no warnings; my sub s { "S@_" } print s(1), "\n"; my sub y { "Y@_" } print y(2), "\n"; { my sub q { "Q@_" } print q(3), "\n"; } my $v = q(lit); print "$v\n"; my $n = 3 x 2; print "$n\n";},
+           '§43: my sub s / y / q called by the bare name');
+both_agree(q{use feature "lexical_subs"; no warnings; sub f { my sub tr { "T@_" } return tr(4) } print f(), "\n"; $_ = "abc"; { my sub m { "M@_" } print m(5), "\n"; } print "m\n" if m/b/;},
+           '§43: my sub tr / m inside a block, m/b/ after it');
 
 done_testing();

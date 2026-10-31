@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 147;
+plan tests => 148;
 
 sub run_cl {
     my ($code) = @_;
@@ -1069,8 +1069,16 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (�
 }
 {
     my $doc = PPI::Document->new(\'sort <STDIN>;');
+    ok( $doc && grep { $_->isa('PPI::Token::QuoteLike::Readline') } $doc->tokens,
+        'FIXED ON PCL\'S PPI BRANCH (s527g, group AH, #4100): `<FH>` after a builtin '
+      . 'list operator is ONE readline (ppi-upstream-bugs.md §14)' );
+}
+{
+    # perl: after a DECLARED user sub `<FH>` is a readline too, but only the
+    # prototype table knows the sub is declared, so PPI keeps the less-than.
+    my $doc = PPI::Document->new(\'sub foo { @_ } foo <STDIN>;');
     ok( $doc && !grep { $_->isa('PPI::Token::QuoteLike::Readline') } $doc->tokens,
-        'CANARY: PPI still lexes `<FH>` after a list operator as `<` … `>` — '
+        'CANARY: PPI still lexes `<FH>` after a USER sub as `<` … `>` — '
       . 'if this FAILS, drop _fix_ppi_glob_after_block AND the `<` guard in '
       . '_repair_word_match (ppi-upstream-bugs.md §14)' );
 }

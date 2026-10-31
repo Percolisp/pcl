@@ -791,7 +791,7 @@ invented, so the result no longer depends on the caller's `$/` at all.
 
 ## 14. `<FH>` / `<glob>` after a list operator or a block is lexed as `<` … `>`  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527d: group AH, commit `a33452b4` on branch `pcl`, vendored as vendor/PPI -- the after-a-BLOCK half only (`map { … } <$fh>`, `if (…) { } <STDIN>`); after a list operator or a user sub only the prototype table knows, so that half stays PCL's (`_repair_readline_cascade`, `_fix_ppi_glob_after_block`)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AH.md`).
+**FIXED on PCL's PPI branch** (s527d: group AH, commit `a33452b4` on branch `pcl`, vendored as vendor/PPI -- the after-a-BLOCK half only (`map { … } <$fh>`, `if (…) { } <STDIN>`); s527g: group AH, commit `5c74a167` -- the after-an-OPERATOR and after-a-BUILTIN half, §14d; after a USER sub only the prototype table knows, so that half stays PCL's (`_repair_readline_cascade`, `_fix_ppi_glob_after_block`)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AH.md`).
 
 **Perl:** `<…>` in TERM position is a readline/glob, wherever that position
 comes from — after `sort`, after `print`, after a `map`/`grep` block.
@@ -933,6 +933,36 @@ break, and both shared by the other repairs in this family: `$#a` is a
 **Repro + failing rows:** Bugs 15 and 16 in `docs/ppi-bug-report.t`.  Guard:
 `Pl/t/readline-ternary-01.t` (like §14b, ZERO sites in every population —
 emission-ab over 921 files was SAME 921 — so the rows are the only guard).
+
+### 14d. The list-operator half, FIXED on PCL's PPI branch -- and the `-DIGIT` cascade  (task #4100, s527g)
+
+**FIXED on PCL's PPI branch** (s527g: group AH, commit `5c74a167` on branch
+`pcl`, vendored as vendor/PPI): where perl expects a term -- after an operator,
+and after a BUILTIN that takes an operand (`print <FH>`, `sort <*.pl>`,
+`return <$fh>`, `$s .= <STDIN>`, `$ok ? <$f> // "" : ""`) -- a closed `<...>`
+is ONE `QuoteLike::Readline` (toke.c `yyl_leftpointy`: `PL_expect` is not
+`XOPERATOR`).  The term test is the one PPI already used for a term-initial
+`~~` (§21), moved to `PPI::Tokenizer::_term_expected` and shared.  It un-TODOs
+the five §14 / §14b / §14c rows of the report.  After a USER's word (`foo
+<FH>`) the tokenizer cannot know whether the sub is declared (perl: a declared
+sub is a list operator, an undeclared bareword a term), so that half stays
+PCL's: `_fix_ppi_glob_after_block` and `_repair_readline_cascade` remain, and
+`Pl/t/misc-fixes-02.t`'s canary now asserts the user-sub spelling.
+
+The shape that found it (#4100, a Fable merge probe): a glob whose path holds
+`-DIGIT` after `sort`:
+
+```
+my @b = sort </tmp/x-1/y/*.pl>; print scalar(@b), "\n";
+  Word(sort) Operator(<) Regexp::Match(/tmp) … Word(x) Number(-1) Operator(/)
+  Regexp::Transliterate(y/*.pl>; print scalar(@b),"\n";\nmy @c = sort </tmp)
+```
+
+The `-1` became a Number, the `/` after it a division and the `y/` a
+transliteration that swallowed the rest of the line and the next one, which
+PCL's token-level rebuild cannot undo: PCL died at load with a Lisp backtrace
+(`invalid number of arguments: 5`).  perl prints 1.  **Repro + row:** the
+last §14 row of `docs/ppi-bug-report.t`; guard `Pl/t/ppi-token-rows-01.t`.
 
 ---
 
@@ -2372,6 +2402,8 @@ repair; the body becomes code and the program dies ("Undefined subroutine
 ---
 
 ## 43. A LEXICAL SUB named like a keyword keeps the keyword lexing  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**FIXED on PCL's PPI branch** (s527g: group AL, commit `c4d0da86` on branch `pcl`, vendored as vendor/PPI -- the tokenizer keeps the names a `my`/`state`/`our sub` declares, with the brace depth of their block, and `__current_token_is_forced_word` treats such a name as a word where perl does not expect an operator: `s(1)`, `y(2)`, `q(3)`, `m(4)`, `tr(1)`, `x(5)` are calls; after a term `3 x 2` repeats; after the block the keyword is back.  `my sub if` + `if if if` is a STATEMENT question (the Lexer), not a token one -- the token is a Word either way); upstream PR: pending.
 
 **Minimal repro** (perl prints `S1`):
 `use feature "lexical_subs"; no warnings; my sub s { "S@_" } print s(1), "\n";`
