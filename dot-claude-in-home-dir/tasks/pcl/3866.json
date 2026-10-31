@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-25",
+   "description" : "FILED AND FIXED s526w2 (Opus, resumed s528 2026-10-25), from the Log-Log4perl-1.58 board census (t/004Config.t rows 26-28: `open STDERR, \">$TMP_FILE\"; ... close STDERR;` then a later eval's warn).  PRE-EXISTING (main 31cd8c02).\n\n    open STDERR, \">/tmp/f\"; print STDERR \"x\\n\"; close STDERR;\n    eval { warn \"after close\\n\"; print STDERR \"p\\n\"; 1 }; print \"1 [\", ($@ // ''), \"]\\n\";\n  perl 5.40.3: 1 []      PCL: 1 [#<sb-sys:fd-stream for \"descriptor 2\" {...}> is closed at (eval 0) line 0.]\n  (`print STDERR` on the closed handle was already right: returns false.)  Probe scratch/s526w2/pstderr.pl.\n\n=== DONE (s526w2) ===\ncl/pcl-runtime.lisp p-warn: the default branch's write moves into %p-warn-to-stderr, which drops a host stream-error (a closed STDERR) -- an EFFECT-only loss with no value flowing on, perl's own answer, so not a rule-12 die.  A tied STDERR and $SIG{__WARN__} are untouched.  Guard Pl/t/misc-fixes-01.t row 143 (inverse-verified on a 31cd8c02 extraction).  Log-Log4perl t/004Config.t 21/7 -> see the board run (rows 26-28).\n",
+   "id" : "3866",
+   "status" : "completed",
+   "subject" : "`warn` with STDERR CLOSED died with the host's `#<sb-sys:fd-stream for \"descriptor 2\"> is closed` text (into $@); perl drops the warning and continues\n"
+}

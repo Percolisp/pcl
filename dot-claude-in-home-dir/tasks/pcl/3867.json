@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-25",
+   "description" : "FILED AND FIXED s526w2 (Opus, resumed s528 2026-10-25), from the Log-Log4perl-1.58 board census (t/024WarnDieCarp.t \"croak without stringify\" / \"confess without stringify\": `$logger->logcroak({ foo => \"bar\" })` then `$@->{foo}`).  PRE-EXISTING (main 31cd8c02).\n\n    use Carp; eval { croak { foo => \"bar\" } }; print ref($@), \" \", (ref $@ ? $@->{foo} : $@), \"\\n\";\n  perl 5.40.3: HASH bar      PCL: \" HASH(0x1)\"   (probe scratch/s526w2/pcroak.pl)\n\nperl's Carp (longmess_heavy / ret_summary): \"don't break references as exceptions\" -- a reference first argument is returned / died with untouched.\n\n=== DONE (s526w2) ===\nlib/Carp.pm (the module's own layer, CLAUDE.md 9a): longmess / shortmess return the reference (wantarray ? @_ : $_[0]) when $_[0] is a ref; croak / confess `die @_`; carp / cluck `warn @_`.  A plain string is unchanged.  Guard Pl/t/misc-fixes-01.t row 144 (inverse-verified on a 31cd8c02 extraction).\n",
+   "id" : "3867",
+   "status" : "completed",
+   "subject" : "lib/Carp.pm shim stringified a REFERENCE exception: `croak { foo => \"bar\" }` / `confess [...]` died with \"HASH(0x1)\\n\" where Carp passes the reference through (Log::Log4perl logcroak / logconfess)\n"
+}

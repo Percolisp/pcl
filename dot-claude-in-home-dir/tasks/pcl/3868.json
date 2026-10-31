@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-25",
+   "description" : "FILED s526w2 (Opus, resumed s528 2026-10-25), from the Log-Log4perl-1.58 board census (t/026FileApp.t rows 6-7: \"the 0.33 Log::Log4perl::Appender::File bug which caused all messages to end up in the same file\" -- PCL reproduces exactly that bug; Appender/File.pm:123 `my $fh = do { local *FH; *FH; };`).  PRE-EXISTING (main 31cd8c02).\n\n    sub mk { my $fh = do { local *FH; *FH; }; return $fh }\n    my $a = mk(); my $b = mk();\n    open $a, '>', '/tmp/g1' or die; open $b, '>', '/tmp/g2' or die;\n    print $a \"A\\n\"; print $b \"B\\n\"; close $a; close $b;   # then read both files back\n  perl 5.40.3: 1=[A;] 2=[B;]      PCL: 1=[] 2=[A;B;]\n  Probe scratch/s526w2/pglob.pl.\n\nperl: `local *FH` gives the glob a fresh GP for the scope; the value `*FH` returned from the do-block is a glob COPY that keeps that GP after `local` restores the old one, so each call yields a distinct, independent handle (the pre-Symbol::gensym idiom, still common on CPAN: IO::Handle-less modules, Log4perl, older Template, etc.).  PCL's `local *FH` restore appears to hand the same IO slot back, so the copy and the next call's glob alias.  The fix belongs in the runtime's glob localization (what the localized glob's VALUE carries out of the scope), cl/pcl-runtime.lisp -- not reduced further.\nROWS: Log-Log4perl t/026FileApp.t 6-7 (blessed to this task).\n",
+   "id" : "3868",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: the anonymous-glob idiom `my $fh = do { local *FH; *FH }` returns the SAME glob on every call -- two handles opened through it share one stream (Log::Log4perl::Appender::File: two file appenders write into one file)\n"
+}

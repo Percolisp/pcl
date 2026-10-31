@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-25",
+   "description" : "FILED s526w2 (Opus, resumed s528 2026-10-25), from the Template-Toolkit-3.106 board census.  NOT REDUCED; downstream of #3856.\n\n  `require Template::Parser` fails (\"Failed to transpile .../Template/Parser.pm\", PCL: cannot compile interpolated regex reference '${ ... }' = #3856).  Template->new still works (probe scratch/s526w2/ptt1.pl: \"ok Template=HASH(0x1)\"), but the first ->process fails (\"file error - Can't call method \"process\" on unblessed reference\", ptt2.pl) and then:\n   - t/anycase.t (and 68 more, rc=0 on the board, no TAP): `use Template::Test` path dies with SBCL \"Binding stack exhausted\" -- a method-call loop, backtrace frames alternate (LAMBDA ...) / P-METHOD-CALL with arguments (1, undef) -- after 24 s warm (scratch/s526w2/tt-anycase.out);\n   - t/block.t (and 28 more, rc=124 TIMEOUT at 120 s on the board): still running at 300 s warm (tt-block.out empty) -- a HANG.\n  perl runs all of these (prove -b: 121 files, 3144 tests, PASS; 14 PERL-SKIPs).\nWHAT TO DO: re-measure after #3856 lands -- if the parser loads, these files may simply run.  If they still hang, the hang is its own bug: a recursion / loop on an error path (perl would die with \"Deep recursion\" only as a warning, so a real perl loop would also hang -- check that perl does NOT reach this path because the parser loads there).\n",
+   "id" : "3869",
+   "status" : "pending",
+   "subject" : "HANG / RECURSION: with Template::Parser unloadable (#3856), Template-Toolkit's test files either exhaust the binding stack in a method-call loop (invocant 1, args undef) or hang past 300 s -- 29 TT files TIMEOUT on the board census, 69 print no TAP\n"
+}

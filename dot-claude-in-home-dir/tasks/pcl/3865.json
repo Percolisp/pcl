@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-25",
+   "description" : "FILED s526w2 (Opus, resumed s528 2026-10-25) as the residue of #3863 (the subscript is SCALAR context -- fixed for slices and calls; the array-variable spelling is a different emission site).  PRE-EXISTING (main 31cd8c02).\n\n    my @a = (1,2); my %h = (2 => \"two\"); print $h{@a}, \"|\", \"$h{@a}\", \"\\n\";\n  perl 5.40.3: two|two      PCL: |\n  emission: (p-print (p-string-concat (p-gethash %h @a)))  -- the array variable is emitted bare although its node is now annotated SCALAR_CTX.\n  Probe scratch/s526w2/pslk4.pl.  The generator path for an array variable in a subscript slot should consult the node context (the way `my $n = @a` counts), and the interpolation path's subscript compile likewise.  Rows: none known on the board.\n",
+   "id" : "3865",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a bare ARRAY variable as an element subscript, `$h{@a}` / `$a[@a]` (and interpolated \"$h{@a}\"), passes the array itself -- `(p-gethash %h @a)` -- where perl keys on the COUNT\n"
+}
