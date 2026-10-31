@@ -1702,30 +1702,6 @@ sub parse {
   # already lowers, then the document is reparsed — see _rewrite_state_prepass.
   $doc = $self->_rewrite_state_prepass($doc);
 
-  # PPI splits an oddly-spelled qualified sub name into ADJACENT Word tokens
-  # (`sub main::::flomp` → 'main::' + '::flomp'), and Statement::Sub->name
-  # returns only the FIRST — every downstream consumer (prototype registry,
-  # sub_info, p-declare-sub, p-sub emission) would see the truncated name and
-  # emit an unreadable symbol (`pl-main::` — a read error that aborts the
-  # section; method.t stopped at test 122 on this).  Merge each run into ONE
-  # Word token here; v1's own name-concatenation loop sees the single token
-  # and behaves identically (v1 handles the split by concatenating).
-  for my $sub (@{ $doc->find('PPI::Statement::Sub') || [] }) {
-    next if $sub->isa('PPI::Statement::Scheduled');
-    my @words;
-    for my $child ($sub->children) {
-      last if $child->isa('PPI::Structure::Block')
-           || $child->isa('PPI::Token::Prototype')
-           || $child->isa('PPI::Token::Attribute');
-      push @words, $child
-        if $child->isa('PPI::Token::Word')
-        && $child->content !~ /^(?:sub|my|our|state)$/;
-    }
-    next unless @words > 1;
-    $words[0]->set_content(join '', map { $_->content } @words);
-    $_->delete for @words[1 .. $#words];
-  }
-
   # A named sub with a plain signature is the classic `my (PARAMS) = @_`
   # spelling plus an arity check — normalise it INTO that spelling here, before
   # every name-keyed and scope pass, so all of them see one shape (#2514).
