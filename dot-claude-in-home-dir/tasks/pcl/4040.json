@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s529b (Opus, 2026-10-31) while doing #3860, whose ruling says \"base.pm's skip-a-parent-the-class-already-isa and parent.pm's `-norequire` kept apart as today\" -- measured: there is NO skip today; both spellings push unconditionally.  PRE-EXISTING (main d8577478, unchanged by #3860).\n\nPROBE (scratch/s529b/ub/u5.pl):\n    package X; use base \"File::Spec\"; use base \"File::Spec\"; package main; print \"[@X::ISA]\\n\";\n  perl: [File::Spec]        PCL: [File::Spec File::Spec]\nbase.pm's loop (perl 5.40.3 lib/base.pm): `next if grep $_->isa($base), ($inheritor, @bases);` -- a parent the inheritor already isa, OR that an earlier parent of THIS list isa, is skipped (`use base qw(A A)` pushes A once; `use base qw(Sub Super)` where Sub isa Super pushes Sub only); it also warns \"Class 'X' tried to inherit from itself\".  parent.pm has no such test (`use parent -norequire, \"A\", \"A\"` pushes A twice -- probe it).\nFIX SHAPE (suggested): Pl/Parser.pm _process_use_base emits, for `use base` only, each push guarded by the isa test against the inheritor and the parents already accepted in that list -- inside the p-BEGIN #3860 put it in -- through the runtime's ordinary `->isa` method call (an overriding `isa` is honoured by base.pm too).  The defclass parent list (preamble) then must not list the duplicate either.  LAYER NOTE (the #3860 ruling's): the end state is lib/base.pm running as plain Perl at BEGIN time (codegen review C2), which gives this for free.\n",
+   "id" : "4040",
+   "status" : "pending",
+   "subject" : "`use base` does not skip a parent the class already isa: `package X; use base \"File::Spec\"; use base \"File::Spec\";` gives @X::ISA = (File::Spec File::Spec) where base.pm leaves (File::Spec) -- parent.pm DOES push twice, so the two must differ"
+}
