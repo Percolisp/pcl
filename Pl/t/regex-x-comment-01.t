@@ -20,7 +20,7 @@
 # scan_const there).  The rows are the s529 probe set
 # (~/pcl-agent-scratch/s529/probes/p3856[abc].pl), every expected value
 # perl's own: the program runs under perl AND pcl and each row compares its
-# line.  Row 21 of that set (`use re '/x'`) is task #4042 and is not here.
+# line.  Row 21 of that set (`use re '/x'`) is task #4042: Pl/t/re-pragma-flags-01.t row c.
 
 use v5.30;
 use strict;

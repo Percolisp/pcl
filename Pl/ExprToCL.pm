@@ -935,6 +935,9 @@ sub gen_leaf_form {
 sub _regex_literal_form {
   my ($self, $node, $is_qr) = @_;
   my ($pattern, $flags, $delim) = _parse_regex_content($node->content(), $is_qr);
+  # `use re '/FLAGS'` in force here ORs its default modifiers in (#4042) --
+  # before the /x reading below, so the scanner sees a pragma /x too.
+  $flags = _re_default_flags($flags, $node);
   # A case escape (\Q \U \L \F \E \u \l) is applied HERE, where the literal is
   # compiled -- never by the runtime (#3510, #2501): a pattern whose escapes
   # fold away entirely stays a literal; one that quotes a run-time value is an
@@ -973,6 +976,32 @@ sub _regex_literal_form {
 # runtime's per-letter conversion reproduces the old `map { ":$_" }` keyword
 # list exactly.
 sub _mod_letters { my ($mods) = @_; return join '', sort keys %$mods }
+
+# The pattern literal NODE's modifier letters OWN with the lexically scoped
+# `use re '/FLAGS'` defaults merged in (task #4042) -- the one reading is
+# Pl::Parser2::re_merge_default_flags (the `use re` scope walk it shares with
+# `use re 'eval'`).  A node that is not a PPI element in a document (a
+# fragment's token) has no scope to read and keeps OWN.
+sub _re_default_flags {
+  my ($own, $node) = @_;
+  return $own unless ref $node && eval { $node->isa('PPI::Element') };
+  require Pl::Parser2;
+  return Pl::Parser2::re_merge_default_flags($own, $node);
+}
+
+# The first PPI element in the expression subtree ID (depth first), or undef:
+# the token a lexical-scope question about an OPERATOR is asked through.
+sub _scope_token {
+  my ($self, $id) = @_;
+  return undef unless defined $id;
+  my $n = $self->expr_o->get_a_node($id);
+  return $n if ref $n && eval { $n->isa('PPI::Element') };
+  for my $c (@{ $self->expr_o->get_node_children($id) || [] }) {
+    my $t = $self->_scope_token($c);
+    return $t if $t;
+  }
+  return undef;
+}
 
 # Parse a regex token content into (pattern_content, flags).
 # Works for /pat/flags, m/pat/flags, m{pat}flags, qr/pat/flags, qr{pat}flags, etc.
@@ -1847,6 +1876,21 @@ sub gen_binary_op_form {
   }
 
   my $right = $self->gen_node_form($kids->[1]);
+
+  # `$s =~ $p` with `use re '/FLAGS'` in force: perl compiles a RUN-TIME
+  # pattern with the op's default modifiers too (#4042, probed: `use re '/i';
+  # "q" =~ $p` with $p = "Q" matches), so the operand becomes the interpolated
+  # pattern form carrying them.  A qr object operand keeps its own flags there
+  # (%p-regex-parts), as in perl.  Without the pragma nothing changes.
+  if ($op eq '=~' || $op eq '!~') {
+    my $rn = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($rn) !~ /^PPI::Token::(?:Regexp|QuoteLike::Regexp)/) {
+      my $def = _re_default_flags('', $self->_scope_token($kids->[0]));
+      $right = ['pcl::p-regex-from-parts', ':pat', $right,
+                ':flags', _cl_string_literal_form($def), ':tier', ':dynamic']
+        if $def ne '';
+    }
+  }
 
   # '=' assignment: dispatch on LHS shape (mirrors gen_binary_op, same order).
   if ($op eq '=') {
@@ -5935,6 +5979,11 @@ sub gen_substitution_form {
   my $match = $node->get_match_string;
   my $subst = $node->get_substitute_string;
   my $mods  = $node->get_modifiers;
+  # `use re '/FLAGS'` in force here ORs its default modifiers in (#4042) --
+  # into a COPY: the hash is PPI's own.  The letters are single (PPI collapses
+  # /xx), so the merged string becomes keys again.
+  my $merged = _re_default_flags(_mod_letters($mods), $node);
+  $mods = { map { ($_ => 1) } split //, $merged } if $merged ne _mod_letters($mods);
 
   my $letters = _mod_letters($mods);
 

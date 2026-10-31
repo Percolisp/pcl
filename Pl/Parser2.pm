@@ -13404,21 +13404,113 @@ sub _regex_pattern_interpolates {
 # Is `use re 'eval'` lexically in force at TOK?  perl scopes the pragma
 # lexically, so the walk goes out through every enclosing block to the
 # document and looks at the statements that PRECEDE the one TOK is in.
-sub _re_eval_in_scope {
+sub _re_eval_in_scope { return re_pragma_at($_[0])->{eval} }
+
+# THE `use re` / `no re` SCOPE WALK (one walk for both of the pragma's
+# lexical facts -- `eval` and the DEFAULT MODIFIERS of `use re '/FLAGS'`,
+# task #4042; ir-spec §10 "default modifiers").  perl scopes the pragma
+# lexically: the statements that PRECEDE TOK in every enclosing block, from
+# the document inward, are applied in source order, the way re.pm's bits()
+# applies them to %^H at each statement's compile.  Answers
+# { eval => 0|1, flags => LETTERS } where LETTERS are the default modifier
+# letters in force (`xx` as two x's, the charset as its letters), '' for none.
+#
+# re.pm's rules, read from its bits() (5.40.3): a `/...` argument turns each
+# letter on (`use`) or off (`no`); a second `x` in one argument is `xx`, a
+# second `a` is `aa`; the charset letters d/l/u/a/aa are EXCLUSIVE (the last
+# `use` wins, a `no` removes only the charset it names); `no re` with no
+# argument turns everything off.  A document with no `re` include at all is
+# answered from a per-document flag, so the common case costs one parent walk.
+sub re_pragma_at {
   my ($tok) = @_;
+  my $none = { eval => 0, flags => '' };
+  my @chain;
   my $node = $tok;
   while (my $parent = $node->parent) {
-    if ($parent->isa('PPI::Structure::Block') || $parent->isa('PPI::Document')) {
-      for my $sib ($parent->schildren) {
-        last if $sib == $node;
-        next unless $sib->isa('PPI::Statement::Include');
-        next unless ($sib->module // '') eq 're';
-        return 1 if $sib->content =~ /\beval\b/;
-      }
-    }
+    unshift @chain, [$parent, $node]
+      if $parent->isa('PPI::Structure::Block') || $parent->isa('PPI::Document');
     $node = $parent;
   }
-  return 0;
+  return $none unless $node->isa('PPI::Document');
+  $node->{_pcl_has_re_pragma} //= ($node->find(sub {
+    $_[1]->isa('PPI::Statement::Include') && ($_[1]->module // '') eq 're'
+  }) ? 1 : 0);
+  return $none unless $node->{_pcl_has_re_pragma};
+  my %st = (eval => 0, bits => {}, charset => '');
+  for my $pair (@chain) {
+    my ($parent, $inner) = @$pair;
+    for my $sib ($parent->schildren) {
+      last if $sib == $inner;
+      next unless $sib->isa('PPI::Statement::Include');
+      next unless ($sib->module // '') eq 're';
+      _re_pragma_apply(\%st, $sib);
+    }
+  }
+  my $b = $st{bits};
+  my $flags = join '', map { $b->{$_} ? $_ : '' } qw(m s i x);
+  $flags .= 'x' if $b->{xx};
+  $flags .= join '', map { $b->{$_} ? $_ : '' } qw(n p);
+  $flags .= $st{charset} if $st{charset} ne '' && $st{charset} ne 'd';
+  return { eval => $st{eval}, flags => $flags };
+}
+
+# Apply ONE `use re ...` / `no re ...` statement to the walk's state (re.pm's
+# bits(), the subset that is lexical: eval and the `/FLAGS` defaults).
+sub _re_pragma_apply {
+  my ($st, $inc) = @_;
+  my $on = ($inc->type // 'use') eq 'use';
+  my @args;
+  for my $t (@{ $inc->find(sub {
+               $_[1]->isa('PPI::Token::Quote') || $_[1]->isa('PPI::Token::QuoteLike::Words')
+             }) || [] }) {
+    push @args, $t->isa('PPI::Token::QuoteLike::Words') ? $t->literal : $t->string;
+  }
+  if (!@args) {
+    # `no re;` turns every subpragma off; `use re;` does nothing.
+    %$st = (eval => 0, bits => {}, charset => '') if !$on;
+    return;
+  }
+  for my $s (@args) {
+    if ($s eq 'eval') { $st->{eval} = $on ? 1 : 0; next }
+    next unless $s =~ s{^/}{};
+    my $na = ($s =~ tr/a//);
+    $s =~ tr/a//d;
+    my @letters = split //, $s;
+    push @letters, ($na >= 2 ? 'aa' : 'a') if $na;
+    my $nx = 0;
+    for my $c (@letters) {
+      if ($c =~ /\A(?:[dlu]|aa?)\z/) {
+        if ($on) { $st->{charset} = $c }
+        elsif ($st->{charset} eq $c) { $st->{charset} = '' }
+        next;
+      }
+      $c = 'xx' if $c eq 'x' && ++$nx == 2;
+      next unless $c =~ /\A(?:[msixnp]|xx)\z/;
+      $st->{bits}{$c} = $on ? 1 : 0;
+    }
+  }
+}
+
+# A pattern literal's own modifier LETTERS with the `use re '/FLAGS'` defaults
+# in force at TOK merged in (task #4042): perl ORs the default modifiers into
+# every pattern compiled in the scope, except that an explicit charset
+# modifier on the pattern replaces the default charset.  `xx` is kept as two
+# x's (the literal's own spelling of it).
+sub re_merge_default_flags {
+  my ($own, $tok) = @_;
+  $own //= '';
+  my $def = re_pragma_at($tok)->{flags};
+  return $own if $def eq '';
+  my $out = $own;
+  my $own_cs = $own =~ /[adlu]/;
+  my ($dx, $ox) = (($def =~ tr/x//), ($own =~ tr/x//));
+  $out .= 'x' x ($dx - $ox) if $dx > $ox;
+  for my $c (split //, $def) {
+    next if $c eq 'x';
+    if ($c =~ /[adlu]/) { next if $own_cs; $out .= $c; next }
+    $out .= $c if index($out, $c) < 0;
+  }
+  return $out;
 }
 
 

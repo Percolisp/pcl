@@ -5829,6 +5829,25 @@ and `{,n}+` possessive (§10-poss) like any other.  Example: `"xx" =~
 /^x{,2}$/` is true and `"x{,2}" =~ /^x{,2}$/` is false.  The rewrite is
 local, so a `{,n}` does not change a literal's `:tier` (§10-tier).
 
+### 10-reflags. `use re '/FLAGS'` is a COMPILE-TIME fact merged into each pattern's `:flags` (normative, s530c, task #4042)
+
+The default modifiers `use re '/FLAGS'` sets are lexically scoped (re.pm's
+`bits()`: a letter turns on with `use`, off with `no`; a second `x` is `/xx`,
+a second `a` is `/aa`; the charset letters are exclusive; `no re` with no
+argument turns everything off).  The compiler reads them with ONE scope walk
+(`Pl::Parser2::re_pragma_at`, the walk `use re 'eval'` uses) and ORs them into
+the `:flags` of every m// / qr// / s/// literal in the scope -- an explicit
+charset on the literal replaces the default charset -- and into a RUN-TIME
+pattern operand of `=~` / `!~`, which is emitted as `p-regex-from-parts`
+carrying them (a qr object operand keeps its own flags there, as in perl).
+The interpolation scanner's `x` option (§3.2b, task #3856) reads the merged
+flags, so a pragma `/x` comment is not interpolated either.  The flags are
+never a run-time state: a sub DEFINED outside the scope keeps its own.
+
+    { use re '/i'; print "Q" =~ /q/ ? "ok" : "no" }   # ok -- (p-regex :pat "q" :flags "i" ...)
+
+Not carried yet: a STRING eval compiled inside the scope (task #4101).
+
 ### 10-prop. Unicode properties are answered from PERL'S OWN tables; an unknown one DIES at compile (normative, s496a, tasks #2060 #2372)
 
 `\p{NAME}` `\pX` `\P{NAME}` `\PX` in a pattern match exactly the code points

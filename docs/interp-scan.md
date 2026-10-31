@@ -130,7 +130,7 @@ probe-and-guard (fix) or by clamping to the event subset it consumes today.
     **CONTRACT (task #3856, RULED s529 -- the v1 non-goal is lifted):** in a
     pattern (`in_regex`), outside a character class, `(?#...)` up to the next
     `)` and -- with `x => 1`, the op's TRAILING /x or /xx (an inline `(?x)`
-    does not count; `use re '/x'` is task #4042) -- a `#` up to the end of the
+    does not count; a `use re '/x'` in scope counts -- the compiler merges it into the op's flags, ir-spec §10-reflags, task #4042) -- a `#` up to the end of the
     line are COMMENTS: no event is emitted inside them, and `comment_spans()`
     reports them for a consumer running its own name scan (VarAnnotator).
     Character-class state is TRACKED for this purpose only, with toke.c's
