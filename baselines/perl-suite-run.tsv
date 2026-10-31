@@ -1,4 +1,6 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s527f (2026-10-31, Opus) -- class/accessor.t 0/0 -> 1/1, class/inherit.t 0/1 -> 1/3, class/phasers.t 0/0 -> 0/2, op/defer.t 4/8 -> 6/6 BY EDIT (scratch/s527f/final4.log, the four files ALONE --jobs 1, after --bless-rows of exactly these four): PCL's PPI builds `class NAME BLOCK` / `field` / `method` / `ADJUST` / `defer BLOCK` as statements of their own (docs/ppi-upstream-bugs.md §52 §53, #3746 #3747), so each is refused at its own site and the statement after it RUNS -- rows that were swallowed now run (the class rows fail under the registered reason; inherit's ':isa() version test can throw' and defer's two goto-within-defer rows now pass)
+
 # s527g (2026-10-31, Opus) -- op/glob.t 14/4 -> 17/1 and op/lexsub.t 81/61 -> 83/60 BY EDIT (scratch/s527g/comp.log, --jobs 1, parallel and serial agree): eval "<.>" at a document start is a readline (group AH, §14d, #4100); q() after state/my sub q is a call (group AL, §43, #3750)
 # s530a (2026-10-31, Opus) -- op/for.t 136/12 -> 138/10 BY EDIT (scratch/s530a/comp.log, the file ALONE --jobs 1, parallel = serial): rows 111-112 "NULL GvSV" FIXED by #3963 (a local $NAME body reads the cell, so a nested local *NAME hides it).
 # s527c (2026-10-31, Opus) -- op/for.t spliced by hand from scratch/s527c/m2-comp.log (run ALONE, --jobs 1; parallel and serial agree): TRANSPILE-FAIL 0/0 -> DIFF 136/12 (#1580: PCL's PPI lexes a dereference loop variable, the one such loop drops as a statement).
@@ -1676,14 +1678,14 @@ base/rs.t	41	0	26	15	DIFF		0
 base/term.t	7	0	7	0	OK		0
 base/translate.t	257	0	257	0	OK		0
 base/while.t	4	0	4	0	OK		0
-class/accessor.t	10	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at accessor.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/accessor.t	10	0	1	1	XDIFF	aborted-forms:4: PCL: feature 'class' is not supported, at accessor.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 class/class.t	10	0	0	0	XDIFF	aborted-forms:6: PCL: feature 'class' is not supported, at class.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 class/construct.t	10	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at construct.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 class/destruct.t	4	0	0	0	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 class/field.t	33	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at field.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
-class/inherit.t	19	0	0	1	XDIFF	aborted-forms:7: PCL: feature 'class' is not supported, at inherit.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	1
+class/inherit.t	19	0	1	3	XDIFF	aborted-forms:17: PCL: feature 'class' is not supported, at inherit.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 class/method.t	8	0	0	0	XDIFF	aborted-forms:6: PCL: feature 'class' is not supported, at method.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
-class/phasers.t	3	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at phasers.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/phasers.t	3	0	0	2	XDIFF	aborted-forms:4: PCL: feature 'class' is not supported, at phasers.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 class/threads.t	0	0	0	0	NOTAP	aborted-forms:2: This Perl not built to support threads 	0
 class/utf8.t	4	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "binmode" via package "STDOUT" (perhaps you forgot to load "STD | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 cmd/elsif.t	4	0	4	0	OK		0
@@ -1873,7 +1875,7 @@ op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6
 op/current_sub.t	22	0	10	1	XDIFF	s507c #2691: +2 (__SUB__ in no sub is undef under the feature, `use v5.15` included; the two expected rows left by --bless-rows of this file alone; the 1 left = `+()=__SUB__`, the 11 missing = __SUB__ in a BEGIN block aborts the forms) | aborted-forms:3: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)	0
 op/dbm.t	5	0	0	0	DIFF		0
 op/decl-refs.t	402	0	55	152	DIFF	aborted-forms:2: ParserN TODO: state outside a block-level declaration at (eval N) line N. 	0
-op/defer.t	28	0	4	8	XDIFF	aborted-forms:13: Undefined subroutine &main::defer called | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	0
+op/defer.t	28	0	6	6	XDIFF	aborted-forms:13: PCL: defer blocks are not supported, at defer.t line N  | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	0
 op/defined.t	5	0	5	0	OK		0
 op/defins.t	27	0	27	0	OK		0
 op/delete.t	56	0	53	3	DIFF		0

@@ -18,14 +18,22 @@
 # (the file-level reason covers it wholesale, as before #185).  It must be
 # hand-placed and justified by a MEASUREMENT that the row set is
 # nondeterministic; --bless-rows never invents it and never overwrites it.
+class/accessor.t	$o->a accessor
+class/accessor.t	$o->a accessor in scalar context
+class/accessor.t	$o->h accessor
+class/accessor.t	$o->h accessor in scalar context
+class/accessor.t	$o->s accessor
 class/accessor.t	*summary*
+class/accessor.t	Failure from argument to accessor
+class/accessor.t	Failure from lack of original name accessor
+class/accessor.t	Reader accessor fails with argument
+class/accessor.t	accessor with altered name
 class/class.t	*summary*
 class/construct.t	*summary*
 class/destruct.t	*summary*
 class/field.t	*summary*
 class/inherit.t	*summary*
 class/inherit.t	:isa attribute trims whitespace
-class/inherit.t	:isa() version test can throw
 class/inherit.t	@Testcase1B::ISA is set correctly
 class/inherit.t	Constructor params passed through to superclass
 class/inherit.t	Exception thrown from :isa version test
@@ -44,7 +52,9 @@ class/inherit.t	__CLASS__ yields correct class name for subclass
 class/inherit.t	__CLASS__ yields runtime instance class name
 class/inherit.t	hierarchical base class loaded
 class/method.t	*summary*
-class/phasers.t	*summary*
+class/phasers.t	$self is set correctly inside ADJUST blocks
+class/phasers.t	both ADJUST blocks run in order
+class/phasers.t	value of __CLASS__ in ADJUST block
 class/threads.t	*no-log*
 class/utf8.t	*summary*
 cmd/for.t	[perl #78194] Lone C-style for in a block
@@ -791,8 +801,6 @@ op/defer.t	defer block still runs during exception unwind
 op/defer.t	defer blocks happen after the main body
 op/defer.t	defer blocks happen in LIFO order
 op/defer.t	defer blocks run inside do { }
-op/defer.t	goto backwards within defer {} is permitted
-op/defer.t	goto forwards within defer {} is permitted
 op/do.t	*extra* do subname() called
 op/do.t	*extra* do subname(arg) called
 op/do.t	*summary*
