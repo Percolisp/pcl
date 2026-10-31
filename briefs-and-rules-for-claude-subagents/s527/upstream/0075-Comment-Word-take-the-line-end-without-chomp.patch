@@ -1,0 +1,71 @@
+From 9b10612698ec3e5f67482a26440a69ca45cd7572 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:00:41 +0200
+Subject: [PATCH 75/85] Comment, Word: take the line end without chomp
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+chomp removes $/, not "\n": a PPI::Tokenizer used directly by a caller
+in slurp mode ($/ undefined) left the newline inside a comment and
+inside the rest of an __END__ / __DATA__ line.  PPI::Document already
+guards the parse (3a08ed1f); this fixes it at the tokens, so a
+standalone tokenizer reads the same tokens too.  Fixes PCL §13.
+---
+ lib/PPI/Token/Comment.pm | 2 +-
+ lib/PPI/Token/Word.pm    | 4 ++--
+ t/ppi_bugs_pcl.t         | 3 +--
+ 3 files changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Token/Comment.pm b/lib/PPI/Token/Comment.pm
+index 195b7aef..60e9bfa0 100644
+--- a/lib/PPI/Token/Comment.pm
++++ b/lib/PPI/Token/Comment.pm
+@@ -86,7 +86,7 @@ sub __TOKENIZER__commit {
+ 
+ 	# Get the rest of the line
+ 	my $rest = substr( $t->{line}, $t->{line_cursor} );
+-	if ( chomp $rest ) { # Include the newline separately
++	if ( $rest =~ s/\n\z// ) { # Include the newline separately (not chomp: $/ may be anything)
+ 		# Add the current token, and the newline
+ 		$t->_new_token('Comment', $rest);
+ 		$t->_new_token('Whitespace', "\n");
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 9bcc9b1a..fc269aff 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -237,7 +237,7 @@ sub __TOKENIZER__commit {
+ 		my $end_rest = substr( $t->{line}, $t->{line_cursor} );
+ 		$t->{line_cursor} = length $t->{line};
+ 		if ( $end_rest =~ /\n$/ ) {
+-			chomp $end_rest;
++			$end_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
+ 			$t->_new_token( 'Comment', $end_rest ) if length $end_rest;
+ 			$t->_new_token( 'Whitespace', "\n" );
+ 		} else {
+@@ -261,7 +261,7 @@ sub __TOKENIZER__commit {
+ 		my $data_rest = substr( $t->{line}, $t->{line_cursor} );
+ 		$t->{line_cursor} = length $t->{line};
+ 		if ( $data_rest =~ /\n$/ ) {
+-			chomp $data_rest;
++			$data_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
+ 			$t->_new_token( 'Comment', $data_rest ) if length $data_rest;
+ 			$t->_new_token( 'Whitespace', "\n" );
+ 		} else {
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 76bfa4fd..4b87f8eb 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1709,8 +1709,7 @@ TODO: {
+ # §13, the root: a PPI::Tokenizer used on its own (no PPI::Document, no
+ # Lexer) reads the same tokens whatever the caller's $/ is.  The comment and
+ # __END__ arms took their line end with chomp, which removes $/.
+-TODO: {
+-    local $TODO = 'PCL §13: tokenization of a trailing __END__/__DATA__ section depends on $/';
++{
+     my $src = "# c\nx; # d\n__END__ e\nfoo\n";
+     my $tokens = sub {
+         my $tz = PPI::Tokenizer->new( \$src );
+-- 
+2.53.0
+

@@ -67,3 +67,20 @@ tests, then the fix", PPI's suite green after every commit (plain and
   reason is in the commit message and in PR-Y.md.
 - one test-only commit (`a2fa26a0`): two `for $$$r` rows of t/ppi_bugs_pcl.t
   leave TODO (they pass since PR-Q).
+
+## s527d (2026-10-31): the branch is now 85 commits, head 40fed036
+
+`0001-*.patch` .. `0085-*.patch` and `pcl-branch.bundle` regenerated from the
+whole branch.  The new groups (letters as `tools/vendor-ppi` assigns them in
+branch order), each "TODO tests, then the fix", PPI's suite green after every
+commit, plain and AUTHOR_TESTING=1:
+**Z** §47 a word in a ternary's middle operand is never a label (the regression
+row for S); **AA** §44 `CORE::__END__` / `CORE::__DATA__` end the code; **X2**
+§13 a standalone tokenizer takes line ends without `chomp` (vendor-ppi files it
+under X, s527c's §13 group; its text is `PR-X2.md`); **AB** §41 `foo::::bar` is
+one name; **AC** §46 `sub 'Hello'_he_said`; **AD** §45 `& {BLOCK}` / `& $code`
+with a space; **AE** §39 a spaced sigil `$ name`; **AF** §9 `@{+}` / `${ + }` /
+`%{-}` as one Magic keeping the braces; **AG** §20 `use experimental 'try'`
+(upstream PR #361's change, credited) + the 5.40 bundle, then `defer` and
+`class` tracked as features; **AH** §14 `<...>` after a statement or map/grep
+block.  t/ppi_bugs_pcl.t: 253 -> 275 rows (twin of PCL's docs/ppi-bug-report.t).

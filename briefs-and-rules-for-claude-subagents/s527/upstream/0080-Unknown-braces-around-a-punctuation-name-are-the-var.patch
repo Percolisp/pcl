@@ -1,0 +1,96 @@
+From 320d7a97744a544babc3919a24fc0732d32c9780 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:15:55 +0200
+Subject: [PATCH 80/85] Unknown: braces around a punctuation name are the
+ variable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+${ + }, @{+} and %{-} are the variables $+, @+ and %- (toke.c
+scan_ident reads the name inside the braces; perl 5.40.3:
+"ab" =~ /(a)/; my @plus = @{+}; print "@plus" prints 1 1), as ${^MATCH}
+already is.  PPI lexed a Cast and a Block holding one Operator.  The
+Magic token keeps the braced text (round-trip), as ${^MATCH} does; only
+a name that is a magic variable with that sigil, and % only where a term
+is expected (after a term %{ is the modulo operator).  Fixes PCL §9 in
+t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Unknown.pm | 25 +++++++++++++++++++++++++
+ t/ppi_bugs_pcl.t         |  3 +--
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index c99b006c..eea464b3 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -173,6 +173,8 @@ sub __TOKENIZER__on_char {
+ 				$t->{class} = $t->{token}->set_class( 'Magic' );
+ 				return 1;
+ 			}
++			return $t->_finalize_token->__TOKENIZER__on_char( $t )
++			  if _braced_punct_magic( $t, '$' );
+ 		}
+ 
+ 		# Must be a cast
+@@ -197,6 +199,9 @@ sub __TOKENIZER__on_char {
+ 			return 1;
+ 		}
+ 
++		return $t->_finalize_token->__TOKENIZER__on_char( $t )
++		  if $char eq '{' and _braced_punct_magic( $t, '@' );
++
+ 		# Is it a nameless arg in a signature?
+ 		if ( $char eq ')' and $t->_in_signature ) {
+ 			$t->{class} = $t->{token}->set_class('Symbol');
+@@ -260,6 +265,9 @@ sub __TOKENIZER__on_char {
+ 			return $t->{class}->__TOKENIZER__on_char( $t );
+ 		}
+ 
++		return $t->_finalize_token->__TOKENIZER__on_char( $t )
++		  if $char eq '{' and _braced_punct_magic( $t, '%' );
++
+ 		# Is it a magic variable?
+ 		if ( $char eq '^' || $MAGIC{ $c . $char } ) {
+ 			$t->{class} = $t->{token}->set_class( 'Magic' );
+@@ -388,6 +396,23 @@ sub __TOKENIZER__on_char {
+ 	PPI::Exception->throw('Unknown value in PPI::Token::Unknown token');
+ }
+ 
++# ${ + }, @{+}, %{-}: braces around a punctuation name are the variable
++# itself, as ${^MATCH} is (toke.c scan_ident reads a name inside the
++# braces, and @{+} IS @+).  A block holding one punctuation character
++# could not be an expression anyway.  The Magic token keeps the braced
++# text.  Called with the cursor on the {; true when it made the token.
++sub _braced_punct_magic {
++	my ( $t, $sigil ) = @_;
++	pos $t->{line} = $t->{line_cursor};
++	return 0 if $t->{line} !~ m/\G(\{[ \t]*([^\w\s{}])[ \t]*\})/gc;
++	my ( $text, $name ) = ( $1, $2 );
++	return 0 if !$MAGIC{ $sigil . $name };
++	$t->{token}->{content} .= $text;
++	$t->{line_cursor} += length $text;
++	$t->{class} = $t->{token}->set_class( 'Magic' );
++	return 1;
++}
++
+ sub _is_cast_or_op {
+ 	my ( $self, $char ) = @_;
+ 	return 1 if $char eq '$';
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 84da85d0..88762cdc 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -149,8 +149,7 @@ sub toks {
+ # spelling, but leaves the punctuation ones as Cast + Block{lone Operator}.  A
+ # deref block holding exactly one Operator token can never be an expression, so
+ # the fold is unambiguous.
+-TODO: {
+-    local $TODO = 'PCL §9: ${ PUNCTUATION } is a variable, but lexes as Cast + Block';
++{
+     my @t = toks('@{+}');
+     ok( !grep(/^PPI::Token::Structure=\{$/, @t),
+         '@{+} should fold to the magic array @+, as @{foo} folds to @foo' )
+-- 
+2.53.0
+

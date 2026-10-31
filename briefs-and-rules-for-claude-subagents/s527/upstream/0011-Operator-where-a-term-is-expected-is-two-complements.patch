@@ -1,7 +1,7 @@
 From 5caa125f6ff52ec2c8610830b22c1983416e7641 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:41:48 +0300
-Subject: [PATCH 11/70] Operator: ~~ where a term is expected is two
+Subject: [PATCH 11/85] Operator: ~~ where a term is expected is two
  complements
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

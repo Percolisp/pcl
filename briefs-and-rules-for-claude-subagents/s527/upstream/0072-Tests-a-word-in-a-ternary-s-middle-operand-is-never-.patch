@@ -1,0 +1,46 @@
+From 2d9122945861d43b48d967cc6eb88d4215e38e8c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 04:55:09 +0200
+Subject: [PATCH 72/85] Tests: a word in a ternary's middle operand is never a
+ label
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+0 ? ref shift : shift is a conditional whose middle operand is ref
+shift (perl 5.40.3: sub f { my $c = 0 ? ref shift : shift; $c } f(5)
+is 5).  PPI 1.291 lexed 'shift :' as a Label; the rule that a label
+stands only where a statement starts (6a5de5c1) already gets it right,
+and this row keeps it so.  Completes PCL §47 (YAML::Tiny's
+ref $_[0] ? ref shift : shift).
+---
+ t/ppi_bugs_pcl.t | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 0876117a..ce52e92b 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 264 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 265 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1699,3 +1699,10 @@ TODO: {
+     ok( grep( $_ eq q{Word='Hello'_he_said}, @t ), q{sub 'Hello'_he_said: the name is one Word} ) or diag "got: @t";
+ }
+ 
++# §47 -- `WORD :` inside a ternary's middle operand is a word and the
++# colon, never a label (a label only where a statement starts):
++# `my $c = 0 ? ref shift : shift` is the second shift.
++{
++    my @t = map { short_class($_) } toks('sub f { my $c = 0 ? ref shift : shift; $c }');
++    ok( !grep( /^Label=/, @t ), '0 ? ref shift : shift: no label in a ternary' ) or diag "got: @t";
++}
+-- 
+2.53.0
+

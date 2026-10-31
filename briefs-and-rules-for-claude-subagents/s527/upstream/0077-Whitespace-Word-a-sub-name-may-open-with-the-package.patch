@@ -1,0 +1,102 @@
+From 45bf106d903b04a76782e57f76a3f3e0d81f9ba4 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:02:14 +0200
+Subject: [PATCH 77/85] Whitespace, Word: a sub name may open with the '
+ package separator
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After sub perl reads a name, and ' is (deprecated, still valid) a
+package separator: sub 'Hello'_he_said { "hi" } defines
+Hello::_he_said (perl 5.40.3 prints hi for Hello::_he_said()).  PPI
+started a single-quoted string at the '.  Only right after the word
+sub, never after ->sub.  Fixes PCL §46 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Whitespace.pm | 19 +++++++++++++++++++
+ lib/PPI/Token/Word.pm       | 17 +++++++++++++++++
+ t/ppi_bugs_pcl.t            |  3 +--
+ 3 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index fa09420c..2a17edf0 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -191,6 +191,19 @@ sub __TOKENIZER__on_line_start {
+ 	1;
+ }
+ 
++# Is the ' at the cursor the start of a sub's NAME (sub 'Hello'_he_said)?
++# Only right after the word sub (not a method named sub), and only when a
++# whole name follows: the separator, then a word, and more parts.
++sub __sub_name_expected {
++	my $t = shift;
++	pos $t->{line} = $t->{line_cursor};
++	return 0 if $t->{line} !~ m/\G'(?!\d)\w/gc;
++	my ( $prev, $before ) = $t->_previous_significant_tokens(2);
++	return 0 if !$prev or !$prev->isa('PPI::Token::Word') or $prev->content ne 'sub';
++	return 0 if $before and $before->isa('PPI::Token::Operator') and $before->content eq '->';
++	return 1;
++}
++
+ sub __TOKENIZER__on_char {
+ 	my $t    = $_[1];
+ 	my $c = substr $t->{line}, $t->{line_cursor}, 1;
+@@ -199,6 +212,12 @@ sub __TOKENIZER__on_char {
+ 	# Do we definitely know what something is?
+ 	return $COMMITMAP{$char}->__TOKENIZER__commit($t) if $COMMITMAP{$char};
+ 
++	# A sub's name may open with the old package separator ':
++	# sub 'Hello'_he_said is sub main'Hello'_he_said (perl reads a name
++	# after sub, toke.c yyl_sub, and ' separates its parts).
++	return 'PPI::Token::Word'->__TOKENIZER__commit_quoted_name($t)
++	  if $char == 39 and __sub_name_expected($t);
++
+ 	# Handle the simple option first
+ 	return $CLASSMAP{$char} if $CLASSMAP{$char};
+ 
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 6fc2f2c8..7cb6a689 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -334,6 +334,23 @@ sub __TOKENIZER__commit {
+ 
+ 
+ 
++# A sub name that opens with the old package separator ' (sub 'Hello'_x):
++# the caller (PPI::Token::Whitespace) has checked that a name follows.
++sub __TOKENIZER__commit_quoted_name {
++	my ( $class, $t ) = @_;
++	pos $t->{line} = $t->{line_cursor};
++	$t->{line} =~ m/\G('(?!\d)\w+(?:(?:'(?!\d)|(?:::)+)\w+)*)/gc
++	  or die "Fatal error... quoted sub name expected";
++	my $word = $1;
++	$t->{line_cursor} += length $word;
++	$t->_new_token( 'Word', $word );
++	if ( $t->{line_cursor} >= $t->{line_length} ) {
++		$t->_finalize_token;
++		return 0;
++	}
++	$t->_finalize_token->__TOKENIZER__on_char($t);
++}
++
+ # Is the current Word really a subroutine attribute?
+ sub __current_token_is_attribute {
+ 	my ( $t ) = @_;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index a156cca3..5f95a354 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1691,8 +1691,7 @@ TODO: {
+ 
+ # §46 -- the old package separator ' may open a sub name:
+ # `sub 'Hello'_he_said { "hi" } print Hello::_he_said()` prints hi.
+-TODO: {
+-    local $TODO = q{PCL §46: the ' package separator in a sub name lexes as a quote};
++{
+     my @t = map { short_class($_) } toks(q{sub 'Hello'_he_said { "hi" }});
+     ok( grep( $_ eq q{Word='Hello'_he_said}, @t ), q{sub 'Hello'_he_said: the name is one Word} ) or diag "got: @t";
+ }
+-- 
+2.53.0
+

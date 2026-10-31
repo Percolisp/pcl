@@ -1,0 +1,49 @@
+From 40c6886d0ce155331f4c8bd12bc6cb64ef9dbf04 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:00:29 +0200
+Subject: [PATCH 74/85] TODO test: a standalone tokenizer's tokens do not
+ depend on $/
+
+PPI::Document already localises $/ around the parse (3a08ed1f); a
+PPI::Tokenizer used on its own still chomps the line end of a comment
+and of the rest of an __END__ line, and chomp removes $/, so in slurp
+mode a comment swallows its newline.
+---
+ t/ppi_bugs_pcl.t | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 91f4d2e4..76bfa4fd 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 265 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 266 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1705,3 +1705,18 @@ TODO: {
+     my @t = map { short_class($_) } toks('sub f { my $c = 0 ? ref shift : shift; $c }');
+     ok( !grep( /^Label=/, @t ), '0 ? ref shift : shift: no label in a ternary' ) or diag "got: @t";
+ }
++
++# §13, the root: a PPI::Tokenizer used on its own (no PPI::Document, no
++# Lexer) reads the same tokens whatever the caller's $/ is.  The comment and
++# __END__ arms took their line end with chomp, which removes $/.
++TODO: {
++    local $TODO = 'PCL §13: tokenization of a trailing __END__/__DATA__ section depends on $/';
++    my $src = "# c\nx; # d\n__END__ e\nfoo\n";
++    my $tokens = sub {
++        my $tz = PPI::Tokenizer->new( \$src );
++        join '|', map { short_class(ref $_) . '=' . $_->content } @{ $tz->all_tokens };
++    };
++    my $plain   = $tokens->();
++    my $slurped = do { local $/; $tokens->() };
++    is( $slurped, $plain, 'a standalone tokenizer: the tokens are the same when $/ is undef' );
++}
+-- 
+2.53.0
+

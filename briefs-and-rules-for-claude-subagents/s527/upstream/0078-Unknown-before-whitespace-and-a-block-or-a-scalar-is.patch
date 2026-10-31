@@ -1,0 +1,59 @@
+From bc7d176bc7bf16209ae27cadbc61b2a182b8355f Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:02:50 +0200
+Subject: [PATCH 78/85] Unknown: & before whitespace and a block or a scalar is
+ the code sigil
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Where a term is expected perl reads & as the code sigil whatever
+follows it (toke.c yyl_ampersand: not XOPERATOR => scan_ident; perl
+5.40.3: & {sub { print "ok\n" }}; prints ok, and & $code(1) calls
+$code).  PPI lexed a bitwise-and Operator and the braces as a block
+statement.  The same decision as &$x without the space (_cast_or_op);
+after a term & stays the operator.  Fixes PCL §45 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Unknown.pm | 11 +++++++++++
+ t/ppi_bugs_pcl.t         |  3 +--
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 13e577c7..dc2fbb80 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -307,6 +307,17 @@ sub __TOKENIZER__on_char {
+ 
+ 		return $self->_as_cast_or_op($t) if $self->_is_cast_or_op($char);
+ 
++		# Where a term is expected & is the code sigil even before
++		# whitespace (toke.c yyl_ampersand: not XOPERATOR => scan_ident),
++		# so & {BLOCK} and & $code call code.
++		if ( $char =~ /\s/ ) {
++			pos $t->{line} = $t->{line_cursor};
++			if ( $t->{line} =~ m/\G\s+[{\$]/gc and _cast_or_op($t) eq 'Cast' ) {
++				$t->{class} = $t->{token}->set_class( 'Cast' );
++				return $t->_finalize_token->__TOKENIZER__on_char( $t );
++			}
++		}
++
+ 		# Probably the binary and operator
+ 		$t->{class} = $t->{token}->set_class( 'Operator' );
+ 		return $t->{class}->__TOKENIZER__on_char( $t );
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 5f95a354..f0d51156 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1683,8 +1683,7 @@ TODO: {
+ # §45 -- `&` where a term is expected is the code sigil even before a
+ # space and a block (toke.c yyl_ampersand): `& {sub { print "ok\n" }};`
+ # prints ok.
+-TODO: {
+-    local $TODO = 'PCL §45: & {BLOCK} with a space is a bitwise and';
++{
+     my @t = map { short_class($_) } toks('& {sub { print "ok\n" }};');
+     is( $t[0], 'Cast=&', '& {BLOCK} at a statement start: & is a Cast' ) or diag "got: @t";
+ }
+-- 
+2.53.0
+

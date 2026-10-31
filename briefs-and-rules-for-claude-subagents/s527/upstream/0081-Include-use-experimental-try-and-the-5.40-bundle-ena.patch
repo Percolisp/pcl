@@ -1,0 +1,94 @@
+From 9e862724e572b5397945df87959447ba9623c4aa Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:16:47 +0200
+Subject: [PATCH 81/85] Include: use experimental 'try' and the 5.40 bundle
+ enable try
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl enables try three ways: use feature 'try', use experimental 'try'
+(which is feature->import) and the :5.40 bundle of use v5.40 / use
+5.040 (perl 5.40.3: each compiles try {} catch ($e) {}).  PPI knew only
+the first, so under the other two try/catch lexed as one statement that
+swallowed the next.  The experimental branch also answered
+signatures => 0 for any argument list, switching off signatures a
+previous line had enabled; it now names only the features it is given
+-- the change of upstream PR #361 (credited).  Fixes PCL §20 in
+t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Statement/Include.pm | 16 +++++++++++-----
+ t/ppi_bugs_pcl.t             |  9 +++------
+ 2 files changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/lib/PPI/Statement/Include.pm b/lib/PPI/Statement/Include.pm
+index 56644a29..ac97081a 100644
+--- a/lib/PPI/Statement/Include.pm
++++ b/lib/PPI/Statement/Include.pm
+@@ -269,9 +269,12 @@ sub feature_mods {
+ 		## versions of it, so e.g. a 5.20 install cannot know about
+ 		## 5.36 features
+ 
+-		# crude proof of concept hack due to above
+-		return { signatures => "perl" }
+-		  if version::->parse($perl_version) >= 5.035;
++		# crude proof of concept hack due to above: the 5.36 bundle has
++		# signatures, the 5.40 bundle try as well (perl 5.40.3:
++		# use v5.40; try {} catch ($e) {} compiles)
++		my $v = version::->parse($perl_version);
++		return { signatures => "perl", try => "perl" } if $v >= 5.039;
++		return { signatures => "perl" } if $v >= 5.035;
+ 	}
+ 
+ 	my $module = $self->module or return;
+@@ -296,8 +299,11 @@ sub feature_mods {
+ 		return { signatures => $v >= 2023 ? "perl" : 0 };
+ 	}
+ 	elsif ( $module eq "experimental" ) {
+-		my $wants_signatures = grep /signatures/, $self->_decompose_arguments;
+-		return { signatures => $wants_signatures ? "perl" : 0 };
++		# use experimental 'try' IS feature->import('try'): it names the
++		# features it enables and says nothing about the others (the
++		# change of upstream PR #361)
++		my @features = grep $known{$_}, $self->_decompose_arguments;
++		return { map +( $_ => $on_or_off ? "perl" : 0 ), @features };
+ 	}
+ 	elsif ( $module eq "Syntax::Keyword::Try" ) {
+ 		return { try => $on_or_off ? "Syntax::Keyword::Try" : 0 };
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 88762cdc..79cf4fe1 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -502,8 +502,7 @@ TODO: {
+ # `use v5.40` / `use 5.040` all enable the same feature in perl.  PPI knows only
+ # the first, so under the other two the construct lexes like the no-pragma case:
+ # ONE unterminated statement that swallows the statement after it.
+-TODO: {
+-    local $TODO = 'PCL §20: Two of perl\'s three ways to enable try are not recognised, so the construct mis-lexes';
++{
+     my $doc = PPI::Document->new(\<<'PERL');
+ use v5.40;
+ try { foo(); } catch ($e) { bar($e); }
+@@ -514,8 +513,7 @@ PERL
+         'a version bundle >= 5.39 should enable try (its bundle contains it)' )
+         or diag "got: " . join(' | ', map { squash($_->content) } @s);
+ }
+-TODO: {
+-    local $TODO = 'PCL §20: Two of perl\'s three ways to enable try are not recognised, so the construct mis-lexes';
++{
+     my $doc = PPI::Document->new(\<<'PERL');
+ use experimental 'try';
+ try { foo(); } catch ($e) { bar($e); }
+@@ -529,8 +527,7 @@ PERL
+ # …and it must not answer about a feature it was not asked about: the
+ # experimental branch returns `signatures => 0` for ANY argument list, so this
+ # turns OFF the signatures the line before switched on.
+-TODO: {
+-    local $TODO = 'PCL §20: Two of perl\'s three ways to enable try are not recognised, so the construct mis-lexes';
++{
+     my $doc = PPI::Document->new(\"use feature 'signatures';\nuse experimental 'try';\n");
+     my (undef, $exp) = @{ $doc->find('PPI::Statement::Include') || [] };
+     my $mods = $exp->feature_mods || {};
+-- 
+2.53.0
+

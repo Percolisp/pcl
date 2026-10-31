@@ -1,0 +1,59 @@
+From a33452b4d4920a3c4da983771eb7fec63ff57f74 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:18:00 +0200
+Subject: [PATCH 83/85] Whitespace: <...> after a statement or map/grep block
+ is a readline
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the } of a block that opens a statement or follows a word (map,
+grep, sort, BEGIN, a compound statement's block) perl expects a term,
+so a closed <...> there is a readline or a glob whatever it holds --
+<op/*>, <$fh>, <~> and <> as well as <WORD>.  The block test is
+_after_statement_block's; after a subscript, a dereference block, do or
+an anonymous sub the < stays the comparison.  The after-a-list-operator
+half (sort <STDIN>) needs to know which words take a list and is not
+covered.  Fixes PCL §14 (the after-a-block rows) in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Whitespace.pm | 9 +++++++++
+ t/ppi_bugs_pcl.t            | 3 +--
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 2a17edf0..c6a1cde8 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -324,6 +324,15 @@ sub __TOKENIZER__on_char {
+ 				# Almost definitely readline
+ 				return 'QuoteLike::Readline';
+ 			}
++
++			# After the } of a block that opens a statement or follows a
++			# word (map { ... } <op/*>, grep { ... } <$fh>) perl expects a
++			# term, so a closed <...> is a readline or a glob, whatever it
++			# holds.  After a subscript's } the < compares.
++			pos $t->{line} = $t->{line_cursor};
++			return 'QuoteLike::Readline'
++			  if $t->{line} =~ m/\G<(?:>|[^<>=\s][^<>]*>)/gc
++			  and $t->_after_statement_block;
+ 		}
+ 
+ 		# Otherwise, we guess operator, which has been the default up
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index dcac61a3..21b17792 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1717,8 +1717,7 @@ TODO: {
+ # or a glob whatever it holds.  perl: my %h; my @l = map { $h{$_}++ } <DATA>
+ # reads DATA.  After a subscript's } or a do block's } (the controls) the
+ # < compares.
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     for my $r (
+         [ 'my @l = map { $h{$_}++ } <op/*>;', 'QuoteLike::Readline=<op/*>',  'a glob after a map block' ],
+         [ 'my @m = grep { 1 } <$fh>;',        'QuoteLike::Readline=<$fh>',   'a readline after a grep block' ],
+-- 
+2.53.0
+

@@ -1,0 +1,62 @@
+From cf13afb5a785b63a5f379ce73d876ae7aa8fcd32 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:00:11 +0200
+Subject: [PATCH 73/85] Word: CORE::__END__ and CORE::__DATA__ end the code
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads CORE::__END__ as __END__ and CORE::__DATA__ as __DATA__
+(toke.c yyl_data_handle; perl 5.40.3: print "x\n"; CORE::__END__ not
+code prints x).  PPI lexed a Word and went on tokenizing the rest of the
+file as code.  Fixes PCL §44 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Word.pm | 10 ++++++----
+ t/ppi_bugs_pcl.t      |  3 +--
+ 2 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 89ed1805..9bcc9b1a 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -220,8 +220,10 @@ sub __TOKENIZER__commit {
+ 			: $t->{class}->__TOKENIZER__on_char($t);
+ 	}
+ 
+-	# Check for the end of the file
+-	if ( $word eq '__END__' ) {
++	# Check for the end of the file.  CORE::__END__ ends it too: perl
++	# reads either spelling as the end of the code (toke.c
++	# yyl_data_handle), so the rest of the file is never code.
++	if ( $word eq '__END__' or $word eq 'CORE::__END__' ) {
+ 		# Create the token for the __END__ itself
+ 		$t->_new_token( 'Separator', $1 );
+ 		$t->_finalize_token;
+@@ -246,8 +248,8 @@ sub __TOKENIZER__commit {
+ 		return 0;
+ 	}
+ 
+-	# Check for the data section
+-	if ( $word eq '__DATA__' ) {
++	# Check for the data section (CORE::__DATA__ is the same)
++	if ( $word eq '__DATA__' or $word eq 'CORE::__DATA__' ) {
+ 		# Create the token for the __DATA__ itself
+ 		$t->_new_token( 'Separator', "$1" );
+ 		$t->_finalize_token;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index ce52e92b..91f4d2e4 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1674,8 +1674,7 @@ TODO: {
+ 
+ # §44 -- CORE::__END__ and CORE::__DATA__ end the code like __END__ and
+ # __DATA__: `print "x\n";\nCORE::__END__\nnot code` prints x.
+-TODO: {
+-    local $TODO = 'PCL §44: CORE::__END__ / CORE::__DATA__ is a Word';
++{
+     for my $m (qw(__END__ __DATA__)) {
+         my @t = map { short_class($_) } toks("print 1;\nCORE::$m\nnot code\n");
+         ok( grep( $_ eq "Separator=CORE::$m", @t ), "CORE::$m is a Separator" ) or diag "got: @t";
+-- 
+2.53.0
+

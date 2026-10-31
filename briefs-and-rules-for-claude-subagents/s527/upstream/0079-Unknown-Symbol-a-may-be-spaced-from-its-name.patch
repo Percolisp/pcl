@@ -1,0 +1,85 @@
+From f780c1254ae58e302f3dc6c45ad35dc68cad7abc Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:04:09 +0200
+Subject: [PATCH 79/85] Unknown, Symbol: a $ may be spaced from its name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl's scan_ident skips whitespace between a sigil and its identifier:
+my $ bits = 5; print $bits prints 5 (perl 5.40.3), and $ x, $ s and
+$ i++ are the variables $x, $s, $i.  PPI lexed a Cast followed by a
+Word, or worse an operator or a substitution.  The Symbol keeps the text
+(round-trip); Symbol::canonical already removes the whitespace, and
+$ _ is the Magic $_.  A name on the next line is not covered.
+Fixes PCL §39 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Symbol.pm  |  4 +++-
+ lib/PPI/Token/Unknown.pm | 14 ++++++++++++++
+ t/ppi_bugs_pcl.t         |  3 +--
+ 3 files changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Token/Symbol.pm b/lib/PPI/Token/Symbol.pm
+index 44d6898f..32703d6d 100644
+--- a/lib/PPI/Token/Symbol.pm
++++ b/lib/PPI/Token/Symbol.pm
+@@ -169,7 +169,8 @@ sub __TOKENIZER__on_char {
+ 
+ 	# Handle magic things
+ 	my $content = $t->{token}->{content};	
+-	if ( $content eq '@_' or $content eq '$_' ) {
++	( my $name = $content ) =~ s/^\$[ \t]+/\$/;    # $ _ is $_
++	if ( $name eq '@_' or $name eq '$_' ) {
+ 		$t->{class} = $t->{token}->set_class( 'Magic' );
+ 		return $t->_finalize_token->__TOKENIZER__on_char( $t );
+ 	}
+@@ -201,6 +202,7 @@ sub __TOKENIZER__on_char {
+ 	my $pattern = qr/
+ 	^(
+ 		[\$@%&*]
++		(?: (?<=\$) [ \t]+ )?	# a $ may be spaced from its name ($ bits)
+ 		(?:
+ 				: (?! : )			# allow single-colon non-magic variables
+ 			|
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index dc2fbb80..c99b006c 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -130,6 +130,20 @@ sub __TOKENIZER__on_char {
+ 			return 1;
+ 		}
+ 
++		# Whitespace may stand between the sigil and the name (toke.c
++		# scan_ident skips it): my $ bits is $bits.  The Symbol keeps the
++		# text; its canonical form drops the whitespace.  $ is never an
++		# operator, so no position test is needed.
++		if ( $char eq ' ' or $char eq "\t" ) {
++			pos $t->{line} = $t->{line_cursor};
++			if ( $t->{line} =~ m/\G([ \t]+)(?=[^\W\d])/gc ) {
++				$t->{token}->{content} .= $1;
++				$t->{line_cursor} += length $1;
++				$t->{class} = $t->{token}->set_class( 'Symbol' );
++				return $t->{class}->__TOKENIZER__on_char( $t );
++			}
++		}
++
+ 		# Is it a nameless arg in a signature?
+ 		my %noname = ( ')' => 1, '=' => 1, ',' => 1 );
+ 		if ( $noname{$char} and $t->_in_signature ) {
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index f0d51156..84da85d0 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1627,8 +1627,7 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+ 
+ # §39 -- whitespace may stand between a sigil and its name (toke.c
+ # scan_ident skips it): `my $ bits = 5; print $bits` prints 5.
+-TODO: {
+-    local $TODO = 'PCL §39: a spaced sigil $ name lexes as Cast + Word';
++{
+     for my $r ( [ 'my $ bits = 5;', 'Symbol=$ bits' ], [ '$ x = 1;', 'Symbol=$ x' ] ) {
+         my ( $code, $want ) = @$r;
+         my @t = map { short_class($_) } toks($code);
+-- 
+2.53.0
+

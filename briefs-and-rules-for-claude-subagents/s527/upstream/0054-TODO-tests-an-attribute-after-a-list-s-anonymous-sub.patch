@@ -1,7 +1,7 @@
 From a7f3847f9715d16eaf5a885046e5d5dcc808f570 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 01:02:12 +0200
-Subject: [PATCH 54/70] TODO tests: an attribute after a list's anonymous sub
+Subject: [PATCH 54/85] TODO tests: an attribute after a list's anonymous sub
  or a declaration
 
 perl reads a word before a colon as a label only where it expects a

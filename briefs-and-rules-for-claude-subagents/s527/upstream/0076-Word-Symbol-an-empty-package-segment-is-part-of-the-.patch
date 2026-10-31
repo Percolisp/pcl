@@ -1,0 +1,71 @@
+From cb213af0596f173a8bd4fdcd3fb9742362b7b3f8 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:01:13 +0200
+Subject: [PATCH 76/85] Word, Symbol: an empty package segment is part of the
+ name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl takes a run of :: inside a name (toke.c scan_word6 / scan_ident;
+perl 5.40.3: sub foo::::bar { 7 } print foo::::bar() prints 7, and
+$foo::::bar is one variable).  PPI split the name at the second ::
+into Word(foo::) + Word(::bar).  Fixes PCL §41 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Symbol.pm | 2 +-
+ lib/PPI/Token/Word.pm   | 4 ++--
+ t/ppi_bugs_pcl.t        | 3 +--
+ 3 files changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Token/Symbol.pm b/lib/PPI/Token/Symbol.pm
+index 612e43b1..44d6898f 100644
+--- a/lib/PPI/Token/Symbol.pm
++++ b/lib/PPI/Token/Symbol.pm
+@@ -197,7 +197,7 @@ sub __TOKENIZER__on_char {
+ 	}
+ 
+ 	# Verify and extract actual full symbol name from sigil to end
+-	my $sep = qr/ (?: :: | '(?!\d) ) /x; # :: and ' are namespace separators
++	my $sep = qr/ (?: (?: :: )+ | '(?!\d) ) /x; # :: (a run of them: foo::::bar) and ' are namespace separators
+ 	my $pattern = qr/
+ 	^(
+ 		[\$@%&*]
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index fc269aff..6fc2f2c8 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -123,7 +123,7 @@ sub __TOKENIZER__on_char {
+ 
+ 	# Suck in till the end of the bareword
+ 	pos $t->{line} = $t->{line_cursor};
+-	if ( $t->{line} =~ m/\G(\w+(?:(?:\'|::)\w+)*(?:::)?)/gc ) {
++	if ( $t->{line} =~ m/\G(\w+(?:(?:\'|(?:::)+)\w+)*(?:::)?)/gc ) {
+ 		my $word = $1;
+ 		# Special Case: If we accidentally treat eq'foo' like
+ 		# the word "eq'foo", then just make 'eq' (or whatever
+@@ -198,7 +198,7 @@ sub __TOKENIZER__commit {
+ 	# Our current position is the first character of the bareword.
+ 	# Capture the bareword.
+ 	pos $t->{line} = $t->{line_cursor};
+-	unless ( $t->{line} =~ m/\G((?!\d)\w+(?:(?:\'|::)\w+)*(?:::)?)/gc ) {
++	unless ( $t->{line} =~ m/\G((?!\d)\w+(?:(?:\'|(?:::)+)\w+)*(?:::)?)/gc ) {
+ 		# Programmer error
+ 		die sprintf "Fatal error... regex failed to match in '%s' when expected", substr $t->{line}, $t->{line_cursor};
+ 	}
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 4b87f8eb..a156cca3 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1647,8 +1647,7 @@ TODO: {
+ 
+ # §41 -- an empty package segment is part of the name (toke.c scan_word6):
+ # `sub foo::::bar { 7 } print foo::::bar()` prints 7.
+-TODO: {
+-    local $TODO = 'PCL §41: a name with an empty package segment is split into two Words';
++{
+     for my $code ( 'sub foo::::bar { 7 }', 'foo::::bar();' ) {
+         my @t = map { short_class($_) } toks($code);
+         ok( grep( $_ eq 'Word=foo::::bar', @t ), "$code: foo::::bar is one Word" ) or diag "got: @t";
+-- 
+2.53.0
+

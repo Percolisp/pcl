@@ -1,0 +1,55 @@
+From b91ced6cc0ad8e5948ebf9407c8d9d124cf9b34e Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:28:38 +0200
+Subject: [PATCH 84/85] TODO tests: use feature / use experimental 'defer' and
+ 'class'
+
+perl 5.36's defer and 5.38's class are switched on like try (use feature
+or use experimental; no version bundle holds them), and a lexer that
+changes how defer { and class NAME lex needs to know they are on.
+Include::feature_mods knows only signatures and try.
+---
+ t/ppi_bugs_pcl.t | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 21b17792..db393dea 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 271 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 275 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1738,3 +1738,24 @@ TODO: {
+         ok( grep( $_ eq 'Operator=<', @t ), "$code: $desc" ) or diag "got: @t";
+     }
+ }
++
++# §20, the rest of the feature set: perl 5.36's `defer` and 5.38's
++# `class` are enabled the same two ways (use feature, use experimental),
++# and a lexer that changes how `defer {` and `class NAME` lex has to know
++# they are on.  perl: use feature 'defer'; defer { print "b\n" } print "a\n"
++# prints a then b.  Neither is in a version bundle.
++TODO: {
++    local $TODO = 'PCL §20: Two of perl\'s three ways to enable try are not recognised, so the construct mis-lexes';
++    for my $r (
++        [ q{use feature 'defer';},      'defer' ],
++        [ q{use experimental 'defer';}, 'defer' ],
++        [ q{use feature 'class';},      'class' ],
++        [ q{use experimental 'class';}, 'class' ],
++    ) {
++        my ( $code, $feature ) = @$r;
++        my $doc = PPI::Document->new( \$code );
++        my ($inc) = @{ $doc->find('PPI::Statement::Include') || [] };
++        my $mods = $inc ? $inc->feature_mods || {} : {};
++        is( $mods->{$feature}, 'perl', "$code enables $feature" );
++    }
++}
+-- 
+2.53.0
+

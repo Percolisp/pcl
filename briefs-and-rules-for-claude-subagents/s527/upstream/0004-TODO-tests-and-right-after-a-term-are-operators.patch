@@ -1,7 +1,7 @@
 From fe5aeb64b09fcd8081aaf8dc9814d85bffd565b5 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:34:26 +0300
-Subject: [PATCH 04/70] TODO tests: % and * right after a term are operators
+Subject: [PATCH 04/85] TODO tests: % and * right after a term are operators
 
 perl -e 'print 7%-3, "\n"' prints -2: after a term the % is modulo, but
 PPI reads %- as the magic hash %-.  Likewise length($k)*length($k)

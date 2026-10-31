@@ -1,0 +1,51 @@
+From 40fed03628f9b5eb916882f88063d1985369cdbd Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 05:29:01 +0200
+Subject: [PATCH 85/85] Include: defer and class are features PPI tracks
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+use feature 'defer' / 'class' and use experimental 'defer' / 'class'
+now answer defer => 'perl' / class => 'perl' from feature_mods, as try
+and signatures do (perl 5.40.3: use feature 'defer'; defer { print
+"b\n" } print "a\n" prints a, b).  Nothing lexes on them yet; this
+is the switch a lexer rule for defer { and class NAME reads.  Completes
+PCL §20 in t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Statement/Include.pm | 4 +++-
+ t/ppi_bugs_pcl.t             | 3 +--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Statement/Include.pm b/lib/PPI/Statement/Include.pm
+index ac97081a..2dd9d7e8 100644
+--- a/lib/PPI/Statement/Include.pm
++++ b/lib/PPI/Statement/Include.pm
+@@ -279,7 +279,9 @@ sub feature_mods {
+ 
+ 	my $module = $self->module or return;
+ 
+-	my %known     = ( signatures => 1, try => 1 );
++	# the features that change how code lexes: defer (5.36) and class (5.38)
++	# are switched on like try, and are in no version bundle
++	my %known     = ( signatures => 1, try => 1, defer => 1, class => 1 );
+ 	my $on_or_off = $type eq "use";
+ 
+ 	if ( $on_or_off
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index db393dea..24d41c6b 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1744,8 +1744,7 @@ TODO: {
+ # and a lexer that changes how `defer {` and `class NAME` lex has to know
+ # they are on.  perl: use feature 'defer'; defer { print "b\n" } print "a\n"
+ # prints a then b.  Neither is in a version bundle.
+-TODO: {
+-    local $TODO = 'PCL §20: Two of perl\'s three ways to enable try are not recognised, so the construct mis-lexes';
++{
+     for my $r (
+         [ q{use feature 'defer';},      'defer' ],
+         [ q{use experimental 'defer';}, 'defer' ],
+-- 
+2.53.0
+

@@ -1,7 +1,7 @@
 From 23ec7b8628f25c39ce77c03c90b620db238b7799 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 21:14:02 +0200
-Subject: [PATCH 29/70] TODO tests: ~~ after a block's } is two complements
+Subject: [PATCH 29/85] TODO tests: ~~ after a block's } is two complements
 
 perl -e 'my $y = 3; my @a = map { $_ } ~~$y; print "@a"' prints 3:
 the } of a block does not end a term, so ~~ there is two bitwise
