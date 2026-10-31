@@ -2,7 +2,7 @@
 
 Main at launch: `26f57064` = `2bf16931` + Fable's s529 notes/briefs commits.  `git log ff5f72b5..main -- Pl cl lib tools baselines vendor` is EMPTY: every rebase is records-only.  Last CODE commit **`ff5f72b5`** (the corpus-diff / emission-ab reference for all three).  Generation **v2-8585** on main (s526w2 carries v2-8688, s527b v2-8785; the second to merge renumbers ABOVE the first).  CI GREEN on both workflows (26f57064).  **THE BOX REBOOTED AGAIN** (uptime 2 min at 00:29): `/tmp` is gone; every worktree's `scratch/` is intact; `HEAVY.holder.1` held a dead pid of s527c's cut gate-set-scan -- cleared by Fable; `HEAVY.queue` entries before 00:30 today are history.  Bare repo `~/pcl-agent-scratch/ppi/PPI.git` `pcl` = **`6a5de5c1`** (s527b's head; main's `vendor/PPI` is still `8955ba30`).
 
-THE USER'S WORD TODAY: **"Please start. Do 3 subtasks at a time."** -- THREE subtasks, all three RESUMES (every deliverable, bar and rule of the ORIGINAL brief stands, amended only by the s529 rulings below):
+THE USER'S WORD TODAY: **three subtasks at a time** -- THREE subtasks, all three RESUMES (every deliverable, bar and rule of the ORIGINAL brief stands, amended only by the s529 rulings below):
 * **s526w2** -- board half 2.  Worktree `.claude/worktrees/agent-a3ad79b740a76bd47`, HEAD `332b34f8`.  Resume brief `s530/resume-s526w2.md`.
 * **s527b** -- the tokenizer rows.  Worktree `.claude/worktrees/agent-a743b493df5814081`, HEAD `8e4e6397`.  Resume brief `s530/resume-s527b.md`.
 * **s527c** -- the Lexer rows.  Worktree `.claude/worktrees/agent-a817916caebc9b6ef`, HEAD `cd7fe4b4`.  Resume brief `s530/resume-s527c.md`.
