@@ -1280,8 +1280,11 @@ sub parse {
         && $term->start() eq '['
         && $i > 0
         && ref($e->[$i-1]) eq 'PPI::Token::QuoteLike::Words';
-    # Typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
-    my $is_typeglob_slot = ref($term) eq 'PPI::Structure::Block'
+    # Typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Subscript
+    # '{SLOT}' (PCL's PPI branch, docs/ppi-upstream-bugs.md §49: a { after a glob
+    # subscripts it).  The glob slot is not a hash element: it is caught before
+    # the X{} handler below.
+    my $is_typeglob_slot = ref($term) eq 'PPI::Structure::Subscript'
         && $term->start() eq '{'
         && $i > 0
         && !$self->is_internal_node_type($e->[$i-1])
@@ -1540,7 +1543,8 @@ sub parse {
 
     if ($self->is_arr_or_hash_braces($term)
         && !$is_kv_slice_block && !$is_kv_arr_constructor
-        && !$is_kv_arr_deref_constructor && !$is_kv_hash_deref_block) {
+        && !$is_kv_arr_deref_constructor && !$is_kv_hash_deref_block
+        && !$is_typeglob_slot) {
       # X[] or X{}
       # #211: with a REAL arrow ($is_reference), a leading scalar-deref cast
       # binds WITH the ref target — `$$rr->{k}` == `(${$rr})->{k}`, deref
@@ -1740,7 +1744,7 @@ sub parse {
         . _dd([ @$e[$i-2 .. $i] ]) . "\n";
     }
 
-    # Handle typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
+    # Handle typeglob slot access: *name{SLOT} — Symbol '*name' + Subscript '{SLOT}'
     # e.g., *_{ARRAY} -> (p-glob-slot (p-make-typeglob "main" "_") "ARRAY")
     if ($is_typeglob_slot) {
       my $glob_id = $self->parse([$pre]);

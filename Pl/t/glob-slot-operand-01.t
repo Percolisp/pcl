@@ -59,7 +59,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -182,4 +182,16 @@ for my $k (qw(SCALAR ARRAY HASH)) { my $v = *$$r{$k}; print "$k ", (defined $v ?
 my $a2 = *$$r{ARRAY}; print "@$a2\n";
 my %h = (k => 4); my $hr = \%h; my $rr = \$hr; my $n = 7;
 print "mul=", $n *$$rr->{k}, " ", $n * ${$hr}{k}, "\n";
+PL
+
+# ---- s527e (§49, #3741 #3964): PCL's PPI makes the {SLOT} of `*NAME{SLOT}` a
+# Subscript (a { after a term), so the chain `*x{HASH}{k}` -- a Block after a
+# Block before, DROPPED as "Fell through" -- reads the element.
+
+both_agree(<<'PL', '§49 *NAME{SLOT} and the chain *NAME{HASH}{k} after it');
+our %gso_x = (a => 1); our @gso_x = (5, 6);
+my $h = *gso_x{HASH}; print $h->{a}, "\n";
+print *gso_x{HASH}{a}, " ", *gso_x{ARRAY}[1], " ", ${*gso_x{HASH}}{a}, "\n";
+sub gso_f { 42 } my $c = *main::gso_f{CODE}; print $c->(), "\n";
+print defined(*gso_x{CODE}) ? "def\n" : "undef\n";
 PL

@@ -768,9 +768,9 @@ not code
    tasks => [3740] },
  { id => 49, kind => 'structure', dump => 'structure',
    title => 'A GLOB SLOT `*NAME{THING}` (`*STDOUT{IO}`, `*x{HASH}`): the `{THING}` is built as a BLOCK, where perl subscripts the glob',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'the `{SLOT}` after a glob symbol `*NAME` built as Block' },
-   fix => { kind => 'handler', handler => 'Pl::PExpr::parse ($is_typeglob_slot read Symbol + Block)' },
+   fix => { kind => 'handler', handler => undef, changed => 'Pl::PExpr::parse: $is_typeglob_slot reads Symbol + Subscript and is caught before the X{} handler (s527e: PPI fixed on the branch; the Block reading is gone)', commit => 'ad60625b', group => 'AA', pr => undef },
    repro => 'our %x = (a => 1); my $h = *x{HASH}; print $h->{a}, "\\n";
 ',
    perl => "1\\n",
@@ -838,9 +838,9 @@ not code
    tasks => [3747] },
  { id => 54, kind => 'structure', dump => 'structure',
    title => 'The dereference block of a glob cast after `require` (`require *{"name"}`) is built as a hash CONSTRUCTOR',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'brace-class', shape => 'the block of `*{` after require built as Constructor (the `use constant {` rule)' },
-   fix => { kind => 'handler', handler => undef },
+   fix => { kind => 'handler', handler => undef, commit => 'ad60625b', group => 'AA', pr => undef },
    repro => 'eval { require *{"\\0a"} }; print $@ ? "died\\n" : "lived\\n";
 ',
    perl => "died\\n",

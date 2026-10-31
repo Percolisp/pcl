@@ -2526,6 +2526,8 @@ over the four populations (s527e M0), the largest single kind.
 
 ## 49. A GLOB SLOT `*NAME{THING}` (`*STDOUT{IO}`, `*x{HASH}`): the `{THING}` is built as a BLOCK  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527e: group AA, commit `ad60625b` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).  PCL's `$is_typeglob_slot` reads the Subscript (the Block reading is gone), so `*x{HASH}{a}` is no longer dropped.
+
 **Minimal repro** (valid perl; perl 5.40.3 prints `1`):
 
 ```perl
@@ -2633,6 +2635,8 @@ method syntax"; the s417 `class NAME ;` refusal).  Task #3747.
 
 ## 54. The dereference block of a glob cast after `require` is built as a hash CONSTRUCTOR  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527e: group AA, commit `ad60625b` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).  PCL had no repair.
+
 **Minimal repro** (valid perl; perl 5.40.3 prints `died`):
 
 ```perl
@@ -2650,6 +2654,8 @@ block).  From `t/op/require_errors.t:256`.
 ---
 
 ## 57. A `{` after a glob symbol is a BLOCK -- the same bug as §49  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527e: group AA, commit `ad60625b` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).
 
 Filed twice: #3741 from the expect-state checker's measurement (s525p) and
 #3964 from s527b's hand-over (s527c).  One rule, one fix and one registry row
