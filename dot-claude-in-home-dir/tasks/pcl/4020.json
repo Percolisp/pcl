@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "Found by s527e (PPI Â§49 review probes).\n\nREPRO (perl 5.40.3 prints stash-z; PCL main and s527e print no-z):\n  *main::{HASH}->{zz} = 5; print exists $main::{zz} ? \"stash-z\\n\" : \"no-z\\n\";\n\nPCL emits (p-gethash-deref (p-glob-slot (p-stash \"main\") \"HASH\") \"zz\"): the HASH slot of the stash glob *main:: comes back :undef, so the deref autovivifies a throwaway hash.  In perl *main::{HASH} is a reference to the stash %main:: itself.  t/op/gv.t:549 and t/uni/gv.t (*slosh::{HASH}->{ISA}=[]) use it.  Layer: runtime (p-glob-slot of a p-stash glob, HASH -> the stash as a hash).  Pre-existing: identical on main c903838f.",
+   "id" : "4020",
+   "status" : "pending",
+   "subject" : "*main::{HASH} (the HASH slot of a STASH glob) is not the stash: *main::{HASH}->{k} = v writes nowhere (silent wrong)"
+}
