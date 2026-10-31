@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **761**
+* names exported: **763**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 761
+* with a machine-readable `Contract:` tail: **71** of 763
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -114,13 +114,14 @@ ir-spec §10 row **command capture** — wantarray-sensitive, exactly like `p-re
 |---|---|---|---|---|---|---|---|---|---|
 | `p-backtick` | function | `(cmd)` | — | — | — | — | — | — | — |
 
-## compiled-regex (2)
+## compiled-regex (3)
 
 ir-spec §10 row **compiled regex (qr)** — a Regexp OBJECT, not a string: it carries its own flags and identity, and stringifies as perl's `(?^flags:SOURCE)` wrapper.  A pattern that is exactly ONE interpolated qr *is* that qr (the outer modifiers are ignored); a qr used as PART of a larger pattern embeds its wrapper verbatim
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `p-qr` | macro | `(&rest args)` | insensitive | none | none | no | no | no | ppcre |
+| `p-qr-from-parts` | macro | `(&rest args)` | insensitive | str | none | no | no | no | ppcre |
 | `p-regex-from-parts` | macro | `(&rest args)` | insensitive | str | none | no | no | no | ppcre |
 
 ## compound-assignment (35)
@@ -453,12 +454,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `to-string` | function | `(val)` | — | — | — | — | — | — | — |
 | `unbox` | function | `(val)` | — | — | — | — | — | — | — |
 
-## call (1)
+## call (2)
 
 *No ir-spec §10 row.*  the code-ref call form
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `p-amp-spread` | macro | `(call)` | insensitive | none | none | no | no | no | none |
 | `p-funcall-ref` | function | `(ref &rest args)` | — | — | — | — | — | — | — |
 
 ## capture-io (3)

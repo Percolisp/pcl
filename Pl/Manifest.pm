@@ -118,6 +118,7 @@ my %OBLIGATION = (
   # engine TIER histogram, read off the `:tier` keyword the literals now carry
   'p-regex'             => 'regex.literal',
   'p-regex-from-parts'  => 'regex.interpolated',
+  'p-qr-from-parts'     => 'regex.interpolated',   # an interpolated qr (#4060)
   'p-qr'                => 'regex.qr',
   'p-subst'             => 'regex.subst',
   'p-tr'                => 'regex.tr',
@@ -178,7 +179,7 @@ my %ELEM_PLACE = map { ($_ => 1) } qw(p-aref p-gethash);
 # The regex-literal heads that carry a `:tier` keyword.  `p-tr` is not one:
 # a transliteration needs no regex engine.
 my %TIER_HEAD = map { ($_ => 1) }
-  qw(p-regex p-qr p-regex-from-parts p-subst);
+  qw(p-regex p-qr p-regex-from-parts p-subst p-qr-from-parts);
 
 # ── Collection ────────────────────────────────────────────────────────────
 

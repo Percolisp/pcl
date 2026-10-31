@@ -296,14 +296,14 @@ my %FAMILY;
   'pack' => [qw(p-pack p-unpack)],
   'extension' => [qw(p-load-extension)],
   'capture-io' => [qw(p-high-capture p-capture-write p-capture-fh)],
-  'call' => [qw(p-funcall-ref)],
+  'call' => [qw(p-funcall-ref p-amp-spread)],
   'oo' => [qw(p-get-class p-method-call p-resolve-invocant p-class-invocant
               p-class-invocant-snapshot p-super-call
               perl-pkg-to-clos-class %pcl-super-indirect)],
   'overload' => [qw(*p-overload-table* p-register-overloads p-find-overload
                     p-call-overload p-overload-strval p-overloaded)],
   'regex' => [qw(p-=~ p-!~ p-subst p-tr p-regex)],
-  'compiled-regex' => [qw(p-regex-from-parts p-qr)],
+  'compiled-regex' => [qw(p-regex-from-parts p-qr p-qr-from-parts)],
   'magic-global' => [qw(@INC %INC %SIG @ARGV $ARGV @_ %_args p-errno-string
                         *p-errno-table*)],
   'context-frame' => [qw(*wantarray* p-list-ctx p-scalar-ctx p-void-ctx
@@ -398,7 +398,7 @@ my @SPEC10_CITED = qw(
   p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map
   p-grep p-wantarray p-scalar p-defined %p-sort-classic %p-push1
   p-=~ p-!~ p-regex p-subst p-tr p-split
-  pcl::p-qr pcl::p-regex-from-parts
+  pcl::p-qr pcl::p-regex-from-parts pcl::p-qr-from-parts
   p-print p-say p-printf p-open p-close p-readline p-eof p-binmode
   p-backtick
   p-ref p-bless p-caller p-can p-isa

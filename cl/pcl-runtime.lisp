@@ -348,7 +348,7 @@
    #:%pcl-to-integer #:%pcl-super-indirect #:%pcl-local-errno-init
    #:%pcl-loop-tag #:p-qr
    ;; Regex
-   #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
+   #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts #:p-qr-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:$10 #:$11 #:$12 #:$13 #:$14 #:$15 #:$16 #:$17 #:$18 #:$19 #:$20
@@ -31863,12 +31863,21 @@ would consume, so it dies naming the stream (rule 12)."
   "The class of a RE-BLESSED ARRAY / CODE referent, keyed by the referent (the
    raw vector or function; #4000).  Weak by key: the entry goes with it.")
 
+(declaim (inline %p-rebless-referent-p))
+(defun %p-rebless-referent-p (v)
+  "Is V a raw referent whose class lives on the REFERENT through
+   *p-rebless-stash* -- an ARRAY vector, a CODE function (#4000) or a qr
+   Regexp struct (#4060, distinct per qr evaluation since then)?  The ONE
+   reading of that kind set, for the writer (p-bless) and the reader."
+  (or (and (vectorp v) (not (stringp v))) (functionp v) (p-regex-match-p v)))
+
 (declaim (inline %p-rebless-class))
 (defun %p-rebless-class (v)
-  "The class a re-bless gave the ARRAY / CODE referent V, or NIL (#4000).
-   Costs one fixnum compare in a program that never re-blessed one."
+  "The class a re-bless gave the ARRAY / CODE / Regexp referent V, or NIL
+   (#4000, #4060).  Costs one fixnum compare in a program that never
+   re-blessed one."
   (and (not (eql *p-reblessed* 0))
-       (or (and (vectorp v) (not (stringp v))) (functionp v))
+       (%p-rebless-referent-p v)
        (gethash v *p-rebless-stash*)))
 
 (defun %p-note-rebless (rv old class)
@@ -32121,8 +32130,9 @@ would consume, so it dies naming the stream (rule 12)."
       ;; above: a RAW stream is the glob VALUE `$$fh` hands back, and perl's
       ;; ref() on that is "" (probed).
       ((and (p-box-p val) (%p-handle-payload-p inner)) "GLOB")
-      ;; Compiled regex (qr//) — ref() returns "Regexp"
-      ((p-regex-match-p inner) "Regexp")
+      ;; Compiled regex (qr//) — ref() returns "Regexp", or the class a bless
+      ;; of the RAW object (an element holding it) put on it (#4060).
+      ((p-regex-match-p inner) (or (%p-rebless-class inner) "Regexp"))
       ;; Not a reference
       (t ""))))
 
@@ -35485,7 +35495,7 @@ would consume, so it dies naming the stream (rule 12)."
                   (setf (gethash :__class__ rv) class-name))
                  ;; An ARRAY / CODE referent re-blessed: on the referent
                  ;; itself, for every other copy (#4000).
-                 ((or (and (vectorp rv) (not (stringp rv))) (functionp rv))
+                 ((%p-rebless-referent-p rv)
                   (%p-note-rebless rv old class-name))))))
        ;; The variable/wrapper write stays as the cache box-set copies
        ;; around (fast "is this an object" checks read it).
@@ -35504,8 +35514,15 @@ would consume, so it dies naming the stream (rule 12)."
          (setf (gethash inner *p-handle-stash*) class-name))
        ;; An ARRAY / CODE referent RE-blessed through this box: on the
        ;; referent itself, for every other copy (#4000).
-       (when (or (and (vectorp inner) (not (stringp inner))) (functionp inner))
+       (when (%p-rebless-referent-p inner)
          (%p-note-rebless inner (and (p-box-p ref) (p-box-class ref)) class-name))
+       ;; A RAW qr object -- an array element or hash value holding the
+       ;; Regexp itself, `bless $a[0], "K"' (#4060): there is no container to
+       ;; stamp, and the box made below is stored nowhere, so the class goes
+       ;; on the referent, where the element's readers find it.
+       (when (and (not (p-box-p ref)) (p-regex-match-p inner))
+         (setf (gethash inner *p-rebless-stash*) class-name)
+         (setf *p-reblessed* 1))
        ;; Array, code, or other ref type - store class on the box
        (if (p-box-p ref)
            (setf (p-box-class ref) class-name)
@@ -37979,6 +37996,29 @@ would consume, so it dies naming the stream (rule 12)."
       (%p-regex-keyword-args 'p-regex-from-parts args '(:pat :flags :tier))
     (declare (ignore tier))
     `(%p-regex-parts ,pat ,(or flags ""))))
+
+(defun %p-qr-from-parts (pattern modifiers)
+  "An INTERPOLATED qr// (task #4060): a FRESH Regexp object per evaluation,
+   as perl's qr makes a new REGEXP referent every time -- `qr/$s/' twice, and
+   `qr/$re/' with $re a qr, are distinct references that a bless or a
+   re-bless through one cannot reach through the other.  %p-regex-parts
+   hands back the cached match op (or the operand qr itself); this copies
+   it, keeping its %COMPILED cache (immutable, so sharing it is safe -- no
+   pattern is compiled twice) and dropping the derived-op alist, which
+   belongs to the struct it was built on."
+  (let ((fresh (copy-p-regex-match (%p-regex-parts pattern modifiers))))
+    (setf (p-regex-match-%op-variants fresh) nil)
+    fresh))
+
+(defmacro p-qr-from-parts (&rest args)
+  "An INTERPOLATED qr// literal: (p-qr-from-parts :pat FORM :flags LETTERS
+   :tier :dynamic) -- p-regex-from-parts's pattern, a fresh Regexp object
+   per evaluation (task #4060).
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=ppcre"
+  (multiple-value-bind (pat flags tier)
+      (%p-regex-keyword-args 'p-qr-from-parts args '(:pat :flags :tier))
+    (declare (ignore tier))
+    `(%p-qr-from-parts ,pat ,(or flags ""))))
 
 (defmacro p-subst (&rest args)
   "An s/// literal: (p-subst :pat PATTERN|FORM :rep TEXT|LAMBDA :flags LETTERS

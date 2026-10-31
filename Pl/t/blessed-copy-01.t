@@ -24,8 +24,10 @@
 # copy shows through every copy; PCL records the new class on the referent
 # (*p-rebless-stash*).  NOT asserted (filed #4061): a copy taken BEFORE the
 # referent's first bless, and a fresh `\@a` / `\&f` after `bless \@a`.  The
-# #4001 row: a blessed qr// in an element keeps its class (a re-bless of a
-# qr object is #4060).
+# #4001 row: a blessed qr// in an element keeps its class.  The #4060 row
+# (s530c): every qr evaluation is a distinct Regexp, so a qr re-bless follows
+# the #4000 referent rule (row 3 of its probe -- a copy taken before the
+# FIRST bless -- is #4061's and not asserted).
 
 use v5.30;
 use strict;
@@ -44,7 +46,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub run_cl {
     my ($code) = @_;
@@ -235,4 +237,37 @@ PL
 11 K
 12 K
 13 K
+OUT
+
+test_cl('every qr// evaluation is a DISTINCT Regexp; a re-bless of one shows through its copies (#4060)',
+        <<'PL', <<'OUT');
+use Scalar::Util qw(refaddr);
+my $r = bless qr/x/, 'K'; my $r3 = $r; bless $r, 'L'; print "1 ", ref($r3), "\n";
+my @l = ($r); bless $r, 'M'; print "2 ", ref($l[0]), "\n";
+my %h = (k => qr/h/); bless $h{k}, 'K'; print "4 ", ref($h{k}), "\n";
+my @a; push @a, qr/z/ for 1..2; bless $a[0], 'K'; print "5 ", ref($a[0]), " ", ref($a[1]), "\n";
+my $r2 = qr/$r/; print "6 ", ref($r2), "\n";
+my $s = "ab"; my $q1 = qr/$s/; my $q2 = qr/$s/;
+print "7 ", (refaddr($q1) == refaddr($q2) ? "same" : "distinct"), "\n";
+my $q3 = qr/$q1/; print "8 ", (refaddr($q3) == refaddr($q1) ? "same" : "distinct"), "\n";
+bless $q1, 'Z'; print "9 ", ref($q1), " ", ref($q2), " ", ref($q3), "\n";
+print "10 ", ("xaby" =~ $q1 ? "m" : "n"), " $q1 $q3\n";
+my $q4 = qr/$s/i; print "11 ", ("AB" =~ $q4 ? "m" : "n"), " $q4\n";
+my @rs = map { qr/$_/ } qw(a b a); print "12 ", (refaddr($rs[0]) == refaddr($rs[2]) ? "same" : "distinct"), "\n";
+my $cnt = 0; for my $i (1..3) { my $t = qr/a$i/; $cnt++ if "a2" =~ $t } print "13 $cnt\n";
+my $g = 0; my $gs = "aXaXa"; my $gq = qr/$s/; $g++ while "abab" =~ /$gq/g; print "14 $g\n";
+PL
+1 L
+2 M
+4 K
+5 K Regexp
+6 Regexp
+7 distinct
+8 distinct
+9 Z Regexp Regexp
+10 m (?^:ab) (?^:ab)
+11 m (?^i:ab)
+12 distinct
+13 1
+14 2
 OUT

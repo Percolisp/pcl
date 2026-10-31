@@ -954,11 +954,14 @@ sub _regex_literal_form {
   # The EXTENDED flag decides what a `#` is to the interpolation scanner
   # (task #3856): the op's trailing modifiers, never an inline (?x).
   my $x = ($flags // '') =~ /x/ ? 1 : 0;
+  # A run-time pattern's head: an interpolated qr is a FRESH Regexp object per
+  # evaluation (p-qr-from-parts, task #4060), a match op is not.
+  my $dyn_head = $is_qr ? 'pcl::p-qr-from-parts' : 'pcl::p-regex-from-parts';
   if (my $cm = $self->_regex_case_mod_pattern($pattern, $delim, $node, $x)) {
     if (!ref $cm->[0]) {
       $pattern = $cm->[0];
     } else {
-      return ['pcl::p-regex-from-parts',
+      return [$dyn_head,
               ':pat',   $cm->[0],
               ':flags', _cl_string_literal_form($flags),
               ':tier',  ':dynamic'];
@@ -968,7 +971,7 @@ sub _regex_literal_form {
     # An interpolated pattern is not known until run time, so the TIER is a
     # run-time question for a target: `:dynamic` is a declared absence, never
     # a guess (Pl::RegexTier's header).
-    return ['pcl::p-regex-from-parts',
+    return [$dyn_head,
             ':pat',   $self->_gen_interp_regex_pattern($pattern, $x),
             ':flags', _cl_string_literal_form($flags),
             ':tier',  ':dynamic'];
