@@ -10,6 +10,7 @@ behaviours still run, matched by the declarative skip registry
 (`cl/skip-registry.lisp`), which is why `perl-tests/*.t` stays
 byte-identical to perl's own test files ([`test-skip-registry.md`](test-skip-registry.md)).
 
+<a id="ns-how-to-read"></a>
 ## How to read an entry
 
 Every entry has the same shape: **Perl behaviour** → **PCL behaviour** →
@@ -23,12 +24,26 @@ says how permanent it is:
 | **[PARTIAL]**, **[INTERIM]** | **half there.** The common spelling works; the entry says which one does not. |
 | **[RESOLVED]**, **[IMPLEMENTED]** | **no longer a limitation.** Kept so the history and the test rows stay traceable. |
 
+> **Every section has a STABLE ID** (s531b, Fable ruling s531 #5): the
+> `<a id="ns-..."></a>` line above its heading.  A failing row that this
+> section explains cites it as `NS:<id>` in its cause
+> ([`failure-cause-classes.md`](failure-cause-classes.md), "The grammar"),
+> and `Pl/t/verdict-register-01.t` checks that every cited id exists.  The id
+> is assigned by the section's author when the section is written and NEVER
+> changes with the heading text (the Index's links below follow the heading
+> and do); a split keeps the parent's id; a section that stops being a
+> limitation keeps its id with `<!-- RETIRED -> <successor id> -->` (or a bare
+> `<!-- RETIRED -->`) after the anchor, and a cause citing a retired id is
+> stale, like one citing a closed task.  `tools/ns-ids.pl --list | --check` is
+> the one reader.
+
 > **A note on citations.** Entries that cite `docs/fable-answers-sNNN.md` name
 > a design-review record removed from the tree in s440; the ruling itself is
 > indexed in [`DECIDED.md`](DECIDED.md), and the record is readable from
 > history (`git show 959bf43:docs/fable-answers-sNNN.md`).  `sNNN` names a
 > working session, `#NNN` an internal task.
 
+<a id="ns-ruled-refusal-shape"></a>
 ### The shape of a ruled refusal (RULED s465 by the USER; task #1037)
 
 A handful of entries below are **refusals**: PCL recognises the construct,
@@ -65,6 +80,7 @@ above 64k characters](#a-single-generated-top-level-form-above-64k-characters)
 [eval](#string-eval-ending-in-an-unconvertible-declaration) refusals (the unit
 is the eval, which is what perl's compile error covers too).
 
+<a id="ns-short-list"></a>
 ## The short list
 
 The handful most likely to matter to a program that is otherwise portable:
@@ -78,8 +94,10 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`format` / `write`](#format--write-report-formatting) and [source filters](#source-filters-filterutilcall-filtersimple-use-switch-).
 * [Live symbol-table hashes `%Foo::`](#live-symbol-table-hashes-main-foo--deferred--see-roadmap) — keys/exists, sub and variable deletes and `*A:: = *B::` work; other writes do not.
 
+<a id="ns-index"></a>
 ## Index
 
+<a id="ns-index-values"></a>
 ### Values, scalars and the data model
 
 * [Boolean REFERENCE identity and read-only booleans (`\!0`)](#boolean-reference-identity-and-read-only-booleans-0)
@@ -94,6 +112,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`use integer` — large shift / overflow edge cases](#use-integer--large-shift--overflow-edge-cases) — pointer into the section above
 * [Hex floating-point literals (`0x1.8p+1`)](#hex-floating-point-literals-0x18p1)
 
+<a id="ns-index-strings"></a>
 ### Strings and Unicode
 
 * [Unicode semantics differences](#unicode-semantics-differences) — and its four sub-cases:
@@ -106,6 +125,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Unicode properties PCL does not generate](#unicode-properties-pcl-does-not-generate-s496a-task-2060) — `\p{ea=W}` `\p{lb=AL}` `\p{nv=1}` … die with perl's own "Can't find" text
 * [Encode: encodings with no codec, and the out-of-scope sub-modules](#encode-encodings-with-no-codec-and-the-out-of-scope-sub-modules-task-2946) — big5, euc-kr, iso-2022-* … die `Unknown encoding`; Encode::Guess, MIME-Header, Encode::Encoder are absent
 
+<a id="ns-index-regexes"></a>
 ### Regexes
 
 * [Regex code blocks: `(?{code})` and `(??{code})`](#regex-code-blocks-code-and-code)
@@ -119,6 +139,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Regex control verbs: `(*SKIP)`, `(*FAIL)`, `(*MARK:name)`, `(*PRUNE)`, …](#regex-control-verbs-skip-fail-markname-prune-)
 * [Regex escapes that are still passed through untranslated](#regex-escapes-that-are-still-passed-through-untranslated)
 
+<a id="ns-index-subs"></a>
 ### Subroutines, arguments and closures
 
 * [`@_` argument aliasing — PARTIAL](#_-argument-aliasing--partial-plain-my-lexicals-only)
@@ -132,6 +153,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [A lexical sub (`my sub NAME`) reached from outside the token stream](#a-lexical-sub-my-sub-name-reached-from-a-place-that-is-not-the-token-stream)
 * [Lazy argument evaluation / `$SIG{__WARN__}` side effects during argument build](#lazy-argument-evaluation--sig__warn__-side-effects-during-argument-build)
 
+<a id="ns-index-control-flow"></a>
 ### Control flow
 
 * [Computed goto (`goto EXPR`)](#computed-goto-goto-expr)
@@ -139,6 +161,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`defer { … }` blocks — DEFERRED](#defer----blocks--deferred--implementable-not-rejected)
 * [An unlabelled `last`/`next`/`redo` through an indirect call, a string eval, or across compilation units](#an-unlabelled-lastnextredo-through-an-indirect-call-a-string-eval-or-across-compilation-units) — INTERIM, owner #1022 half (b)
 
+<a id="ns-index-oo"></a>
 ### Objects and OO
 
 * [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
@@ -148,6 +171,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`tie` on a filehandle — announced, not silent](#tie-on-a-filehandle--announced-not-silent-scalar-array-and-hash-tie-work)
 * [`mro` pragma — DFS default, ordering switch, full API](#mro-pragma--dfs-default-ordering-switch-and-full-api)
 
+<a id="ns-index-packages"></a>
 ### Packages, globs and the symbol table
 
 * [Live symbol-table hashes (`%main::`, `%Foo::`) — DEFERRED](#live-symbol-table-hashes-main-foo--deferred--see-roadmap)
@@ -158,6 +182,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [A SYMBOLIC spelling of a package variable does not demote an identity-promoted lexical](#a-symbolic-spelling-of-a-package-variable-does-not-demote-an-identity-promoted-lexical-470)
 * [`undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it](#undef-glob-leaves-an-empty-aggregate-slot-where-perl-removes-it--a-read-does-not-re-vivify-it-and-a-write-is-noticed-at-the-next-read-1117)
 
+<a id="ns-index-compile-model"></a>
 ### The compile model, `eval` and pragmas
 
 * [Context propagation into string eval](#context-propagation-into-string-eval)
@@ -171,6 +196,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [A sub or prototype that only BEGIN-time code installs does not change the FILE's parse (the detector reports it)](#a-sub-or-prototype-that-only-begin-time-code-installs-does-not-change-the-files-parse-the-detector-reports-it)
 * [Source filters (`Filter::Util::Call`, `Filter::Simple`, …)](#source-filters-filterutilcall-filtersimple-use-switch-)
 
+<a id="ns-index-errors"></a>
 ### Errors, warnings and diagnostics
 
 * [Error message text and format](#error-message-text-and-format)
@@ -179,6 +205,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation](#sig__die__-and-sig__warn__-handler-invocation)
 * [Warnings-gated diagnostics are absent (`use warnings` is not modelled)](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled)
 
+<a id="ns-index-builtins"></a>
 ### Built-ins, I/O and the OS
 
 * [`format` / `write` report formatting](#format--write-report-formatting)
@@ -203,6 +230,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Builtins ruled out: SysV IPC, `syscall`, `ioctl`, `chroot`, `dbmopen`, `dump`](#builtins-ruled-out-sysv-ipc-syscall-ioctl-chroot-dbmopen-dump)
 * [Perl's command-line switches: what `pcl` does not do](#perls-command-line-switches-what-pcl-does-not-do-s506f) — taint, `-d`/`-u`, `-C` i/o scope, a `#!` without `perl`
 
+<a id="ns-index-internals"></a>
 ### Perl's own internals, and C extensions
 
 * [`Internals::*` C-level introspection](#internals-c-level-introspection)
@@ -210,6 +238,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [DynaLoader / XS binary extensions](#dynaloader--xs-binary-extensions)
 * [`caller()` fidelity — DEFERRED for now (task #233)](#caller-fidelity--deferred-for-now--task-233) — the whole family: 3-vs-4 fields, filename/line, `$0`, `#line`, frame hiding, `CORE::GLOBAL::caller`; USER 2026-09-17
 
+<a id="ns-index-no-longer"></a>
 ### No longer limitations — kept for the record
 
 * [Bare `if` with empty true branch — RESOLVED](#bare-if-with-empty-true-branch--resolved-on-the-default-v2-pipeline)
@@ -218,6 +247,7 @@ The handful most likely to matter to a program that is otherwise portable:
 
 ---
 
+<a id="ns-boolean-ref-identity"></a>
 ## Boolean REFERENCE identity and read-only booleans (`\!0`)
 
 **The VALUE identity half is IMPLEMENTED (s517a, #3242):** every boolean
@@ -254,6 +284,7 @@ global constant table besides.
 
 ---
 
+<a id="ns-literal-writable-in-foreach"></a>
 ## A LITERAL reached through `sort` / `reverse` / `grep` in a `foreach` list is writable
 
 **Mostly IMPLEMENTED since s497b (tasks #1391 / #2103)**: a literal in the
@@ -279,6 +310,7 @@ every call with a literal argument, sized in #1391, not a Scalar::Util fix.
 
 ---
 
+<a id="ns-raw-topic-for-range"></a>
 ## A raw-topic `for (A..B)` loop: user code that WRITES the global `$_` is not seen by the body
 
 When the body of `for (A..B) BLOCK` (or the statement-modifier form) cannot
@@ -297,6 +329,7 @@ and restores perl's answer.
 
 ---
 
+<a id="ns-weaken-no-free"></a>
 ## Weak references: `weaken` sets the flag, it does not free (s500a)
 
 **Perl behaviour:** `weaken($ref)` makes that SCALAR's reference not count, so
@@ -315,6 +348,7 @@ isweak stays false).  Same family as *`DESTROY` called by garbage collector*.
 
 ---
 
+<a id="ns-readonly-undef-stash"></a>
 ## Read-only constants via `\undef` stash tricks
 
 **Perl behaviour:** `BEGIN { $::{z} = \undef }` creates a constant slot in the
@@ -343,6 +377,7 @@ where it should croak — **task #911**.
 
 ---
 
+<a id="ns-live-stash-hashes"></a>
 ## Live symbol-table hashes (`%main::`, `%Foo::`)  [DEFERRED — see roadmap]
 
 **Perl behaviour:** `%main::` (and any `%Pkg::`) is a live view of the package
@@ -417,6 +452,7 @@ typeglob slots are the fiddly remainder.
 
 ---
 
+<a id="ns-caller-fidelity"></a>
 ## `caller()` fidelity  [DEFERRED for now — task #233]
 
 **USER decision (2026-09-17, s488): deferred, "for now".**  The whole
@@ -456,6 +492,7 @@ Listed in the README roadmap under "planned, not rejected".
 
 ---
 
+<a id="ns-error-text"></a>
 ## Error message text and format
 
 **Perl behaviour:** Perl's compile-time and runtime errors have specific,
@@ -505,6 +542,7 @@ nothing else:
 
 ---
 
+<a id="ns-error-location"></a>
 ## Error messages: no "at FILE line N" location info
 
 **Perl behaviour:** Die/warn/croak messages append `" at FILE line N.\n"` when
@@ -524,6 +562,7 @@ exact `" at FILE line N"` format (e.g. `warn.t`, `die.t`, `chop.t`).
 
 ---
 
+<a id="ns-unicode-semantics"></a>
 ## Unicode semantics differences
 
 PCL uses SBCL's native Unicode strings and CL-PPCRE's regex engine.  These
@@ -662,6 +701,7 @@ diverge from Perl in several respects:
 `@chars` loop generating `start=N end=N` tests, the `pack('U',0)` utf8-NUL
 tests) are commented out.
 
+<a id="ns-use-bytes"></a>
 ### `use bytes` — byte view of upgraded strings
 
 Perl's `use bytes` makes string ops (including `sprintf %vd`) see the UTF-8
@@ -684,6 +724,7 @@ ARTIFICIALLY upgraded with `utf8::upgrade` (`"\xa3\xff"` → perl 4, PCL 2).
 `bytes::substr`/`chr`/`ord`/`index`/`rindex` are absent and occur nowhere in
 perl's `t/`, `perl-tests/`, `lib/` or `cpan-tests/`.
 
+<a id="ns-above-10ffff"></a>
 ### Code points above U+10FFFF (perl's extended UTF-8)
 
 **Perl behaviour:** perl can hold and encode code points *beyond* Unicode's
@@ -747,6 +788,7 @@ populations (measured s422 over perl-tests/, perl's `t/`, `lib/**` and
 cpan-tests/modules — 1205 files): `t/re/pat.t` (8) and `t/uni/variables.t`
 (1, `"\x{11_1111}"`); `perl-tests/`, `lib/` and the CPAN dists have none.
 
+<a id="ns-quote-delimiters"></a>
 ### A quote-like literal whose delimiters the compiler cannot read
 
 `Pl::ExprToCL::convert_perl_string_form` recognises `'…'`, `"…"`, `q…`, `qq…`
@@ -772,12 +814,14 @@ SBCL's reader refused the file, but different content would have READ as CL
 and RUN as garbage.  That is the #138 family one level worse than a drop, and
 rule 12 says the sin is the silence.
 
+<a id="ns-use-vn-warnings"></a>
 ### `use vN` does not toggle default warnings
 
 Perl ≥ 5.35 as a `use VERSION` target enables warnings by default in that
 lexical scope (`op/ver.t` test 54).  PCL treats `use v5.x` purely as a
 version check.
 
+<a id="ns-control-char-globs"></a>
 ### Control-character glob names ("Mordor" v-strings)
 
 `*{"\3"} = *DATA; readline v3` — aliasing a glob under a control-character
@@ -787,6 +831,7 @@ names.
 
 ---
 
+<a id="ns-unicode-case-folding"></a>
 ## Unicode case folding and case mapping — [DEFERRED] (RULED s465, owner #1036)
 
 **Perl behaviour.** `lc`/`uc`/`ucfirst`/`lcfirst`/`fc` and `/i` matching
@@ -825,6 +870,7 @@ statuses DIFF-with-0-rows / XDIFF); the sweep's `lc.t` shortfall (85 of
 2,662 planned rows produced since s496a restored its three `\p{IsWord}` rows) is in this class too.  See task #1036 and
 `docs/plan-test-audit-s464.md` §2d.
 
+<a id="ns-unicode-properties"></a>
 ## Unicode properties PCL does not generate (s496a, task #2060)
 
 **Perl behaviour.** `\p{…}` accepts every property in perl's Unicode tables,
@@ -858,6 +904,7 @@ lists again for no program we have seen.  Adding one is a one-line change to
 (`\p{isgc=punct}`, while `\p{Isgc=Punct}` and `\p{isword}` work); PCL's loose
 matching lowercases first and so ACCEPTS it — valid-input only (principle 9).
 
+<a id="ns-encode-codecs"></a>
 ## Encode: encodings with no codec, and the out-of-scope sub-modules (task #2946)
 
 `lib/Encode.pm` (s513i) converts through the runtime's codec table — the one
@@ -880,6 +927,7 @@ row): the UTF-8 flag (#1389), a read-only source, the croak location (#233),
 the in-place remainder through a raw slot (#3060), and code points above
 U+10FFFF (the host's `char-code-limit`).
 
+<a id="ns-sig-die-warn"></a>
 ## `$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 
 **IMPLEMENTED since s497b (task #1554)**: `pl-warn` invokes `$SIG{__WARN__}`,
@@ -897,6 +945,7 @@ are the stub test.pl's unnumbered `isa_ok` (#1953).
 
 ---
 
+<a id="ns-indirect-object-scalar"></a>
 ## Indirect object syntax with a SCALAR invocant (`method $obj LIST`)  [MAYBE LATER — USER decision s425]
 
 **Perl behaviour:** the pre-arrow method call syntax `METHOD INVOCANT LIST`
@@ -956,6 +1005,7 @@ Tasks: #399 (closed with this decision), #381 (open, the mis-compile).
 
 ---
 
+<a id="ns-given-when"></a>
 ## `given`/`when` / smart match (`~~`)
 
 **Perl behaviour:** `given`/`when` (the "switch" statement) and the `~~`
@@ -1006,6 +1056,7 @@ used it are commented out).
 
 ---
 
+<a id="ns-args-aliasing"></a>
 ## `@_` argument aliasing — PARTIAL (plain `my` lexicals only)
 
 **Perl behaviour:** Elements of `@_` are aliases to the caller's actual
@@ -1090,6 +1141,7 @@ guarded by `Pl/t/writes-args-01.t`.
 
 ---
 
+<a id="ns-use-english"></a>
 ## `use English` — everything works except `@ARG` inside a sub
 
 **Perl behaviour:** `English.pm` aliases each English name to its punctuation
@@ -1135,6 +1187,7 @@ path; that is `$0`'s own bug, not English's.
 
 ---
 
+<a id="ns-regex-code-blocks"></a>
 ## Regex code blocks: `(?{code})` and `(??{code})`
 
 **Perl behaviour:** `(?{code})` runs arbitrary Perl code during pattern
@@ -1189,6 +1242,7 @@ gap, with the opposite answer — see the next section.
 
 ---
 
+<a id="ns-regex-recursion"></a>
 ## Regex recursion: `(?R)`, `(?1)`, `(?+1)`, `(?-1)`, `(?&name)`, `(?P>name)` (task #2382)
 
 **Perl behaviour:** a group may call itself or another group recursively —
@@ -1204,6 +1258,7 @@ has the fix options (a bounded expansion that dies at its bound, a
 
 ---
 
+<a id="ns-regex-control-verbs"></a>
 ## Regex control verbs: `(*SKIP)`, `(*FAIL)`, `(*MARK:name)`, `(*PRUNE)`, …
 
 **Perl behaviour:** backtracking control verbs steer the regex engine —
@@ -1247,6 +1302,7 @@ DROPS until #872, honest failures since.
 
 ---
 
+<a id="ns-format-write"></a>
 ## `format` / `write` report formatting
 
 **Perl behaviour:** The `format` keyword defines a report template;
@@ -1305,6 +1361,7 @@ and `t/uni/write.t` carry the unstripped spellings and now refuse.
 
 ---
 
+<a id="ns-internals"></a>
 ## `Internals::*` C-level introspection
 
 **Perl behaviour:** `Internals::SvREADONLY($ref, 1)` marks a scalar
@@ -1349,6 +1406,7 @@ row now pass and are no longer in the skip registry.
 
 ---
 
+<a id="ns-local-elements-globs"></a>
 ## `local` on hash/array elements and typeglobs
 
 **PCL behaviour (supported; two element corners below):**
@@ -1380,6 +1438,7 @@ row now pass and are no longer in the skip registry.
 
 ---
 
+<a id="ns-dollar-zero"></a>
 ## Assigning `$0` does not change the OS process name
 
 **Perl behaviour:** writing `$0` sets both the value read back AND, best effort
@@ -1402,6 +1461,7 @@ UTF8-flagged` and friends), which now pass.  Net magic.t 150/39 → 152/37.
 
 ---
 
+<a id="ns-exec-argv0"></a>
 ## `exec { PROG } LIST` cannot set argv[0]; an emulated `exec` keeps a parent
 
 **Perl behaviour:** the indirect-object form runs PROG with LIST as its WHOLE
@@ -1426,6 +1486,7 @@ would need a small C spawn helper; a program that depends on either is rare
 
 ---
 
+<a id="ns-in-memory-std-handle"></a>
 ## An IN-MEMORY handle opened onto STDOUT/STDERR/STDIN
 
 **Perl behaviour (probed 5.40.3):** `open(STDOUT, '>', \my $buf)` **FAILS** —
@@ -1453,6 +1514,7 @@ exactly — that is what `Pl/t/std-handle-open-01.t` rows 1 and 5 assert.
 
 ---
 
+<a id="ns-use-open-computed"></a>
 ## `use open` with a COMPUTED layer list
 
 **Perl:** the `open` pragma's `import` runs at compile time with whatever its
@@ -1484,6 +1546,7 @@ unimport method* (probed 5.40.3).
 
 ---
 
+<a id="ns-perlio-layers"></a>
 ## PerlIO layer stacks and `PerlIO::get_layers`
 
 **Perl:** a handle carries a STACK of layers (`:unix:perlio:encoding(UTF-8)`),
@@ -1526,6 +1589,7 @@ spelling that decides bytes-vs-characters (`:raw`, `:bytes`, `:utf8`,
 
 ---
 
+<a id="ns-defer"></a>
 ## `defer { … }` blocks  [DEFERRED — implementable, not rejected]
 
 **Perl behaviour:** Perl 5.36 added `defer BLOCK` (`use feature 'defer'`): the
@@ -1559,6 +1623,7 @@ divergence.
 
 ---
 
+<a id="ns-hex-float"></a>
 ## Hex floating-point literals (`0x1.8p+1`)
 
 **Perl behaviour:** Perl 5.22+ accepts C99-style hex float literals:
@@ -1576,6 +1641,7 @@ error).
 
 ---
 
+<a id="ns-xs"></a>
 ## DynaLoader / XS binary extensions
 
 **Perl behaviour:** `DynaLoader` loads compiled `.so`/`.dll` extension
@@ -1600,6 +1666,7 @@ longer in this not-supported bucket.
 
 ---
 
+<a id="ns-begin-installed-parse"></a>
 ## A sub or prototype that only BEGIN-time code installs does not change the FILE's parse (the detector reports it)
 
 **Perl behaviour:** perl parses a statement only after the one before it has
@@ -1643,6 +1710,7 @@ population are in `docs/detector-measurement-s513d.md` §3 (s513d) and §6
 guard (`Pl/t/detect-01.t`); an announcement is a stderr line, so no
 stdout-compared row moves.
 
+<a id="ns-source-filters"></a>
 ## Source filters (`Filter::Util::Call`, `Filter::Simple`, `use Switch`, …)
 
 **Perl behaviour:** A source filter is code installed by a module's `import`
@@ -1703,6 +1771,7 @@ a separate perl binary).  No other test or in-scope module uses a filter.
 
 ---
 
+<a id="ns-fork"></a>
 ## `fork` — SUPPORTED (with two narrow caveats), not a general gap
 
 `fork` **is implemented** via `sb-posix:fork` (`p-fork` in
@@ -1737,6 +1806,7 @@ plumbing, and Perl's `runperl`/`fresh_perl_*` helpers spawn a *separate*
 
 ---
 
+<a id="ns-sig"></a>
 ## %SIG
 
 Since s494g (task #2107) `%SIG` works the way perl's does for every signal a
@@ -1789,6 +1859,7 @@ process BY the signal (the normative contract is `docs/ir-spec.md` §8, "The
 
 ---
 
+<a id="ns-regex-charset-modifiers"></a>
 ## Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`)
 
 **Perl behaviour:** Perl 5.14+ added regex modifiers that select which
@@ -1830,6 +1901,7 @@ matching.
 
 ---
 
+<a id="ns-regex-n-modifier"></a>
 ## Regex `/n` modifier — non-capturing groups
 
 **Perl behaviour:** Perl 5.22+ added the `/n` modifier, which makes the grouping
@@ -1862,6 +1934,7 @@ parts of `t/re/rxcode.t`.
 
 ---
 
+<a id="ns-reset"></a>
 ## `reset()` for one-match `?pattern?` and named captures
 
 **Perl behaviour:** `reset()` clears all `?pattern?` patterns so they can
@@ -1882,6 +1955,7 @@ the `reset` / `?pat?` tests fail).
 
 ---
 
+<a id="ns-current-sub"></a>
 ## `__SUB__` (current sub reference)  [PARTIAL — works; one no-feature residue]
 
 **Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
@@ -1918,6 +1992,7 @@ code relies on that.
 
 ---
 
+<a id="ns-scalar-copy-identity"></a>
 ## Scalar copy does not preserve reference/SV identity
 
 **Perl behaviour:** A Perl scalar variable holds an SV with a stable identity.
@@ -1943,6 +2018,7 @@ through the outer `$c1`).
 
 ---
 
+<a id="ns-computed-goto"></a>
 ## Computed goto (`goto EXPR`)
 
 **Perl behaviour:** `goto EXPR` where EXPR evaluates to a label name (or `&sub`)
@@ -1973,6 +2049,7 @@ site.
 **Rationale:** Runtime-computed `goto LABEL` has no clean CL target (tags are lexical,
 not first-class).  It is rare and discouraged in modern Perl.
 
+<a id="ns-goto-nested-block"></a>
 ### goto into a nested block: the shapes PCL does not lower (#1747, s517a)
 
 A literal `goto LABEL` into an `if`/`elsif`/`else`/`unless` branch or a bare
@@ -1997,6 +2074,7 @@ which is fully supported; a true trampoline loop is not.
 
 ---
 
+<a id="ns-lvalue-subs"></a>
 ## Lvalue subroutines — [DEFERRED] for now (task #930)
 
 **Perl behaviour:** A sub marked `: lvalue` can appear on the left-hand
@@ -2087,6 +2165,7 @@ loses 35 assertions to one drop, because a file-level `my` makes the enclosing
 
 ---
 
+<a id="ns-prototype"></a>
 ## `prototype()` — every definition spelling is registered (s500a); the residue
 
 **Perl behaviour:** `prototype(\&foo)` returns the prototype string for `&foo`
@@ -2141,6 +2220,7 @@ row, `is prototype(\&t000), "\$a"`, would now pass).
 
 ---
 
+<a id="ns-signature-feature-off"></a>
 ## Signature syntax is read as a signature even with the feature off
 
 (The other direction is NOT a divergence since s513f, task #2872: with the
@@ -2181,6 +2261,7 @@ syntax with the feature genuinely off is a construct perl itself warns about.
 
 ---
 
+<a id="ns-bare-if-empty"></a> <!-- RETIRED -->
 ## Bare `if` with empty true branch  [RESOLVED on the default v2 pipeline]
 
 **Perl behaviour:** `sub f { if(1) {} }` returns `undef`.  When the condition is
@@ -2198,6 +2279,7 @@ overwrites it.
 
 ---
 
+<a id="ns-invalid-perl"></a>
 ## Error compatibility for invalid Perl input
 
 **Perl behaviour:** Perl validates code at compile time and produces specific error
@@ -2220,6 +2302,7 @@ is not in effect (commented out).
 
 ---
 
+<a id="ns-pack-pointers"></a>
 ## `pack`/`unpack` — pointer types (`p`/`P`) and 80-bit long double (`D`)
 
 **Perl behaviour:**
@@ -2249,6 +2332,7 @@ handled via `is_valid_error()` skip, so they count as passes once the error is t
 
 ---
 
+<a id="ns-destroy-gc"></a>
 ## `DESTROY` called by garbage collector
 
 > **A staged design exists (s495): `docs/scope-exit-destroy-design.md`** — DESTROY at program exit (sound, small), then scope-owned objects (a static licence, no reference counts).  **USER ruling s495: DESTROY at program exit is on the todo list (#2371); the scope-owned stage is PARKED as not worth the trouble (#2370).**  Nothing of it is built yet; the text below is still what PCL does.
@@ -2285,6 +2369,7 @@ prints the destructor's line and PCL prints nothing.
 
 ---
 
+<a id="ns-escaping-filehandle"></a>
 ## A filehandle that ESCAPES its block is closed at exit, not at its last reference
 
 **Perl behaviour:** a lexical handle is freed — closed and flushed — when its
@@ -2309,6 +2394,7 @@ plus an EMFILE retry) — designed, not built.
 
 ---
 
+<a id="ns-lazy-arg-eval"></a>
 ## Lazy argument evaluation / `$SIG{__WARN__}` side effects during argument build
 
 **Perl behaviour:** In Perl, function arguments are evaluated left-to-right.  If evaluating
@@ -2337,6 +2423,7 @@ the fix requires a fundamentally different argument-passing model.
 
 ---
 
+<a id="ns-refaliasing"></a> <!-- RETIRED -->
 ## Ref aliasing (`use feature 'refaliasing'`)  — IMPLEMENTED s396 (#325)
 
 > **NO LONGER A LIMITATION for the assignment forms.**  `\$x = \$y`,
@@ -2373,6 +2460,7 @@ the fix requires a fundamentally different argument-passing model.
 
 ---
 
+<a id="ns-perl-internals-readouts"></a>
 ## Readouts of perl's own internals: `B::` optree inspection, `re::optimization`, `XS::APItest`
 
 **What this covers:** test code that inspects perl's IMPLEMENTATION rather than
@@ -2396,6 +2484,7 @@ is a member, so `grep -c 'Readouts of perl.s own internals'
 baselines/perl-suite-expected.tsv` IS the population (ruled s397,
 `docs/fable-answers-s396.md` §4).
 
+<a id="ns-re-optimization"></a>
 ### `re::optimization` — the regex engine's internal optimizer report
 
 `re::optimization($qr)` (XS, in perl's `re` module) returns a hashref
@@ -2412,6 +2501,7 @@ while implementing refaliasing: the file's ONLY blocker had been the
 reachable on that basis — with the declaration lowering fixed, the file
 transpiles and runs, and this is what it hits instead.
 
+<a id="ns-constant-folding-readout"></a>
 ### Constant-folding / inlinability and the `:method` attribute readout
 
 `t/op/const-optree.t` asks, for ~40 spellings of `sub () { … }`, whether
@@ -2454,6 +2544,7 @@ kept the file UNEXPLAINED, because a registration would have silenced them.
 
 ---
 
+<a id="ns-triple-deref"></a> <!-- RETIRED -->
 ## Triple (and higher) dereference without braces: `$$$ref`  — RESOLVED s390 (#305)
 
 > **NO LONGER A LIMITATION.**  `$$$ref`, `$$$$ref`, the arrow forms
@@ -2497,6 +2588,7 @@ is covered by `Pl/t/transpile-test-02.t`).
 
 ---
 
+<a id="ns-string-eval-context"></a>
 ## Context propagation into string eval
 
 > **Update (s510c, #2800): the VOID-context gap below is FIXED** -- `eval STRING` is
@@ -2558,6 +2650,7 @@ meaningful value inside `eval "string"`.
 
 ---
 
+<a id="ns-env-tz"></a>
 ## Runtime `$ENV{TZ}` changes not reflected in `localtime`
 
 **Perl behaviour:** Changing `$ENV{TZ}` at runtime causes subsequent `localtime` calls to use
@@ -2574,6 +2667,7 @@ that rarely changes TZ at runtime.
 
 **Affected tests:** `perl-tests/time.t` test 7 — commented out and replaced with `ok(1, 'SKIP: ...')`.
 
+<a id="ns-hash-bucket-stats"></a>
 ## `Hash::Util` bucket statistics
 
 **Perl behaviour:** `Hash::Util::bucket_ratio(\%h)` returns a string like `"3/8"` describing
@@ -2595,6 +2689,7 @@ implementation (not feasible).
 ~225 tests) are commented out.  Remaining failures in `hash.t` are DESTROY-via-GC and tie/weak-ref
 tests, also documented as not-supported.
 
+<a id="ns-max-nested-eval-begin"></a>
 ## `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 
 **Perl behaviour:** This special variable (introduced in Perl 5.38) controls the maximum number
@@ -2610,6 +2705,7 @@ adversarial code.  No CPAN module in scope uses it.
 **Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 is commented out (6 tests).
 
+<a id="ns-tie-filehandle"></a>
 ## `tie` on a filehandle  [IMPLEMENTED s514d (task #2590); what is left]
 
 `tie *FH, 'T'`, `tie *STDOUT, 'T'`, `tie *$fh, 'T'` work: TIEHANDLE, and from
@@ -2651,6 +2747,7 @@ been silent); s473h measured that `t/op/tiearray.t`'s 20 missing rows were
 this entry (#1429's `$NEGATIVE_INDICES`); s501 designed the aggregate half and
 s501t built it (tiearray.t 26/29 -> see the session log).
 
+<a id="ns-sparse-arrays"></a>
 ## Sparse arrays (holes), element aliasing, and SV identity
 
 **Perl behaviour:** A Perl array can have *holes* — index positions that have never
@@ -2717,6 +2814,7 @@ hole-vs-real `exists` after a whole-array copy.
 
 ---
 
+<a id="ns-sort-ab-writes"></a>
 ## Writing to `$a`/`$b` inside a sort comparator
 
 **Perl behaviour:** `sort` binds `$a` and `$b` to the list's elements, and perl's
@@ -2747,6 +2845,7 @@ through a comparator operand.
 
 ---
 
+<a id="ns-block-ends-in-package"></a>
 ## Value of a block whose LAST statement is a `package` declaration
 
 **Perl behaviour:** A `package NAME;` statement is a declaration, not an
@@ -2773,6 +2872,7 @@ probe battery, `Pl/t/transpile-test-04b.t` covers the supported shapes).
 
 ---
 
+<a id="ns-sort-ab-package-switch"></a>
 ## `sort` comparator `$a`/`$b` re-homing after an inline `package` switch
 
 **Perl behaviour:** `$a` and `$b` in a sort comparator are the globals of the
@@ -2798,6 +2898,7 @@ probe battery).
 
 ---
 
+<a id="ns-mro"></a>
 ## `mro` pragma — DFS default, ordering switch, and full API
 
 **Perl behaviour:** `mro` selects a class's method resolution order. Perl's
@@ -2841,6 +2942,7 @@ out of scope until needed. Full design + tiers: `docs/mro-plan.md`.
 
 ---
 
+<a id="ns-split-lhs-limit"></a>
 ## `split` implicit LHS-arity limit (`my ($a,$b) = split …` / `() = split …`)
 
 **Perl behaviour:** When a `split` is *directly* the RHS of a list assignment,
@@ -2875,6 +2977,7 @@ split /,/, $s` → perl `[1]`, PCL `[3]`.  Logged as a deliberate divergence.
 
 ---
 
+<a id="ns-integers-unbounded"></a>
 ## Integers are unbounded: PCL has no 64-bit boundary  *(by design — USER 2026-09-07; revisit pointer: task #1513)*
 
 **This section absorbs one older one**: [`use integer` — large shift /
@@ -3040,6 +3143,7 @@ above, so an implementation of the boundary trips it deliberately.
 
 ---
 
+<a id="ns-use-integer"></a>
 ## `use integer` — large shift / overflow edge cases
 
 **See [Integers are unbounded: PCL has no 64-bit
@@ -3049,6 +3153,7 @@ that one mechanism, and the large-shift corners are the same C-ABI detail.
 
 ---
 
+<a id="ns-pow-exact-integer"></a> <!-- RETIRED -->
 ## `**` returns an exact integer where Perl returns a float (NV)  *(FIXED s473d — task #1248(b))*
 
 **NOT a divergence any more.**  This heading is kept so older citations
@@ -3071,6 +3176,7 @@ unchanged and still diverge.
 
 ---
 
+<a id="ns-class-syntax"></a>
 ## Perl 5.38 `class` / `field` / `method` syntax  [DEFERRED — future version]
 
 **Perl behaviour:** Perl 5.38 introduced native object-oriented syntax as an
@@ -3149,6 +3255,7 @@ divergences in `baselines/perl-suite-expected.tsv`.  Revisit as a feature projec
 (parser desugaring + a `docs/class-feature-plan.md`) once the v2 endgame
 lands.
 
+<a id="ns-nul-identifiers"></a>
 ## NUL bytes (and other control characters) in identifiers
 
 **Perl behaviour:** perl's lexer accepts control characters — including NUL —
@@ -3172,6 +3279,7 @@ rows (registered in `cl/skip-registry.lisp`).
 
 ---
 
+<a id="ns-nesting-depth"></a>
 ## Pathological expression nesting depth (≥ ~10k)  [DEFERRED — revisit after Release 1]
 
 **What:** expressions nested thousands of levels deep — the canonical case is
@@ -3212,6 +3320,7 @@ phase, nothing running beside it) and the sweep is contained in a
    like cl-ppcre recursion on long strings).  Triage those separately as
    real bugs.
 
+<a id="ns-autodie"></a>
 ## `autodie` — file scope, no location, the built-ins it does not wrap
 
 **Perl behavior:** `use autodie` (Fatal.pm) replaces the named built-ins in
@@ -3253,6 +3362,7 @@ caveats, each deliberate:
 **Affected tests:** autodie's own `t/open.t` rows 7 and 11 (the location);
 `t/truncate.t` 5/6/9/10 are #2924 (truncate through a glob), not the shim.
 
+<a id="ns-bigint"></a>
 ## `bigint` / `bignum` / `bigrat` and `overload::constant`
 
 **Perl behaviour:** `overload::constant` installs compile-time handlers that
@@ -3272,6 +3382,7 @@ whose handler is an ANONYMOUS sub (or computed) cannot be honoured: the
 handler is code that would have to run while PCL parses — the static-parse
 family of #2610 — and its literals stay plain numbers, silently.
 
+<a id="ns-compile-hints"></a>
 ## Lexical compile-time hints (`$^H` / `%^H` scoping)
 
 **Perl behavior:** `$^H` (hint bits) and `%^H` (the hints hash) are
@@ -3312,6 +3423,7 @@ point scope-tracked hint snapshots in the transpiler (a per-scope constant
 alist captured at transpile time, restored via unwind-protect at runtime
 scope exit) is the design sketch.
 
+<a id="ns-eval-multi-package"></a>
 ## String eval with multiple package sections
 
 **What:** an `eval` string that changes package more than once, e.g.
@@ -3371,6 +3483,7 @@ sets `$@`, which is exactly where this lands.
 
 **Owner:** task #242 (the refusal is deliberate; a real consumer re-opens it).
 
+<a id="ns-eval-unconvertible-decl"></a>
 ## String eval ending in an unconvertible declaration
 
 **What:** an `eval` string whose last statement is a declaration whose VALUE
@@ -3392,6 +3505,7 @@ carry a run-time form, and `$@` is where perl puts a compile error too.
 
 **Owner:** task #242.
 
+<a id="ns-form-above-64k"></a>
 ## A single generated top-level form above 64k characters
 
 **What:** one emitted top-level runtime form whose whitespace-collapsed length
@@ -3422,6 +3536,7 @@ raising the cap.
 
 **Owner:** tasks #230 / #242.
 
+<a id="ns-our-alias-region"></a>
 ## An `our` alias whose requalified region contains a nested package statement or an inner-scope re-declaration
 
 **What:** inside one block, an `our @x` declared after an in-block `package`
@@ -3462,6 +3577,7 @@ region rewrite — then both shapes fall out.
 
 **Owner:** tasks #251 / #242.
 
+<a id="ns-anon-sub-prototype-attr"></a>
 ## `:prototype(...)` on an anonymous sub at the START of an expression
 
 **RESOLVED (s527b, 2026-10-29):** PCL's own PPI no longer lexes `sub :attr` as a label (vendor/PPI, group S, ppi-upstream-bugs.md §7); the prototype is KEPT (`(sub :prototype($) { 42 })` answers `$` from `prototype`, as perl does) and nothing is announced.  The text below is the history.
@@ -3517,6 +3633,7 @@ let the existing extractor run.
 
 ---
 
+<a id="ns-variable-attributes"></a>
 ## Attributes on a variable declaration (`my $x : shared`, `my @a : Foo(1)`)
 
 **Perl behaviour:** an attribute list on a `my` / `our` / `state` declaration is
@@ -3562,6 +3679,7 @@ row counts above as its bar.  Nothing about the box model blocks it.
 
 ---
 
+<a id="ns-regex-script-run"></a>
 ## Regex script-run assertions `(*script_run:…)` / `(*sr:…)` (and the atomic pair)
 
 **Perl behaviour:** perl 5.28+ has `(*script_run: PATTERN)` (short form `(*sr:`)
@@ -3589,6 +3707,7 @@ the CURRENT engine, not of PCL.
 
 ---
 
+<a id="ns-regex-extended-class"></a>
 ## Regex extended character classes `(?[ … ])`
 
 **Perl behaviour:** perl 5.18+ has `(?[ ... ])`, a set-operation syntax inside a
@@ -3615,6 +3734,7 @@ over character classes in the pattern translator.
 
 ---
 
+<a id="ns-warnings"></a>
 ## Warnings-gated diagnostics are absent (`use warnings` is not modelled)
 
 **Perl behaviour:** most perl diagnostics are DEFAULT-OFF and switched on by
@@ -3684,6 +3804,7 @@ two `pass()` calls at lines 184 and 191 (`'print length undef' warned` and
 
 ---
 
+<a id="ns-will-not-stay-shared"></a>
 ## A NAMED sub whose captured lexical is re-created per call or per iteration (perl's "will not stay shared")
 
 **Perl behaviour:** a named sub is compiled ONCE and closes over the pad entry
@@ -3758,6 +3879,7 @@ fresh closure per iteration.  The scope-unique rename (#337, below) gives it
 its own NAME; what it cannot give it is its own per-iteration CELL, which is
 the same promotion-decision change described above.
 
+<a id="ns-lexical-sub-indirect"></a>
 ## A lexical sub (`my sub NAME`) reached from a place that is not the token stream
 
 `my sub NAME {…}` / `state sub NAME {…}` are LEXICALS: the name is visible from
@@ -3829,6 +3951,7 @@ package.
 
 ---
 
+<a id="ns-scalar-glob-iterator"></a>
 ## `glob` in SCALAR context: the iterator is keyed by the PATTERN, perl keys it by the CALL SITE  [ACCEPTED DIVERGENCE for v0.1 — task #489]
 
 **Perl behaviour:** each `glob(PAT)` / `<PAT>` *op* owns its own iterator.
@@ -3853,6 +3976,7 @@ s438i) carries this entry as its cause.  It surfaced only when #450 made
 metacharacter-free patterns return themselves — the row had been passing on
 two undefs (runbook §4b).
 
+<a id="ns-symbolic-demote"></a>
 ## A SYMBOLIC spelling of a package variable does not demote an identity-promoted lexical (#470)
 
 **The rule it qualifies:** a file lexical the compiler promotes to a package
@@ -3892,6 +4016,7 @@ non-interpolating quote text; both are pure over-refusal (cost: a mangle) and
 are worth doing if a real case turns up — no population measured for #470
 contains one.
 
+<a id="ns-fcntl-struct"></a>
 ## `fcntl` with a packed-structure argument (`F_GETLK`, `F_SETLK`, …)
 
 `fcntl FILEHANDLE, FUNCTION, SCALAR` is implemented for the INTEGER argument
@@ -3925,6 +4050,7 @@ result straight back in is not mistaken for a struct.
 `ioctl` is not implemented at all, for the same reason plus the absence of any
 constant table.
 
+<a id="ns-loop-control-indirect"></a>
 ## An unlabelled `last`/`next`/`redo` through an indirect call, a string eval, or across compilation units
 
 perl's unlabelled loop-control keywords act on the innermost **dynamically**
@@ -4034,6 +4160,7 @@ exit site — the two halves must agree, since with no frame there is nothing to
 throw to.  It is the one Kind-A gate whose OFF arm is not semantics-preserving,
 and it says so in the registry.
 
+<a id="ns-strict-refs"></a>
 ## `use strict 'refs'` — what is still not enforced (the write path, module imports, code refs)
 
 **Enforced since s497b (task #2103)**: `strict refs` is a LEXICAL fact the
@@ -4060,6 +4187,7 @@ perl's own `t/lib/strict/refs` cases: 26 of 33 agree died/lived (13 before).
   "ver decl enables vars/subs" rows are these.
 
 
+<a id="ns-undef-glob-slot"></a>
 ## `undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it — a READ does not re-vivify it, and a write is noticed at the next read (#1117)
 
 **Perl behaviour.** `undef *a` DELETES the glob's array slot, so `*a{ARRAY}`
@@ -4128,6 +4256,7 @@ above. Nothing in the shipped shape blocks it: the table becomes dead code.
 `docs/ir-spec.md` §7.2 carries the normative statement; the guard rows are
 `Pl/t/glob-undef-01.t` 6–9 and 11 (`local`).
 
+<a id="ns-digest-corners"></a>
 ## Digest::MD5 / Digest::SHA: the partial-byte and state-dump corners
 
 `lib/Digest/MD5.pm` and `lib/Digest/SHA.pm` (task #2947, s514a) are plain Perl
@@ -4149,6 +4278,7 @@ files; slow for hashing large downloads.
 **A wide character** dies `Wide character in subroutine entry` as in perl, but
 without perl's " at FILE line N." suffix (PCL's `Carp` does not append it).
 
+<a id="ns-storable"></a>
 ## Storable: what is not byte-identical, and what dies
 
 `lib/Storable.pm` (task #2948, s514a) is plain Perl and writes and reads
@@ -4189,6 +4319,7 @@ restricted (locked) hash perl wrote is read as an ordinary hash.  A stream with 
 major version dies as perl does; a truncated stream thaws to `undef`, as perl
 does.
 
+<a id="ns-hires-timers"></a>
 ## Time::HiRes: the signal-driven timers (`ualarm`, `setitimer`, `getitimer`)
 
 `lib/Time/HiRes.pm` (task #1992, s492c) is plain Perl over four runtime
@@ -4211,6 +4342,7 @@ that compares `CLOCK_MONOTONIC` against a number it got from elsewhere on
 macOS (where the system value is 6) will disagree.  Any other id DIES naming
 itself (CLAUDE.md rule 12) rather than answering a wrong time.
 
+<a id="ns-builtin-override"></a>
 ## Builtin override: only the COMPILE-TIME spellings perl can be shown
 
 A core builtin is displaced by a sub that reached the package at compile time
@@ -4226,6 +4358,7 @@ stays the builtin (task #2053).  The `CORE::GLOBAL::` overrides of `require`,
 `do` and `readline` are separate emission sites and are not routed yet
 (task #2054).
 
+<a id="ns-posix"></a>
 ## POSIX: the classes and the syscalls that need a real libc
 
 `lib/POSIX.pm` (task #1997, which folds #1613, s492c) is plain Perl with
@@ -4257,6 +4390,7 @@ value:
 `lib/POSIX.pm`'s errno, `O_*` and `F_*` numbers are Linux's, like
 `lib/Fcntl.pm`'s and `lib/Errno.pm`'s; that portability gap is unchanged here.
 
+<a id="ns-regex-escapes"></a>
 ## Regex escapes that are still passed through untranslated
 
 The escape rewriter (`%pcl-rewrite-scan`, named `%pcl-expand-hv-escapes` until s499e) translates `\h \H \v \V \R`,
@@ -4289,6 +4423,7 @@ emoji ZWJ sequence are ONE cluster in perl and several here — task #2381.
 
 ---
 
+<a id="ns-builtins-ruled-out"></a>
 ## Builtins ruled out: SysV IPC, `syscall`, `ioctl`, `chroot`, `dbmopen`, `dump`
 
 **Perl behaviour:** `msgctl` `msgget` `msgrcv` `msgsnd`, `semctl` `semget`
@@ -4309,6 +4444,7 @@ answer (struct layouts, syscall numbers, IPC keys) or none at all in a
 garbage-collected image (`dump`).  The IPC family would be a `IPC::SysV`-style shim over libc if a
 program ever needs it.
 
+<a id="ns-command-line-switches"></a>
 ## Perl's command-line switches: what `pcl` does not do (s506f)
 
 `pcl` takes perl's switches by perl's argv grammar, and a program's own
@@ -4362,6 +4498,7 @@ table; one parser, `tools/lib/PCLSwitches.pm`).  What remains different:
 * **`PERL5OPT`** is not read by `pcl` (task #2663; the harness wrapper
   `tools/pclperl-for-tests` does read it).
 
+<a id="ns-first-run"></a>
 ## The first run of a program: a second `import`, and programs that never end ordinarily (s510f, #2702)
 
 `pcl prog.pl` keeps a compiled file per program.  The run that finds none runs
@@ -4385,6 +4522,7 @@ things stay different from perl:
   more than half the heap at exit starts from its text every time — correct,
   only slower to start.  Owner: #2702.
 
+<a id="ns-attributes"></a>
 ## attributes: lvalue set at run time, and variable attributes (task #3162)
 
 `use attributes __PACKAGE__, \&f, "lvalue"` (and `"-lvalue"`) at RUN time is
@@ -4398,6 +4536,7 @@ carries an attribute; for any other, `get` asks the CALLER's
 Attributes on a variable declaration are the older entry above
 ("Attributes on a variable declaration").  Owner: #3162.
 
+<a id="ns-hash-util"></a>
 ## Hash::Util: perl's hash internals (task #3163)
 
 `bucket_ratio`, `num_buckets`, `used_buckets`, `bucket_info`, `bucket_array`,
@@ -4411,6 +4550,7 @@ hash is a hidden tie (docs/shipped-modules.md), so a program that `tie`s or
 `untie`s a hash it also restricted sees the shim's class underneath.
 Owner: #3163.
 
+<a id="ns-zlib"></a>
 ## Compress::Raw::Zlib (zlib) -- libz via sb-alien, TEMPORARY (task #3161)
 
 Compress::Raw::Zlib is XS -- zlib itself.  Since s517b PCL ships
@@ -4440,6 +4580,7 @@ What is NOT covered:
   data, a deflate never flushed with Z_FINISH -- keeps its z_stream until the
   process exits.
 
+<a id="ns-b"></a>
 ## B: perl's interpreter internals (task #3281)
 
 The core `B` module is perl's window onto its own interpreter (SVs, ops,
