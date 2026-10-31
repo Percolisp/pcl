@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s527g (2026-10-31).  tools/ppi-expect-check.pl (Pl/PPIExpect.pm) flags the now-correct Word tokens of a lexical sub named like a quote-like operator: t/op/lexsub.t 354 (`state sub q () { 45 } is q(), 45`), 745 (q), 851 (`is y, 43` after `my sub y`), t/op/lvref.t 642-644 (`s(1); s(2); is s(3), 1` after `my sub s`) -- quote-letter-as-word 0 -> 6 and paren-after-term +5, in raw and pcl modes alike.  perl reads each as a call (toke.c yyl_keylookup looks in the pad before the keyword table).  The checker is the same class as #3946 (a checker gap, not a PPI bug): it should model a `my`/`state`/`our sub NAME` declaration for the rest of its block, the way s527c taught it the dereference loop variable.  Measured: expect m0 (main 1885930f) vs m3 (s527g) by kind, scratch/s527g/expect-m{0,3}-raw.tsv in the s527g worktree.",
+   "id" : "4141",
+   "status" : "pending",
+   "subject" : "the expect-state checker does not model LEXICAL SUBS: after PCL's PPI calls a keyword-named lexical sub by its bare name (§43, group AL) the call sites report quote-letter-as-word / paren-after-term (11 false rows)"
+}
