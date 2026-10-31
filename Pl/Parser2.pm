@@ -13098,6 +13098,18 @@ sub _tail_decl_convertible {
   return @k >= 2 && $k[1]->isa('PPI::Structure::List') ? 1 : 0;
 }
 
+# The `package` statements under NODE that switch the package -- a `class`
+# statement (PPI §53) is a Package statement PCL refuses whole
+# (Pl::Parser::feature_statement_refusal), never a switch, so it does not
+# send an embedded block down v1's package route (where it would be lowered
+# as a package block and refused piecemeal, at its `field`).
+sub _package_switches {
+  my ($self, $node) = @_;
+  my $fp = $self->fallback_parser;
+  return grep { !$fp->feature_statement_refusal($_) }
+         @{ $node->find('PPI::Statement::Package') || [] };
+}
+
 sub lower_embedded_block {
   my ($self, $block, $kind) = @_;
   my $forms = $kind eq 'sub' ? $self->_lower_embedded_anon($block)
@@ -13178,7 +13190,7 @@ sub _lower_embedded_body {
   # runtime restore, which a bare lambda does not have (the switch leaked
   # out of `map { package XM; … }`).  Keep v1's route.  (PPI find returns 0,
   # not undef, when nothing matches.)
-  if (@{ $block->find('PPI::Statement::Package') || [] }) {
+  if ($self->_package_switches($block)) {
     warn "pcl-raw\tbody-decl:package\n" if $ENV{PCL_E2_RAW_CENSUS};
     return undef;
   }
@@ -13291,7 +13303,7 @@ sub _lower_embedded_anon {
   # revert wrapper (the native nested-package branch relies on p-sub's
   # dynamic bind, absent in a bare lambda); a tail declaration converts when
   # the $decl_tail machinery covers its value semantics (s307).
-  if (@{ $block->find('PPI::Statement::Package') || [] }) {
+  if ($self->_package_switches($block)) {
     warn "pcl-raw\tanon-decl:package\n" if $census;
     return undef;
   }

@@ -77,7 +77,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 sub write_pl {
     my ($code) = @_;
@@ -203,6 +203,12 @@ sub f { 1 }
 PL
 is(scalar(() = $err_cls3 =~ /refused statement at .* -- feature 'class' is not supported/g), 2,
    '`field` and `ADJUST` each refuse at their own statement');
+my ($cl_cls4, $err_cls4, $rc_cls4) = transpile_refusing(<<'PL');
+use v5.38; use experimental 'class';
+my $f = sub { class Foo { field $x :param; } 1 };
+PL
+like($err_cls4, qr/refused statement at \S+ line 2: class Foo \{ field \$x :param; \} -- /,
+     'a class inside an anonymous sub is refused whole too (not as a package block, at its field)');
 
 # 7b `defer { … }` (perl 5.36).  Under the feature PCL's PPI builds `defer
 # BLOCK` as a compound statement of its own (docs/ppi-upstream-bugs.md §52,
