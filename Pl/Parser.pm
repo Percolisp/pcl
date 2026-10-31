@@ -2264,8 +2264,12 @@ sub _subscript_key_cl_list {
 
 # Parse one key group to a CL expression string.
 # For hash subscripts ({...}), auto-quote single bareword tokens (Perl hash key rule).
+# ELEM: the group is the WHOLE subscript of a hash ELEMENT (`local $h{KEY}`,
+# not a slice): its key is then compiled by the emitter's ONE subscript-key
+# rule (ExprToCL::generate_hash_key -- a bare array keys on its COUNT, #3865),
+# which the read, the store, exists and delete already take (task #4062).
 sub _subscript_key_expr {
-  my ($self, $group, $open, $stmt, $ctx) = @_;
+  my ($self, $group, $open, $stmt, $ctx, $elem) = @_;
   $ctx //= 0;  # default SCALAR_CTX
   if ($open eq '{' && @$group == 1 && ref($group->[0]) eq 'PPI::Token::Word') {
     my $word = $group->[0]->content;
@@ -2273,6 +2277,10 @@ sub _subscript_key_expr {
     unless ($word =~ /^(?:if|unless|while|until|for|foreach|sub|my|our|local|state|undef|defined|not|and|or)$/) {
       return "\"$word\"";
     }
+  }
+  if ($elem && $open eq '{') {
+    my ($cl) = $self->_parse_expression_internal($group, $stmt, 0, 1);
+    return $cl // 'nil';
   }
   return $self->_parse_expression($group, $stmt, $ctx) // 'nil';
 }
@@ -4057,7 +4065,8 @@ sub _local_target_item {
     my @key_groups = $self->_subscript_key_groups($g->[1]);
     die "Parser2 TODO: empty subscript in a `local` target\n" unless @key_groups;
     my $sub_ctx = ($open eq '[') ? 1 : 0;
-    my @keys = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) }
+    my $elem = ($g->[0]->content =~ /\A\$/ && @key_groups == 1);
+    my @keys = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx, $elem) }
                    @key_groups;
     return {
       kind  => 'elem',
@@ -4461,7 +4470,8 @@ sub _process_local_declaration {
       # of a flip-flop (which would trigger $SIG{__WARN__} via uninitialized $..).
       # A slice's key list is in LIST context (`@h{qw(a b)}` is two keys).
       my $sub_ctx = ($open eq '[' || $ld_slice) ? 1 : 0;
-      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
+      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx,
+                                                       (!$ld_slice && @key_groups == 1)) } @key_groups;
 
       # Choose the macro based on subscript type.
       # p-local-array-slice handles both scalar and vector (range) indices.
@@ -11819,6 +11829,9 @@ sub _parse_expression_internal {
   my $parts   = shift;
   my $stmt    = shift;
   my $context = shift // 0;  # 0 = SCALAR_CTX (default), 1 = LIST_CTX
+  # AS_KEY: the expression is a hash ELEMENT's subscript, compiled by the
+  # emitter's ONE key rule (ExprToCL::generate_hash_key, #3865 / #4062).
+  my $as_key  = shift;
 
   my $result;
   my @decls;
@@ -11835,7 +11848,7 @@ sub _parse_expression_internal {
 
     my $gen = $self->_expr_generator($expr_o);
 
-    $result = $gen->generate($node_id);
+    $result = $as_key ? $gen->generate_hash_key($node_id) : $gen->generate($node_id);
   };
 
   if ($@) {

@@ -583,6 +583,15 @@ sub generate {
        . Pl::CLForm::to_flat($self->gen_node_form($node_id));
 }
 
+# The text entry for a hash ELEMENT's subscript compiled on its own -- the v1
+# seam's `local $h{KEY}` forms (Pl::Parser::_subscript_key_expr): the key goes
+# through _hash_key_form, the one subscript-key rule every other element
+# access takes (a bare array keys on its COUNT, #3865; task #4062).
+sub generate_hash_key {
+  my ($self, $node_id) = @_;
+  return Pl::CLForm::to_flat($self->_hash_key_form($node_id));
+}
+
 # The CL symbols that a `${^NAME}`-shaped perl variable resolves to when the
 # RUNTIME owns it — i.e. every %SPECIAL_VARS caret entry whose value is a plain
 # CL symbol, not a compound form.  ONE reading, because two passes need it and

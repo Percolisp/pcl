@@ -48,7 +48,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 35;
+plan tests => 36;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -576,4 +576,25 @@ our @y = (1, 2);
 say "out=@y";
 });
     is($out, "in=1 2\nout=1 2\n", 'K4: local @y=LIST if FALSE leaves array unchanged');
+}
+
+# ─── Group L: the key of a LOCAL hash element is the element's key (#4062) ───
+# `local $h{@a}` keys on @a's COUNT, as `$h{@a}` does (#3865): the v1 seam
+# compiled the subscript as a free expression and keyed on the array itself.
+# Expected text probed under perl 5.40.3 (scratch/s530c/pr/loc1.pl).
+{
+    my $out = run_pl(q{
+my @a = (1,2); our %h = (2 => "two", 1 => "one"); our @b = (10, 11, 12, 13);
+{ local $h{@a} = "loc"; print "1 $h{2}\n"; } print "2 $h{2}\n";
+{ local $h{@a}; print "3 ", (defined $h{2} ? $h{2} : "undef"), "\n"; } print "4 $h{2}\n";
+{ local $b[@a] = 99; print "5 @b\n"; } print "6 @b\n";
+my $r = \@a;
+{ local $h{@$r} = "lr"; print "9 $h{2}\n"; } print "10 $h{2}\n";
+{ local @h{@a} = ("x", "y"); print "11 $h{1} $h{2}\n"; } print "12 $h{1} $h{2}\n";
+{ local ($h{@a}, $b[0]) = ("p", "q"); print "13 $h{2} $b[0]\n"; } print "14 $h{2} $b[0]\n";
+our $hr = \%h; { local $hr->{@a} = "dr"; print "15 $h{2}\n"; } print "16 $h{2}\n";
+});
+    is($out, "1 loc\n2 two\n3 undef\n4 two\n5 10 11 99 13\n6 10 11 12 13\n9 lr\n10 two\n"
+           . "11 x y\n12 one two\n13 p q\n14 two 10\n15 dr\n16 two\n",
+       'L1: local $h{@a} / $hr->{@a} / ($h{@a}, ...) key on the COUNT; slices still spread');
 }

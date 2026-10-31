@@ -2160,6 +2160,13 @@ Three sites read that same rule, and each was a silent wrong before it:
   the deref sits in: `print f()->{k}` calls `f` in scalar context
   (`(p-gethash-deref (p-scalar-ctx (pl-f)) "k")`).  A LIST SLICE base
   (`(f())[0]->{k}`) is the exception above and stays LIST.
+* **An ELEMENT's subscript is SCALAR context** (tasks #3863, #3865, #4062): a
+  bare array as the whole key keys on its COUNT (`$h{@a}` is `$h{scalar
+  @a}`), through ONE emitter rule (`_hash_key_form`, wrapping it in
+  `p-scalar`) that the read, the store, `exists`, `delete` AND the `local`
+  element forms (`local $h{@a} = V`, `local $r->{@a}`, `local ($h{@a}, ...)`,
+  via `ExprToCL::generate_hash_key` from the v1 seam) all take.  A SLICE's
+  key list stays LIST (`local @h{@a}` localizes each key).
 
 ## 5. Calling convention
 
