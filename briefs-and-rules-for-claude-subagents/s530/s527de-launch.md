@@ -1,7 +1,7 @@
 # s527d + s527e -- THE FILL AT LAUNCH BLOCK for both briefs (s530, Fable, 2026-10-31), plus the s529/s530 amendments.  Read this file right after your brief's first paragraph; it REPLACES the brief's "FILL AT LAUNCH" placeholder and AMENDS the paragraphs named below.  Everything else in `s529/s527d-prompt.md` / `s529/s527e-prompt.md` stands.
 
 ## The state you start from
-- **main** = MAIN-READY-51 `df8e1ec9` + Fable's merge-records commit on top (`git log -1 main`` (s527c merged on top of MAIN-READY-50 = s527b and MAIN-READY-49 = s526w2).  Main's last CODE sha = `df8e1ec9` -- your corpus-diff / emission-ab / inverse-guard reference, never `main`.  Generation on main **v2-8885**.
+- **main** = MAIN-READY-51 `87ee8368` (s527c `df8e1ec9` + Fable's merge records) (s527c merged on top of MAIN-READY-50 = s527b and MAIN-READY-49 = s526w2).  Main's last CODE sha = `df8e1ec9` -- your corpus-diff / emission-ab / inverse-guard reference, never `main`.  Generation on main **v2-8885**.
 - **`vendor/PPI`** = branch `pcl` **`a2fa26a0`** (the bare repo `~/pcl-agent-scratch/ppi/PPI.git` has that head; 70 commits over upstream `455bfa73`).  PPI's own suite PASS plain + `AUTHOR_TESTING=1` there.
 - **The report** `docs/ppi-bug-report.t` = the branch's `t/ppi_bugs_pcl.t`, row for row (s527c reconciled them): **plan 253, 235 ok / 18 not ok** on the vendored lib.
 - **The expect-state checker** (`tools/ppi-expect-check.pl`): raw **1,075**, pcl **1,025** after s527c (s527c modelled the dereference loop variable in `Pl/PPIExpect.pm`; s527b reported 13 false rows on Attribute tokens = #3946 -- a checker gap, not a PPI bug).
