@@ -68,9 +68,11 @@ extent_is('"str";',        0, 0);
 extent_is("'str';",        0, 0);
 extent_is('qw(a b);',      0, 0);
 extent_is('qr/x/;',        0, 0);
-# At statement level PPI tokenizes <STDIN> as three Operator/Word tokens, so
-# the walker declines; in expression position it is one QuoteLike::Readline.
-extent_is('<STDIN>;',          0, undef, 'statement-level <STDIN>: declines');
+# At statement level perl expects a term, so <STDIN> is a readline there too
+# (toke.c yyl_leftpointy); PCL's PPI lexes it as one QuoteLike::Readline
+# since s527g (group AH, §14d) -- before, PPI gave three Operator/Word tokens
+# and the walker declined.
+extent_is('<STDIN>;',          0, 0,     'statement-level <STDIN> is a term (one readline)');
 extent_is('my $l = <STDIN>;',  3, 3,     'readline in expr position is a term');
 extent_is('$_;',           0, 0, 'magic var');
 extent_is('$#foo;',        0, 0, 'arraylen');
