@@ -10,6 +10,7 @@ use strict;
 use warnings;
 
 use Moo;
+use Scalar::Util ();
 
 # Postfix operators
 has postfix => (
@@ -317,6 +318,24 @@ our %STATEMENT_MODIFIERS = map { $_ => 1 } qw(if unless while until for foreach)
 our %STATEMENT_KEYWORDS  = (%STATEMENT_MODIFIERS, map { $_ => 1 } qw(else elsif));
 
 sub is_statement_modifier { return $STATEMENT_MODIFIERS{ $_[0] // '' } ? 1 : 0 }
+
+# The TOKEN form, which every modifier SPLIT asks (#4083): is this PPI token a
+# statement-modifier KEYWORD where it stands?  Perl reads the six words as
+# keywords only where a keyword can stand -- a word after `->` is a METHOD name
+# (toke.c: XOPERATOR, no keyword lookup; `$factory->if(...)` is Template::
+# Grammar's IF rule), and a word before `=>` is a string (toke.c's fat-arrow
+# test runs before the keyword lookup; `push @a, if => 1`).  Both neighbours
+# are the token's SIBLINGS: a modifier is split at the statement's top level.
+sub is_statement_modifier_word {
+  my ($t) = @_;
+  return 0 unless Scalar::Util::blessed($t) && $t->isa('PPI::Token::Word')
+               && $STATEMENT_MODIFIERS{ $t->content };
+  my $prev = $t->sprevious_sibling;
+  return 0 if $prev && $prev->isa('PPI::Token::Operator') && $prev->content eq '->';
+  my $nx = $t->snext_sibling;
+  return 0 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  return 1;
+}
 
 has statement_keywords => (
   is      => 'ro',

@@ -179,8 +179,8 @@ sub append_rest {
   return () if !@rest;
   for my $t (@rest) {
     return () if $t->isa('PPI::Token::Operator') && !$APPEND_REST_OK{ $t->content };
-    return () if $t->isa('PPI::Token::Word')
-              && $t->content =~ /^(?:and|or|xor|not|if|unless|while|until|for|foreach)$/;
+    return () if ($t->isa('PPI::Token::Word') && $t->content =~ /^(?:and|or|xor|not)$/)
+              || Pl::PExpr::Config::is_statement_modifier_word($t);
   }
   return @rest;
 }

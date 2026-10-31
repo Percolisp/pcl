@@ -6060,7 +6060,7 @@ sub _word_in_operator_position {
   return 1 if _ends_term($pv);
   return 0 if !$pv->isa('PPI::Token::Word');
   return 1 if $call->{ refaddr $pv };
-  return 0 if Pl::PExpr::Config::is_statement_modifier($pv->content);
+  return 0 if Pl::PExpr::Config::is_statement_modifier_word($pv);
   return $word_is_term->($pv->content) ? 1 : 0;
 }
 
@@ -6840,7 +6840,7 @@ sub _local_value_consumed {
     my $sep = sub { my $e = shift; !defined $e
       || ($e->isa('PPI::Token::Operator') && $e->content =~ /^(?:,|=>)$/)
       || ($e->isa('PPI::Token::Structure') && $e->content eq ';')
-      || ($e->isa('PPI::Token::Word') && $e->content =~ /^(?:if|unless|while|until|for|foreach)$/) };
+      || Pl::PExpr::Config::is_statement_modifier_word($e) };
     my $lhs = $box == $s && $i == 0 && $item[0]->isa('PPI::Structure::List')
            && $k[$j + 1] && $k[$j + 1]->content eq '=';
     return 1 unless ($i == 0 || $sep->($k[$i - 1])) && ($lhs || $sep->($k[$j + 1]));
@@ -7001,8 +7001,7 @@ sub _stmt_modifier_split {
   my @k = $s->schildren;
   pop @k if @k && $k[-1]->isa('PPI::Token::Structure') && $k[-1]->content eq ';';
   for my $i (1 .. $#k) {
-    next unless $k[$i]->isa('PPI::Token::Word')
-             && $k[$i]->content =~ /^(?:if|unless|while|until|for|foreach)$/;
+    next unless Pl::PExpr::Config::is_statement_modifier_word($k[$i]);
     return ([@k[0 .. $i - 1]], $k[$i]->content, [@k[$i + 1 .. $#k]]);
   }
   return (\@k, undef, []);
@@ -7637,7 +7636,7 @@ sub _is_bare_loop_control {
               && ($nx->content eq '=>' || $nx->content eq '::');
   # A LABEL argument: the next word that is not a statement modifier.
   return 0 if $nx && $nx->isa('PPI::Token::Word')
-              && !Pl::PExpr::Config::is_statement_modifier($nx->content);
+              && !Pl::PExpr::Config::is_statement_modifier_word($nx);
   return 1;
 }
 
@@ -11681,8 +11680,7 @@ sub _lower_stmt {
       # would miss — mis-lowering to (p-return (p-if COND)).  Detect a leading
       # modifier here; the value expr is then empty (return undef/()).
       my ($expr, $mod, $cond);
-      if (@k && $k[0]->isa('PPI::Token::Word')
-          && Pl::PExpr::Config::is_statement_modifier($k[0]->content)) {
+      if (@k && Pl::PExpr::Config::is_statement_modifier_word($k[0])) {
         ($expr, $mod, $cond) = ([], $k[0]->content, [@k[1 .. $#k]]);
       } else {
         ($expr, $mod, $cond) = _split_modifier(\@k);
@@ -14232,7 +14230,7 @@ sub _split_modifier {
   my ($parts) = @_;
   for my $i (1 .. $#$parts) {
     my $p = $parts->[$i];
-    if ($p->isa('PPI::Token::Word') && Pl::PExpr::Config::is_statement_modifier($p->content)) {
+    if (Pl::PExpr::Config::is_statement_modifier_word($p)) {
       return ([@$parts[0 .. $i - 1]], $p->content, [@$parts[$i + 1 .. $#$parts]]);
     }
   }
@@ -14262,8 +14260,7 @@ sub _decl_loop_modifier {
   my @ch = $stmt->children;
   pop @ch while @ch && ($ch[-1]->isa('PPI::Token::Whitespace')
     || ($ch[-1]->isa('PPI::Token::Structure') && $ch[-1]->content eq ';'));
-  my ($mi) = grep { $ch[$_]->isa('PPI::Token::Word')
-                    && Pl::PExpr::Config::is_statement_modifier($ch[$_]->content) } 1 .. $#ch;
+  my ($mi) = grep { Pl::PExpr::Config::is_statement_modifier_word($ch[$_]) } 1 .. $#ch;
   die "Parser2 TODO: no loop modifier in: " . $stmt->content . "\n" unless defined $mi;
   die "Parser2 TODO: heredoc in a my-declaration with a loop modifier: "
     . $stmt->content . "\n" if $stmt->find_first('PPI::Token::HereDoc');

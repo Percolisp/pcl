@@ -547,8 +547,7 @@ sub _desugar_loop_modifiers {
   for my $st (reverse @{ $doc->find($plain) || [] }) {
     my @ch = $st->children;
     my ($mi) = grep {
-      $ch[$_]->isa('PPI::Token::Word')
-        && Pl::PExpr::Config::is_statement_modifier($ch[$_]->content)
+      Pl::PExpr::Config::is_statement_modifier_word($ch[$_])
     } 0 .. $#ch;
     next if !defined $mi;
     my $mod = $ch[$mi]->content;
@@ -2556,7 +2555,7 @@ sub _process_expression_statement {
   for my $i (0 .. $#parts) {
     if (ref($parts[$i]) eq 'PPI::Token::Word') {
       my $word = $parts[$i]->content;
-      if (Pl::PExpr::Config::is_statement_modifier($word)) {
+      if (Pl::PExpr::Config::is_statement_modifier_word($parts[$i])) {
         $modifier_idx = $i;
         $modifier = $word;
         last;
@@ -2667,7 +2666,7 @@ sub _process_variable_statement {
     my $mod_idx = -1;
     for my $i (1 .. $#parts) {
       next unless ref($parts[$i]) eq 'PPI::Token::Word';
-      if (Pl::PExpr::Config::is_statement_modifier($parts[$i]->content)) {
+      if (Pl::PExpr::Config::is_statement_modifier_word($parts[$i])) {
         $mod_idx = $i;
         last;
       }
@@ -2956,7 +2955,7 @@ sub _process_our_declaration {
   my $mod_idx = -1;
   for my $i (1 .. $#$parts) {
     next unless ref($parts->[$i]) eq 'PPI::Token::Word';
-    next unless Pl::PExpr::Config::is_statement_modifier($parts->[$i]->content);
+    next unless Pl::PExpr::Config::is_statement_modifier_word($parts->[$i]);
     $mod_idx = $i;
     last;
   }
@@ -3799,7 +3798,7 @@ sub _split_trailing_modifier {
   for my $i (0 .. $#$parts) {
     my $p = $parts->[$i];
     next unless ref($p) eq 'PPI::Token::Word';
-    next unless Pl::PExpr::Config::is_statement_modifier($p->content);
+    next unless Pl::PExpr::Config::is_statement_modifier_word($p);
     return ('', []) unless $accept->{ $p->content };
     my $mod  = $p->content;
     my @cond = @$parts[$i + 1 .. $#$parts];
