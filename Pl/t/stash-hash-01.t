@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -209,3 +209,22 @@ print "r1 ", (eval { Mover->SUPER::dohtem } // "undef"), "\n";
 package main; print "r2 ", ref(bless {}, "Mover"), "\n";
 EOF
     "r1 dohtem\nr2 Mover2\n");
+
+# #4020: the HASH slot of a STASH glob is the stash itself (perl: `*main::{HASH}`
+# IS `\%main::`), so reads through it answer as `%Pkg::` -- both spellings, the
+# compile-time `*Pkg::{HASH}` and the dynamic `*{"Pkg::"}{HASH}` -- and NAME /
+# PACKAGE are the glob's own (`*Foo::Bar::` is `Bar::` in Foo).  A WRITE through
+# it stays the deferred live-stash model (not-supported "Live symbol-table
+# hashes").  Expected = perl 5.40.3; the ade297e7 base prints r1 ` `, r2
+# `no-bar`, r3 empty, r4 `undef`, r5 four empty fields and r6 ` nox`.
+test_cl('#4020: *Pkg::{HASH} is a reference to the stash view; NAME / PACKAGE', <<'EOF',
+package Foo; sub bar { "bar" } our $v = 3; package Foo::Bar; sub y { 1 } package main;
+print "r1 ", ref(*main::{HASH}), " ", ref(*Foo::{HASH}), "\n";
+print "r2 ", (exists *Foo::{HASH}->{bar} ? "has-bar" : "no-bar"), " ", (exists *Foo::{HASH}->{nope} ? "has-nope" : "no-nope"), "\n";
+print "r3 ", join(",", grep { /^(bar|v)$/ } sort keys %{*Foo::{HASH}}), "\n";
+print "r4 ", (defined *Foo::{HASH}->{bar} ? "def" : "undef"), "\n";
+print "r5 ", *Foo::Bar::{NAME}, " ", *Foo::Bar::{PACKAGE}, " ", *main::{NAME}, " ", *Foo::{PACKAGE}, "\n";
+my $h = *{"Foo::"}{HASH}; print "r6 ", ref($h), " ", (exists $h->{bar} ? "bar" : "nox"), "\n";
+*slosh::{HASH}->{ISA} = []; eval { slosh->import }; print "r7 ", ($@ ? "err" : "ok"), "\n";
+EOF
+    "r1 HASH HASH\nr2 has-bar no-nope\nr3 bar,v\nr4 def\nr5 Bar:: Foo main:: main\nr6 HASH bar\nr7 ok\n");

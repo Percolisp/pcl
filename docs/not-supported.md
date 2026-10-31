@@ -373,6 +373,10 @@ the s522 ruling, task #1510 / #3511 / #3321):
   refs, `%A::`) to B's stash.  Names bound at COMPILE time stay with A's own
   package, as they stay with A's original stash in perl -- `SUPER::` too: it
   walks the @ISA of the package the code was compiled in.
+* **The stash glob's HASH slot** `*Pkg::{HASH}` (and `*{"Pkg::"}{HASH}`) is a
+  reference to the same snapshot (#4020, s531c), so reads through it answer
+  as `%Pkg::` does; `*Pkg::{NAME}` / `{PACKAGE}` are the glob's own.  A WRITE
+  through it (`*main::{HASH}->{k} = 5`) is lost like the other writes below.
 * **The element VALUE of a non-sub symbol** reads as its TYPEGLOB `*Pkg::name`
   — perl's own value (core Exporter reads `${$pkg."::"}{EXPORT_FAIL}` on every
   import), so `values %Pkg::` and `each` over a stash holding variables answer

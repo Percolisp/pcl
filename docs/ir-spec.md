@@ -3861,6 +3861,20 @@ var ⇒ plain lexical binding, no localization at all).
   package B0; sub hi {"hi"} package main; *A0:: = *B0::;
   print ref(bless {}, "A0"), " ", A0->hi;   # B0 hi
   ```
+- **The HASH slot of a stash glob is the stash (normative, s531c, task
+  #4020).**  `(p-glob-slot G "HASH")` where G is a stash glob -- the
+  `(p-stash "P")` view the spelling `*P::` evaluates to, or the empty-named
+  typeglob a dynamic `*{"P::"}` makes -- is a reference to that same view, so
+  reads through it (`keys`, `exists`, an element value) answer as `%P::`
+  does; a write through it is the deferred live-stash model (lost, as
+  `$P::{x} = V` is).  NAME / PACKAGE are the glob's own: `*Foo::Bar::` is the
+  glob `Bar::` in package `Foo`, the main stash is `main::` in `main`; every
+  other slot is the ordinary slot of that glob.
+
+  ```perl
+  package Foo; sub bar {} package main;
+  print exists *Foo::{HASH}->{bar} ? 1 : 0, " ", *Foo::{NAME};   # 1 Foo::
+  ```
 - **A named sub inside a BEGIN is defined before the BEGIN's body runs
   (normative, s522b, task #1572):** perl compiles the whole block first, so
   each sub moves up past ordinary statements -- never above a `package`, a

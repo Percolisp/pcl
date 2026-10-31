@@ -33134,8 +33134,45 @@ would consume, so it dies naming the stream (rule 12)."
           ((string= s "GLOB") h)
           (t *p-undef*))))
 
+(defun %p-stash-glob-pkg (glob)
+  "The PERL package name when GLOB is a STASH glob `*Pkg::` -- the p-stash
+   view the compile-time spelling `*Pkg::` evaluates to, or the typeglob a
+   dynamic `*{\"Pkg::\"}` makes (an EMPTY name in package Pkg) -- else NIL."
+  (cond ((hash-table-p glob) (values (gethash glob *p-stash-pkg-table*)))
+        ((and (p-typeglob-p glob) (zerop (length (p-typeglob-name glob))))
+         (%p-glob-perl-package glob))
+        (t nil)))
+
+(defun %p-stash-glob-slot (glob pkg-name slot-s)
+  "*Pkg::{SLOT} of a STASH glob (task #4020).  HASH is a reference to the
+   stash itself -- perl's `*main::{HASH}` IS `\\%main::` -- so it is the same
+   p-stash view `%Pkg::` reads (its keys / exists / values; a WRITE through it
+   is the deferred live-stash model, not-supported \"Live symbol-table
+   hashes\").  NAME and PACKAGE are the glob's own: `*Foo::Bar::` is the glob
+   `Bar::` in package Foo, and the main stash is `main::` in main.  Every
+   other slot is the ordinary slot of that glob."
+  (let* ((canon (if (or (string= pkg-name "") (string-equal pkg-name "main"))
+                    "main"
+                    pkg-name))
+         (sep (search "::" canon :from-end t))
+         (parent (if sep (subseq canon 0 sep) "main"))
+         (name (concatenate 'string (if sep (subseq canon (+ sep 2)) canon) "::")))
+    (cond ((string= slot-s "HASH")
+           (make-p-box (if (hash-table-p glob) glob (p-stash canon))))
+          ((string= slot-s "NAME") (make-p-box name))
+          ((string= slot-s "PACKAGE") (make-p-box parent))
+          ((string= slot-s "GLOB") glob)
+          (t (let ((ppkg (%pcl-find-package parent)))
+               (if ppkg
+                   (p-glob-slot (make-p-typeglob ppkg (%pcl-invert-case name)) slot-s)
+                   *p-undef*))))))
+
 (defun p-glob-slot (glob slot)
   "Read *foo{SLOT}."
+  (let ((stash-pkg (%p-stash-glob-pkg glob)))
+    (when stash-pkg
+      (return-from p-glob-slot
+        (%p-stash-glob-slot glob stash-pkg (string-upcase (to-string slot))))))
   (unless (p-typeglob-p glob)
     (return-from p-glob-slot (%p-glob-slot-of-handle glob slot)))
   (let* ((pkg    (p-typeglob-package glob))
