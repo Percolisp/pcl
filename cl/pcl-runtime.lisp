@@ -10575,6 +10575,32 @@ per element."
                                 (not (%p-in-targets-p item keep-containers))))))))
               (%p-flatten-list-general src keep-containers))))))
 
+(defun %p-slice-src-vector (src)
+  "The right-hand side of a SLICE assignment (`@a[...] = ...`, `@h{...} =
+   ...`, through a reference too) as the flat, snapshotted vector its stores
+   read.  It is a list assignment like any other, so an array, a hash or a
+   nested list among the values SPREADS: `@h{@k} = (@v, 3)` used to store @v
+   itself in the first slot -- printed as its COUNT -- and leave the rest
+   undef (#4082; Template::Grammar fills its lexer table with exactly that
+   shape, so no TT keyword was recognized).  Only a LIST -- the emitter's
+   (vector ...) or a returned list -- can hold an element that spreads (a raw
+   nil is an empty list and vanishes, as in p-array-=); a Perl ARRAY as the
+   whole right side is adjustable and its elements are values, holes
+   included, so it keeps the lazy snapshot, as does the all-scalar literal
+   list (the common case: one type test per element, no allocation).  A list
+   that spreads takes %p-flatten-list, the walk every list assignment uses."
+  (let ((v (cond ((listp src) (coerce src 'vector))
+                 ((and (vectorp src) (not (stringp src))) src)
+                 (t (vector src)))))
+    (if (and (simple-vector-p v)
+             (loop for x across v
+                   thereis (and (not (p-box-p x))
+                                (or (null x) (consp x) (hash-table-p x)
+                                    (and (vectorp x) (not (stringp x)))
+                                    (%p-hash-marker-p x)))))
+        (%p-flatten-list v)
+        (%p-assign-snapshot-vector v))))
+
 (defun %p-hash-keyval-list (h)
   "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...), matching how %hash
    flattens in list context (same pairing as %p-flatten-list).
@@ -11176,11 +11202,7 @@ per element."
      ONE spelling (rule 11) — the array arm and the hash arm had it twice, and
      the constant-subscript arms make four."
     `((,src ,value)
-      (,src-vec (%p-assign-snapshot-vector
-                 (cond
-                   ((listp ,src) (coerce ,src 'vector))
-                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                   (t (vector ,src)))))))
+      (,src-vec (%p-slice-src-vector ,src))))
 
   (defun %p-unrolled-slice-stores (accessor container subs src-vec)
     "The N stores a constant-subscript slice assignment becomes: subscript K at

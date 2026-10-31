@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 46;
+plan tests => 47;
 
 sub run_cl {
     my ($code) = @_;
@@ -578,3 +578,25 @@ test_cl('#981 a deleted element still copies as one undef slot',
      print scalar(@copy), " ", (defined $copy[1] ? "def" : "undef"), " ",
            (defined $copy[2] ? $copy[2] : "?"), "\n";',
     "3 undef 3\n");
+
+# #4082 (s530b): a SLICE assignment's right side is a LIST and flattens like
+# every list assignment's -- the slice arms stored an array as ONE element (its
+# count) and left the rest undef.  Template::Grammar's lexer table is the
+# `('X') x @n` row.  Every expected line is perl's.
+test_cl('#4082 a slice assignment flattens an array / repetition on its right side',
+    'my @k = qw(a b c); my @v = (1, 2); my $h = {}; my %g;
+     @$h{ @k } = (@v, 3);
+     print join(",", map { "$_=$h->{$_}" } sort keys %$h), "\n";
+     @g{ @k } = (@v, 3);
+     print join(",", map { "$_=$g{$_}" } sort keys %g), "\n";
+     my $r = {}; my @n = (8, 9);
+     @{$r}{ @k } = (("x") x @n, "y");
+     print join(",", map { "$_=$r->{$_}" } sort keys %$r), "\n";
+     my @a; my $ar = [];
+     @a[0,1,2] = (@v, 3);
+     @$ar[0,1,2] = (@v, 3);
+     print "@a | @$ar\n";
+     my %s; my %src = (p => 1);
+     @s{qw(x y)} = %src;
+     print "$s{x}$s{y}\n";',
+    "a=1,b=2,c=3\na=1,b=2,c=3\na=x,b=x,c=y\n1 2 3 | 1 2 3\np1\n");
