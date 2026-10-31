@@ -2503,6 +2503,160 @@ still divides.  Report rows: the six `§56` rows at the end of
 ---
 
 
+## 48. A LIST SLICE `(LIST)[i]` / `qw(..)[i]`: the `[` is built as an anonymous-array CONSTRUCTOR  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `2`):
+
+```perl
+my @x = (1, 2, 3)[1]; print "@x\n";
+```
+
+**PPI structure**: `Structure::List[(1, 2, 3)] Structure::Constructor[[1]]`.
+**Expected**: `Structure::Subscript[[1]]` -- after the `)` of a list (or a
+`qw()`) perl's lexer expects an operator (toke.c `yyl_rightparen` returns a
+TERM; `yyl_leftsquare` under XOPERATOR is a subscript), so the `[` subscripts
+the list.  The expect-state checker's `list-slice-as-constructor` rows: 311
+over the four populations (s527e M0), the largest single kind.
+
+**PCL's workaround**: PExpr reads a List / Condition / qw primary followed by a
+`[` Constructor as a list slice -- `_retag_list_slice_subscripts`,
+`_is_elided_call_prev`, `$is_qw_subscript`, `_term_extent`'s W4.  Task #3740.
+
+---
+
+## 49. A GLOB SLOT `*NAME{THING}` (`*STDOUT{IO}`, `*x{HASH}`): the `{THING}` is built as a BLOCK  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `1`):
+
+```perl
+our %x = (a => 1); my $h = *x{HASH}; print $h->{a}, "\n";
+```
+
+**PPI structure**: `Symbol[*x] Structure::Block[{HASH}]` -- and
+`*x{HASH}{a}` a Block after a Block.  **Expected**: `Structure::Subscript` --
+a glob is a complete term, and perl reads a `{` after a term as a subscript
+(toke.c `yyl_leftcurly` under XOPERATOR), the rule PPI already applies after
+`$x`, `@x`, `%x` and a `$ @ %` dereference block.  The same holds after a
+glob's own dereference block, `*{"x"}{HASH}`.
+
+**PCL's workaround**: `Pl::PExpr::parse` read `Symbol('*name') + Block('{SLOT}')`
+as a glob slot (`$is_typeglob_slot`); the `*x{HASH}{a}` chain was DROPPED
+("Fell through. Missing case"), and the slot word (`HASH`, `IO`, `CODE`) was
+recorded in the #2610 detector table as an unknown bareword call.  Tasks #3741,
+#3964.
+
+---
+
+## 50. An ANONYMOUS HASH right after a list operator or named unary is built as a BLOCK  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `42`):
+
+```perl
+eval { die { code => 42 } }; print $@->{code}, "\n";
+```
+
+**PPI structure**: `Word[die] Structure::Block[{code => 42}]` -- `_curly`
+answers Block for every `{` after any element it has no rule for (its own
+FIXME).  **Expected**: `Structure::Constructor` -- after `die` / `exists` the
+lexer expects a term (toke.c XTERM: a `{` is an anonymous hash), and after
+`map` / `grep` (XREF) the look-ahead decides: a word or a string followed by
+`,` or `=>`, or an immediate `}`, is a hash (`map {a => $_}, 1, 2` returns two
+hashes) -- the sibling of §5 in the term positions.
+
+**PCL's workaround**: `Pl::PExpr::_block_is_hash_constructor` classifies the
+Block (it stays: PCL still classifies what PPI leaves ambiguous).  Task #3742.
+
+---
+
+## 51. A BARE BLOCK with a `continue` block: `continue` starts a NEW statement  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `11`):
+
+```perl
+my $n = 0; { $n++ } continue { $n += 10 } print "$n\n";
+```
+
+**PPI structure**: `Statement::Compound[{ $n++ }]` then
+`Statement[continue { $n += 10 } print "$n\n";]` -- the continue block and the
+statement AFTER it in one statement.  A labelled bare block (`L: { } continue
+{ }`) is right.  **Expected**: one `Statement::Compound[{ $n++ } continue
+{ $n += 10 }]` -- a bare block is a loop that runs once and takes a continue
+block (perly.y `block cont`); `_continues` ends a one-block statement before it
+looks at the next token.
+
+**PCL's workaround**: `Pl::Parser2` joins the orphan `continue` statement back
+onto the compound and lowers the swallowed tokens as a synthetic statement (the
+"unlabeled `{ … } continue { … }`" arm; a declarator there dies "Parser2 TODO").
+Task #3743.
+
+---
+
+## 52. `defer BLOCK` (perl 5.36) is not a statement of its own  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `a` then `b`):
+
+```perl
+use feature 'defer'; no warnings; defer { print "b\n" } print "a\n";
+```
+
+**PPI structure**: `Statement[defer { print "b\n" } print "a\n";]`.
+**Expected**: `defer { print "b\n" }` a statement that ends at its block, and
+`print "a\n";` the next one.  The keyword exists only under the `defer`
+feature, so the fix needs `Statement::Include::feature_mods` to know `defer`
+(today it knows `signatures` and `try`) -- a tokenizer-side half.
+
+**PCL**: a defer block is refused loudly (`docs/not-supported.md` "defer { … }
+blocks"); the refusal reads `Word(defer) + Block` and stays.  Task #3746.
+
+---
+
+## 53. Perl 5.38 CLASS syntax builds no statements of its own  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `1`):
+
+```perl
+use v5.38; use experimental 'class'; class P { field $v = 1; method get { $v } } print P->new->get, "\n";
+```
+
+**PPI structure**: `Statement[class P { … } print P->new->get, "\n";]` -- the
+class block ends nothing; `method get {` lexes as a Word + a match (`m {`).
+**Expected**: `class NAME BLOCK` a statement of its own (the shape of
+`package NAME BLOCK`), `class NAME;` like `package NAME;`, `field` a variable
+declaration, `method NAME BLOCK` a sub, `ADJUST BLOCK` a scheduled-like block.
+Like §52 it is a FEATURE (`use feature 'class'`, `use experimental 'class'`),
+so `feature_mods` must know it first.
+
+**PCL**: refused loudly (`docs/not-supported.md` "Perl 5.38 class / field /
+method syntax"; the s417 `class NAME ;` refusal).  Task #3747.
+
+---
+
+## 54. The dereference block of a glob cast after `require` is built as a hash CONSTRUCTOR  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `died`):
+
+```perl
+eval { require *{"\0a"} }; print $@ ? "died\n" : "lived\n";
+```
+
+**PPI structure**: `Word[require] Cast[*] Structure::Constructor[{"\0a"}]` --
+`_curly`'s rule for `use constant { … }` (a `{` right after use / no / require
+and one more element) fires on the cast.  **Expected**: `Structure::Block`,
+the block a cast takes everywhere else (toke.c `yyl_star` + the dereference
+block).  From `t/op/require_errors.t:256`.
+
+**PCL**: no wrong answer (the require dies either way).  Task #3753.
+
+---
+
+## 57. A `{` after a glob symbol is a BLOCK -- the same bug as §49  [CONFIRMED 1.291]
+
+Filed twice: #3741 from the expect-state checker's measurement (s525p) and
+#3964 from s527b's hand-over (s527c).  One rule, one fix and one registry row
+(§49); this section keeps the number the hand-over was given.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`

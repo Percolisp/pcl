@@ -855,7 +855,7 @@ sub _check_structure {
   if ($kind eq 'subscript' && $got eq 'Constructor' && $p
       && (($p->isa('PPI::Token::Structure') && $p->content eq ')')
           || $p->isa('PPI::Token::QuoteLike::Words'))) {
-    return _flag($w, $c, 'list-slice-as-constructor', 'Structure::Subscript (a list slice)', '',
+    return _flag($w, $c, 'list-slice-as-constructor', 'Structure::Subscript (a list slice)', 48,
                  "PPI: Structure::$got");
   }
   my $sec = _structure_section($w, $c, $kind, $got, $fhblock);
@@ -872,8 +872,11 @@ sub _structure_section {
   my ($w, $c, $kind, $got, $fhblock) = @_;
   return 37 if $fhblock;
   return 5 if $kind eq 'hash' && $got eq 'Block' && $w->{st}{x} eq 'XSTATE';
+  return 50 if $kind eq 'hash' && $got eq 'Block';   # #3742: XTERM / the XREF look-ahead
   my $p = $c->{prev};
   return 1 if $kind eq 'deref' && $p && $p->isa('PPI::Token::Magic') && $p->content eq '$$';   # §1b
+  return 54 if $kind eq 'deref' && $got eq 'Constructor' && $p && $p->isa('PPI::Token::Cast') && $p->content eq '*';   # #3753
+  return 49 if $kind eq 'subscript' && $p && $p->isa('PPI::Token::Symbol') && $p->content =~ /^\*/;   # #3741 #3964: *NAME{SLOT}
   if ($kind eq 'subscript' && $p) {
     if ($p->isa('PPI::Token::Structure') && $p->content eq '}') {
       my $blk = $p->parent;
@@ -919,12 +922,13 @@ sub _pending_statement_end {
     return if $ts == $bs;
     $w->{cont_split} = 1;
     return _flag($w, $c, 'continuation-split', "`" . $t->content . "` continuing `$kw`",
-                 ($t->content eq 'finally' ? 18 : ''), 'PPI: the continuation starts a new statement');
+                 ($t->content eq 'finally' ? 18 : ($t->content eq 'continue' && $kw eq '') ? 51 : ''), 'PPI: the continuation starts a new statement');
   }
   return if $ts != $bs;
   return if $t->isa('PPI::Token::Structure') && $t->content =~ /^[;})]$/;
   my $sec = $kw eq 'finally' ? 18 : $kw =~ /^(?:try|catch)$/ ? 20
-          : ($kw eq 'sub' && $e->{owner_name_magic}) ? 31 : '';
+          : ($kw eq 'sub' && $e->{owner_name_magic}) ? 31 
+          : $kw eq 'defer' ? 52 : $kw =~ /^(?:class|method|ADJUST)$/ ? 53 : '';
   # the after-effect of a block PPI already split off its keyword: a cascade
   if (exists $w->{split_sec}{refaddr $e->{open}}) {
     $sec = $w->{split_sec}{refaddr $e->{open}};
