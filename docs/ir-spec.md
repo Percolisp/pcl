@@ -1761,7 +1761,8 @@ their optional site slot.
 
     use strict;  my @a = @$u;   ->  (p-array-= @a (p-cast-@ $u :strict))
     use strict;  push @$u, 1;   ->  (p-push (p-cast-@ $u :strict-lv) 1)
-    use strict;  $s->[0]        ->  (p-aref-deref $s 0 :strict)
+    use strict;  f()->[0]       ->  (p-aref-deref (p-scalar-ctx (pl-f)) 0 :strict)
+    use strict;  $s->[0]        ->  (p-aref-deref $s 0 :strict-lv)    ; a plain variable base, #3858
 
 The element READS `p-aref-deref` / `p-gethash-deref` take `:strict` too: a
 string or a number dies, an undef BOX vivifies (an element read vivifies its

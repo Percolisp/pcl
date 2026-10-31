@@ -83,8 +83,14 @@ like(cl_of('use strict; my $u; my @a = @$u; print "@a\n";'),
      qr/\(p-cast-\@ \$u :strict\)/, 'strict rvalue deref: :strict');
 like(cl_of('use strict; my $u; push @$u, 1; print "@$u\n";'),
      qr/\(p-cast-\@ \$u :strict-lv\)/, 'strict vivifying deref: :strict-lv');
+# #3858 (s526w2, ir-spec 3.2f): through a plain VARIABLE perl never dies
+# (`my $u; $u->[0]` vivifies $u to ARRAY), so that site is :strict-lv; a
+# CALL base still dies in perl ("Can't use an undefined value as an ARRAY
+# reference") and keeps :strict.
 like(cl_of('use strict; my $u; my $v = $u->[0]; print defined $v ? 1 : 0;'),
-     qr/\(p-aref-deref \$u 0 :strict\)/, 'strict element read: :strict');
+     qr/\(p-aref-deref \$u 0 :strict-lv\)/, 'strict element read through a variable: :strict-lv');
+like(cl_of('use strict; sub f { undef } my $v = f()->[0]; print defined $v ? 1 : 0;'),
+     qr/\(p-aref-deref \(p-scalar-ctx \(pl-f\)\) 0 :strict\)/, 'strict element read through a call: :strict');
 like(cl_of('my $u; my @a = @$u; print scalar(@a), "\n";'),
      qr/\(p-cast-\@ \$u :rvalue\)/, 'no-strict rvalue deref: :rvalue');
 unlike(cl_of('my $u; push @$u, 1; print "ok\n";'),

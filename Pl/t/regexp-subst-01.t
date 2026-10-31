@@ -237,9 +237,19 @@ PL
     my $rc  = $? >> 8;
     my $msg = do { open my $e, '<', $err or die; local $/; <$e> };
     unlink $err;
-    isnt($rc, 0, 's///e with an uncompilable replacement exits nonzero (rule 12)');
-    like($msg, qr/cannot compile the s\/\/\/e replacement/,
-         '... and says which replacement it could not compile');
+    # s526w2 (#3855): a replacement holding STATEMENTS is retried as
+    # `do { ... }`, so the smartmatch statement now lowers to the ONE ruled
+    # drop shape (s433: a perl-shaped run-time die at the drop site) and the
+    # transpile succeeds.  Rule 12 is asserted where it now holds -- the RUN
+    # dies naming the statement and never prints a substituted value.
+    my $run_out = `$root/runpcl $file 2>$err`;
+    my $run_rc  = $? >> 8;
+    my $run_err = do { open my $e, '<', $err or die; local $/; <$e> };
+    unlink $err;
+    isnt($run_rc, 0, 's///e with an uncompilable statement in its replacement dies when run (rule 12)');
+    like($run_err, qr/smart match \(~~\) is not supported/,
+         '... and says which statement it could not compile');
+    is($run_out, '', '... and prints nothing: the substitution never happens');
     unlike($out, qr/lambda \(\) nil/,
            '... and emits no nil replacement thunk');
 }
