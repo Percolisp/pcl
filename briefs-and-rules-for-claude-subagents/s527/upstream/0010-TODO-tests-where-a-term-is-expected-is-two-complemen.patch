@@ -1,7 +1,7 @@
 From af5345e978a86dde3bd8e38802ea2cd7c512cff6 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:40:32 +0300
-Subject: [PATCH 10/55] TODO tests: ~~ where a term is expected is two
+Subject: [PATCH 10/57] TODO tests: ~~ where a term is expected is two
  complements
 
 perl -e '$y = "3"; print ~~$y' prints 3: in term position ~~ is two

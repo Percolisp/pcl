@@ -23,9 +23,9 @@ second pair of F keeps `print $fh .5` the number perl reads.
 
 PCL vendors the branch as `vendor/PPI` (refresh: `tools/vendor-ppi CLONE pcl`).
 
-## s527b (2026-10-25 .. 10-29): the branch is now 55 commits, head 6a5de5c1
+## s527b (2026-10-25 .. 10-31): the branch is now 57 commits, head ded727c3
 
-`0001-*.patch` .. `0055-*.patch` and `pcl-branch.bundle` are regenerated from
+`0001-*.patch` .. `0057-*.patch` and `pcl-branch.bundle` are regenerated from
 the whole branch (`git format-patch master..pcl`).  The new PR groups, each
 "TODO tests, then the fix", PPI's suite green after every commit:
 
@@ -41,7 +41,7 @@ the whole branch (`git format-patch master..pcl`).  The new PR groups, each
 - `PR-P.md` globs named by punctuation, digits, a caret letter -- §26;
 - `PR-Q.md` $$$a -- §1, which IS upstream PR #428 (credited, widened to $${});
 - `PR-R.md` a nameless parameter only inside a signature -- §32;
-- `PR-S.md` a label only at a statement's start; declaration attributes -- §7 §8.
+- `PR-S.md` a label only at a statement's start; declaration attributes -- §7 §8 (a second pair, s530: a TYPED declaration, `my Dog $spot : attr`).
 
 The group letters are assigned by `tools/vendor-ppi` in branch order; s527c's
 groups follow S.

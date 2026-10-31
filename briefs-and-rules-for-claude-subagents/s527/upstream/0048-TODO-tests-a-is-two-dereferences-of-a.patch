@@ -1,7 +1,7 @@
 From 59e0c3b9d66a6cc070cd06ca5bff8f40d18df837 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:49:31 +0200
-Subject: [PATCH 48/55] TODO tests: $$$a is two dereferences of $a
+Subject: [PATCH 48/57] TODO tests: $$$a is two dereferences of $a
 
 perl reads $$$a as ${${$a}}; PPI lexes the magic $$ (the process id)
 followed by $a.  The rows are those of upstream PR #428 (Perl-Critic/PPI,

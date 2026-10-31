@@ -1,7 +1,7 @@
 From 487563ded4bfb15fe988592092b042663537d23a Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 21:42:25 +0200
-Subject: [PATCH 34/55] Tokenizer: a builtin that takes no operand ends a term
+Subject: [PATCH 34/57] Tokenizer: a builtin that takes no operand ends a term
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

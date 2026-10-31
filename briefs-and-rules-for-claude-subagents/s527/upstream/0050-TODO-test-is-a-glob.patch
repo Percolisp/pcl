@@ -1,7 +1,7 @@
 From 436169bb2c5425f5dc1adb71f16bbfaae5fdfd52 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:56:08 +0200
-Subject: [PATCH 50/55] TODO test: *: is a glob
+Subject: [PATCH 50/57] TODO test: *: is a glob
 
 $: names a scalar, so *: is the glob that holds it; *::foo stays the
 glob main::foo.  One row marked TODO and a control.

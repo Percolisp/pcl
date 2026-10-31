@@ -1,7 +1,7 @@
 From 3ed5f8839db87e0dafd1c3d3985db30cea645992 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:30:31 +0200
-Subject: [PATCH 41/55] HereDoc: the indentation is what stands before the
+Subject: [PATCH 41/57] HereDoc: the indentation is what stands before the
  terminator
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

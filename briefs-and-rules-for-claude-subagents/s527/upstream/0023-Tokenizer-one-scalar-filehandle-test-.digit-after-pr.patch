@@ -1,7 +1,7 @@
 From 8955ba306e507be53d1696e4cf7881a694d9f5b8 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 21:17:43 +0300
-Subject: [PATCH 23/55] Tokenizer: one scalar-filehandle test; .digit after
+Subject: [PATCH 23/57] Tokenizer: one scalar-filehandle test; .digit after
  print $fh is a number
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

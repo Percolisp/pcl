@@ -1,0 +1,55 @@
+From ded727c31a80b563524e5875a5d688c8ce599446 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 02:50:12 +0200
+Subject: [PATCH 57/57] Tokenizer: a typed declaration's colon introduces
+ attributes
+
+perl's typed lexical -- my Dog $spot : attr, our Dog ($p, $q) : attr --
+puts the class name between the declarator and the variable; the colon
+after the variable still introduces the declaration's attributes
+(toke.c's yyl_colon with PL_in_my).  _after_declared_variables now looks
+one word further back when the word before the variable is not my, our
+or state.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Tokenizer.pm | 8 +++++++-
+ t/ppi_bugs_pcl.t     | 3 +--
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 7e163f8b..30b96760 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -1032,7 +1032,13 @@ sub _after_declared_variables {
+ 	elsif ( !$last->isa('PPI::Token::Symbol') ) {
+ 		return '';
+ 	}
+-	my ( $prev ) = $self->_significant_before($cursor);
++	my ( $prev, $at ) = $self->_significant_before($cursor);
++	return '' if !$prev or !$prev->isa('PPI::Token::Word');
++	return 1 if $DECLARATOR{ $prev->content };
++
++	# A typed declaration -- my Dog $spot : shared -- has the class name
++	# between the declarator and the variable.
++	( $prev ) = $self->_significant_before($at);
+ 	return $prev && $prev->isa('PPI::Token::Word') && $DECLARATOR{ $prev->content };
+ }
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index c75b5756..b624b858 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1421,8 +1421,7 @@ for my $code ( "use v5.36;\nsub f (\$, \$y) { 1 }",
+ # §8, a TYPED declaration.  perl's `my CLASS $var : attr` (and `my CLASS
+ # ($a, $b) : attr`) has the class name between the declarator and the
+ # variable; the colon still introduces the declaration's attributes.
+-TODO: {
+-    local $TODO = 'PCL §8: a typed declaration\'s attribute is lexed as a word';
++{
+     my @rows = (
+         [ 'my A $x : plugh;',                 'Attribute=plugh',  'a typed declaration takes an attribute' ],
+         [ 'my Foo::Bar @s :shared = ();',     'Attribute=shared', 'a typed declaration with a qualified class takes an attribute' ],
+-- 
+2.53.0
+
