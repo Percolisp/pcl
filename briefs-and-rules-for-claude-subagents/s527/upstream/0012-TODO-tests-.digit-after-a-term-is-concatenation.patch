@@ -1,7 +1,7 @@
 From a268a29b711befebbea1a6535dbd29ea45f1b7cb Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:42:28 +0300
-Subject: [PATCH 12/93] TODO tests: .digit after a term is concatenation
+Subject: [PATCH 12/99] TODO tests: .digit after a term is concatenation
 
 perl -e '$_ = 1; print $_.2' prints 12: after a term the . is the
 concatenation operator and 2 a number, but PPI lexes .2 as one

@@ -1,7 +1,7 @@
 From d26d7ce4eff8f8ecf8937731e4d3fd1a171848b6 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 21:16:21 +0300
-Subject: [PATCH 22/93] TODO test: .digit after a print filehandle is a number
+Subject: [PATCH 22/99] TODO test: .digit after a print filehandle is a number
 
 perl -e 'print $fh .5' writes 0.5 to $fh: the scalar after print is a
 filehandle, not a term, when whitespace comes before the . and none

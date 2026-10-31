@@ -1,4 +1,4 @@
-From a7c058da9efe49a282430be4132684a50b62e357 Mon Sep 17 00:00:00 2001
+From 634d8e6d7e2e097be6aa87efa079d6c99ab81200 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:07:55 +0200
 Subject: [PATCH 98/99] TODO tests: the class feature builds its statements
@@ -18,7 +18,7 @@ PPI tracks the feature (Include) but the Lexer builds one plain
 statement that swallows the next one.  A row for the four statement
 classes, in the shapes of upstream PR #346 (Perl-Critic/PPI, fixes
 issue #299), inside the existing PCL §53 TODO block; a control
-without the feature.  Plan 299 -> 301.
+without the feature.  Plan 302 -> 304.
 ---
  t/ppi_bugs_pcl.t | 15 ++++++++++++++-
  1 file changed, 14 insertions(+), 1 deletion(-)

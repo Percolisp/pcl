@@ -701,7 +701,7 @@ print;
    title => '`CORE::__END__` / `CORE::__DATA__` is a Word, not a Separator: the code does not end',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'data-marker-as-word', shape => 'a Word CORE::__END__ / CORE::__DATA__ under XSTATE' },
-   fix => { kind => 'relex', handler => undef, commit => 'cf13afb5 3e71c399', group => 'AA', pr => undef },
+   fix => { kind => 'relex', handler => undef, commit => 'cf13afb5 49a24b96', group => 'AA', pr => undef },
    repro => 'print "x\\n";
 CORE::__END__
 not code
@@ -812,7 +812,7 @@ not code
    title => '`defer BLOCK` (perl 5.36) is not a statement of its own: the NEXT statement is swallowed into it',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'statement-not-ended', shape => 'the statement after `defer BLOCK` is inside it' },
-   fix => { kind => 'handler', handler => undef, changed => 'NONE: PCL never repaired it; the refusal now reads the compound (Pl::Parser::feature_statement_refusal; defer joins PCL_FEATURE_BUNDLE)', commit => '5195c2fa', group => 'AL', pr => undef },
+   fix => { kind => 'handler', handler => undef, changed => 'NONE: PCL never repaired it; the refusal now reads the compound (Pl::Parser::feature_statement_refusal; defer joins PCL_FEATURE_BUNDLE)', commit => '41cf1558', group => 'AM', pr => undef },
    repro => 'use feature \'defer\'; no warnings; defer { print "b\\n" } print "a\\n";
 ',
    perl => "a\\nb\\n",
@@ -826,7 +826,7 @@ not code
    title => 'Perl 5.38 CLASS syntax (`class NAME BLOCK`, `field`, `method NAME BLOCK`, `ADJUST BLOCK`) builds no statements of its own: the statement after a class block is swallowed',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'statement-not-ended', shape => 'the statement after `class NAME BLOCK` is inside it' },
-   fix => { kind => 'handler', handler => undef, changed => 'NONE: PCL never repaired it; class joins PCL_FEATURE_BUNDLE and Pl::Parser::feature_statement_refusal refuses the class / field / method / ADJUST statements (Parser2: _lower_block_1 before the declaration paths, $consume_pkg keeps a class out of the package sections)', commit => '85c383f8', group => 'AM', pr => undef },
+   fix => { kind => 'handler', handler => undef, changed => 'NONE: PCL never repaired it; class joins PCL_FEATURE_BUNDLE and Pl::Parser::feature_statement_refusal refuses the class / field / method / ADJUST statements (Parser2: _lower_block_1 before the declaration paths, $consume_pkg keeps a class out of the package sections)', commit => '9286f7c0', group => 'AN', pr => undef },
    repro => 'use v5.38; use experimental \'class\'; class P { field $v = 1; method get { $v } } print P->new->get, "\\n";
 ',
    perl => "1\\n",

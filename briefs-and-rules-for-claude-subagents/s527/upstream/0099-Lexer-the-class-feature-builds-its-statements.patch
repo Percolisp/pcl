@@ -1,4 +1,4 @@
-From 2e44b939a186eb78163ea43b45d9fc41ac18e414 Mon Sep 17 00:00:00 2001
+From 9286f7c07449d368ca605ec3f9c68527d41d3116 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:09:34 +0200
 Subject: [PATCH 99/99] Lexer: the class feature builds its statements

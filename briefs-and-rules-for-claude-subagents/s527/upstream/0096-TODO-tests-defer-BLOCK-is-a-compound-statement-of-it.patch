@@ -1,4 +1,4 @@
-From c64742cab62240d209f57b3bf80212d9f9848fed Mon Sep 17 00:00:00 2001
+From d21a9b3fe3f25100b51031451566bac5da684507 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:01:48 +0200
 Subject: [PATCH 96/99] TODO tests: defer BLOCK is a compound statement of its
@@ -16,7 +16,7 @@ ends at its block (perly.y: barestmt: KW_DEFER mblock):
 PPI already tracks the feature (Include); the Lexer still builds one
 plain statement that swallows the next one.  A type row inside the
 existing PCL §52 TODO block, and a control: without the feature defer
-is an ordinary word.  Plan 297 -> 299.
+is an ordinary word.  Plan 300 -> 302.
 ---
  t/ppi_bugs_pcl.t | 9 ++++++++-
  1 file changed, 8 insertions(+), 1 deletion(-)

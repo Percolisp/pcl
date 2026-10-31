@@ -1,7 +1,7 @@
 From 949debd99b3abdf4cc889e0a121e4400261a243d Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:42:56 +0200
-Subject: [PATCH 61/93] TODO tests: every loop variable foreach accepts
+Subject: [PATCH 61/99] TODO tests: every loop variable foreach accepts
 
 perl's foreach takes, before its ( LIST ): [my|our|state] $x, a
 dereference ($$f, ${$r}, ${*$f}), a refaliasing variable (\my %h,

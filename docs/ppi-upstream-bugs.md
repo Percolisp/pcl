@@ -2420,7 +2420,7 @@ cannot see it); task #3750.
 
 **FIXED on PCL's PPI branch** (s527d: group AA, commit `cf13afb5` on branch `pcl`, vendored as vendor/PPI -- the token; the Lexer's statement-class table still keys on `__END__` / `__DATA__` (hand-over to s527e, task #3981)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).
 
-**The statement half FIXED** (s527f: group AA's second fix commit `3e71c399` on branch `pcl` -- the Lexer's `%STATEMENT_CLASSES` knows `CORE::__END__` / `CORE::__DATA__`, so the Separator leads a Statement::End / ::Data); PCL's `Pl::Parser::_core_separator_statements` repair made INERT (never fired, corpus IDENTICAL) and DELETED (task #3981).
+**The statement half FIXED** (s527f: group AA's second fix commit `49a24b96` on branch `pcl` -- the Lexer's `%STATEMENT_CLASSES` knows `CORE::__END__` / `CORE::__DATA__`, so the Separator leads a Statement::End / ::Data); PCL's `Pl::Parser::_core_separator_statements` repair made INERT (never fired, corpus IDENTICAL) and DELETED (task #3981).
 
 **Minimal repro** (perl prints `x`): `print "x\n";` then a line `CORE::__END__`
 then `not code`.  perl ends the code at either spelling (`yyl_data_handle`,
@@ -2633,7 +2633,7 @@ Task #3743.
 
 ## 52. `defer BLOCK` (perl 5.36) is not a statement of its own  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527f: group AL, commit `5195c2fa` on branch `pcl`, vendored as vendor/PPI -- under the feature `defer` opens a Statement::Compound of type `defer` that ends at its block, the shape of `try`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AL.md`).  PCL had no repair: `defer` joins `%Pl::Parser::PCL_FEATURE_BUNDLE` (threshold `:all` only) and `Pl::Parser::feature_statement_refusal` refuses the compound at its own statement, so the statement after it runs (guard `Pl/t/refusal-site-01.t` 7b).
+**FIXED on PCL's PPI branch** (s527f: group AM, commit `41cf1558` on branch `pcl`, vendored as vendor/PPI -- under the feature `defer` opens a Statement::Compound of type `defer` that ends at its block, the shape of `try`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AM.md`).  PCL had no repair: `defer` joins `%Pl::Parser::PCL_FEATURE_BUNDLE` (threshold `:all` only) and `Pl::Parser::feature_statement_refusal` refuses the compound at its own statement, so the statement after it runs (guard `Pl/t/refusal-site-01.t` 7b).
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `a` then `b`):
 
@@ -2654,7 +2654,7 @@ blocks"); the refusal reads `Word(defer) + Block` and stays.  Task #3746.
 
 ## 53. Perl 5.38 CLASS syntax builds no statements of its own  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527f: group AM, commit `85c383f8` on branch `pcl`, vendored as vendor/PPI -- under the feature `class` leads a Statement::Package, `field` a ::Variable, `ADJUST` a ::Scheduled and `method NAME` a ::Sub: the statement classes of upstream PR #346, credited); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AM.md`).  PCL had no repair and builds no lowering: `class` joins `%Pl::Parser::PCL_FEATURE_BUNDLE`, `Pl::Parser::feature_statement_refusal` refuses each of the four statements at its own site (Parser2 `_lower_block_1`, before the declaration paths; `$consume_pkg` keeps a class out of the package sections), so the statement after a class block is no longer swallowed (guard `Pl/t/refusal-site-01.t` 7a').
+**FIXED on PCL's PPI branch** (s527f: group AN, commit `9286f7c0` on branch `pcl`, vendored as vendor/PPI -- under the feature `class` leads a Statement::Package, `field` a ::Variable, `ADJUST` a ::Scheduled and `method NAME` a ::Sub: the statement classes of upstream PR #346, credited); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AN.md`).  PCL had no repair and builds no lowering: `class` joins `%Pl::Parser::PCL_FEATURE_BUNDLE`, `Pl::Parser::feature_statement_refusal` refuses each of the four statements at its own site (Parser2 `_lower_block_1`, before the declaration paths; `$consume_pkg` keeps a class out of the package sections), so the statement after a class block is no longer swallowed (guard `Pl/t/refusal-site-01.t` 7a').
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `1`):
 

@@ -1,7 +1,7 @@
 From 45bf106d903b04a76782e57f76a3f3e0d81f9ba4 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:02:14 +0200
-Subject: [PATCH 77/93] Whitespace, Word: a sub name may open with the '
+Subject: [PATCH 77/99] Whitespace, Word: a sub name may open with the '
  package separator
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,4 +1,4 @@
-From 251244bdc37c4bbd88c734f9eb7df0330f730892 Mon Sep 17 00:00:00 2001
+From ac62cb8593b4e980b582d5e705e84108d5289840 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 09:56:52 +0200
 Subject: [PATCH 94/99] TODO tests: CORE::__END__ / CORE::__DATA__ start an End
@@ -14,7 +14,7 @@ bare spellings (toke.c yyl_data_handle via yyl_word_or_keyword):
 
 The tokenizer already makes both a Separator; the Lexer still picks the
 statement class by the bare spelling, so the Separator sits in a plain
-PPI::Statement.  Two TODO rows (PCL §44); plan 295 -> 297.
+PPI::Statement.  Two TODO rows (PCL §44); plan 298 -> 300.
 ---
  t/ppi_bugs_pcl.t | 12 +++++++++++-
  1 file changed, 11 insertions(+), 1 deletion(-)

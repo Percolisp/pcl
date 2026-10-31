@@ -1,7 +1,7 @@
 From cb213af0596f173a8bd4fdcd3fb9742362b7b3f8 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:01:13 +0200
-Subject: [PATCH 76/93] Word, Symbol: an empty package segment is part of the
+Subject: [PATCH 76/99] Word, Symbol: an empty package segment is part of the
  name
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

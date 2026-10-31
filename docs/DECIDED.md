@@ -135,10 +135,10 @@ not-supported.md → only then probe.*
 - a Lexer fix whose only emission change is the #2610 detector table (a slot word / an orphan `continue` no longer recorded as a bareword call site) -> KEPT, generation bumped (v2-9100), FULL sweep run
 - a PPI structure fix meets PCL code that REWRITES source and reparses (`_normalize_null_statements` deleting the `;` of `map {; ...}`) or that chains subscripts by class (`*x{HASH}->{k}` as an element chain) -> the full gate and the WIDE emission-ab caught both, the 111-file corpus neither; a Lexer batch runs both before its MERGE-READY -> s527e fix-forwards `166ecf6b` `ddac6e97`, #4020 (stash HASH slot, pre-existing)
 
-## s527f (2026-10-31, Opus) -- PCL's PATCHED PPI, Lexer batch 5: §44's statement half (group AA), §52 `defer` (AL), §53 `class` (AM) fixed on `pcl-s527f`; one repair deleted; §48 left registered
+## s527f (2026-10-31, Opus) -- PCL's PATCHED PPI, Lexer batch 5: §44's statement half (group AA), §52 `defer` (AM), §53 `class` (AN) fixed on `pcl-s527f`; one repair deleted; §48 left registered
 - `CORE::__END__` / `CORE::__DATA__` statement class -> PPI's `%STATEMENT_CLASSES` (group AA's second commit); `Pl::Parser::_core_separator_statements` DELETED (inert first, never fired) -> #3981
-- `defer BLOCK` under its feature -> a `Statement::Compound` of type `defer` in PPI, the shape of `try` (group AL) -> #3746
-- 5.38 class syntax under its feature -> `class` Package, `field` Variable, `ADJUST` Scheduled, `method NAME` Sub: the statement classes of upstream PR #346, credited, Lexer half only (group AM) -> #3747
+- `defer BLOCK` under its feature -> a `Statement::Compound` of type `defer` in PPI, the shape of `try` (group AM) -> #3746
+- 5.38 class syntax under its feature -> `class` Package, `field` Variable, `ADJUST` Scheduled, `method NAME` Sub: the statement classes of upstream PR #346, credited, Lexer half only (group AN) -> #3747
 - a statement PPI builds only under a feature PCL does not lower (defer, class, field, method, ADJUST) -> ONE predicate `Pl::Parser::feature_statement_refusal` (word + statement class = the evidence; the text asked of the drop classifier), checked at `Parser2::_lower_block_1` BEFORE the declaration / package paths and at `_lower_stmt`; `$consume_pkg` and `_package_switches` (the embedded-block declines) keep a class statement off the package routes, so it is refused WHOLE -> #3746 #3747, guards `Pl/t/refusal-site-01.t` 7a' 7b
 - `defer` / `class` in `%PCL_FEATURE_BUNDLE` -> threshold 9e9 = only `:all` (probed: in no numbered bundle); PCL's include callback must name a feature for PPI's Lexer to see it -> #3746 #3747
 - §48 (the list slice) -> still a batch of its own (311 checker rows), catalogued + registered -> #3740

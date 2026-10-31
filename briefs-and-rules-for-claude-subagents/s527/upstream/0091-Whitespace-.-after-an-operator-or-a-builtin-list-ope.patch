@@ -1,7 +1,7 @@
 From 5c74a167e6aa6f97778bebf0f98bfa0b6e3aff4e Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:32:13 +0200
-Subject: [PATCH 91/93] Whitespace: <...> after an operator or a builtin list
+Subject: [PATCH 91/99] Whitespace: <...> after an operator or a builtin list
  operator is a readline
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

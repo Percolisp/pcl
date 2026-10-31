@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: c4d0da867d2937cdca0cbfa6b0ede9a8bc90d47c
-lib-tree: 0339d59a7418442eb206a55ef7729f0e33f81170
+branch-sha: 9286f7c07449d368ca605ec3f9c68527d41d3116
+lib-tree: 8c21d51ddcccac839ce6aa912781b37f152b0ef5
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -58,6 +58,9 @@ fix: AJ §51 b23d5869 Lexer: a bare block takes a continue block
 fix: AK §50 dd90e749 Lexer: an anonymous hash where perl expects a term
 fix: AH §14 5c74a167 Whitespace: <...> after an operator or a builtin list operator is a readline
 fix: AL §43 c4d0da86 Tokenizer: a lexical sub named like a keyword is called by its bare name
+fix: AA §44 49a24b96 Lexer: CORE::__END__ / CORE::__DATA__ start an End / Data statement
+fix: AM §52 41cf1558 Lexer: defer BLOCK is a compound statement of its own
+fix: AN §53 9286f7c0 Lexer: the class feature builds its statements
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -151,3 +154,9 @@ commit: 30d7356c TODO tests: <...> after a builtin list operator is a readline, 
 commit: 5c74a167 Whitespace: <...> after an operator or a builtin list operator is a readline
 commit: 585ea9dd TODO tests: a lexical sub named like a quote-like operator or x is a call
 commit: c4d0da86 Tokenizer: a lexical sub named like a keyword is called by its bare name
+commit: ac62cb85 TODO tests: CORE::__END__ / CORE::__DATA__ start an End / Data statement
+commit: 49a24b96 Lexer: CORE::__END__ / CORE::__DATA__ start an End / Data statement
+commit: d21a9b3f TODO tests: defer BLOCK is a compound statement of its own
+commit: 41cf1558 Lexer: defer BLOCK is a compound statement of its own
+commit: 634d8e6d TODO tests: the class feature builds its statements
+commit: 9286f7c0 Lexer: the class feature builds its statements

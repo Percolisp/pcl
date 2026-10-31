@@ -1,7 +1,7 @@
 From 6100d8b3f289eb54a7b3642fe5496d64ea10aa60 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:47:53 +0200
-Subject: [PATCH 47/93] Unknown: a glob may be named by punctuation, digits or
+Subject: [PATCH 47/99] Unknown: a glob may be named by punctuation, digits or
  a caret letter
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

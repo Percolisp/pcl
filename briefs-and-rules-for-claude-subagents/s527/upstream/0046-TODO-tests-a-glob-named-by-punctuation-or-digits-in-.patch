@@ -1,7 +1,7 @@
 From 74ee2b19475f8f58b28eea13baebab48ddb8f868 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:46:23 +0200
-Subject: [PATCH 46/93] TODO tests: a glob named by punctuation or digits, in
+Subject: [PATCH 46/99] TODO tests: a glob named by punctuation or digits, in
  more positions
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

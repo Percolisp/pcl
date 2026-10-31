@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 298;
+use Test::More tests => 304;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1651,6 +1651,15 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
         ok( grep( $_ eq "Separator=CORE::$m", @t ), "CORE::$m is a Separator" ) or diag "got: @t";
     }
 }
+{
+    for my $m (qw(__END__ __DATA__)) {
+        my $doc = PPI::Document->new(\"print 1;\nCORE::$m\nnot code\n");
+        my @s = map { ref $_ } $doc->schildren;
+        ( my $want = $m ) =~ s/_//g;
+        is( $s[-1], 'PPI::Statement::' . ucfirst lc $want,
+            "CORE::$m starts the same statement as $m" ) or diag "got: @s";
+    }
+}
 
 # §45 -- `&` where a term is expected is the code sigil even before a
 # space and a block (toke.c yyl_ampersand): `& {sub { print "ok\n" }};`
@@ -1814,6 +1823,13 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;' 
     my @in = $blk ? map { squash( $_->content ) } $blk->schild(0)->schildren : ();
     is_deeply( \@in, [ 'defer { print "b\n" }', 'print "a\n";' ],
                'defer BLOCK ends at its block' );
+    my ($def) = $blk ? $blk->schild(0)->schildren : ();
+    is( $def && $def->isa('PPI::Statement::Compound') && $def->type, 'defer',
+        'defer BLOCK is a compound statement of type defer' );
+}
+{
+    my @s = stmts(q{defer { print "b\n" } print "a\n";});
+    is( scalar(@s), 1, 'without the feature defer is an ordinary word (control)' ) or diag join "\n", @s;
 }
 
 # §53 -- the class feature (perl 5.38): `class NAME BLOCK`, `field`,
@@ -1822,6 +1838,19 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;' 
 {
     my @s = stmts(q{use feature 'class'; class P { field $v = 1; method get { $v } } print P->new->get;});
     is( scalar(@s), 3, 'class NAME BLOCK ends at its block' ) or diag join "\n", @s;
+    # the shapes of upstream PR #346: class a package, method a sub, field a
+    # variable declaration, ADJUST a scheduled block
+    my $doc = PPI::Document->new(\q{use feature 'class'; class P 1.0 :isa(Q) { field $v :param = 1; method get { $v } ADJUST { $v++ } } class R; field @w;});
+    my @k = map { short_class(ref $_) . ':' . $_->schild(0)->content }
+            grep { $_->schild(0) && $_->schild(0)->content =~ /^(?:class|field|method|ADJUST)\z/ }
+            @{ $doc->find('PPI::Statement') || [] };
+    is( "@k", 'Statement::Package:class Statement::Variable:field Statement::Sub:method'
+            . ' Statement::Scheduled:ADJUST Statement::Package:class Statement::Variable:field',
+        'class / field / method / ADJUST build their statements' );
+}
+{
+    my @s = stmts(q{class P { 1 } print 2;});
+    is( scalar(@s), 1, 'without the feature class is an ordinary word (control)' ) or diag join "\n", @s;
 }
 {
     my @t = map { short_class($_) } toks(q{use feature 'class'; class Q :isa(P);});

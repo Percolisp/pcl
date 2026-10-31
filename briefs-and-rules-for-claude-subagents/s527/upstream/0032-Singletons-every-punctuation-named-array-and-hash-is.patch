@@ -1,7 +1,7 @@
 From 1dc5820886c8d957bc3f6b885db697f3cdd7332d Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 21:39:29 +0200
-Subject: [PATCH 32/93] Singletons: every punctuation-named array and hash is a
+Subject: [PATCH 32/99] Singletons: every punctuation-named array and hash is a
  magic variable
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

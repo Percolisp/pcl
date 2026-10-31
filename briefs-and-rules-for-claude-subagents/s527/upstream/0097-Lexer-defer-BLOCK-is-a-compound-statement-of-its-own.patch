@@ -1,4 +1,4 @@
-From 118032302cc5cbc640b4914d03611a49f7d46ec7 Mon Sep 17 00:00:00 2001
+From 41cf15583868f5663b69f0575daf29a57b674958 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:02:29 +0200
 Subject: [PATCH 97/99] Lexer: defer BLOCK is a compound statement of its own

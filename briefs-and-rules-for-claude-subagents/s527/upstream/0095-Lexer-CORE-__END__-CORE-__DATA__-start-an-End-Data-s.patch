@@ -1,4 +1,4 @@
-From 11d31c3fcee237236e8855c1bc261e375ef3c8e5 Mon Sep 17 00:00:00 2001
+From 49a24b96d8dea9a22c3743da340cf6156ffcfbc7 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 09:57:39 +0200
 Subject: [PATCH 95/99] Lexer: CORE::__END__ / CORE::__DATA__ start an End /
