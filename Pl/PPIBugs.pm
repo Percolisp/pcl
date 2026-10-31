@@ -184,14 +184,14 @@ our @BUGS = (
    tasks => [314, 322] },
  { id => 9, kind => 'token', dump => 'tokens',
    title => '`${ PUNCTUATION }` is a variable, but lexes as Cast + Block',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Operator', content => '', pred => 'sole_in_deref_block', check => 'punct-name-in-braces' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::braced_punct_magic_name' },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::braced_punct_magic_name', commit => '320d7a97', group => 'AF', pr => undef },
    repro => '"ab" =~ /(a)/; my @plus = @{+}; print "@plus\\n";',
    perl => "1 1\n",
    tokens => {
      got  => ['Quote::Double="ab"', 'Operator==~', 'Regexp::Match=/(a)/', 'Structure=;', 'Word=my', 'Symbol=@plus', 'Operator==', 'Cast=@', 'Structure={', 'Operator=+', 'Structure=}', 'Structure=;', 'Word=print', 'Quote::Double="@plus\\n"', 'Structure=;'],
-     want => ['Quote::Double="ab"', 'Operator==~', 'Regexp::Match=/(a)/', 'Structure=;', 'Word=my', 'Symbol=@plus', 'Operator==', 'Magic=@+', 'Structure=;', 'Word=print', 'Quote::Double="@plus\\n"', 'Structure=;'],
+     want => ['Quote::Double="ab"', 'Operator==~', 'Regexp::Match=/(a)/', 'Structure=;', 'Word=my', 'Symbol=@plus', 'Operator==', 'Magic=@{+}', 'Structure=;', 'Word=print', 'Quote::Double="@plus\\n"', 'Structure=;'],
    },
    unblocks => ['t/re/pat_rt_report.t'],
    tasks => [] },
@@ -251,18 +251,15 @@ __END__
    tasks => [] },
  { id => 14, kind => 'token', dump => 'tokens',
    title => '`<FH>` / `<glob>` after a list operator or a block is lexed as `<` … `>`',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^<(?:<|=|<=|=>)?$/, pred => '', check => 'lt-as-comparison' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_readline_cascade' },
-   repro => 'print sort <DATA>;
-__DATA__
-b
-a
-',
-   perl => "a\nb\n",
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_readline_cascade', commit => 'a33452b4', group => 'AH', pr => undef,
+            note => 'the after-a-BLOCK half is fixed on the branch (s527d); after a list operator or a user sub (`print sort <DATA>`) only the prototype table knows, so that half stays PCL\'s repair' },
+   repro => 'open my $fh, "<", \\"a\\nb\\n"; my %h; my @l = map { $h{$_}++ } <$fh>; print scalar(@l), "\\n";',
+   perl => "2\n",
    tokens => {
-     got  => ['Word=print', 'Word=sort', 'Operator=<', 'Word=DATA', 'Operator=>', 'Structure=;', 'Separator=__DATA__', 'Data=b\\na\\n'],
-     want => ['Word=print', 'Word=sort', 'QuoteLike::Readline=<DATA>', 'Structure=;', 'Separator=__DATA__', 'Data=b\\na\\n'],
+     got  => ['Word=open', 'Word=my', 'Symbol=$fh', 'Operator=,', 'Quote::Double="<"', 'Operator=,', 'Cast=\\', 'Quote::Double="a\\nb\\n"', 'Structure=;', 'Word=my', 'Symbol=%h', 'Structure=;', 'Word=my', 'Symbol=@l', 'Operator==', 'Word=map', 'Structure={', 'Symbol=$h', 'Structure={', 'Magic=$_', 'Structure=}', 'Operator=++', 'Structure=}', 'Operator=<', 'Symbol=$fh', 'Operator=>', 'Structure=;', 'Word=print', 'Word=scalar', 'Structure=(', 'Symbol=@l', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=open', 'Word=my', 'Symbol=$fh', 'Operator=,', 'Quote::Double="<"', 'Operator=,', 'Cast=\\', 'Quote::Double="a\\nb\\n"', 'Structure=;', 'Word=my', 'Symbol=%h', 'Structure=;', 'Word=my', 'Symbol=@l', 'Operator==', 'Word=map', 'Structure={', 'Symbol=$h', 'Structure={', 'Magic=$_', 'Structure=}', 'Operator=++', 'Structure=}', 'QuoteLike::Readline=<$fh>', 'Structure=;', 'Word=print', 'Word=scalar', 'Structure=(', 'Symbol=@l', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
    },
    unblocks => ['Pl/t/readline-ternary-01.t'],
    tasks => [138, 472, 479, 563] },
@@ -336,9 +333,9 @@ print "after\\n";
    tasks => [361] },
  { id => 20, kind => 'structure', dump => 'statements',
    title => 'Two of perl\'s three ways to enable `try` are not recognised, so the construct mis-lexes',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'statement-not-ended', shape => '`try` enabled by `use v5.40` / `use experimental "try"`: not recognised, the construct mis-lexes' },
-   fix => { kind => 'handler', handler => 'Pl::Parser::_pcl_feature_include_cb' },
+   fix => { kind => 'handler', handler => 'Pl::Parser::_pcl_feature_include_cb', commit => '9e862724', group => 'AG', pr => undef },
    repro => 'use v5.40;
 try { die "e\\n" } catch ($e) { print "caught $e" }
 print "after\\n";

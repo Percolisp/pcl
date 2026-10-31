@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s527d
-branch-sha: f780c1254ae58e302f3dc6c45ad35dc68cad7abc
-lib-tree: 142758926094afbc57b71f5b3647a26baefd7266
+branch-sha: a33452b4d4920a3c4da983771eb7fec63ff57f74
+lib-tree: 88084521d15645ab14bf62627752941adbd16523
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -49,6 +49,9 @@ fix: AB §41 cb213af0 Word, Symbol: an empty package segment is part of the name
 fix: AC §46 45bf106d Whitespace, Word: a sub name may open with the ' package separator
 fix: AD §45 bc7d176b Unknown: & before whitespace and a block or a scalar is the code sigil
 fix: AE §39 f780c125 Unknown, Symbol: a $ may be spaced from its name
+fix: AF §9 320d7a97 Unknown: braces around a punctuation name are the variable
+fix: AG §20 9e862724 Include: use experimental 'try' and the 5.40 bundle enable try
+fix: AH §14 a33452b4 Whitespace: <...> after a statement or map/grep block is a readline
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -128,3 +131,7 @@ commit: cb213af0 Word, Symbol: an empty package segment is part of the name
 commit: 45bf106d Whitespace, Word: a sub name may open with the ' package separator
 commit: bc7d176b Unknown: & before whitespace and a block or a scalar is the code sigil
 commit: f780c125 Unknown, Symbol: a $ may be spaced from its name
+commit: 320d7a97 Unknown: braces around a punctuation name are the variable
+commit: 9e862724 Include: use experimental 'try' and the 5.40 bundle enable try
+commit: 9a1332b2 TODO tests: <...> after a statement or map/grep block is a readline
+commit: a33452b4 Whitespace: <...> after a statement or map/grep block is a readline

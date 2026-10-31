@@ -88,4 +88,20 @@ both_agree(q{no warnings; sub 'Hello'_he_said { "hi" } print Hello::_he_said(), 
 both_agree('sub f { my $c = 0 ? ref shift : shift; return $c } print f(5), "\n";',
            '§47: 0 ? ref shift : shift');
 
+# §9 -- a punctuation variable in braces is ONE Magic token keeping the
+# braces; the compiler reads it as the plain spelling.
+both_agree('"ab" =~ /(a)(b)/; my @p = @{+}; my @m = @{ - }; print "@p|@m\n";',
+           '§9: @{+} and @{ - } are @+ and @-');
+both_agree('$! = 2; my $e = ${ ! }; print $e + 0, "\n";',
+           '§9: ${ ! } is $!');
+
+# §20 -- use experimental 'try' enables try for PPI too (the construct
+# is one compound statement; the next statement survives).
+both_agree(qq{use experimental "try"; no warnings;\ntry { die "e\\n" } catch (\$e) { print "caught \$e" }\nprint "after\\n";},
+           q{§20: use experimental 'try'});
+
+# §14, the after-a-block half: <$fh> after a map block is a readline.
+both_agree('open my $fh, "<", \"a\nb\n"; my %h; my @l = map { $h{$_}++ } <$fh>; print scalar(@l), "\n";',
+           '§14: map { ... } <$fh>');
+
 done_testing();

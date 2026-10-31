@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 266;
+use Test::More tests => 271;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1687,4 +1687,31 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
     my $plain   = $tokens->();
     my $slurped = do { local $/; $tokens->() };
     is( $slurped, $plain, 'a standalone tokenizer: the tokens are the same when $/ is undef' );
+}
+
+# §14, the after-a-block half: after the } of a block that opens a
+# statement or follows a word perl expects a term, so <...> is a readline
+# or a glob whatever it holds.  perl: my %h; my @l = map { $h{$_}++ } <DATA>
+# reads DATA.  After a subscript's } or a do block's } (the controls) the
+# < compares.
+{
+    for my $r (
+        [ 'my @l = map { $h{$_}++ } <op/*>;', 'QuoteLike::Readline=<op/*>',  'a glob after a map block' ],
+        [ 'my @m = grep { 1 } <$fh>;',        'QuoteLike::Readline=<$fh>',   'a readline after a grep block' ],
+        [ 'if ($x) { } <STDIN>;',             'QuoteLike::Readline=<STDIN>', 'a readline after a statement block' ],
+    ) {
+        my ( $code, $want, $desc ) = @$r;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+{
+    for my $r (
+        [ '$x = $h{a} < $b;',   'less-than after a subscript (control)' ],
+        [ '$w = do { 1 } < 2;', 'less-than after a do block (control)' ],
+    ) {
+        my ( $code, $desc ) = @$r;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq 'Operator=<', @t ), "$code: $desc" ) or diag "got: @t";
+    }
 }

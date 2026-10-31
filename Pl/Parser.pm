@@ -440,15 +440,24 @@ sub _strip_format_blocks {
 # compiler keys on a variable's content, so the ONE place that drops the
 # whitespace is here, in place (no re-parse), for whole documents and for
 # fragment documents alike (both entries call it).  `$ _` is the Magic `$_`.
+#
+# The same holds for a punctuation variable in braces (`@{+}`, `${ ! }`,
+# §9): PCL's PPI makes it ONE Magic token keeping the braced text, and the
+# compiler's spelling is the plain one (`@+`), as
+# Pl::PExpr::braced_punct_magic_name decides for the string scanner too.
 sub _canonical_spaced_symbols {
   my ($doc, $src) = @_;
-  return if defined $src && $src !~ /\$[ \t]/;   # the source names none
+  return if defined $src && $src !~ /\$[ \t]|[\$\@%]\{/;   # the source names none
   my $syms = $doc->find(sub {
     ($_[1]->isa('PPI::Token::Symbol') || $_[1]->isa('PPI::Token::Magic'))
-      && $_[1]->content =~ /^\$[ \t]/
+      && $_[1]->content =~ /^(?:\$[ \t]|[\$\@%]\{\s*[^\w\s{}^]\s*\}\z)/
   }) || [];
   for my $tok (@$syms) {
-    (my $c = $tok->content) =~ s/^\$[ \t]+/\$/;
+    my $c = $tok->content;
+    if ($c =~ /^([\$\@%])\{(.*)\}\z/s) {
+      $c = Pl::PExpr::braced_punct_magic_name($1, $2) // $c;
+    }
+    $c =~ s/^\$[ \t]+/\$/;
     $tok->set_content($c);
   }
   return;

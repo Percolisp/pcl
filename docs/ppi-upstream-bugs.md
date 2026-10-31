@@ -426,6 +426,8 @@ ANNOUNCES the drop (rule 12, effect-only). Unblocked `t/op/attrs.t` 0 → 28 and
 
 ## 9. `${ PUNCTUATION }` is a variable, but lexes as Cast + Block  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527d: group AF, commit `320d7a97` on branch `pcl`, vendored as vendor/PPI -- the Magic token keeps the braced text (`@{+}`); PCL reads the plain spelling through `Pl::Parser::_canonical_spaced_symbols` (the registry row's `want` changed to the braced text)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AF.md`).
+
 Minimal repro (found s395 — `t/re/pat_rt_report.t`, 2513 rows behind it):
 
 ```perl
@@ -755,6 +757,8 @@ real glob, and the tree is what tells them apart.
 
 ## 13. Tokenization of a trailing `__END__`/`__DATA__` section depends on `$/`  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527d: group X, commit `9b106126` on branch `pcl`, vendored as vendor/PPI -- the root: a standalone `PPI::Tokenizer` takes the line end of a comment and of an `__END__` line without `chomp`, so it no longer reads `$/` (s527c fixed the Document entry)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-X2.md`).
+
 **FIXED on PCL's PPI branch** (s527c: group X, commit `3a08ed1f` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-X.md`).  The Lexer runs the tokenizer with $/ = "\n"; PCL's _trim_invented_tail is deleted.  A standalone PPI::Tokenizer still reads $/ in Token::Word / Token::Comment's chomp (a token-file change, handed over).
 
 **Perl:** `$/` is an input-record separator for *reading*; it has nothing to do
@@ -786,6 +790,8 @@ invented, so the result no longer depends on the caller's `$/` at all.
 ---
 
 ## 14. `<FH>` / `<glob>` after a list operator or a block is lexed as `<` … `>`  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527d: group AH, commit `a33452b4` on branch `pcl`, vendored as vendor/PPI -- the after-a-BLOCK half only (`map { … } <$fh>`, `if (…) { } <STDIN>`); after a list operator or a user sub only the prototype table knows, so that half stays PCL's (`_repair_readline_cascade`, `_fix_ppi_glob_after_block`)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AH.md`).
 
 **Perl:** `<…>` in TERM position is a readline/glob, wherever that position
 comes from — after `sort`, after `print`, after a `map`/`grep` block.
@@ -1132,6 +1138,8 @@ its other callers).  Guard rows: `Pl/t/method-name-word-01.t`.
 ---
 
 ## 20. Two of perl's three ways to enable `try` are not recognised, so the construct mis-lexes  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527d: group AG, commit `9e862724` on branch `pcl`, vendored as vendor/PPI -- `use experimental 'try'` (upstream PR #361's change, credited) and the 5.40 bundle; PCL's `_pcl_feature_include_cb` STAYS: it also models a version bundle REPLACING the feature set, `no feature;` and the `:5.NN` bundle names); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AG.md`).
 
 **Perl:** three spellings enable 5.34's try/catch, and they are equivalent —
 `use feature 'try'`, `use experimental 'try'` (which *is* `feature->import` plus
@@ -2290,6 +2298,8 @@ PCL's `_repair_statement_start_glob_cast` was deleted in s527b (corpus-diff iden
 
 ## 39. A SPACED sigil `$ name` is split into Cast + Word  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
 
+**FIXED on PCL's PPI branch** (s527d: group AE, commit `f780c125` on branch `pcl`, vendored as vendor/PPI -- a name on the same line; a name on the NEXT line (`$\nname`) and `@ name` / `% name` are not covered, so `_fix_spaced_sigils` stays for them); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AE.md`).
+
 **Minimal repro** (perl 5.40.3 prints `5`): `my $ bits = 5; print $bits, "\n";`
 perl's `scan_ident` (toke.c, reached from `yyl_dollar`) skips whitespace
 between a sigil and its identifier, so `$ bits` IS `$bits` (perl's own
@@ -2329,6 +2339,8 @@ not-supported, `docs/not-supported.md`).  Registry §40, checker
 ---
 
 ## 41. A name with an EMPTY package segment (`foo::::bar`) is split into two Words  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**FIXED on PCL's PPI branch** (s527d: group AB, commit `cb213af0` on branch `pcl`, vendored as vendor/PPI -- Word and Symbol; PCL's two merges (Parser2's sub-name merge, `Pl::PExpr::_merge_split_qualified_words`) DELETED, corpus-diff identical); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AB.md`).
 
 **Minimal repro** (perl prints `7`): `sub foo::::bar { 7 } print foo::::bar(), "\n";`
 perl's `scan_word6` takes `::` runs inside a name (t/base/lex.t `foo::::::bar`).
@@ -2374,6 +2386,8 @@ cannot see it); task #3750.
 
 ## 44. `CORE::__END__` / `CORE::__DATA__` is a Word, not a Separator  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
 
+**FIXED on PCL's PPI branch** (s527d: group AA, commit `cf13afb5` on branch `pcl`, vendored as vendor/PPI -- the token; the Lexer's statement-class table still keys on `__END__` / `__DATA__` (hand-over to s527e, task #3981)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).
+
 **Minimal repro** (perl prints `x`): `print "x\n";` then a line `CORE::__END__`
 then `not code`.  perl ends the code at either spelling (`yyl_data_handle`,
 t/op/coreamp.t:1225).  **PPI**: `Word[CORE::__END__] Operator[not] Word[code]`.
@@ -2385,6 +2399,8 @@ checker `data-marker-as-word`; task #3751.
 
 ## 45. `& {BLOCK}` with a space after the `&` is a bitwise and  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
 
+**FIXED on PCL's PPI branch** (s527d: group AD, commit `bc7d176b` on branch `pcl`, vendored as vendor/PPI -- `& {` and `& $` where a term is expected); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AD.md`).
+
 **Minimal repro** (perl prints `ok`): `& {sub { print "ok\n" }};`
 Where a term is expected `&` is the code sigil (`yyl_ampersand`: not
 XOPERATOR => `scan_ident`), whitespace or not (t/op/goto.t:569).  **PPI**:
@@ -2395,6 +2411,8 @@ Registry §45, checker `ampersand-as-bitand`; task #3752.
 ---
 
 ## 46. The old package separator `'` opening a SUB NAME lexes as a quote  [CONFIRMED 1.291 and PCL's branch a2fa26a0]
+
+**FIXED on PCL's PPI branch** (s527d: group AC, commit `45bf106d` on branch `pcl`, vendored as vendor/PPI -- PCL's tick-name source rewrite also takes the leading tick); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AC.md`).
 
 **Minimal repro** (perl prints `hi`):
 `no warnings; sub 'Hello'_he_said { "hi" } print Hello::_he_said(), "\n";`
