@@ -1,7 +1,7 @@
 From 6613fff5d07a9483db77bf364200e4bcfc4be754 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 21:56:03 +0200
-Subject: [PATCH 37/57] TODO tests: PPI loads and parses without YAML::PP
+Subject: [PATCH 37/70] TODO tests: PPI loads and parses without YAML::PP
 
 PPI::Document has `use YAML::PP ();` at its top, so PPI cannot be
 loaded at all on a machine without YAML::PP -- although YAML::PP is

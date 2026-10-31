@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "Filed by s527c (2026-10-31), found by t/op/for.t's first companion run (the file had been a whole-file PPI failure until s527c, #1580).  SILENT WRONG, pre-existing (main ff5f72b5 + vendor dc242138 = the s527c tree): `local *NAME` does NOT hide a scalar that an enclosing `local $NAME = ...` gave a value -- inside the glob-local scope $NAME still reads the outer local's value; perl reads a fresh (undef) scalar.\n\nperl 5.40.3 vs PCL:\n  our $foo = \"boo\"; { local *foo; print defined $foo ? \"def [$foo]\\n\" : \"undef\\n\"; }    perl: undef   PCL: undef   (control: a plain package value IS hidden)\n  local $bar = \"b\"; { local *bar; print defined $bar ? \"def [$bar]\\n\" : \"undef\\n\"; }    perl: undef   PCL: def [b]\n  { local $foo = \"boo\"; { local *foo; for $foo (1,2) {} print defined $foo ? \"def\\n\" : \"undef\\n\"; } }   perl: undef   PCL: def  (t/op/for.t 111 \"NULL GvSV\", 112 \"NULL GvSV int iterator\")\n\nSuspect: `local $NAME` dynamically binds the scalar CELL (a let of the special variable), and `local *NAME` swaps the glob's scalar SLOT -- a read of $NAME inside reaches the let-bound value, not the glob's new empty slot.  Cheap discriminating measurement: pl2cl the second line and read whether `local $bar` lowers to a dynamic binding of the cell symbol and `local *bar` to p-local-glob on the glob -- two different places.  ir-spec §7.2 (globs) is the normative text to check.\n",
+   "id" : "3963",
+   "status" : "pending",
+   "subject" : "local *NAME does not hide a scalar an enclosing local $NAME = ... set: $NAME keeps the outer local's value inside the glob-local scope (op/for.t NULL GvSV rows) -- silent wrong"
+}

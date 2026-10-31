@@ -1,0 +1,69 @@
+From 3a08ed1fbd775d1768c61df1b2d823a552839df4 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:54:11 +0200
+Subject: [PATCH 68/70] Lexer: the caller's $/ does not reach the tokenizer
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+$/ is perl's input record separator; it has nothing to do with how
+source is read.  The tokenizer splits its source on "\n" and chomps the
+rest of a comment line and of the __END__ / __DATA__ lines, and chomp
+removes $/ -- so with $/ undefined (slurp mode) a trailing comment kept
+its newline, the newline after __DATA__ became a Comment and serialize
+was no longer the identity.  lex_tokenizer, the one place every
+document is lexed, sets $/ to "\n" for the lexing (the tokenizer runs
+lazily inside it).
+
+Fixes PCL §13 in t/ppi_bugs_pcl.t (three rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm | 5 ++++-
+ t/ppi_bugs_pcl.t | 6 ++----
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index c7973de1..da51f33e 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -202,8 +202,11 @@ sub lex_tokenizer {
+ 		$Tokenizer->_features($feat);
+ 	}
+ 
+-	# Lex the token stream into the document
++	# Lex the token stream into the document.  The tokenizer splits its
++	# source on "\n" and chomps pieces of it, so the caller's $/ (undef
++	# in slurp mode) must not reach it.
+ 	$self->{Tokenizer} = $Tokenizer;
++	local $/ = "\n";
+ 	if ( !eval { $self->_lex_document($Document); 1 } ) {
+ 		# If an error occurs DESTROY the partially built document.
+ 		$Tokenizer->_document(undef);
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index b81d09ee..14b7f997 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -318,8 +318,7 @@ TODO: {
+ # has just read the source with `local $/` leaves behind), a document whose last
+ # line is `__END__`/`__DATA__` comes back one byte longer: serialize is no
+ # longer the identity, and the DATA section gains a line the file never had.
+-TODO: {
+-    local $TODO = 'PCL §13: Tokenization of a trailing __END__/__DATA__ section depends on $/';
++{
+     my $src = "# c\n__END__\n";
+     my $slurped = do { local $/; PPI::Document->new(\$src)->serialize };
+     is( $slurped, $src,
+@@ -1624,8 +1623,7 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+     my $plain   = $tokens->();
+     my $slurped = do { local $/; $tokens->() };
+     my $crlf    = do { local $/ = "\r\n"; $tokens->() };
+-    TODO: {
+-        local $TODO = 'PCL §13: Tokenization of a trailing __END__/__DATA__ section depends on $/';
++    {
+         is( $slurped, $plain, 'the tokens are the same when $/ is undef' );
+         is( $crlf,    $plain, 'the tokens are the same when $/ is "\r\n"' );
+     }
+-- 
+2.53.0
+

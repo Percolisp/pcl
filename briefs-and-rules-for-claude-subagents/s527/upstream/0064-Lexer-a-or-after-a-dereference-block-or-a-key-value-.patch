@@ -1,0 +1,334 @@
+From 75fc24e8d436aa766ab0efe2f8cdeefa9284e816 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:47:16 +0200
+Subject: [PATCH 64/70] Lexer: a [ or { after a dereference block or a
+ key/value slice name subscripts it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After a term perl expects an operator, and a [ or { there subscripts
+the term: ${$r}[0] is an element of @$r, ${a}[1] of @a, @{$r}[0, 1]
+an array slice, %{$r}[0, 1] and %h{'a', 'b'} key/value slices.
+_square knew the [ after a symbol and after ->, but not after a
+dereference block, so it made an anonymous-array Constructor; _curly
+knew the { after a $ or @ dereference block and after a $ or @ symbol,
+but not the % forms (5.20's key/value slices), so it made a Block.
+
+One predicate, _deref_block (a $, @ or % cast before the block), now
+serves both, and a % symbol subscripts like $ and @.  An anonymous
+array after a block filehandle (print {$fh} [1]) stays a Constructor.
+
+Regression pair 62_deref_subscript (the plans of 08_regression.t and
+25_increment.t enumerate the directory).  Fixes PCL §17 and §36 in
+t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm                             |  32 +++--
+ t/08_regression.t                            |   2 +-
+ t/25_increment.t                             |   2 +-
+ t/data/08_regression/62_deref_subscript.code |   7 +
+ t/data/08_regression/62_deref_subscript.dump | 128 +++++++++++++++++++
+ t/ppi_bugs_pcl.t                             |  17 +--
+ 6 files changed, 161 insertions(+), 27 deletions(-)
+ create mode 100644 t/data/08_regression/62_deref_subscript.code
+ create mode 100644 t/data/08_regression/62_deref_subscript.dump
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 0c413d40..a576ba95 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1160,6 +1160,15 @@ sub _round {
+ 	'PPI::Structure::List'
+ }
+ 
++# Is the last child of the parent the block of a dereference -- a $, @ or
++# % cast before it, as in ${$ref}, @{$ref}, %{$ref} or ${name}?  A [ or {
++# right after it subscripts it, as after the symbol it stands for.
++sub _deref_block {
++	my $Parent = shift;
++	my $prior  = $Parent->schild(-2) or return '';
++	return $prior->isa('PPI::Token::Cast') && $prior->content =~ /^[\$\@\%]\z/;
++}
++
+ # Given a parent element, and a [ token to open a structure, determine
+ # the class that the structure should be.
+ sub _square {
+@@ -1182,8 +1191,8 @@ sub _square {
+ 			# $foo{}[]
+ 			return 'PPI::Structure::Subscript';
+ 		}
+-		if ( $Element->isa('PPI::Token::Symbol') and $Element->content =~ /^(?:\$|\@)/ ) {
+-			# $foo[], @foo[]
++		if ( $Element->isa('PPI::Token::Symbol') and $Element->content =~ /^[\$\@\%]/ ) {
++			# $foo[], @foo[], %foo[] (a key/value slice)
+ 			return 'PPI::Structure::Subscript';
+ 		}
+ 		if ( $Element->isa('PPI::Token::Cast') and $Element->content =~ /^(?:\@|\%)/ ) {
+@@ -1193,6 +1202,10 @@ sub _square {
+ 				return 'PPI::Structure::Subscript';
+ 			}
+ 		}
++		if ( $Element->isa('PPI::Structure::Block') and _deref_block($Parent) ) {
++			# ${$aref}[0], ${name}[0], @{$aref}[0, 1], %{$aref}[0, 1]
++			return 'PPI::Structure::Subscript';
++		}
+ 		# FIXME - More cases to catch
+ 	}
+ 
+@@ -1265,8 +1278,8 @@ sub _curly {
+ 			# $foo[]{}
+ 			return 'PPI::Structure::Subscript';
+ 		}
+-		if ( $content =~ /^(?:\$|\@)/ and $Element->isa('PPI::Token::Symbol') ) {
+-			# $foo{}, @foo{}
++		if ( $content =~ /^[\$\@\%]/ and $Element->isa('PPI::Token::Symbol') ) {
++			# $foo{}, @foo{}, %foo{} (a key/value slice)
+ 			return 'PPI::Structure::Subscript';
+ 		}
+ 		if ( $Element->isa('PPI::Token::Cast') and $Element->content =~ /^(?:\@|\%|\*)/ ) {
+@@ -1276,17 +1289,12 @@ sub _curly {
+ 				return 'PPI::Structure::Subscript';
+ 			}
+ 		}
+-		if ( $Element->isa('PPI::Structure::Block') ) {
++		if ( $Element->isa('PPI::Structure::Block') and _deref_block($Parent) ) {
+ 			# deference - ${$hash_ref}{foo}
+ 			#     or even ${burfle}{foo}
+ 			# hash slice - @{$hash_ref}{'foo', 'bar'}
+-			if ( my $prior = $Parent->schild(-2) ) {
+-				my $prior_content = $prior->content();
+-				$prior->isa( 'PPI::Token::Cast' )
+-					and ( $prior_content eq '@' ||
+-						$prior_content eq '$' )
+-					and return 'PPI::Structure::Subscript';
+-			}
++			# key/value slice - %{$hash_ref}{'foo', 'bar'}
++			return 'PPI::Structure::Subscript';
+ 		}
+ 
+ 		# Are we the last argument of sub?
+diff --git a/t/08_regression.t b/t/08_regression.t
+index 0545f12a..eb376c65 100644
+--- a/t/08_regression.t
++++ b/t/08_regression.t
+@@ -7,7 +7,7 @@
+ use if !(-e 'META.yml'), "Test::InDistDir";
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 1229 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 1247 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Test qw( pause );
+diff --git a/t/25_increment.t b/t/25_increment.t
+index 23a3f946..8fe29472 100644
+--- a/t/25_increment.t
++++ b/t/25_increment.t
+@@ -7,7 +7,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 11966 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 12590 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI::Test::Run ();
+ 
+diff --git a/t/data/08_regression/62_deref_subscript.code b/t/data/08_regression/62_deref_subscript.code
+new file mode 100644
+index 00000000..6d93d43c
+--- /dev/null
++++ b/t/data/08_regression/62_deref_subscript.code
+@@ -0,0 +1,7 @@
++my $v = ${$r}[0] + ${a}[1];
++my @s = @{$r}[0, 1];
++my %kv = %{$r}[0, 1];
++my %kh = %{$r}{'a', 'b'};
++my %h2 = %h{'a', 'b'};
++my %a2 = %a[0, 1];
++print {$fh} [1];
+diff --git a/t/data/08_regression/62_deref_subscript.dump b/t/data/08_regression/62_deref_subscript.dump
+new file mode 100644
+index 00000000..df82bac0
+--- /dev/null
++++ b/t/data/08_regression/62_deref_subscript.dump
+@@ -0,0 +1,128 @@
++PPI::Document
++  PPI::Statement::Variable
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'$v'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'$'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Symbol  	'$r'
++    PPI::Structure::Subscript  	[ ... ]
++      PPI::Statement::Expression
++        PPI::Token::Number  	'0'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'+'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'$'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Word  	'a'
++    PPI::Structure::Subscript  	[ ... ]
++      PPI::Statement::Expression
++        PPI::Token::Number  	'1'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Variable
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'@s'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'@'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Symbol  	'$r'
++    PPI::Structure::Subscript  	[ ... ]
++      PPI::Statement::Expression
++        PPI::Token::Number  	'0'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'1'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Variable
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%kv'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'%'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Symbol  	'$r'
++    PPI::Structure::Subscript  	[ ... ]
++      PPI::Statement::Expression
++        PPI::Token::Number  	'0'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'1'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Variable
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%kh'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'%'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Symbol  	'$r'
++    PPI::Structure::Subscript  	{ ... }
++      PPI::Statement::Expression
++        PPI::Token::Quote::Single  	''a''
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Quote::Single  	''b''
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Variable
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%h2'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%h'
++    PPI::Structure::Subscript  	{ ... }
++      PPI::Statement::Expression
++        PPI::Token::Quote::Single  	''a''
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Quote::Single  	''b''
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Variable
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%a2'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Operator  	'='
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%a'
++    PPI::Structure::Subscript  	[ ... ]
++      PPI::Statement::Expression
++        PPI::Token::Number  	'0'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'1'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement
++    PPI::Token::Word  	'print'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Symbol  	'$fh'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Constructor  	[ ... ]
++      PPI::Statement
++        PPI::Token::Number  	'1'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 640e75d2..327dc9c9 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -425,8 +425,7 @@ TODO: {
+ # bracketed part SUBSCRIPTS what precedes it.  PPI builds Structure::Constructor
+ # (an anonymous arrayref) and Structure::Block (a code block) instead — while
+ # the sibling `@h{...}` correctly gets a Structure::Subscript.
+-TODO: {
+-    local $TODO = 'PCL §17: A SUBSCRIPT after a deref or a KV slice is structured as something else';
++{
+     my $doc = PPI::Document->new(\'my $v = ${$r}[0];');
+     my @s = map { ref } @{ $doc->find(sub { $_[1]->isa('PPI::Structure') }) || [] };
+     ok( (grep { $_ eq 'PPI::Structure::Subscript' } @s),
+@@ -1058,8 +1057,7 @@ for my $src ('1.5-0.5;', '1e3-1;') {
+ # §36 -- the `[1]` of a braced element `${a}[1]` is lexed as an anonymous-array
+ # Constructor, while `${h}{k}` gets a Subscript.  perl: `@a = (1, 2, 3);
+ # print ${a}[1]` prints 2.
+-TODO: {
+-    local $TODO = 'PCL §36: The [i] of a braced element ${name}[i] is lexed as an anonymous-array CONSTRUCTOR';
++{
+     my $doc = PPI::Document->new(\q{@a = (1, 2, 3); print ${a}[1];});
+     my ($st) = grep { $_->start && $_->start->content eq q{[} }
+                @{ $doc->find(q{PPI::Structure}) || [] };
+@@ -1558,20 +1556,13 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+         [ 'my %v = %h{"a", "b"};',     '{', '§17' ],
+         [ 'my %v = %a[0, 1];',         '[', '§17' ],
+     );
+-    my %why = (
+-        '§17' => 'PCL §17: A SUBSCRIPT after a deref or a KV slice is structured as something else',
+-        '§36' => 'PCL §36: The [i] of a braced element ${name}[i] is lexed as an anonymous-array CONSTRUCTOR',
+-    );
+     for my $r (@rows) {
+         my ( $code, $open, $sect ) = @$r;
+         my $doc = PPI::Document->new(\$code);
+         my @br  = grep { $_->start && $_->start->content eq $open }
+                   @{ $doc->find('PPI::Structure') || [] };
+-        TODO: {
+-            local $TODO = $why{$sect};
+-            is( ref( $br[-1] ), 'PPI::Structure::Subscript',
+-                "$code: the last $open...  is a Structure::Subscript" );
+-        }
++        is( ref( $br[-1] ), 'PPI::Structure::Subscript',
++            "$code: the last $open...  is a Structure::Subscript ($sect)" );
+     }
+     for my $r ( [ 'print {$fh} [1];', '[', 'PPI::Structure::Constructor',
+                   'after a block filehandle a [ is an anonymous array (control)' ],
+-- 
+2.53.0
+

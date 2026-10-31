@@ -1,0 +1,383 @@
+From a320f21a8962f2a8152c65d017054cd8581f6bb3 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:44:43 +0200
+Subject: [PATCH 62/70] Lexer: the loop variable of foreach is any of perl's
+ forms
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perly.y's foreach reads, between the for word and the ( LIST ), an
+optional my/our/state, an optional \ (refaliasing), and then a scalar,
+a dereference ($$f, ${$r}, ${*$f}) or, after my, a list of
+scalars (5.36's for my ($q, $r) (LIST)).  _continues knew only
+[my] $scalar: a dereference reached "Illegal state in 'for' compound
+statement" and PPI::Document->new returned undef for the whole file,
+and the other forms ended the compound after its first word, so the
+loop and the statement after it became one flat statement.
+
+One helper, _foreach_head, walks the head so far: declarators and
+casts keep it open, a symbol, a block after a cast or a () after my
+completes it, and then only ( LIST ) or qw() may follow.
+Anything else hands back to the rules that were there.  A compound
+whose first word after for is a cast is of type foreach.
+
+Regression pair 61_foreach_variable (the plans of 08_regression.t and
+25_increment.t enumerate the directory).  Fixes PCL §6, §10 and §29 in
+t/ppi_bugs_pcl.t; the for $$$r row stays TODO (a tokenizer row: the
+tokenizer reads $$$r as $$ + $r).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm                              |  76 ++++++++++
+ lib/PPI/Statement/Compound.pm                 |   2 +
+ t/08_regression.t                             |   2 +-
+ t/25_increment.t                              |   2 +-
+ t/data/08_regression/61_foreach_variable.code |   7 +
+ t/data/08_regression/61_foreach_variable.dump | 132 ++++++++++++++++++
+ t/ppi_bugs_pcl.t                              |  15 +-
+ 7 files changed, 223 insertions(+), 13 deletions(-)
+ create mode 100644 t/data/08_regression/61_foreach_variable.code
+ create mode 100644 t/data/08_regression/61_foreach_variable.dump
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index daae6b4d..0c413d40 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -846,6 +846,12 @@ sub _continues {
+ 		return '';
+ 	}
+ 
++	# The loop variable of a foreach, up to its ( LIST )
++	if ( $type eq 'for' or $type eq 'foreach' ) {
++		my $head = $self->_foreach_head( \@part, $Token );
++		return $head if defined $head;
++	}
++
+ 	# Handle the common "after round braces" case
+ 	if ( $LastChild->isa('PPI::Structure') and $LastChild->braces eq '()' ) {
+ 		# LABEL while (EXPR) ...
+@@ -1043,6 +1049,76 @@ sub _continues {
+ 
+ 
+ 
++# The loop variable of a foreach.  perly.y reads, between the for word and
++# the ( LIST ):
++#
++#   [my|our|state] $x            for my $x (LIST)
++#   a dereference                for $$f (LIST), for ${$r} (LIST)
++#   a refaliasing variable       for \my %h (LIST), for my \%h (LIST)
++#   my and a list of scalars     for my ($q, $r) (LIST)   (5.36)
++#
++# Given the significant children of the compound and the next token,
++# returns true to continue, '' to end, or undef once the variable (and
++# anything else this does not know) is past: the callers' rules decide.
++sub _foreach_head {
++	my ($self, $part, $Token) = @_;
++	my $i = $part->[0]->isa('PPI::Token::Label') ? 1 : 0;
++	return undef if $part->[$i]->content !~ /^for(?:each)?\z/;
++	my @head = @{$part}[ $i + 1 .. $#$part ];
++
++	# Classify the head so far; a part that cannot be in a loop variable
++	# (a C-style head, the LIST itself) hands back to the callers.
++	my $decl = sub {
++		my $e = shift;
++		$e and $e->isa('PPI::Token::Word') and $e->content =~ /^(?:my|our|state)\z/;
++	};
++	my $state = 'start';    # start | open | done
++	for my $j ( 0 .. $#head ) {
++		my $e    = $head[$j];
++		my $prev = $j ? $head[ $j - 1 ] : undef;
++		return undef if $state eq 'done';
++		if ( $decl->($e) or $e->isa('PPI::Token::Cast') ) {
++			$state = 'open';
++		} elsif ( $e->isa('PPI::Token::Symbol') or $e->isa('PPI::Token::Magic') ) {
++			$state = 'done';
++		} elsif ( $e->isa('PPI::Structure::Block') and _INSTANCE( $prev, 'PPI::Token::Cast' ) ) {
++			$state = 'done';
++		} elsif (
++			$e->isa('PPI::Structure') and $e->braces eq '()'
++			and _INSTANCE( $prev, 'PPI::Token::Word' ) and $prev->content eq 'my'
++		) {
++			$state = 'done';
++		} else {
++			return undef;
++		}
++	}
++	return undef if $state eq 'start' and not $Token->isa('PPI::Token::Cast');
++
++	my $open_round = $Token->isa('PPI::Token::Structure') && $Token->content eq '(';
++	my $qw         = $Token->isa('PPI::Token::QuoteLike::Words');
++	if ( $state eq 'done' ) {
++		# The variable is complete: the LIST comes next
++		return ( $open_round or $qw ) ? 1 : '';
++	}
++
++	# Inside the variable: a declarator, a cast, a symbol, a
++	# dereference block after a cast, or the scalar list after my/our
++	my $last = $head[-1];
++	return 1 if $decl->($Token) and not $decl->($last);
++	return 1 if $Token->isa('PPI::Token::Cast');
++	return 1 if $Token->isa('PPI::Token::Symbol') or $Token->isa('PPI::Token::Magic');
++	return 1 if $open_round and $last->isa('PPI::Token::Word') and $last->content eq 'my';
++	return 1
++	  if $Token->isa('PPI::Token::Structure')
++	  and $Token->content eq '{'
++	  and $last->isa('PPI::Token::Cast');
++	return '';
++}
++
++
++
++
++
+ #####################################################################
+ # Lex Methods - Structure Object
+ 
+diff --git a/lib/PPI/Statement/Compound.pm b/lib/PPI/Statement/Compound.pm
+index c877c0d7..d6bd2730 100644
+--- a/lib/PPI/Statement/Compound.pm
++++ b/lib/PPI/Statement/Compound.pm
+@@ -121,6 +121,8 @@ sub type {
+ 		if ( $Element->isa('PPI::Token') ) {
+ 			return 'foreach' if $Element->content =~ /^(?:my|our|state)\z/;
+ 			return 'foreach' if $Element->isa('PPI::Token::Symbol');
++			# a dereference or a refaliasing variable: for $$f, for \my %h
++			return 'foreach' if $Element->isa('PPI::Token::Cast');
+ 			return 'foreach' if $Element->isa('PPI::Token::QuoteLike::Words');
+ 		}
+ 		if ( $Element->isa('PPI::Structure::List') ) {
+diff --git a/t/08_regression.t b/t/08_regression.t
+index 5da5f8f5..0545f12a 100644
+--- a/t/08_regression.t
++++ b/t/08_regression.t
+@@ -7,7 +7,7 @@
+ use if !(-e 'META.yml'), "Test::InDistDir";
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 1211 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 1229 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Test qw( pause );
+diff --git a/t/25_increment.t b/t/25_increment.t
+index 4aa27205..23a3f946 100644
+--- a/t/25_increment.t
++++ b/t/25_increment.t
+@@ -7,7 +7,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 11238 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 11966 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI::Test::Run ();
+ 
+diff --git a/t/data/08_regression/61_foreach_variable.code b/t/data/08_regression/61_foreach_variable.code
+new file mode 100644
+index 00000000..90285929
+--- /dev/null
++++ b/t/data/08_regression/61_foreach_variable.code
+@@ -0,0 +1,7 @@
++for $$f (5, 11) { push @seen, $$f }
++for ${*$f} (5, 11) { 1 }
++foreach my ($q, $r) (@l) { print "$q$r" }
++for \my %h (@l) { 1 }
++for my \@a (@l) { 1 }
++L: for \$x (@l) { 1 }
++print "x\n";
+diff --git a/t/data/08_regression/61_foreach_variable.dump b/t/data/08_regression/61_foreach_variable.dump
+new file mode 100644
+index 00000000..9bfaed7d
+--- /dev/null
++++ b/t/data/08_regression/61_foreach_variable.dump
+@@ -0,0 +1,132 @@
++PPI::Document
++  PPI::Statement::Compound
++    PPI::Token::Word  	'for'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'$'
++    PPI::Token::Symbol  	'$f'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Number  	'5'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'11'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'push'
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Symbol  	'@seen'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Cast  	'$'
++        PPI::Token::Symbol  	'$f'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Word  	'for'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'$'
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Cast  	'*'
++        PPI::Token::Symbol  	'$f'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Number  	'5'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'11'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Number  	'1'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Word  	'foreach'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Symbol  	'$q'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Symbol  	'$r'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Symbol  	'@l'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'print'
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Quote::Double  	'"$q$r"'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Word  	'for'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'\'
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Symbol  	'%h'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Symbol  	'@l'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Number  	'1'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Word  	'for'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'my'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'\'
++    PPI::Token::Symbol  	'@a'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Symbol  	'@l'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Number  	'1'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Label  	'L:'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'for'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Cast  	'\'
++    PPI::Token::Symbol  	'$x'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement
++        PPI::Token::Symbol  	'@l'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Number  	'1'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement
++    PPI::Token::Word  	'print'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Quote::Double  	'"x\n"'
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 59df8eeb..4fac3cb4 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -114,8 +114,7 @@ sub toks {
+ #   Lexer failed: Illegal state in 'for' compound statement
+ # Plain `for $x (…)` is fine; `foreach ${*$f} (…)` fails identically, as does
+ # the construct buried anywhere in a larger document (the whole parse dies).
+-TODO: {
+-    local $TODO = 'PCL §6: for ${*$f} (LIST) { } — LEXER DIES: "Illegal state in \'for\' compound statement"';
++{
+     my $src = 'no strict "refs"; my $f = "v"; for ${*$f} (5,11,33) { print }';
+     my $doc = PPI::Document->new(\$src);
+     ok( $doc,
+@@ -168,8 +167,7 @@ TODO: {
+ # a consumer sees a `for` with no list and no block, and loses unrelated code
+ # with it.  (Compare `for my $q (@l) { A() } print "x";`, which parses into two
+ # statements as expected.)
+-TODO: {
+-    local $TODO = 'PCL §10: for accepts only [my] $scalar as its loop variable';
++{
+     my $src = 'for my ($q, $r) (@l) { A() } print "x";';
+     my $doc = PPI::Document->new(\$src);
+     my ($first) = $doc ? $doc->schildren : ();
+@@ -851,8 +849,7 @@ TODO: {
+ # ("Lexer failed: Illegal state in 'for' compound statement"), so the WHOLE
+ # FILE is lost.  The same dereference outside a for head lexes fine, so the
+ # fault is in the for-compound lexer's loop-variable slot.
+-TODO: {
+-    local $TODO = 'PCL §29: A DEREFERENCE as the foreach loop variable fails the LEXER: "Illegal state in \'for\' compound statement"';
++{
+     for my $src ('for $$f (1,2) { }',
+                  'for ${$f} (1,2) { }',
+                  'for ${*$f} (5,11,33) { }') {
+@@ -880,8 +877,7 @@ TODO: {
+ # the list and the block in a SIBLING PPI::Statement, so the document exists
+ # and is silently wrong-shaped.  perl runs the loop, aliasing $x to each
+ # element's referent.
+-TODO: {
+-    local $TODO = 'PCL §29: A DEREFERENCE as the foreach loop variable fails the LEXER: "Illegal state in \'for\' compound statement"';
++{
+     for my $src ('for my \$x (\$main::y) { 1 }',
+                  'foreach my \@a (\@main::b) { 1 }') {
+         my $doc = PPI::Document->new(\$src) or do {
+@@ -1527,9 +1523,6 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+     );
+     my %why = (
+         '§1'  => 'PCL §1: $$$ref (triple dereference) tokenized as $$ + $ref',
+-        '§6'  => 'PCL §6: for ${*$f} (LIST) { } — LEXER DIES: "Illegal state in \'for\' compound statement"',
+-        '§10' => 'PCL §10: for accepts only [my] $scalar as its loop variable',
+-        '§29' => 'PCL §29: A DEREFERENCE as the foreach loop variable fails the LEXER: "Illegal state in \'for\' compound statement"',
+     );
+     for my $r (@shapes) {
+         my ( $code, $sect ) = @$r;
+-- 
+2.53.0
+

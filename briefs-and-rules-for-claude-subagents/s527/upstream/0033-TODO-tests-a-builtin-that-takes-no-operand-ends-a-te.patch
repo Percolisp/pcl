@@ -1,7 +1,7 @@
 From df9e06cb1f8471c278f93b61e22173d21845eb10 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 21:41:39 +0200
-Subject: [PATCH 33/57] TODO tests: a builtin that takes no operand ends a term
+Subject: [PATCH 33/70] TODO tests: a builtin that takes no operand ends a term
 
 perl -e 'print time.2' prints the time with a 2 appended, and
 `time %.5e1` is a modulo: time, wait, wantarray, fork, getppid and the

@@ -1,0 +1,76 @@
+From e1c736f972e89f5a4e98dcec44b14fc6f70f2552 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:51:01 +0200
+Subject: [PATCH 65/70] TODO tests: { STRING, ... } where a statement starts is
+ an anonymous hash
+
+perl decides a statement-initial { by looking ahead (toke.c, the curly
+look-ahead): a } right away, a first term followed by =>, or a string,
+a number or a word that does not start with a lower-case letter
+followed by a comma make an anonymous hash -- perl -e 'sub f { { "a",
+"foo" } } print ref f()' prints HASH.  PPI knows the } and the =>, not
+the comma, so { 'a', 'foo' } is a Block.
+
+Five TODO rows ('a', "a", 1, Foo and q(a) before the comma) and five
+controls: { foo, 1 }, { $x, 1 } and { 1.5, 2 } are blocks in perl too,
+{ 'a' } is a block, and { 'a' => 1 } stays a Constructor.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 36 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 327dc9c9..9ca42fac 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 241 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 251 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1579,3 +1579,37 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+         is( ref( $br[-1] ), $want, "$code: $desc" );
+     }
+ }
++
++# §5 -- a { where a statement starts is a block unless what follows says
++# anonymous hash.  perl's rule (toke.c, the curly look-ahead): a } right
++# away, or a first term that is a string or a word followed by =>, or a
++# string, a number or a word not starting with a lower-case letter
++# followed by a comma -- perl -e 'sub f { { "a", "foo" } } print ref f()'
++# prints HASH, and so do { 1, 2 } and { Foo, 1 }; { foo, 1 }, { $x, 1 }
++# and { 1.5, 2 } are blocks.
++{
++    my @rows = (
++        [ q{{ 'a', 'foo' };},  'PPI::Structure::Constructor', 1 ],
++        [ q{{ "a", 1 };},      'PPI::Structure::Constructor', 1 ],
++        [ q{{ 1, 2 };},        'PPI::Structure::Constructor', 1 ],
++        [ q{{ Foo, 1 };},      'PPI::Structure::Constructor', 1 ],
++        [ q{{ q(a), 1 };},     'PPI::Structure::Constructor', 1 ],
++        [ q{{ foo, 1 };},      'PPI::Structure::Block', 0 ],
++        [ q{{ $x, 1 };},       'PPI::Structure::Block', 0 ],
++        [ q{{ 1.5, 2 };},      'PPI::Structure::Block', 0 ],
++        [ q{{ 'a' };},         'PPI::Structure::Block', 0 ],
++        [ q{{ 'a' => 1 };},    'PPI::Structure::Constructor', 0 ],
++    );
++    for my $r (@rows) {
++        my ( $code, $want, $todo ) = @$r;
++        my $doc = PPI::Document->new(\$code);
++        my ($first) = $doc->schildren;
++        my $br = $first && $first->schild(0);
++        local $TODO = $todo
++          ? 'PCL §5: { LITERAL , ... } (anon hash, comma-separated) misclassified as a Block'
++          : undef;
++        is( ref($br), $want,
++            "$code: the statement-initial { is a " . short_class($want)
++              . ( $todo ? '' : ' (control)' ) );
++    }
++}
+-- 
+2.53.0
+

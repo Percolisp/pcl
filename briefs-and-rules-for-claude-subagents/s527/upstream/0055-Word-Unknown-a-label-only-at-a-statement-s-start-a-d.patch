@@ -1,7 +1,7 @@
 From 6a5de5c1953d94e3e7e829b40af80b23a97867ca Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 01:03:29 +0200
-Subject: [PATCH 55/57] Word, Unknown: a label only at a statement's start; a
+Subject: [PATCH 55/70] Word, Unknown: a label only at a statement's start; a
  declaration's attributes
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -45,3 +45,25 @@ the whole branch (`git format-patch master..pcl`).  The new PR groups, each
 
 The group letters are assigned by `tools/vendor-ppi` in branch order; s527c's
 groups follow S.
+
+## s527c (2026-10-29 .. 10-31): the branch is now 70 commits, head a2fa26a0
+
+`0001-*.patch` .. `0070-*.patch` and `pcl-branch.bundle` regenerated from the
+whole branch (`git format-patch master..pcl`).  The Lexer groups, each "TODO
+tests, then the fix", PPI's suite green after every commit (plain and
+`AUTHOR_TESTING=1`):
+
+- `PR-T.md` `finally` belongs to the `try` statement -- §18;
+- `PR-U.md` every loop variable `foreach` accepts (a dereference, `our` /
+  `state`, refaliasing, the 5.36 n-at-a-time list) -- §6 §10 §29;
+- `PR-V.md` a `[` / `{` after a dereference block or a key/value slice name
+  subscripts it -- §17 §36;
+- `PR-W.md` `{ STRING, ... }` where a statement starts is an anonymous hash -- §5;
+- `PR-X.md` the caller's `$/` does not reach the tokenizer -- §13;
+- `PR-Y.md` a block filehandle right after `print(` is a block -- §37.  Its TODO
+  commit (`d15cb43f`) sits earlier in the series than its fix (`56330a40`):
+  cherry-pick the pair.  The fix UPDATES PPI's own fixture
+  `t/data/05_lexer/13_braces_in_parens.dump`, which stored the bug -- the
+  reason is in the commit message and in PR-Y.md.
+- one test-only commit (`a2fa26a0`): two `for $$$r` rows of t/ppi_bugs_pcl.t
+  leave TODO (they pass since PR-Q).

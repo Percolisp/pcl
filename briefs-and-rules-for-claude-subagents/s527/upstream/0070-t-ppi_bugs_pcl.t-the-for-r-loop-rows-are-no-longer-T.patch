@@ -1,0 +1,34 @@
+From a2fa26a09c6149844fff2f3f87e3db327fe23b01 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 01:24:49 +0200
+Subject: [PATCH 70/70] t/ppi_bugs_pcl.t: the for $$$r loop rows are no longer
+ TODO
+
+They were marked TODO under the $$$ref tokenizer row when the foreach
+rows were written; that row is fixed earlier on this branch (Unknown:
+$$ before a $, a word or a { is a dereference cast), so both rows pass
+and prove reported them as TODO passed.  The shape list is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 630a4cc2..195fcda5 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1516,9 +1516,7 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+         [ 'for \$x (@l) { 1 } f();',          '§10' ],
+         [ 'L: for \our @a (@l) { 1 } f();',   '§10' ],
+     );
+-    my %why = (
+-        '§1'  => 'PCL §1: $$$ref (triple dereference) tokenized as $$ + $ref',
+-    );
++    my %why = ();   # every shape passes since §1 ($$$r) was fixed
+     for my $r (@shapes) {
+         my ( $code, $sect ) = @$r;
+         ( my $loop = $code ) =~ s/ f\(\);$//;
+-- 
+2.53.0
+

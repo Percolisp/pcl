@@ -1,0 +1,238 @@
+From 4e021b91b9881e8e551114482b3cfb70b420325d Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:37:04 +0200
+Subject: [PATCH 59/70] Lexer: finally belongs to the try statement
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl's grammar (perly.y, the try rule) reads try BLOCK catch (VAR) BLOCK
+and an optional finally BLOCK as one statement that needs no ;.
+_continues stopped the try compound after the catch block, so finally
+{ ... } started a new, unterminated statement that swallowed the next
+one.  The try branch now continues after the try block on catch or
+finally, after the catch block on finally, and ends after the finally
+block -- which also covers Syntax::Keyword::Try's try BLOCK finally
+BLOCK.
+
+Regression pair 60_try_finally (the plans of 08_regression.t and
+25_increment.t enumerate the directory).  Fixes PCL §18 in
+t/ppi_bugs_pcl.t (three rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm                         | 22 ++++--
+ t/08_regression.t                        |  2 +-
+ t/25_increment.t                         |  2 +-
+ t/data/08_regression/60_try_finally.code |  5 ++
+ t/data/08_regression/60_try_finally.dump | 99 ++++++++++++++++++++++++
+ t/ppi_bugs_pcl.t                         |  6 +-
+ 6 files changed, 122 insertions(+), 14 deletions(-)
+ create mode 100644 t/data/08_regression/60_try_finally.code
+ create mode 100644 t/data/08_regression/60_try_finally.dump
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 5bdeb9de..daae6b4d 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -910,17 +910,23 @@ sub _continues {
+ 	}
+ 
+ 	if ( $type eq 'try' and $LastChild->presumed_features->{try} ) {
++		# try BLOCK catch (VAR) BLOCK
++		# try BLOCK catch (VAR) BLOCK finally BLOCK
++		# try BLOCK finally BLOCK                    (Syntax::Keyword::Try)
+ 		return 1 if not $LastChild->isa('PPI::Structure::Block');
+ 
++		# The block after a finally ends the statement
+ 		my $NextLast = $Statement->schild(-2);
+-		return ''
+-		  if $NextLast
+-		  and $NextLast->isa('PPI::Token')
+-		  and $NextLast->isa('PPI::Token::Word')
+-		  and $NextLast->content eq 'catch';
+-
+-		return 1    #
+-		  if $Token->isa('PPI::Token::Word') and $Token->content eq 'catch';
++		my $after =
++		  ( $NextLast and $NextLast->isa('PPI::Token::Word') )
++		  ? $NextLast->content
++		  : '';
++		return '' if $after eq 'finally';
++
++		# Only a catch (after the try block) or a finally will do
++		return '' if not $Token->isa('PPI::Token::Word');
++		return 1 if $Token->content eq 'finally';
++		return 1 if $Token->content eq 'catch' and $after ne 'catch';
+ 
+ 		return '';
+ 	}
+diff --git a/t/08_regression.t b/t/08_regression.t
+index 35d24743..5da5f8f5 100644
+--- a/t/08_regression.t
++++ b/t/08_regression.t
+@@ -7,7 +7,7 @@
+ use if !(-e 'META.yml'), "Test::InDistDir";
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 1193 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 1211 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Test qw( pause );
+diff --git a/t/25_increment.t b/t/25_increment.t
+index 44112011..4aa27205 100644
+--- a/t/25_increment.t
++++ b/t/25_increment.t
+@@ -7,7 +7,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 10622 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 11238 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI::Test::Run ();
+ 
+diff --git a/t/data/08_regression/60_try_finally.code b/t/data/08_regression/60_try_finally.code
+new file mode 100644
+index 00000000..67055a16
+--- /dev/null
++++ b/t/data/08_regression/60_try_finally.code
+@@ -0,0 +1,5 @@
++use feature 'try';
++try { foo(); } catch ($e) { bar($e); } finally { baz(); }
++is($x, 1, 'desc');
++try { foo(); } catch ($e) { bar($e); }
++is($y, 2, 'desc');
+diff --git a/t/data/08_regression/60_try_finally.dump b/t/data/08_regression/60_try_finally.dump
+new file mode 100644
+index 00000000..60809876
+--- /dev/null
++++ b/t/data/08_regression/60_try_finally.dump
+@@ -0,0 +1,99 @@
++PPI::Document
++  PPI::Statement::Include
++    PPI::Token::Word  	'use'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'feature'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Quote::Single  	''try''
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Word  	'try'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'foo'
++        PPI::Structure::List  	( ... )
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'catch'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement::Expression
++        PPI::Token::Symbol  	'$e'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'bar'
++        PPI::Structure::List  	( ... )
++          PPI::Statement::Expression
++            PPI::Token::Symbol  	'$e'
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'finally'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'baz'
++        PPI::Structure::List  	( ... )
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement
++    PPI::Token::Word  	'is'
++    PPI::Structure::List  	( ... )
++      PPI::Statement::Expression
++        PPI::Token::Symbol  	'$x'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'1'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Quote::Single  	''desc''
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Token::Word  	'try'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'foo'
++        PPI::Structure::List  	( ... )
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'catch'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::List  	( ... )
++      PPI::Statement::Expression
++        PPI::Token::Symbol  	'$e'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'bar'
++        PPI::Structure::List  	( ... )
++          PPI::Statement::Expression
++            PPI::Token::Symbol  	'$e'
++        PPI::Token::Structure  	';'
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement
++    PPI::Token::Word  	'is'
++    PPI::Structure::List  	( ... )
++      PPI::Statement::Expression
++        PPI::Token::Symbol  	'$y'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'2'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Quote::Single  	''desc''
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index a5ec4737..7389cc4f 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -442,8 +442,7 @@ TODO: {
+ # ONE self-terminating statement.  PPI builds a Statement::Compound for the
+ # try/catch part and stops; `finally {…}` starts an unterminated statement that
+ # then swallows everything up to the next `;` — here, a whole assertion.
+-TODO: {
+-    local $TODO = 'PCL §18: finally { … } is not part of the try statement — and eats the next one';
++{
+     my $doc = PPI::Document->new(\<<'PERL');
+ use feature 'try';
+ try { foo(); } catch ($e) { bar($e); } finally { baz(); }
+@@ -1452,8 +1451,7 @@ sub stmts {
+ # finally BLOCK` -- and Syntax::Keyword::Try also allows `try BLOCK finally
+ # BLOCK`.  The finally block belongs to the Statement::Compound, and the
+ # statement after it is a statement of its own.
+-TODO: {
+-    local $TODO = 'PCL §18: finally { … } is not part of the try statement — and eats the next one';
++{
+     is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() } finally { c() }\nd();\n") ],
+         [ "Statement::Include: use feature 'try';",
+           'Statement::Compound: try { a() } catch ($e) { b() } finally { c() }',
+-- 
+2.53.0
+

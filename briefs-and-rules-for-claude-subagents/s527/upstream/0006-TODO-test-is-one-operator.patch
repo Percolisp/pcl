@@ -1,7 +1,7 @@
 From 5060abc96be033fda8512e1fe8ffc2b71b6959e9 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:37:33 +0300
-Subject: [PATCH 06/57] TODO test: ^^ is one operator
+Subject: [PATCH 06/70] TODO test: ^^ is one operator
 
 perl 5.40 added ^^, the logical exclusive or (perl -e 'print 1 ^^ 0'
 prints 1); PPI lexes it as two ^ operators.

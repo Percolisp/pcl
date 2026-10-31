@@ -1,0 +1,253 @@
+From a2f28ed9666f4f3c4071d2d6c33c2e24557e868a Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Thu, 29 Oct 2026 00:52:23 +0200
+Subject: [PATCH 66/70] Lexer: { STRING, ... } where a statement starts is an
+ anonymous hash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+toke.c's curly look-ahead makes a statement-initial { an anonymous hash
+when the first term inside is a string (a quote, qw, `` or qx), or a
+run of word characters that does not start with a lower-case letter (a
+number such as 1 or 0x1F, a word such as Foo), and a comma follows it.
+_curly's look-ahead table knew the } right away and the => in second
+place; the comma needs the first token's class, so it is one predicate,
+_hash_comma_head, asked when the second significant token is a comma.
+{ foo, 1 }, { $x, 1 } and { 1.5, 2 } stay blocks, as in perl.
+
+Regression pair 63_hash_comma (the plans of 08_regression.t and
+25_increment.t enumerate the directory).  Fixes PCL §5 in
+t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm                        | 30 ++++++++
+ t/08_regression.t                       |  2 +-
+ t/25_increment.t                        |  2 +-
+ t/data/08_regression/63_hash_comma.code |  6 ++
+ t/data/08_regression/63_hash_comma.dump | 96 +++++++++++++++++++++++++
+ t/ppi_bugs_pcl.t                        |  7 +-
+ 6 files changed, 136 insertions(+), 7 deletions(-)
+ create mode 100644 t/data/08_regression/63_hash_comma.code
+ create mode 100644 t/data/08_regression/63_hash_comma.dump
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index a576ba95..c7973de1 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1160,6 +1160,22 @@ sub _round {
+ 	'PPI::Structure::List'
+ }
+ 
++# The first token after a { that a comma after it makes an anonymous
++# hash (toke.c's curly look-ahead): a quote, or a run of word characters
++# -- a number such as 1 or 0x1F, a word -- unless it starts with a
++# lower-case letter.  { 1.5, 2 } and { foo, 1 } stay blocks.
++sub _hash_comma_head {
++	my $Token = shift or return '';
++	return 1 if $Token->isa('PPI::Token::Quote');
++	return 1 if $Token->isa('PPI::Token::QuoteLike::Words');      # qw()
++	return 1 if $Token->isa('PPI::Token::QuoteLike::Backtick');   # ``
++	return 1 if $Token->isa('PPI::Token::QuoteLike::Command');    # qx()
++	my $content = $Token->content;
++	return '' if $content !~ /\A\w+\z/;
++	return 1 if $Token->isa('PPI::Token::Number');
++	return $Token->isa('PPI::Token::Word') && $content !~ /\A[a-z]/;
++}
++
+ # Is the last child of the parent the block of a dereference -- a $, @ or
+ # % cast before it, as in ${$ref}, @{$ref}, %{$ref} or ${name}?  A [ or {
+ # right after it subscripts it, as after the symbol it stands for.
+@@ -1354,12 +1370,26 @@ sub _curly {
+ 	my $Next;
+ 	my $position = 0;
+ 	my @delayed;
++	my $first;
+ 	while ( $Next = $self->_get_token ) {
+ 		unless ( $Next->significant ) {
+ 			push @delayed, $Next;
+ 			next;
+ 		}
+ 
++		# perl (toke.c): a string, a number or a word that does not
++		# start with a lower-case letter, followed by a comma, makes an
++		# anonymous hash: { 'a', 1 }, { 1, 2 }, { Foo, 1 }
++		$first = $Next if $position == 0;
++		if (
++			$position == 1
++			and $Next->content eq ','
++			and _hash_comma_head($first)
++		) {
++			$self->_buffer( splice(@delayed), $Next );
++			return 'PPI::Structure::Constructor';
++		}
++
+ 		# If we are off the end of the lookahead array,
+ 		if ( ++$position >= @CURLY_LOOKAHEAD_CLASSES ) {
+ 			# default to block.
+diff --git a/t/08_regression.t b/t/08_regression.t
+index eb376c65..075fc710 100644
+--- a/t/08_regression.t
++++ b/t/08_regression.t
+@@ -7,7 +7,7 @@
+ use if !(-e 'META.yml'), "Test::InDistDir";
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 1247 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 1265 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Test qw( pause );
+diff --git a/t/25_increment.t b/t/25_increment.t
+index 8fe29472..74262c53 100644
+--- a/t/25_increment.t
++++ b/t/25_increment.t
+@@ -7,7 +7,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 12590 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 13026 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI::Test::Run ();
+ 
+diff --git a/t/data/08_regression/63_hash_comma.code b/t/data/08_regression/63_hash_comma.code
+new file mode 100644
+index 00000000..272bb392
+--- /dev/null
++++ b/t/data/08_regression/63_hash_comma.code
+@@ -0,0 +1,6 @@
++sub f { { 'a', 'foo' } }
++sub g { { 1, 2 } }
++sub h { { foo, 1 } }
++sub i { { $x, 1 } }
++{ Foo, 1 };
++{ 1.5, 2 };
+diff --git a/t/data/08_regression/63_hash_comma.dump b/t/data/08_regression/63_hash_comma.dump
+new file mode 100644
+index 00000000..9f46f184
+--- /dev/null
++++ b/t/data/08_regression/63_hash_comma.dump
+@@ -0,0 +1,96 @@
++PPI::Document
++  PPI::Statement::Sub
++    PPI::Token::Word  	'sub'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'f'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Whitespace  	' '
++        PPI::Structure::Constructor  	{ ... }
++          PPI::Token::Whitespace  	' '
++          PPI::Statement
++            PPI::Token::Quote::Single  	''a''
++            PPI::Token::Operator  	','
++            PPI::Token::Whitespace  	' '
++            PPI::Token::Quote::Single  	''foo''
++          PPI::Token::Whitespace  	' '
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Sub
++    PPI::Token::Word  	'sub'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'g'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement
++        PPI::Token::Whitespace  	' '
++        PPI::Structure::Constructor  	{ ... }
++          PPI::Token::Whitespace  	' '
++          PPI::Statement
++            PPI::Token::Number  	'1'
++            PPI::Token::Operator  	','
++            PPI::Token::Whitespace  	' '
++            PPI::Token::Number  	'2'
++          PPI::Token::Whitespace  	' '
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Sub
++    PPI::Token::Word  	'sub'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'h'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement::Compound
++        PPI::Token::Whitespace  	' '
++        PPI::Structure::Block  	{ ... }
++          PPI::Token::Whitespace  	' '
++          PPI::Statement
++            PPI::Token::Word  	'foo'
++            PPI::Token::Operator  	','
++            PPI::Token::Whitespace  	' '
++            PPI::Token::Number  	'1'
++          PPI::Token::Whitespace  	' '
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Sub
++    PPI::Token::Word  	'sub'
++    PPI::Token::Whitespace  	' '
++    PPI::Token::Word  	'i'
++    PPI::Token::Whitespace  	' '
++    PPI::Structure::Block  	{ ... }
++      PPI::Statement::Compound
++        PPI::Token::Whitespace  	' '
++        PPI::Structure::Block  	{ ... }
++          PPI::Token::Whitespace  	' '
++          PPI::Statement
++            PPI::Token::Symbol  	'$x'
++            PPI::Token::Operator  	','
++            PPI::Token::Whitespace  	' '
++            PPI::Token::Number  	'1'
++          PPI::Token::Whitespace  	' '
++      PPI::Token::Whitespace  	' '
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement
++    PPI::Structure::Constructor  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Word  	'Foo'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'1'
++      PPI::Token::Whitespace  	' '
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
++  PPI::Statement::Compound
++    PPI::Structure::Block  	{ ... }
++      PPI::Token::Whitespace  	' '
++      PPI::Statement
++        PPI::Token::Number::Float  	'1.5'
++        PPI::Token::Operator  	','
++        PPI::Token::Whitespace  	' '
++        PPI::Token::Number  	'2'
++      PPI::Token::Whitespace  	' '
++  PPI::Statement::Null
++    PPI::Token::Structure  	';'
++  PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 9ca42fac..6ddb9a18 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1601,15 +1601,12 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+         [ q{{ 'a' => 1 };},    'PPI::Structure::Constructor', 0 ],
+     );
+     for my $r (@rows) {
+-        my ( $code, $want, $todo ) = @$r;
++        my ( $code, $want, $row ) = @$r;
+         my $doc = PPI::Document->new(\$code);
+         my ($first) = $doc->schildren;
+         my $br = $first && $first->schild(0);
+-        local $TODO = $todo
+-          ? 'PCL §5: { LITERAL , ... } (anon hash, comma-separated) misclassified as a Block'
+-          : undef;
+         is( ref($br), $want,
+             "$code: the statement-initial { is a " . short_class($want)
+-              . ( $todo ? '' : ' (control)' ) );
++              . ( $row ? " (PCL \x{a7}5)" : " (control)" ) );
+     }
+ }
+-- 
+2.53.0
+

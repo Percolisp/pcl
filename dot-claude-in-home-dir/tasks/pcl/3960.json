@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-29",
+   "description" : "Filed by s527c (2026-10-29).  A DEREFERENCE as the foreach loop variable has no lowering.\n\nperl 5.40.3:\n  no strict 'refs'; our $v = 1; my $g = \"v\";\n  for ${*$g} (5, 11, 33) { print \"$v \" } print \"$v\\n\";        ->  5 11 33 1\n  our $z = 7; my $f = \"z\"; my @s; for $$f (5, 11) { push @s, $$f } print \"@s $z\\n\";   ->  5 11 7\n(the loop aliases the scalar the reference names, and restores it after the loop, like a package loop variable.)\n\nBefore s527c, PPI's lexer DIED on these heads (\"Illegal state in 'for' compound statement\", docs/ppi-upstream-bugs.md §6 §29) and the whole file was refused.  s527c fixed the lexer on PCL's PPI branch (group S); the shape now reaches Parser2's foreach arm, which took the first Block (the dereference block) for the loop BODY and bound $_ -- a silent wrong (`for ${*$g}` printed nothing).  s527c made the arm DIE by name instead: \"Parser2 TODO: foreach whose loop variable is a dereference (#3960)\".\n\nFix: lower the loop variable as a localized alias of the referenced scalar (the shape of `for $Pkg::x (LIST)`: save the glob's scalar slot, bind it per iteration to the element, restore after), for the Cast `$` + Symbol and Cast `$` + Block forms.  Reproducer: briefs/scratch s527c/pr/s3.pl.  Populations: perl t/op/for.t (the low-refcount-package-var test) uses `for ${*$f}`.\n",
+   "id" : "3960",
+   "status" : "completed",
+   "subject" : "DUPLICATE of #1580 (a dereference foreach loop variable) -- filed in error by s527c, folded into #1580"
+}

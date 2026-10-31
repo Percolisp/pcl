@@ -1,0 +1,155 @@
+From 56330a400b3ef201a2338ec2537bc7b8dc3a6cf2 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 01:24:15 +0200
+Subject: [PATCH 69/70] Lexer: a block filehandle right after print( is a block
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads print, printf, say, exec and system the same with and
+without their parentheses: after `print(` toke.c is in its filehandle
+expectation (XREF), and a { there is a BLOCK -- the filehandle or the
+program -- unless its first term decides an anonymous hash (a word or a
+string followed by , or =>, or an immediate }; the same look-ahead as
+everywhere else).  perl -MO=Deparse -e 'print({ STDOUT } "Hello")'
+gives  print {'STDOUT';} 'Hello';  -- one statement, the block then the
+list.
+
+_curly answered every list-embedded { a Constructor unless the function
+was print or say, and for those it fell through to the statement-level
+scan, which made the block a Statement::Compound of its own and the rest
+of the list a second statement.  Now the five functions take the
+look-ahead (moved into _curly_lookahead, shared with the statement-level
+scan), and a { it does not decide is a Block that opens the one plain
+statement of the list.  print({a => 1}) stays an anonymous hash.
+
+t/data/05_lexer/13_braces_in_parens.dump is updated in this commit: its
+second line, print({ STDOUT } 'Hello'), was stored as the bug -- a
+Statement::Compound holding the block and a Statement::Expression
+holding 'Hello'.  perl prints Hello: the block is the filehandle of a
+single print statement.  The dump changes in exactly that statement
+(Compound -> plain Statement, the quote now inside it); the other two
+lines, print({ a => 1 }) and ({ %base_args, arg => $mod_value }), keep
+their anonymous-hash Constructors and are unchanged.
+
+Fixes PCL §37 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm                         | 35 ++++++++++++++++++------
+ t/data/05_lexer/13_braces_in_parens.dump |  5 ++--
+ t/ppi_bugs_pcl.t                         |  6 ++--
+ 3 files changed, 31 insertions(+), 15 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index da51f33e..a4330eff 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1365,11 +1365,33 @@ sub _curly {
+ 			if $function and $function->content =~ /^(?:map|grep|sort|eval|do)$/;
+ 
+ 		# If not part of a block print, list-embedded curlies are most likely constructors
+-		return 'PPI::Structure::Constructor'
+-			if not $function or $function->content !~ /^(?:print|say)$/;
++		my $block_fh = $function
++		  && $function->content =~ /^(?:CORE::)?(?:print|printf|say|exec|system)$/;
++		return 'PPI::Structure::Constructor' if not $block_fh;
++
++		# print({$fh} LIST): a filehandle (or program) block opens the one
++		# statement of the list; the look-ahead below tells it from
++		# print({a => 1}).  The statement stays plain, so the list
++		# continues after the block.
++		return $self->_curly_lookahead || 'PPI::Structure::Block';
+ 	}
+ 
+ 	# We need to scan ahead.
++	my $class = $self->_curly_lookahead;
++	return $class if $class;
++
++	# Hit the end of the document, or bailed out, go with block
++	if ( ref $Parent eq 'PPI::Statement' ) {
++		bless $Parent, 'PPI::Statement::Compound';
++	}
++	return 'PPI::Structure::Block';
++}
++
++# Look at the tokens after a { whose class its neighbours do not decide,
++# and return the class they decide, or '' (then it is a block).  The
++# tokens are put back.
++sub _curly_lookahead {
++	my $self = shift;
+ 	my $Next;
+ 	my $position = 0;
+ 	my @delayed;
+@@ -1397,7 +1419,7 @@ sub _curly {
+ 		if ( ++$position >= @CURLY_LOOKAHEAD_CLASSES ) {
+ 			# default to block.
+ 			$self->_buffer( splice(@delayed), $Next );
+-			last;
++			return '';
+ 		# If the content at this position is known
+ 		} elsif ( my $class = $CURLY_LOOKAHEAD_CLASSES[$position]
+ 			{$Next->content} ) {
+@@ -1410,12 +1432,9 @@ sub _curly {
+ 		push @delayed, $Next;
+ 	}
+ 
+-	# Hit the end of the document, or bailed out, go with block
++	# Hit the end of the document
+ 	$self->_buffer( splice(@delayed) );
+-	if ( ref $Parent eq 'PPI::Statement' ) {
+-		bless $Parent, 'PPI::Statement::Compound';
+-	}
+-	return 'PPI::Structure::Block';
++	return '';
+ }
+ 
+ 
+diff --git a/t/data/05_lexer/13_braces_in_parens.dump b/t/data/05_lexer/13_braces_in_parens.dump
+index e48b05e0..bcdfc4c3 100644
+--- a/t/data/05_lexer/13_braces_in_parens.dump
++++ b/t/data/05_lexer/13_braces_in_parens.dump
+@@ -17,14 +17,13 @@ PPI::Document
+   PPI::Statement
+     PPI::Token::Word  	'print'
+     PPI::Structure::List  	( ... )
+-      PPI::Statement::Compound
++      PPI::Statement
+         PPI::Structure::Block  	{ ... }
+           PPI::Token::Whitespace  	' '
+           PPI::Statement
+             PPI::Token::Word  	'STDOUT'
+           PPI::Token::Whitespace  	' '
+-      PPI::Token::Whitespace  	' '
+-      PPI::Statement::Expression
++        PPI::Token::Whitespace  	' '
+         PPI::Token::Quote::Single  	''Hello''
+     PPI::Token::Structure  	';'
+   PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 14b7f997..630a4cc2 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1068,8 +1068,7 @@ for my $src ('1.5-0.5;', '1e3-1;') {
+ # statement holding the block plus a second statement (print, say), or makes the
+ # block an anonymous-hash Constructor followed directly by a term (printf).
+ # perl: `my $fh = \*STDOUT; print({$fh} "a", "b")` prints ab.
+-TODO: {
+-    local $TODO = 'PCL §37: print({$fh} LIST) -- the parenthesised block filehandle -- is split into two statements, or its block is a CONSTRUCTOR';
++{
+     my $doc = PPI::Document->new(\q{print({$fh} "a", "b");});
+     my ($list) = @{ $doc->find(q{PPI::Structure::List}) || [] };
+     my @st = $list->schildren;
+@@ -1482,8 +1481,7 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+         my ($list) = @{ $doc->find('PPI::Structure::List') || [] };
+         my @st = $list ? $list->schildren : ();
+         my $first = @st ? $st[0]->schild(0) : undef;
+-        TODO: {
+-            local $TODO = 'PCL §37: print({$fh} LIST) -- the parenthesised block filehandle -- is split into two statements, or its block is a CONSTRUCTOR';
++        {
+             ok( @st == 1 && ref($st[0]) eq 'PPI::Statement'
+                   && $first && ref($first) eq 'PPI::Structure::Block',
+                 "$what: {\$fh} is a Block opening the one plain statement in $code" )
+-- 
+2.53.0
+

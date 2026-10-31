@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "Filed by s527c (2026-10-31) from s527b's hand-over: a `{` after a GLOB SYMBOL is structured as a Structure::BLOCK where perl reads a glob-slot SUBSCRIPT -- a Lexer row for PCL's PPI branch (s527e).\n\nPCL's PPI (pcl ded727c3 + s527c's groups):\n  my $h = *x{HASH};        Symbol=*x  Block{HASH}       perl: the HASH slot of *x (a subscript after a term)\n  my $c = *main::f{CODE};  Symbol=*main::f  Block{CODE}\n  print *STDOUT{IO};       Symbol=*STDOUT  Block{IO}\n  my $s = *$g{SCALAR};     Cast=* Symbol=$g  Subscript{SCALAR}   (already a Subscript -- s527b group L's *-cast fix)\n\ntoke.c: after a term (`*x` is a complete glob term) PL_expect is XOPERATOR and a `{` is a subscript (yyl_leftcurly 6323-6345) -- the same rule as group V (§17 §36: a `[` / `{` after a dereference block or a key/value slice name).  PPI's Lexer `_curly` decides by the previous significant token's class; a glob Symbol is missing from the subscript-after set.\n\nPCL today: no wrong answer -- PExpr reads `Symbol('*name') + Block('{SLOT}')` as a typeglob slot access (\"Typeglob slot access: *name{SLOT} -- PPI gives Symbol '*name' + Block '{SLOT}'\", `$is_typeglob_slot` in Pl/PExpr.pm parse()), so the fix is a PPI row whose PCL side is that Block alternative becoming dead (delete it with corpus-diff IDENTICAL, rule 13: catalogue section in docs/ppi-upstream-bugs.md + report rows in docs/ppi-bug-report.t and the branch's t/ppi_bugs_pcl.t + registry row + canary).  Not done in s527c (Fable: do not widen the batch).\n",
+   "id" : "3964",
+   "status" : "pending",
+   "subject" : "PPI: a { after a glob symbol (*x{HASH}, *STDOUT{IO}) is a Block where perl reads a glob-slot subscript -- a Lexer row for the pcl branch (s527e); PCL compensates in PExpr"
+}
