@@ -1122,6 +1122,13 @@ sub _premerge_use_constant_prototypes {
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'constant';
     local $self->environment->{reg_site} = Pl::Parser::use_reg_site($inc);  # #2871
+    # ... in the PACKAGE the `use` compiles in (task #3870), the way the
+    # include pre-merge positions an import (#3143).  Registered under `main`,
+    # a constant of `package A` lost to the record a later `require` of a
+    # module declaring the SAME name merged into A (positioned at the
+    # require): every call above the require read the name as unknown -- the
+    # string "_INTERNAL_DEBUG" in Log::Log4perl::Appender::new, true.
+    local $fp->environment->package_stack->[-1] = _package_of_element($inc);
     $fp->register_constant_prototype($_)
       for Pl::Parser::use_constant_names($inc);
   }
