@@ -949,16 +949,19 @@ class cached on a wrapper or variable box. Those cached `class` slots
 still exist — `p-bless` writes them and `box-set` copies them — but only
 as caches for fast is-object checks; the referent is the truth, which is
 what makes a second `\$x` wrapper and a re-bless through one alias
-behave, and what XS reads as `SvSTASH(SvRV(rv))`. **The class of an
-ARRAY, CODE, filehandle or GLOB referent belongs to the referent**
-(normative, s530a, task #4000): those raw referents (the vector, the
-function, the stream, the glob) cannot carry a slot, so `p-bless` writes
-the weak table `*p-referent-stash*` keyed by the referent, and every class
-reader (`%p-target-class`, `p-get-class`, `p-ref` on a raw payload) asks it
-before any wrapper's slot, which is only the cache.  A re-bless through any
-copy, or a bless after an unblessed copy was taken, is seen through every
-copy: `my $o = bless [], "P"; my @l = ($o); bless $o, "Q"; ref $l[0]` is
-`Q`. `box-set` copies a class only when the assigned *value* is itself
+behave, and what XS reads as `SvSTASH(SvRV(rv))`. **A re-bless of an
+ARRAY or CODE referent belongs to the referent** (normative, s530a, task
+#4000): those raw referents (the vector, the function) cannot carry a slot,
+so each copy's box caches the class, and a bless into a DIFFERENT class
+through any box whose cache already named a class records the new class on
+the referent (the weak table `*p-rebless-stash*`, read before any box's
+slot by `%p-target-class`, `p-get-class` and `p-ref`): `my $o = bless [],
+"P"; my @l = ($o); bless $o, "Q"; ref $l[0]` is `Q`.  Only a re-bless is
+recorded -- a weak-table read on every method call cost an array-object
+method row 69 % (s530a) -- so a copy taken before the referent's FIRST
+bless, and a fresh `\@a` / `\&f` after `bless \@a`, still read their own
+slot (#4061).  A filehandle or GLOB referent keeps its class in
+`*p-handle-stash*` (#2056, #3433). `box-set` copies a class only when the assigned *value* is itself
 a reference: copying a plain value out of a blessed referent yields an
 unblessed scalar, exactly as perl's SV-attached stash does not travel
 with the value. The *identity* of an object is the underlying
@@ -973,8 +976,8 @@ never the variable's box itself: a later `$x = 8` does not reach the element
 and `$a[0] = 3` does not reach `$x`.  A blessed PLAIN scalar (a `bless \$x`
 referent) is not a reference and copies its value, unblessed, as `box-set`
 does.  Example: `my $s = bless {}, "K"; my $t = [$s]; $s = 8; ref $t->[0]`
-is `K`.  (The s529a residue -- an ARRAY / CODE class on each container -- is
-closed by the referent stash above, s530a.)
+is `K`.  (The s529a residue -- a re-bless of an ARRAY / CODE referent through
+one copy -- is closed by the re-bless stash above, s530a; #4061 is what is left.)
 
 **A SCALAR'S OWN STASH IS NOT THE CLASS OF WHAT IT HOLDS (normative,
 s483b/#1619).**  `ref(R)` reports the blessing of R's *referent itself*,
