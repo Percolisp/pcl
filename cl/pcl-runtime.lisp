@@ -33377,9 +33377,13 @@ would consume, so it dies naming the stream (rule 12)."
    Exception-set names ($a/$b, runtime magic) keep the dynamic-let
    lowering and must never be routed here.
 
-   THE BODY ALSO REBINDS SYM LEXICALLY to the installed container.  In
-   ordinary code that is a pure alias — the lexical and the cell hold the
-   same box, so it changes nothing.  It matters where something ELSE has
+   THE BODY ALSO REBINDS SYM LEXICALLY -- as a SYMBOL MACRO onto the CELL,
+   exactly the global access p-defcell defines, never a variable holding
+   the installed box (#3963): a `local *NAME' inside the body gives the
+   glob a fresh scalar slot, and a lexical holding the box installed here
+   kept reading the hidden one (perl: `local $x = 1; { local *x; $x }' is
+   undef).  In ordinary code that is a pure alias -- the body reads the
+   cell as code outside it does.  It matters where something ELSE has
    already shadowed the name lexically, and the one thing that does is the
    string-eval thunk: `p-eval-thunk` passes each free name as a lambda
    PARAMETER, so inside an eval body `$foo` is the parameter, not the cell.
@@ -33407,8 +33411,7 @@ would consume, so it dies naming the stream (rule 12)."
             (,new ,init)
             (,tied (%p-local-tied-enter ,old ,new)))
        (unless ,tied (%p-cell-set ',sym ,new))
-       (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
-                         (declare (ignorable ,sym))
+       (unwind-protect (symbol-macrolet ((,sym (sb-ext:symbol-global-value ',sym)))
                          ,@body)
          (cond (,tied (%p-local-tied-exit ,old ,tied))
                ((eq ,old '%p-cell-unbound) (makunbound ',sym))
@@ -33449,8 +33452,7 @@ would consume, so it dies naming the stream (rule 12)."
             (,new (when ,c ,init))
             (,tied (when ,c (%p-local-tied-enter ,old ,new))))
        (when (and ,c (not ,tied)) (%p-cell-set ',sym ,new))
-       (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
-                         (declare (ignorable ,sym))
+       (unwind-protect (symbol-macrolet ((,sym (sb-ext:symbol-global-value ',sym)))
                          ,@body)
          (when ,c
            (cond (,tied (%p-local-tied-exit ,old ,tied))

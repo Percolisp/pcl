@@ -56,7 +56,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 15;
+plan tests => 17;
 
 # 1. RHS reads @_, which *_ localization would otherwise clear first.
 is(run_pl(<<'PL'), "foobar\n", 'local *_ = \join("",@_) sees old @_');
@@ -231,6 +231,31 @@ sub mkh { local *FH; ${*FH} = "sv"; ${*FH}{k} = "hv"; return *FH }
 my $h = mkh(); print ${*$h}, " ", ${*$h}{k}, " ", "$h", "\n";
 sub mkc { local *FH; *FH = sub { "code" }; return *FH }
 my $cg = mkc(); print((defined &FH ? "outer-defined" : "outer-undef"), " ", *{$cg}{CODE}->(), "\n");
+PL
+
+is(run_file(<<'PL'), "1 undef\n1b boo\n2 undef\n2b b\n3 undef\n3b boo\n4 9\n4b 5\n5 7\n5b 1\n6 G\n6b E\n7 Fx\n7b undef\n8 0\n8b 2\n9 undef\n9b U\n", 'local *NAME hides the scalar / array an enclosing local $NAME / @NAME set; the restore brings it back (#3963, t/op/for.t NULL GvSV)');
+our $foo = "boo"; { local *foo; print "1 ", (defined $foo ? "def [$foo]" : "undef"), "\n"; } print "1b $foo\n";
+local $bar = "b"; { local *bar; print "2 ", (defined $bar ? "def [$bar]" : "undef"), "\n"; $bar = "in"; } print "2b $bar\n";
+{ local $baz = "boo"; { local *baz; for $baz (1,2) {} print "3 ", (defined $baz ? "def" : "undef"), "\n"; } print "3b $baz\n"; }
+{ local $q = 5; { local *q; $q = 9; print "4 $q\n"; } print "4b $q\n"; }
+{ local $w = 1; sub rw { $w } { local *w; $w = 7; print "5 ", rw(), "\n"; } print "5b ", rw(), "\n"; }
+{ local $e = "E"; { local *e = \"G"; print "6 $e\n"; } print "6b $e\n"; }
+{ local $f = "F"; $f .= "x"; print "7 $f\n"; } print "7b ", (defined $f ? $f : "undef"), "\n";
+{ local @arr = (1,2); { local *arr; print "8 ", scalar(@arr), "\n"; } print "8b ", scalar(@arr), "\n"; }
+{ local $t = "T"; my $r = \$t; { local *t; $$r = "U"; print "9 ", (defined $t ? $t : "undef"), "\n"; } print "9b $t\n"; }
+PL
+
+is(run_file(<<'PL'), "1 120 5\n2 L L\n3 E E\n4 G\n5 9 8\n6 0\n7 9 8\n8 1 2 3\n9 0\n10 j\n11 1\n11 2\n11 3\n12 undef\n13 2\n14 undef\n15 1\n16 4\n17 3\n", 'local $NAME bodies read the CELL: string eval, closures, local-if, %/@ globs (#3963)');
+$foo = 5;
+$fact = 'local($foo)=$foo; $foo <= 1 ? 1 : $foo-- * (eval $fact)';
+print "1 ", eval($fact), " $foo\n";
+our $g = "G"; sub show { $g } { local $g = "L"; print "2 ", show(), " ", eval('$g'), "\n"; eval 'local $g = "E"; print "3 ", show(), " $g\n"'; } print "4 $g\n";
+our @a = (1,2,3); { local @a = (9); push @a, 8; print "5 @a\n"; { local *a; print "6 ", scalar(@a), "\n"; } print "7 @a\n"; } print "8 @a\n";
+our %h = (k => 1); { local %h = (j => 2); { local *h; print "9 ", scalar(keys %h), "\n"; } print "10 ", join(",", keys %h), "\n"; }
+our $c = 0; for my $i (1..3) { local $c = $c + $i; print "11 $c\n"; }
+our $x = 1; { local $x = 2 if 1; { local *x; print "12 ", (defined $x ? $x : "undef"), "\n"; } print "13 $x\n"; }
+our $y = 1; { local $y = 2 if 0; { local *y; print "14 ", (defined $y ? $y : "undef"), "\n"; } print "15 $y\n"; }
+our $z = 1; { local $z = 3; my $f = sub { $z }; { local *z; $z = 4; print "16 ", $f->(), "\n"; } print "17 ", $f->(), "\n"; }
 PL
 
 system('rm', '-rf', $lg_dir);
