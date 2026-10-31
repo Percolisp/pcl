@@ -1527,9 +1527,10 @@ sub _walk_prototype_facts {
 
 # One statement: `*NAME = RHS ;` where RHS carries code — `\&TARGET`, an
 # anon `sub (PROTO) {…}` (any mix, e.g. across a ternary), or a bare anon
-# `sub {…}` (existence only, no prototype).  Returns undef when the
-# statement is not this shape or carries no code candidate (`*G = *H`,
-# `*G = \$x`, `local *G = …`, `*$name = …` all decline).
+# `sub {…}` (existence only, no prototype), or a whole glob `*TARGET` (its
+# CODE slot is aliased too, #3851).  Returns undef when the statement is not
+# this shape or carries no code candidate (`*G = \$x`, `local *G = …`,
+# `*$name = …` all decline; a `*TARGET` with no known sub resolves nothing).
 sub glob_sub_alias_fact {
   my ($stmt) = @_;
   my @k = grep { $_->significant } $stmt->children;
@@ -1540,6 +1541,21 @@ sub glob_sub_alias_fact {
   my $name = $1;
   return undef unless $eq->isa('PPI::Token::Operator') && $eq->content eq '=';
   my @cands;
+  # A WHOLE-GLOB alias `*NAME = *TARGET;` (or `*TARGET{CODE}`) aliases the
+  # CODE slot too, prototype included -- Test::Warn's `*warning_like =
+  # *warnings_like;` (#3851) -- so it is TARGET's sub exactly as `\&TARGET`
+  # is.  Only the bare spelling: the RHS is the one glob and nothing else.
+  my @rhs = grep { !($_->isa('PPI::Token::Structure') && $_->content eq ';') }
+            @k[2 .. $#k];
+  my $glob;
+  $glob = $1 if $rhs[0]->isa('PPI::Token::Symbol')
+    && $rhs[0]->content =~ /\A\*([A-Za-z_'][\w']*(?:::[\w']+)*)\z/;
+  if (defined $glob
+      && (@rhs == 1
+          || (@rhs == 2 && $rhs[1]->isa('PPI::Structure::Subscript')
+              && $rhs[1]->content =~ /\A\{\s*CODE\s*\}\z/))) {
+    return { name => $name, candidates => [ { target => $glob } ], stmt => $stmt };
+  }
   for my $i (2 .. $#k) {
     my $t = $k[$i];
     if ($t->isa('PPI::Token::Cast') && $t->content eq "\\"

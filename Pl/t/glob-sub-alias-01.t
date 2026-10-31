@@ -35,7 +35,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 7;
 
 sub write_pl {
     my ($code) = @_;
@@ -129,3 +129,44 @@ print "amb=", amb(), "\n";
 PL
    "amb=2\n",
    'disagreeing candidates register nothing; amb() with parens still right');
+
+# ── 6. WHOLE-GLOB alias in a use'd module (#3851, Test::Warn's
+# `*warning_like = *warnings_like;`): `*NAME = *TARGET` aliases the CODE slot
+# too, so the target's (&$;$) prototype is a fact; `*TARGET{CODE}` likewise ──
+open my $wfh, '>', "$moddir/My/GlobAlias.pm" or die "module fixture: $!";
+print $wfh <<'MOD';
+package My::GlobAlias;
+use strict; use warnings;
+require Exporter; our @ISA = ('Exporter');
+our @EXPORT = ('wl', 'wc');
+sub wls (&$;$) { my ($c, $re, $d) = @_; return "wls " . $c->() . " $re $d" }
+no warnings 'once';
+*wl = *wls;
+*wc = *wls{CODE};
+1;
+MOD
+close $wfh;
+is(run_cl(<<PL),
+use lib "$moddir";
+use My::GlobAlias;
+print wl { 1 } qr{x}i, "desc";
+print "\\n";
+print wc { 2 } "s", "d2";
+print "\\n";
+PL
+   "wls 1 (?^i:x) desc\nwls 2 s d2\n",
+   "a use'd module's *wl = *wls / *wc = *wls{CODE} carry wls's (&\$;\$) prototype");
+
+# ── 7. Same-file BEGIN whole-glob alias: a block-form target and a `($)`
+# named-unary target (perl: `(o1 "a", "b")` is a TWO-element list) ──────────
+is(run_cl(<<'PL'),
+sub wls (&$;$) { my ($c, $re, $d) = @_; return "wls " . $c->() . " $re $d" }
+sub one ($) { "one(@_)" }
+BEGIN { *wb = *wls; *o1 = *one; }
+print wb { 3 } "r", "d3";
+print "\n";
+my @l = (o1 "a", "b");
+print scalar(@l), " @l\n";
+PL
+   "wls 3 r d3\n2 one(a) b\n",
+   'BEGIN { *wb = *wls; *o1 = *one } carries the (&$;$) and ($) prototypes');
