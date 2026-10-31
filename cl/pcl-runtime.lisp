@@ -18518,71 +18518,112 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (setf *p-stored-errno* err))
   (box-set $@ (make-p-box ""))
   *p-undef*)
+
+(defun %p-do-dir-file (dir filename)
+  "`do FILE`'s probe of one @INC directory DIR: the truename, or NIL."
+  (let ((p (probe-file (%p-literal-path
+                        (concatenate 'string dir "/" filename)))))
+    (when p (truename p))))
+
+(declaim (ftype function %p-inc-hook-p %p-inc-hook-run %p-require-locate))
+(defun %p-do-locate (filename)
+  "`do FILE`'s search: (values TRUENAME NIL) for a file, (values NIL HOOK)
+   for source an @INC hook supplied (HOOK as %P-REQUIRE-LOCATE's), or NIL.
+   An explicit path is used as given and, when it does not open, offered to
+   the hooks only; any other name walks @INC (no fallback list: `do` never
+   reached PCL's built-in paths), calling a hook in its place (#1815)."
+  (if (%p-explicit-path-p filename)
+      (let ((fp (%p-literal-path filename)))
+        (if (probe-file fp)
+            (truename fp)
+            (%p-require-locate filename :hooks-only t)))
+      (loop for elem across @INC
+            do (if (%p-inc-hook-p elem)
+                   (multiple-value-bind (text dirs) (%p-inc-hook-run elem filename)
+                     (when text
+                       (return (values nil
+                                       (list text elem
+                                             (nth-value 1 (gethash filename
+                                                                   *p-inc-table*))))))
+                     (dolist (d dirs)
+                       (let ((p (%p-do-dir-file d filename)))
+                         (when p (return-from %p-do-locate p)))))
+                   (let ((p (%p-do-dir-file (to-string (unbox elem)) filename)))
+                     (when p (return p)))))))
+
+(defun %p-do-hook (filename hook)
+  "`do FILE` of the source an @INC hook supplied: %INC gets the hook (unless
+   it stored its own entry), then the text runs as the do-file's would."
+  (destructuring-bind (text elem preset) hook
+    (unless preset
+      (setf (gethash filename *p-inc-table*) elem))
+    (handler-case (p-eval (make-p-box text))
+      (error (e)
+        (box-set $@ (make-p-box (format nil "~A" e)))
+        *p-undef*))))
+
+(defun %p-do-path (filename abs-path)
+  "p-do for the file ABS-PATH found (NIL: not found) under FILENAME."
+  (if (null abs-path)
+      ;; File not found: return undef, clear $@, set $! = ENOENT
+      (progn
+        (box-set $@ (make-p-box ""))
+        (setf *p-stored-errno* 2)
+        (setf (sb-alien:extern-alien "errno" sb-alien:int) 2) ; ENOENT=2
+        *p-undef*)
+      ;; File found: read, transpile and eval
+      (handler-case
+          (let ((content
+                 (handler-case
+                     (%p-read-source-octets abs-path)
+                   ;; I/O error opening/reading (is-a-directory, permissions,
+                   ;; …): perl leaves $@ FALSE and reports the reason in $!.
+                   ;; The OS errno is live at this point (probed s321: opening
+                   ;; a directory leaves errno=21/EISDIR), but $! reads PCL's
+                   ;; own *p-stored-errno*, so it has to be carried across —
+                   ;; without that, `do '/some/dir'` reported errno 0 and
+                   ;; op/do.t's "$! is EISDIR on do dir" failed.  Pass the
+                   ;; real errno through rather than special-casing
+                   ;; directories, so EACCES/ELOOP/… are right for free.
+                   (stream-error (e)
+                     (declare (ignore e))
+                     (return-from %p-do-path (%p-do-io-failed)))
+                   (file-error (e)
+                     (declare (ignore e))
+                     (return-from %p-do-path (%p-do-io-failed))))))
+            ;; perl records the file in %INC as soon as it has OPENED it, and
+            ;; a later `require` of the same string is then a no-op.  Probed
+            ;; 5.40.3: the key is the STRING THE CALLER WROTE ("./t.pl",
+            ;; "inc.pl"), the value the path actually opened; a file that
+            ;; COMPILES AND DIES still leaves the entry (`do "./dies.pl"` sets
+            ;; both $INC{"./dies.pl"} and $@), so does one that returns FALSE,
+            ;; and one that could not be OPENED does not — which is why this
+            ;; write is here, after the read and before the compile.  `do`
+            ;; itself never CONSULTS %INC (two `do`s of one file run it
+            ;; twice, probed); only `require` does, and p-require-file already
+            ;; reads *p-inc-table* — this was the one write it was missing
+            ;; (#1116), so every `do` then `require` of a file ran it twice
+            ;; and every side effect happened twice.  The value is spelled the
+            ;; way p-require-file spells it, so the two agree (rule 11).
+            (setf (gethash filename *p-inc-table*)
+                  (sb-ext:native-namestring (pathname abs-path)))
+            (p-eval (make-p-box content)))
+        (error (e)
+          (box-set $@ (make-p-box (format nil "~A" e)))
+          *p-undef*))))
+
 (defun p-do (filename-val)
   "Perl do FILE - find file in @INC, transpile and eval it.
    Returns undef on I/O error (file not found), clears $@.
    Sets $@ to error message on compilation/execution error.
    Binds *pcl-caller-wantarray* so wantarray() in the do-file sees the calling context."
-  (let* ((*pcl-caller-wantarray* *wantarray*)
-         (filename (to-string (unbox filename-val)))
-         ;; Search: an explicit path is used directly; else search @INC
-         (abs-path
-          (if (%p-explicit-path-p filename)
-              (let ((fp (%p-literal-path filename)))
-                (when (probe-file fp) (truename fp)))
-              (loop for dir-box across @INC
-                    for dir = (to-string (unbox dir-box))
-                    for p = (probe-file
-                             (%p-literal-path
-                              (concatenate 'string dir "/" filename)))
-                    when p return (truename p)))))
-    (if (null abs-path)
-        ;; File not found: return undef, clear $@, set $! = ENOENT
-        (progn
-          (box-set $@ (make-p-box ""))
-          (setf *p-stored-errno* 2)
-          (setf (sb-alien:extern-alien "errno" sb-alien:int) 2) ; ENOENT=2
-          *p-undef*)
-        ;; File found: read, transpile and eval
-        (handler-case
-            (let ((content
-                   (handler-case
-                       (%p-read-source-octets abs-path)
-                     ;; I/O error opening/reading (is-a-directory, permissions,
-                     ;; …): perl leaves $@ FALSE and reports the reason in $!.
-                     ;; The OS errno is live at this point (probed s321: opening
-                     ;; a directory leaves errno=21/EISDIR), but $! reads PCL's
-                     ;; own *p-stored-errno*, so it has to be carried across —
-                     ;; without that, `do '/some/dir'` reported errno 0 and
-                     ;; op/do.t's "$! is EISDIR on do dir" failed.  Pass the
-                     ;; real errno through rather than special-casing
-                     ;; directories, so EACCES/ELOOP/… are right for free.
-                     (stream-error (e)
-                       (declare (ignore e))
-                       (return-from p-do (%p-do-io-failed)))
-                     (file-error (e)
-                       (declare (ignore e))
-                       (return-from p-do (%p-do-io-failed))))))
-              ;; perl records the file in %INC as soon as it has OPENED it, and
-              ;; a later `require` of the same string is then a no-op.  Probed
-              ;; 5.40.3: the key is the STRING THE CALLER WROTE ("./t.pl",
-              ;; "inc.pl"), the value the path actually opened; a file that
-              ;; COMPILES AND DIES still leaves the entry (`do "./dies.pl"` sets
-              ;; both $INC{"./dies.pl"} and $@), so does one that returns FALSE,
-              ;; and one that could not be OPENED does not — which is why this
-              ;; write is here, after the read and before the compile.  `do`
-              ;; itself never CONSULTS %INC (two `do`s of one file run it
-              ;; twice, probed); only `require` does, and p-require-file already
-              ;; reads *p-inc-table* — this was the one write it was missing
-              ;; (#1116), so every `do` then `require` of a file ran it twice
-              ;; and every side effect happened twice.  The value is spelled the
-              ;; way p-require-file spells it, so the two agree (rule 11).
-              (setf (gethash filename *p-inc-table*)
-                    (sb-ext:native-namestring (pathname abs-path)))
-              (p-eval (make-p-box content)))
-          (error (e)
-            (box-set $@ (make-p-box (format nil "~A" e)))
-            *p-undef*)))))
+  (let ((*pcl-caller-wantarray* *wantarray*)
+        (filename (to-string (unbox filename-val))))
+    (multiple-value-bind (abs-path hook) (%p-do-locate filename)
+      (when hook
+        (return-from p-do (%p-do-hook filename hook)))
+      (%p-do-path filename abs-path))))
+
 
 
 ;;; Forward declaration for p-eval (p-transpile-string defined later in Module System section)
@@ -26765,7 +26806,13 @@ would consume, so it dies naming the stream (rule 12)."
          ;; %p-literal-path AS-DIRECTORY treats DIR as a directory with or
          ;; without a trailing slash, and keeps any wildcard character in
          ;; either component literal (#755) instead of dying in the parse.
-         (s (if (stringp d) d (namestring d)))
+         ;; An undef element is skipped and a number is its string, as in
+         ;; perl; a HOOK never reaches here (the walkers ask %P-INC-HOOK-P).
+         (s (cond ((stringp d) d)
+                  ((pathnamep d) (namestring d))
+                  ((or (null d) (eq d *p-undef*))
+                   (return-from %p-inc-dir-file nil))
+                  (t (to-string d))))
          (full-path (merge-pathnames (%p-literal-path rel-path)
                                      (%p-literal-path s t)))
          (pmc-file (and pmc
@@ -26838,10 +26885,212 @@ would consume, so it dies naming the stream (rule 12)."
    A must-win shim (%P-MUST-WIN-SHIM) answers first.  Otherwise the list is
    %P-INC-SEARCH-DIRS — @INC, then the fallback that stands in for perl's
    compiled-in default @INC.  A first match over the concatenation is exactly
-   the two-stage search this was written as."
+   the two-stage search this was written as.
+
+   A DIRECTORY resolver: an @INC HOOK (%P-INC-HOOK-P) is skipped, never
+   called -- its callers ask \"is there a file\" (the cache's dependency
+   check, %INC for a no-load pragma, PPI's own sources), and calling a hook
+   is a side effect perl performs only for a real require (%P-REQUIRE-LOCATE)."
   (or (%p-must-win-shim rel-path)
       (loop for dir in (%p-inc-search-dirs)
-            thereis (%p-inc-dir-file dir rel-path))))
+            thereis (and (not (%p-inc-hook-p dir))
+                         (%p-inc-dir-file dir rel-path)))))
+
+;;; ── @INC HOOKS (task #1815; perlfunc require, ir-spec §9) ─────────────────
+;;; An @INC element that is a REFERENCE is a hook, not a directory.  REQUIRE
+;;; (and `do FILE`) call it with the file name and read its answer: an
+;;; optional ref to the initial source text, an optional filehandle, an
+;;; optional CODE ref (a source generator, or a line filter over the
+;;; filehandle) with its optional state -- or nothing, which means \"go on to
+;;; the next element\".  An ARRAY ref is called through its [0]; a blessed
+;;; object through its INC method (an AUTOLOAD answers for it), else INCDIR
+;;; (a list of directories to search in its place), else a blessed CODE ref
+;;; is called as code and a \"\"-overloaded object is a directory.  %INC then
+;;; holds the hook itself, unless the hook stored an entry of its own.
+;;;
+;;; PCL loads source as FILES, so a hook's text is spooled to a private
+;;; temporary file and loaded on the uncached path (a hook answers per call;
+;;; there is nothing a cache could key on).  __FILE__ is that file's path
+;;; where perl says /loader/0x.../NAME or the %INC entry the hook set (#4161).
+
+(declaim (inline %p-inc-hook-p))
+(defun %p-inc-hook-p (elem)
+  "True when the @INC element ELEM is a HOOK (a reference) rather than a
+   directory.  The common element is a string: one type test, so the module
+   search pays nothing for the feature."
+  (let ((d (unbox elem)))
+    (not (or (stringp d) (pathnamep d) (numberp d) (null d)
+             (eq d *p-undef*)))))
+
+(defun %p-inc-call-list (thunk)
+  "THUNK's perl call in LIST context, as a vector of its results."
+  (%p-flatten-list (let ((*wantarray* t)) (funcall thunk))))
+
+(defun %p-inc-hook-text-ref-p (a)
+  "True when A, one item of a hook's answer, is a ref to the initial SOURCE
+   TEXT: a reference to a plain scalar (perl: referent type <= PVLV, not a
+   glob)."
+  (member (p-ref a) '("SCALAR" "LVALUE" "VSTRING") :test #'string=))
+
+(defun %p-inc-hook-handle-p (a)
+  "True when A, one item of a hook's answer, is a FILEHANDLE: a lexical
+   handle arrives as its stream, a bareword as its glob, an IO::Handle
+   object as a blessed glob ref."
+  (let ((v (unbox a)))
+    (or (streamp v)
+        (p-typeglob-p v)
+        (equal (p-reftype a) "GLOB"))))
+
+(defun %p-inc-filter-text (stream sub state)
+  "The source a hook's (FILEHANDLE?, CODE, STATE?) answer yields, as perl's
+   run_user_filter makes it: each call of SUB sees the next line of STREAM
+   (\"\" with no stream) in $_ and may rewrite it; a defined return is the
+   new status (> 0 go on, 0 the end -- the text of that last call counts),
+   an undef return keeps the status the read gave (1 a line, 0 end of
+   file).  With no SUB the stream is read to its end."
+  (with-output-to-string (out)
+    (loop
+     (let* ((line (and stream (%p-read-record stream (string #\Newline))))
+            (status (if line 1 0))
+            (buf (make-p-box (or line ""))))
+       (when sub
+         (let ((r (unbox (let (($_ buf) (*wantarray* nil))
+                           (if state
+                               (p-funcall-ref sub 0 state)
+                               (p-funcall-ref sub 0))))))
+           (unless (or (null r) (eq r *p-undef*))
+             (setf status (truncate (to-number r))))))
+       (let ((s (unbox buf)))
+         (unless (or (null s) (eq s *p-undef*))
+           (write-string (to-string s) out)))
+       (when (<= status 0)
+         (return))))))
+
+(defun %p-inc-hook-source (results)
+  "The source text a hook's answer RESULTS (a vector) hands require, or NIL
+   when it hands nothing usable -- perlfunc require's four optional items,
+   in their order: a ref to the initial text, a filehandle, a CODE ref, its
+   state.  A filehandle that is not open counts as found only beside text
+   or a CODE ref (perl reads /dev/null then)."
+  (let ((i 0) (n (length results)) prefix stream sub state)
+    (flet ((cur () (and (< i n) (aref results i))))
+      (when (and (cur) (%p-inc-hook-text-ref-p (cur)))
+        (setf prefix (to-string (p-$ (cur))))
+        (incf i))
+      (when (and (cur) (%p-inc-hook-handle-p (cur)))
+        (setf stream (p-get-stream (cur)))
+        (incf i))
+      (when (and (cur) (equal (p-reftype (cur)) "CODE"))
+        (setf sub (cur))
+        (incf i)
+        (setf state (cur))))
+    (when (or prefix stream sub)
+      (concatenate 'string (or prefix "")
+                   (if (or stream sub)
+                       (%p-inc-filter-text stream sub state)
+                       "")))))
+
+(defun %p-inc-hook-class (loader)
+  "LOADER's class name when it is a blessed reference, else NIL."
+  (let ((b (%p-builtin-blessed loader)))
+    (if (eq b *p-undef*) nil b)))
+
+(defun %p-inc-hook-no-method (class in-array)
+  "perl's die for a blessed hook with no INC, no INCDIR, no \"\" overload
+   and no code to call."
+  (p-die (format nil "Can't locate object method \"INC\", nor \"INCDIR\" ~
+                      nor string overload via package \"~A\" in object ~
+                      ~:[~;in ARRAY ~]hook in @INC" class in-array)))
+
+(defun %p-inc-hook-run (elem rel-path)
+  "Call the @INC hook ELEM for REL-PATH as perl's require does: (values
+   TEXT) when it supplies source, (values NIL DIRS) when it names
+   directories to search instead (INCDIR, a \"\"-overloaded object), NIL to
+   go on to the next element.  The invocant of an INC / INCDIR method is the
+   object itself, also inside an ARRAY wrapper; a CODE hook is called with
+   the @INC element (the wrapper, for one) and the name -- both probed."
+  (let* ((v (unbox elem))
+         (loader (if (and (equal (p-ref elem) "ARRAY") (vectorp v))
+                     (if (plusp (length v)) (aref v 0) *p-undef*)
+                     elem))
+         (class (%p-inc-hook-class loader)))
+    (cond
+      ((and class (or (p-can loader "INC") (p-can loader "AUTOLOAD")))
+       (%p-inc-hook-source
+        (%p-inc-call-list (lambda () (p-method-call loader "INC" rel-path)))))
+      ((and class (p-can loader "INCDIR"))
+       (values nil (map 'list #'to-string
+                        (%p-inc-call-list
+                         (lambda () (p-method-call loader "INCDIR" rel-path))))))
+      ((or (null class) (equal (p-reftype loader) "CODE"))
+       (%p-inc-hook-source
+        (%p-inc-call-list (lambda () (p-funcall-ref loader elem rel-path)))))
+      ((p-find-overload loader "\"\"")
+       (values nil (list (to-string loader))))
+      (t (%p-inc-hook-no-method class (not (eq loader elem)))))))
+
+(defun %p-require-locate (rel-path &key hooks-only)
+  "REQUIRE's search for REL-PATH: (values ABS-PATH NIL) for a file, (values
+   NIL HOOK) for source an @INC hook supplied -- HOOK = (TEXT ELEM PRESET),
+   PRESET true when the hook stored its own %INC entry -- or NIL.  The order
+   is p-find-module-in-inc's (a must-win shim, then @INC and its fallback);
+   a hook is CALLED here, in its place.  HOOKS-ONLY is perl's walk for a
+   name that is not searched (an explicit path that did not open): only the
+   hooks are asked."
+  (unless hooks-only
+    (let ((shim (%p-must-win-shim rel-path)))
+      (when shim (return-from %p-require-locate shim))))
+  (dolist (elem (%p-inc-search-dirs) nil)
+    (cond
+      ((%p-inc-hook-p elem)
+       (multiple-value-bind (text dirs) (%p-inc-hook-run elem rel-path)
+         (when text
+           (return-from %p-require-locate
+             (values nil (list text elem
+                               (nth-value 1 (gethash rel-path
+                                                     *p-inc-table*))))))
+         (unless hooks-only
+           (dolist (d dirs)
+             (let ((f (%p-inc-dir-file d rel-path)))
+               (when f (return-from %p-require-locate f)))))))
+      ((not hooks-only)
+       (let ((f (%p-inc-dir-file elem rel-path)))
+         (when f (return-from %p-require-locate f)))))))
+
+(defun %p-inc-hook-spool (rel-path text)
+  "Write TEXT, a hook's module source, to a fresh private directory under
+   the name REL-PATH (its last component for an explicit path); the file's
+   path.  Octets as latin-1 -- the transpiler reads source as octets and lets
+   `use utf8' decide -- unless the text holds a wide character."
+  (let* ((dir (sb-posix:mkdtemp
+               (format nil "~A/pcl-inc-XXXXXX"
+                       (or (sb-posix:getenv "TMPDIR") "/tmp"))))
+         (name (if (%p-explicit-path-p rel-path)
+                   (file-namestring rel-path)
+                   rel-path))
+         (path (concatenate 'string dir "/" name)))
+    (ensure-directories-exist path)
+    (with-open-file (out path :direction :output :if-exists :supersede
+                         :external-format
+                         (if (every (lambda (c) (< (char-code c) 256)) text)
+                             :latin-1
+                             :utf-8))
+      (write-string text out))
+    (values path dir)))
+
+(defun %p-inc-hook-load (rel-path hook)
+  "Load the source an @INC hook supplied (HOOK from %P-REQUIRE-LOCATE) as
+   the module REL-PATH, then give %INC its entry: the hook element itself,
+   unless the hook stored one (perlvar %INC)."
+  (destructuring-bind (text elem preset) hook
+    (multiple-value-bind (path dir) (%p-inc-hook-spool rel-path text)
+      (unwind-protect (p-load-module-cached path t)
+        (ignore-errors
+          (sb-ext:delete-directory (concatenate 'string dir "/")
+                                   :recursive t))))
+    (unless preset
+      (setf (gethash rel-path *p-inc-table*) elem))
+    t))
 
 ;;; --- Cache Management ---
 
@@ -28508,8 +28757,11 @@ would consume, so it dies naming the stream (rule 12)."
           (ignore-errors (delete-file lisp))
           (ignore-errors (delete-file path)))))))
 
-(defun p-load-module-cached (source-path)
+(defun p-load-module-cached (source-path &optional uncached)
   "Load a Perl module with caching. Returns t on success.
+   UNCACHED loads it on the no-cache path whatever *PCL-SKIP-CACHE* says --
+   an @INC hook's spooled source (%P-INC-HOOK-LOAD), which has no stable
+   path a cache entry could key on.
 
    THE LOCATION REGISTERS ARE SCOPED TO THE LOAD (task #1240): the module's
    own run bucket sets *p-src-file-id* to the module file, so without this the
@@ -28526,7 +28778,10 @@ would consume, so it dies naming the stream (rule 12)."
    not a require and keeps the caller's context (p-do)."
   (let ((*wantarray* nil)
         (*pcl-caller-wantarray* nil))
-    (p-loc-save (%p-load-unit (lambda () (%p-load-module-cached-1 source-path))))))
+    (p-loc-save (%p-load-unit (lambda ()
+                                (if uncached
+                                    (%p-load-module-uncached source-path)
+                                    (%p-load-module-cached-1 source-path)))))))
 
 (defun %p-load-module-cached-1 (source-path)
   "p-load-module-cached's body; see it for the contract."
@@ -29183,9 +29438,9 @@ would consume, so it dies naming the stream (rule 12)."
       (when do-import
         (%p-do-import module-name caller-pkg import-args))
       (return-from p-use t))
-    ;; Find module in @INC
-    (let ((abs-path (p-find-module-in-inc rel-path)))
-      (unless abs-path
+    ;; Find module in @INC -- calling any @INC HOOK on the way (#1815)
+    (multiple-value-bind (abs-path hook) (%p-require-locate rel-path)
+      (unless (or abs-path hook)
         ;; p-die, not `error`: a failed require is a PERL die — trappable by
         ;; `eval { require Foo }`, and when it is NOT trapped it must exit with
         ;; perl's status and print one line, not SBCL's backtrace and 1 (task
@@ -29200,10 +29455,13 @@ would consume, so it dies naming the stream (rule 12)."
       ;; p-xs-no-artifact note above *p-xs-unavailable-modules*).
       (handler-case
           (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
-            (p-load-module-cached abs-path))
+            (if hook
+                (%p-inc-hook-load rel-path hook)
+                (p-load-module-cached abs-path)))
         (p-xs-no-artifact () (%p-xs-not-installed rel-path)))
-      ;; Update %INC
-      (setf (gethash rel-path *p-inc-table*) abs-path)
+      ;; Update %INC (a hook's entry is %p-inc-hook-load's)
+      (unless hook
+        (setf (gethash rel-path *p-inc-table*) abs-path))
       ;; Import symbols from module (skipped for bare require)
       (when do-import
         (%p-do-import module-name caller-pkg import-args))
@@ -29325,23 +29583,35 @@ would consume, so it dies naming the stream (rule 12)."
         (return-from p-require-file t)))
     ;; Non-.pm: an explicit path (/x, ./test.pl, ../x) is loaded as given,
     ;; cwd-relative; any other name is searched in @INC ONLY -- the cwd is not
-    ;; consulted, as in perl 5.26+ (task #2442).
-    (let ((abs-path (cond
-                      ((char= (char path-str 0) #\/)
-                       (%p-literal-path path-str))
-                      ((%p-explicit-path-p path-str)
-                       (merge-pathnames (%p-literal-path path-str)
-                                        (truename *default-pathname-defaults*)))
-                      (t
-                       (p-find-module-in-inc path-str)))))
-      (unless (and abs-path (probe-file abs-path))
+    ;; consulted, as in perl 5.26+ (task #2442).  An explicit path that does
+    ;; not open is still offered to the @INC HOOKS, and only to them (perl;
+    ;; t/op/inccode.t "the coderef sees the pathname /test_require.pm").
+    (multiple-value-bind (abs-path hook)
+        (cond
+          ((char= (char path-str 0) #\/)
+           (values (%p-literal-path path-str)))
+          ((%p-explicit-path-p path-str)
+           (values (merge-pathnames (%p-literal-path path-str)
+                                    (truename *default-pathname-defaults*))))
+          (t
+           (%p-require-locate path-str)))
+      (when (and (null hook)
+                 (not (and abs-path (probe-file abs-path)))
+                 (or (char= (char path-str 0) #\/)
+                     (%p-explicit-path-p path-str)))
+        (multiple-value-setq (abs-path hook)
+          (%p-require-locate path-str :hooks-only t)))
+      (unless (or hook (and abs-path (probe-file abs-path)))
         ;; ENOENT, as perl's own search leaves it, and p-die for the same
         ;; reason as p-use's twin above (#1247 (b)).
         (%p-io-errno-fail 2)
         (p-die (format nil "Can't locate ~A" path-str)))
-      (p-load-module-cached abs-path)
-      (setf (gethash path-str *p-inc-table*)
-            (sb-ext:native-namestring (pathname abs-path)))
+      (if hook
+          (%p-inc-hook-load path-str hook)
+          (progn
+            (p-load-module-cached abs-path)
+            (setf (gethash path-str *p-inc-table*)
+                  (sb-ext:native-namestring (pathname abs-path)))))
       t)))
 
 ;;; ============================================================

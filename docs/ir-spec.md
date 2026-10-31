@@ -4916,6 +4916,29 @@ itself is warnings-gated and absent).  Example, probed:
 boundary runs the program's CHECK blocks at its first module's boundary, which
 is how `pcl -c` said `syntax OK` before a later `use` could fail.
 
+### 9.0b An @INC element that is a reference is a HOOK (normative, s531a, task #1815)
+
+`require` (`p-use`, `p-require-file`) and `do FILE` (`p-do`) walk @INC in
+order and CALL a hook in its place (`%p-require-locate`, `%p-do-locate`): a
+CODE ref with (the element, NAME); an unblessed ARRAY ref through its `[0]`
+with the array as the first argument; a blessed object through `INC` (an
+`AUTOLOAD` answers for it) with the object as invocant, else `INCDIR` (its
+list is searched as directories), else a blessed CODE ref is called as code
+and a `""`-overloaded object is a directory, else perl's die
+`Can't locate object method "INC", nor "INCDIR" ...`.  The answer is read
+in order -- an optional ref to the initial source, an optional filehandle,
+an optional CODE ref (a generator with no handle, a line filter over one:
+`$_` holds the line, a defined return is the new status, 0 ends it and that
+call's text still counts) and its state; nothing usable means "next
+element".  %INC then holds the hook element itself unless the hook stored
+an entry; an explicit path that does not open is offered to the hooks only.
+The text is spooled to a private temporary file and loaded on the uncached
+path.  The DIRECTORY resolver `p-find-module-in-inc` (the cache's
+dependency check, PCL's own lookups) skips hooks and never calls one.
+Example, probed: `unshift @INC, sub { return unless $_[1] eq 'A.pm'; open
+my $fh, '<', \"package A; sub v {7} 1;"; $fh }; require A; print A::v(),
+ref $INC{'A.pm'}` prints `7CODE`.
+
 ### 9.1 The string-eval protocol (normative, s295)
 
 String eval must let the eval'd code *read and write* the enclosing
