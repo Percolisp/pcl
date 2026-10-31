@@ -1119,4 +1119,41 @@ BEGIN { print "no-lib:", scalar(grep { $_ eq "/z2464" } @INC), "\n" }
 PL
 }
 
+# Test: a REQUIRED file's top level runs in SCALAR context (task #3524, s529a).
+# perl's require forces it, so `wantarray` there is '' for every spelling --
+# the eight of t/comp/require.t:205-213 plus the string forms; PCL ran the
+# file under the CALLER's context ('1' under `@foo = eval q{require M}`, undef
+# for the void and block-eval ones).  `do FILE` is NOT a require and keeps the
+# caller's context.  Expected text probed under perl 5.40.3.
+{
+  my $body = 'print "$main::tag:", (defined wantarray ? (wantarray ? "list" : "scalar") : "void"), "\n"; 1;';
+  for my $f ("WCtx3524.pm", "wctx3524.pl", "wctx3524.do") {
+    open my $fh, '>', File::Spec->catfile($tempdir, $f) or die;
+    print $fh $body;
+    close $fh;
+  }
+  my $output = run_pl(qq{
+use lib "$tempdir";
+my (\$foo, \@foo);
+sub clr { delete \$INC{"WCtx3524.pm"}; delete \$INC{"wctx3524.pl"} }
+\$main::tag = 1; \$foo = eval q{require WCtx3524}; clr();
+\$main::tag = 2; \@foo = eval q{require WCtx3524}; clr();
+\$main::tag = 3;        eval q{require WCtx3524}; clr();
+\$main::tag = 4;        eval q{\$_=\$_+2;require WCtx3524}; clr();
+\$main::tag = 5;        eval q{return require WCtx3524}; clr();
+\$main::tag = 6; \$foo = eval  {require WCtx3524}; clr();
+\$main::tag = 7; \@foo = eval  {require WCtx3524}; clr();
+\$main::tag = 8;        eval  {require WCtx3524}; clr();
+\$main::tag = 9; \@foo = (require "WCtx3524.pm"); clr();
+\$main::tag = 10; \@foo = (require "wctx3524.pl"); clr();
+sub inlist { require WCtx3524 } \$main::tag = 11; \@foo = inlist(); clr();
+\$main::tag = "do-list"; \@foo = do "wctx3524.do";
+\$main::tag = "do-scalar"; \$foo = do "wctx3524.do";
+\$main::tag = "do-void"; do "wctx3524.do";
+});
+  is($output, join('', map { "$_:scalar\n" } 1 .. 11)
+              . "do-list:list\ndo-scalar:scalar\ndo-void:void\n",
+     '#3524 a required file runs in scalar context; do FILE keeps the caller\'s');
+}
+
 done_testing();

@@ -28467,8 +28467,18 @@ would consume, so it dies naming the stream (rule 12)."
    own run bucket sets *p-src-file-id* to the module file, so without this the
    caller would keep reporting the module's file after the require returned.
    p-loc-save restores on a NORMAL return only -- a die during the load must
-   still name the module."
-  (p-loc-save (%p-load-unit (lambda () (%p-load-module-cached-1 source-path)))))
+   still name the module.
+
+   A REQUIRED FILE'S TOP LEVEL RUNS IN SCALAR CONTEXT (task #3524): perl's
+   require forces it, so `wantarray' there is \"\" whatever the require's own
+   context -- `@a = require M', a void `require M', `eval { require M }'.
+   Both require entries (p-use, and p-require-file's non-.pm path, which does
+   not go through p-use) reach THIS loader, and it covers the fasl load and
+   the text run alike, so the bind is here and nowhere else.  `do FILE' is
+   not a require and keeps the caller's context (p-do)."
+  (let ((*wantarray* nil)
+        (*pcl-caller-wantarray* nil))
+    (p-loc-save (%p-load-unit (lambda () (%p-load-module-cached-1 source-path))))))
 
 (defun %p-load-module-cached-1 (source-path)
   "p-load-module-cached's body; see it for the contract."

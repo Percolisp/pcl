@@ -2064,6 +2064,15 @@ snapshots the value at entry into `*pcl-caller-wantarray*` so nested binds
 inside the body don't lie to `(p-wantarray)`, which maps t→`1`, nil→`""`,
 :void→`undef`.
 
+**A REQUIRED file's top level runs in SCALAR context, whatever the caller's**
+(normative, s529a, task #3524).  perl's `require` forces scalar context on
+the file, so `wantarray` there is `""` for every spelling — `@a = require M`,
+a void `require M`, `eval { require M }`, `require "x.pl"`.
+`p-load-module-cached`, the one loader both require entries (`p-use` and
+`p-require-file`) reach, binds `*wantarray*` and `*pcl-caller-wantarray*` to
+nil around the module body, for the fasl load and the text run alike.
+`do FILE` is not a require and keeps the caller's context (`p-do`).
+
 **Statement (void) position — the sub-body regime.** A sub body with more
 than one statement (or a single compound) is wrapped ONCE in
 `(p-void-ctx …)`; every non-tail statement inside then
