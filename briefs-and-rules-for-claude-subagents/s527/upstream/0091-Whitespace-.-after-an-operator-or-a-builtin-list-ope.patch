@@ -1,0 +1,203 @@
+From 5c74a167e6aa6f97778bebf0f98bfa0b6e3aff4e Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 10:32:13 +0200
+Subject: [PATCH 91/93] Whitespace: <...> after an operator or a builtin list
+ operator is a readline
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Where perl expects a term -- after an operator, and after a builtin that
+takes an operand (print <FH>, sort <*.pl>, return <$fh>, $s .= <STDIN>,
+$ok ? <$f> // "" : "") -- a closed <...> is a readline or a glob, whatever
+it holds (toke.c yyl_leftpointy: PL_expect is not XOPERATOR).  PPI took
+the < for less-than everywhere but after = , ( ; and while, and the
+damage cascaded: a / inside the glob started a match, a -1 became a
+Number, a y/ a transliteration that swallowed the following statements.
+
+The term test is the one Operator.pm already used for a term-initial ~~
+(moved to the tokenizer as _term_expected and shared; it now also sees
+through a CORE:: prefix).  After a user's word the tokenizer cannot know
+whether a sub is declared, so there the < stays a less-than.  A block's }
+keeps its own rule below.
+
+Removes the TODO of the six PCL §14 rows of t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Operator.pm   | 21 ++-------------------
+ lib/PPI/Token/Whitespace.pm | 11 +++++++++++
+ lib/PPI/Tokenizer.pm        | 23 ++++++++++++++++++++++-
+ t/ppi_bugs_pcl.t            | 18 ++++++------------
+ 4 files changed, 41 insertions(+), 32 deletions(-)
+
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index 6aaac2f9..be84e510 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -41,7 +41,7 @@ L<PPI::Token> and L<PPI::Element> classes.
+ 
+ use strict;
+ use PPI::Token ();
+-use PPI::Singletons qw' %OPERATOR %KEYWORDS %NO_OPERAND ';
++use PPI::Singletons qw' %OPERATOR ';
+ 
+ our $VERSION = '1.292';
+ 
+@@ -67,7 +67,7 @@ sub __TOKENIZER__on_char {
+ 	}
+ 	# Where a term is expected, ~~ is two bitwise complements (~~$y), not
+ 	# the smart match.
+-	if ( $content eq '~' and $char eq '~' and __term_expected($t) ) {
++	if ( $content eq '~' and $char eq '~' and $t->_term_expected ) {
+ 		return $t->_finalize_token->__TOKENIZER__on_char( $t );
+ 	}
+ 	return 1 if $OPERATOR{ $content . $char };
+@@ -106,23 +106,6 @@ sub __TOKENIZER__on_char {
+ 	$t->_finalize_token->__TOKENIZER__on_char( $t );
+ }
+ 
+-# Is a TERM expected where the tokenizer now stands?  Only what is known
+-# counts: after an operator, an opening bracket or a ; (_opcontext), after a
+-# block's } (_after_term), at the start of the document, and after a builtin
+-# that takes an operand (print, return, ...).  After a match, a method name or
+-# a user's word it cannot say, and the answer is no.
+-sub __term_expected {
+-	my ( $t ) = @_;
+-	my ( $prev, $prevprev ) = $t->_previous_significant_tokens(2);
+-	return 1 if !$prev;
+-	return 1 if $t->_opcontext eq 'operand';
+-	# A block's } does not end a term (map { $_ } ~~$y); a subscript's does
+-	return !$t->_after_term if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
+-	return '' if !$prev->isa('PPI::Token::Word');
+-	return '' if $prevprev and $prevprev->isa('PPI::Token::Operator') and $prevprev->content eq '->';
+-	return $KEYWORDS{ $prev->content } && !$NO_OPERAND{ $prev->content };
+-}
+-
+ 1;
+ 
+ =pod
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index c6a1cde8..a11042e8 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -302,6 +302,17 @@ sub __TOKENIZER__on_char {
+ 		my $next_char = substr( $t->{line}, $t->{line_cursor} + 1, 2 );
+ 		return 'Operator' if $next_char =~ /<[^>]/;
+ 
++		# Where perl expects a term -- after an operator, and after a
++		# builtin that takes an operand: print <FH>, sort <*.pl>,
++		# return <$fh>, $s .= <STDIN> -- a closed <...> is a readline or a
++		# glob, whatever it holds (toke.c yyl_leftpointy: PL_expect is not
++		# XOPERATOR).  A block's } is decided below.
++		pos $t->{line} = $t->{line_cursor};
++		return 'QuoteLike::Readline'
++		  if $t->{line} =~ m/\G<(?:>|[^<>=\s][^<>]*>)/gc
++		  and not ( $prev and $prev->isa('PPI::Token::Structure') and $prev->content eq '}' )
++		  and $t->_term_expected;
++
+ 		return 'Operator' if not $prev;
+ 
+ 		# The most common group of readlines are used like
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 30b96760..69d487c6 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -87,7 +87,7 @@ use PPI::Token      ();
+ use PPI::Exception  ();
+ use PPI::Exception::ParserRejection ();
+ use PPI::Document ();
+-use PPI::Singletons qw' %NO_OPERAND ';
++use PPI::Singletons qw' %KEYWORDS %NO_OPERAND ';
+ 
+ our $VERSION = '1.292';
+ 
+@@ -1071,6 +1071,27 @@ sub _after_term {
+ 	return $self->_ends_term_at($cursor);
+ }
+ 
++# Is a TERM expected where the tokenizer now stands (toke.c: PL_expect is
++# not XOPERATOR)?  Only what is known counts: after an operator, an opening
++# bracket or a ; (_opcontext), after a block's } (_after_term), at the start
++# of the document, and after a builtin that takes an operand (print, sort,
++# return, ...).  After a match, a method name or a user's word it cannot
++# say -- a declared sub is a list operator, an undeclared bareword a term --
++# and the answer is no.
++sub _term_expected {
++	my $self = shift;
++	my ( $prev, $prevprev ) = $self->_previous_significant_tokens(2);
++	return 1 if !$prev;
++	return 1 if $self->_opcontext eq 'operand';
++	# A block's } does not end a term (map { $_ } ~~$y); a subscript's does
++	return !$self->_after_term if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
++	return '' if !$prev->isa('PPI::Token::Word');
++	return '' if $prevprev and $prevprev->isa('PPI::Token::Operator') and $prevprev->content eq '->';
++	my $word = $prev->content;
++	$word =~ s/^CORE:://;
++	return $KEYWORDS{$word} && !$NO_OPERAND{$word};
++}
++
+ # Assuming we are currently parsing the word 'x', return true
+ # if previous tokens imply the x is an operator, false otherwise.
+ sub _current_x_is_operator {
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 6c874028..f8416f7f 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -337,8 +337,7 @@ TODO: {
+ # it took for the end of a term (`map { $h{$_}++ } <op/*>`), where it emits
+ # Operator('<') … Operator('>') — a comparison chain.  This is the same
+ # operator-vs-term error as bugs 8 and 9, in the third direction.
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     my @t = toks('sort <STDIN>;');
+     ok( grep(/^PPI::Token::QuoteLike::Readline=/, @t),
+         '<STDIN> after a list operator should be a readline, as it is after a comma' )
+@@ -352,15 +351,13 @@ TODO: {
+ #   $ perl -e 'open(my $f,"<","/etc/hostname"); my $x = 1 ? <$f> // "" : ""; print $x'
+ #   <the first line of /etc/hostname>
+ #
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     my @t = toks('my $x = $ok ? <$f> // "" : "";');
+     ok( !grep(/^PPI::Token::Regexp::Match=/, @t),
+         '`<$f> // ""` in a ternary branch: the // is defined-or, not an empty match' )
+         or diag "got: @t";
+ }
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     my @t = toks('my $x = $ok ? <$f> / 2 : 0;');
+     ok( !grep(m{^PPI::Token::Regexp::Match=/ 2 : 0;$}, @t),
+         '`<$f> / 2` in a ternary branch: the / is division, and must not eat the statement' )
+@@ -376,15 +373,13 @@ TODO: {
+ #
+ # `sort <./nope-*-xyz>; print "y"; print "z";` is FOUR tokens to PPI, the last
+ # of them a Regexp::Match holding both prints.
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     my @t = toks('my @f = sort <./nope-*-xyz>;');
+     ok( grep(/^PPI::Token::QuoteLike::Readline=/, @t),
+         '`sort <./nope-*-xyz>` — a `.`-relative glob pattern should be a readline token' )
+         or diag "got: @t";
+ }
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     my @t = toks('my @f = sort <./a-*>; print "y";');
+     ok( !grep(m{^PPI::Token::Regexp::Match=/a-\*>; print "y";$}, @t),
+         'the glob-pattern cascade must not swallow the statements that follow' )
+@@ -1867,8 +1862,7 @@ TODO: {
+ # in it: `my @b = sort </tmp/x-1/y/*.pl>; print 1;` globs and prints 1.
+ # Read as a less-than, the -1 became a Number and the y/ a transliteration
+ # that swallowed the next statement.
+-TODO: {
+-    local $TODO = 'PCL §14: <FH> / <glob> after a list operator or a block is lexed as < … >';
++{
+     my @t = map { short_class($_) } toks('my @b = sort </tmp/x-1/y/*.pl>; print 1;');
+     is( $t[4], 'QuoteLike::Readline=</tmp/x-1/y/*.pl>',
+         'sort </tmp/x-1/y/*.pl>: the glob after sort is one readline' ) or diag "got: @t";
+-- 
+2.53.0
+

@@ -1,7 +1,7 @@
 From 8cefefce083749fe9a2bd3e9745366c0e08c64f3 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:46:24 +0300
-Subject: [PATCH 17/89] Word: the _ after sub names the sub
+Subject: [PATCH 17/93] Word: the _ after sub names the sub
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

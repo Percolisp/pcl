@@ -96,3 +96,16 @@ subscripts it (`PR-AI.md`); **AJ** §51 a bare block takes a continue block
 (`PR-AJ.md`); **AK** §50 an anonymous hash where perl expects a term -- die /
 warn / exists / delete, and the map / grep look-ahead (`PR-AK.md`).  §48 (the
 list slice), §52 (`defer`) and §53 (`class`) stay TODO rows.
+
+## s527g (2026-10-31): the branch is now 93 commits, head c4d0da86
+
+`0001-*.patch` .. `0093-*.patch` and `pcl-branch.bundle` regenerated from the
+whole branch (`git format-patch origin/master..pcl`).  Two tokenizer groups,
+each "TODO tests, then the fix", PPI's suite green after every commit, plain
+and AUTHOR_TESTING=1: **AH** (second pair, text `PR-AH2.md`) §14 `<...>` after
+an operator or a builtin list operator is a readline (`print <FH>`, `sort
+<*.pl>`, `$s .= <STDIN>`, a glob whose path holds `-DIGIT`); the term test
+`Operator.pm` used for `~~` moves to `PPI::Tokenizer::_term_expected` and is
+shared.  **AL** §43 a lexical sub named like a keyword (`my sub s`, `my sub
+y`, `my sub x`) is called by its bare name in its block (`PR-AL.md`).
+t/ppi_bugs_pcl.t: 295 -> 298 rows.

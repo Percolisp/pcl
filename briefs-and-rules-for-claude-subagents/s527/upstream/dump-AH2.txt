@@ -1,0 +1,22 @@
+BEFORE (branch pcl dd90e749)
+my @b = sort </tmp/x-1/y/*.pl>; print 1;
+    Word(my) Symbol(@b) Operator(=) Word(sort) Operator(<) Regexp::Match(/tmp/x) Operator(-) Number(1) Operator(/) Regexp::Transliterate(y/*.pl>; print 1;)
+print <STDIN>;
+    Word(print) Operator(<) Word(STDIN) Operator(>) Structure(;)
+$s .= <STDIN>;
+    Symbol($s) Operator(.=) Operator(<) Word(STDIN) Operator(>) Structure(;)
+foo <STDIN>;
+    Word(foo) Operator(<) Word(STDIN) Operator(>) Structure(;)
+my $t = time < 5;
+    Word(my) Symbol($t) Operator(=) Word(time) Operator(<) Number(5) Structure(;)
+AFTER (branch pcl c4d0da86)
+my @b = sort </tmp/x-1/y/*.pl>; print 1;
+    Word(my) Symbol(@b) Operator(=) Word(sort) QuoteLike::Readline(</tmp/x-1/y/*.pl>) Structure(;) Word(print) Number(1) Structure(;)
+print <STDIN>;
+    Word(print) QuoteLike::Readline(<STDIN>) Structure(;)
+$s .= <STDIN>;
+    Symbol($s) Operator(.=) QuoteLike::Readline(<STDIN>) Structure(;)
+foo <STDIN>;
+    Word(foo) Operator(<) Word(STDIN) Operator(>) Structure(;)
+my $t = time < 5;
+    Word(my) Symbol($t) Operator(=) Word(time) Operator(<) Number(5) Structure(;)

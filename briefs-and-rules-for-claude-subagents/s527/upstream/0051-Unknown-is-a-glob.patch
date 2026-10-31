@@ -1,7 +1,7 @@
 From 5ef65f34f519b0fc8e8cc06d99c6d9ca9bb68f5d Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:56:40 +0200
-Subject: [PATCH 51/89] Unknown: *: is a glob
+Subject: [PATCH 51/93] Unknown: *: is a glob
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,7 +1,7 @@
 From a45973532af5c58c4f8fe2a198cae09cb1d58d33 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:45:26 +0300
-Subject: [PATCH 16/89] TODO tests: sub _ is a Statement::Sub named _
+Subject: [PATCH 16/93] TODO tests: sub _ is a Statement::Sub named _
 
 perl -e 'sub _ { "x" } print _()' prints x: the _ after sub names the
 sub.  PPI lexes it as the magic filehandle, builds no Statement::Sub,

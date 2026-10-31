@@ -1,7 +1,7 @@
 From e309445bf2822207c3bcd3f79a909c8166fc5304 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:58:45 +0300
-Subject: [PATCH 21/89] Operator: ~~ after a builtin that takes an operand is
+Subject: [PATCH 21/93] Operator: ~~ after a builtin that takes an operand is
  two complements
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

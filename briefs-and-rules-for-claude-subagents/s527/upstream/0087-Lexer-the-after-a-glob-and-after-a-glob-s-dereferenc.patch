@@ -1,7 +1,7 @@
 From 52c4e102435e40627e1fda13a2870bfb56c8ba8f Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:16:29 +0200
-Subject: [PATCH 87/89] Lexer: the { after a glob, and after a glob's
+Subject: [PATCH 87/93] Lexer: the { after a glob, and after a glob's
  dereference block, subscripts it
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

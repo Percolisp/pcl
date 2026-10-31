@@ -1,7 +1,7 @@
 From 75fc24e8d436aa766ab0efe2f8cdeefa9284e816 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:47:16 +0200
-Subject: [PATCH 64/89] Lexer: a [ or { after a dereference block or a
+Subject: [PATCH 64/93] Lexer: a [ or { after a dereference block or a
  key/value slice name subscripts it
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

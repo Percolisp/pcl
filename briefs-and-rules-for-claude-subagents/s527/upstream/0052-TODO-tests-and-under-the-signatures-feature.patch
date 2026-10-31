@@ -1,7 +1,7 @@
 From 2e173336444014731057b4a8c52e31ce3dee37b8 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:59:05 +0200
-Subject: [PATCH 52/89] TODO tests: $, and $= under the signatures feature
+Subject: [PATCH 52/93] TODO tests: $, and $= under the signatures feature
 
 The two siblings of $): once the signatures feature is on, $, (the output
 field separator) and $= (the page length) are lexed as a nameless

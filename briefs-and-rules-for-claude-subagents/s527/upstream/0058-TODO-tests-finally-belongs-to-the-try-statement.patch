@@ -1,7 +1,7 @@
 From 44b918d465fae37de7e89765d68ffdcc03e7a474 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:35:12 +0200
-Subject: [PATCH 58/89] TODO tests: finally belongs to the try statement
+Subject: [PATCH 58/93] TODO tests: finally belongs to the try statement
 
 perl's try (5.34) takes catch and, from 5.36, finally as ONE
 self-terminating statement: try BLOCK catch (VAR) BLOCK finally BLOCK.

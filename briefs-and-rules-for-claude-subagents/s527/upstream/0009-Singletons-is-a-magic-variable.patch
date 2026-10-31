@@ -1,7 +1,7 @@
 From 6876d6eb5a39bc1a58cdcbb33b52034ec5abc749 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 24 Oct 2026 20:39:14 +0300
-Subject: [PATCH 09/89] Singletons: @? is a magic variable
+Subject: [PATCH 09/93] Singletons: @? is a magic variable
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

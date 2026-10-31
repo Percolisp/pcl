@@ -1,7 +1,7 @@
 From dc242138aa251c5ccb648a98939032417c05f617 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 25 Oct 2026 22:15:20 +0200
-Subject: [PATCH 39/89] Symbol: a * cast trumps the braces in ->symbol
+Subject: [PATCH 39/93] Symbol: a * cast trumps the braces in ->symbol
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

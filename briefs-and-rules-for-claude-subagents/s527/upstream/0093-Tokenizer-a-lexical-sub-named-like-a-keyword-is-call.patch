@@ -1,0 +1,199 @@
+From c4d0da867d2937cdca0cbfa6b0ede9a8bc90d47c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 31 Oct 2026 10:39:57 +0200
+Subject: [PATCH 93/93] Tokenizer: a lexical sub named like a keyword is called
+ by its bare name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+my sub NAME, state sub NAME and our sub NAME (perl 5.18) declare NAME for
+the rest of the enclosing block, and there the bare NAME is the sub, also
+where it is a keyword's name: toke.c yyl_keylookup looks a word up in the
+pad before the keyword table, wherever perl does not expect an operator.
+So after my sub s { ... }, s(1) is a call and not a substitution, and
+y(2), q(3), m(4), tr(1), qw(...) and x(5) likewise; after a term
+(3 x 2) the operator stays.
+
+The tokenizer keeps the declared names with the brace depth of their
+block: a bounded set, only kept once a file declares a lexical sub, which
+the } that closes the block empties again.  __current_token_is_forced_word
+consults it, so every path that asks whether a keyword is forced to be a
+word sees it (Word's two paths, and the x test of _current_x_is_operator,
+which now passes the word).
+
+Removes the TODO of the three PCL §43 rows of t/ppi_bugs_pcl.t.
+---
+ lib/PPI/Token/Word.pm |  8 +++--
+ lib/PPI/Tokenizer.pm  | 69 ++++++++++++++++++++++++++++++++++++++++++-
+ t/ppi_bugs_pcl.t      |  9 ++----
+ 3 files changed, 77 insertions(+), 9 deletions(-)
+
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 7cb6a689..46d6beee 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -145,7 +145,7 @@ sub __TOKENIZER__on_char {
+ 	my $word = $t->{token}->{content};
+ 	if ( $KEYWORDS{$word} ) {
+ 		# Check for a Perl keyword that is forced to be a normal word instead
+-		if ( $t->__current_token_is_forced_word ) {
++		if ( $t->__current_token_is_forced_word($word) ) {
+ 			$t->{class} = $t->{token}->set_class( 'Word' );
+ 			return $t->{class}->__TOKENIZER__on_char( $t );
+ 		}
+@@ -277,7 +277,7 @@ sub __TOKENIZER__commit {
+ 		# Since it's not a simple identifier...
+ 		$token_class = 'Word';
+ 
+-	} elsif ( $KEYWORDS{$word} and $t->__current_token_is_forced_word ) {
++	} elsif ( $KEYWORDS{$word} and $t->__current_token_is_forced_word($word) ) {
+ 		$token_class = 'Word';
+ 
+ 	} elsif ( $QUOTELIKE{$word} ) {
+@@ -322,6 +322,10 @@ sub __TOKENIZER__commit {
+ 		}
+ 	}
+ 
++	# A lexical sub's declaration names it for the rest of its block
++	$t->_lexical_sub_word($word)
++		if $token_class eq 'Word' and ( $word eq 'sub' or defined $t->{lexical_sub_pending} );
++
+ 	# Create the new token and finalise
+ 	$t->_new_token( $token_class, $word );
+ 	if ( $t->{line_cursor} >= $t->{line_length} ) {
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 69d487c6..1bb6e76f 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -636,6 +636,7 @@ sub _finalize_token {
+ 
+ 	# Add the token to the token buffer
+ 	push @{ $self->{tokens} }, $self->{token};
++	$self->_lexical_sub_scope( $self->{token} ) if $self->{lexical_subs};
+ 	$self->{token} = undef;
+ 
+ 	# Return the parse class to that of the zone we are in
+@@ -1101,7 +1102,7 @@ sub _current_x_is_operator {
+ 	my ($prev, $prevprev) = $self->_previous_significant_tokens(2);
+ 	return if !$prev;
+ 
+-	return !$self->__current_token_is_forced_word if $prev->isa('PPI::Token::Word');
++	return !$self->__current_token_is_forced_word('x') if $prev->isa('PPI::Token::Word');
+ 
+ 	return (!$prev->isa('PPI::Token::Operator') || $X_CAN_FOLLOW_OPERATOR{$prev})
+ 		&& (!$prev->isa('PPI::Token::Structure') || $X_CAN_FOLLOW_STRUCTURE{$prev})
+@@ -1117,6 +1118,12 @@ sub _current_x_is_operator {
+ sub __current_token_is_forced_word {
+ 	my ( $t, $word ) = @_;
+ 
++	# A lexical sub in scope is called by its bare name, also where the
++	# name is a keyword's (my sub s { ... } s(1)) -- but not after a term,
++	# where perl expects an operator ($n x 3 stays a repetition).
++	return 1 if $t->{lexical_subs} and defined $word
++		and $t->_lexical_sub_in_scope($word) and !$t->_after_term;
++
+ 	# Check if forced by preceding tokens.
+ 
+ 	my ( $prev, $prevprev ) = $t->_previous_significant_tokens(2);
+@@ -1161,6 +1168,66 @@ sub __current_token_is_forced_word {
+ 	return '';
+ }
+ 
++# Lexical subs (perl 5.18): my sub NAME, state sub NAME and our sub NAME
++# declare NAME for the rest of the enclosing block, and there the bare NAME
++# is the sub, also where it is a keyword's name (toke.c yyl_keylookup looks
++# a word up in the pad before the keyword table): after my sub s { ... },
++# s(1) is a call and not a substitution.  The tokenizer keeps the declared
++# names with the brace depth of their block, a bounded set that the } which
++# closes that block empties again; it is only kept once a file declares one.
++my %LEXICAL_SUB_DECLARATOR = map { $_ => 1 } qw( my our state );
++
++# Called by PPI::Token::Word for the word sub, and for the word after it
++# while a declaration is pending (before the new token is created).
++sub _lexical_sub_word {
++	my ( $self, $word ) = @_;
++	if ( defined $self->{lexical_sub_pending} ) {
++		my $depth = delete $self->{lexical_sub_pending};
++		push @{ $self->{lexical_subs} ||= [] }, [ $word, $depth ];
++		$self->{lexical_sub_depth} = $depth if !defined $self->{lexical_sub_depth};
++		return;
++	}
++	my ( $prev ) = $self->_previous_significant_tokens(1);
++	return if !$prev or !$prev->isa('PPI::Token::Word') or !$LEXICAL_SUB_DECLARATOR{ $prev->content };
++	if ( defined $self->{lexical_sub_depth} ) {
++		$self->{lexical_sub_pending} = $self->{lexical_sub_depth};
++		return;
++	}
++	# The first declaration: count the braces still open before it.
++	my $depth = 0;
++	for my $token ( @{ $self->{tokens} } ) {
++		next if !$token->isa('PPI::Token::Structure');
++		$depth++ if $token->content eq '{';
++		$depth-- if $token->content eq '}' and $depth;
++	}
++	$self->{lexical_sub_pending} = $depth;
++}
++
++# Called by _finalize_token for every token while a lexical sub is in scope.
++sub _lexical_sub_scope {
++	my ( $self, $token ) = @_;
++	return if ref $token ne 'PPI::Token::Structure';
++	if ( $token->{content} eq '{' ) {
++		$self->{lexical_sub_depth}++;
++	}
++	elsif ( $token->{content} eq '}' ) {
++		my $depth = --$self->{lexical_sub_depth};
++		my @left = grep { $_->[1] <= $depth } @{ $self->{lexical_subs} };
++		if ( @left ) {
++			$self->{lexical_subs} = \@left;
++		}
++		else {
++			delete $self->{lexical_subs};
++			delete $self->{lexical_sub_depth};
++		}
++	}
++}
++
++sub _lexical_sub_in_scope {
++	my ( $self, $word ) = @_;
++	return scalar grep { $_->[0] eq $word } @{ $self->{lexical_subs} };
++}
++
+ sub _features {
+ 	my ( $self, $arg ) = @_;
+ 	return $arg ? $self->{feature_set} = $arg : $self->{feature_set} || {};
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 8ece8423..35f96fde 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1655,8 +1655,7 @@ TODO: {
+ 
+ # §43 -- a lexical sub may be named like a keyword, and its name is then
+ # a sub call: `my sub s { "S@_" } print s(1)` prints S1.
+-TODO: {
+-    local $TODO = 'PCL §43: a lexical sub named like a keyword keeps the keyword lexing';
++{
+     my @t = map { short_class($_) } toks('my sub s { "S@_" } print s(1), "\n";');
+     ok( !grep( /^Regexp::Substitute=/, @t ), 'my sub s ... s(1): a call, not a substitution' ) or diag "got: @t";
+ }
+@@ -1874,14 +1873,12 @@ TODO: {
+ # { "X@_" } print y(2), x(5)` prints Y2X5 -- while after a term x is still
+ # the repetition operator and after the block's } the keyword is back:
+ # `{ my sub s { 1 } } s/a/b/` substitutes.
+-TODO: {
+-    local $TODO = 'PCL §43: a lexical sub named like a keyword keeps the keyword lexing';
++{
+     my @t = map { short_class($_) } toks('my sub y { 1 } my sub x { 2 } print y(2), x(5), 3 x 2;');
+     my @ops = grep { /^(?:Regexp::Transliterate|Operator=x)/ } @t;
+     is_deeply( \@ops, ['Operator=x'], 'my sub y / my sub x: y(2) and x(5) are calls, 3 x 2 repeats' ) or diag "got: @t";
+ }
+-TODO: {
+-    local $TODO = 'PCL §43: a lexical sub named like a keyword keeps the keyword lexing';
++{
+     my @t = map { short_class($_) } toks('{ my sub s { 1 } s(1); } s/a/b/;');
+     is( $t[-2], 'Regexp::Substitute=s/a/b/', 'after the block of my sub s, s/a/b/ substitutes again' ) or diag "got: @t";
+ }
+-- 
+2.53.0
+

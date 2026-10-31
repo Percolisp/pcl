@@ -1,7 +1,7 @@
 From f780c1254ae58e302f3dc6c45ad35dc68cad7abc Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 05:04:09 +0200
-Subject: [PATCH 79/89] Unknown, Symbol: a $ may be spaced from its name
+Subject: [PATCH 79/93] Unknown, Symbol: a $ may be spaced from its name
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,0 +1,14 @@
+BEFORE (branch pcl dd90e749)
+my sub s { 1 } print s(1);
+    Word(my) Word(sub) Word(s) Structure({) Number(1) Structure(}) Word(print) Regexp::Substitute(s(1);)
+my sub x { 2 } print x(5), 3 x 2;
+    Word(my) Word(sub) Word(x) Structure({) Number(2) Structure(}) Word(print) Operator(x) Structure(() Number(5) Structure()) Operator(,) Number(3) Operator(x) Number(2) Structure(;)
+{ my sub y { 1 } y(1); } y/a/b/;
+    Structure({) Word(my) Word(sub) Word(y) Structure({) Number(1) Structure(}) Regexp::Transliterate(y(1); } y/a/b/;)
+AFTER (branch pcl c4d0da86)
+my sub s { 1 } print s(1);
+    Word(my) Word(sub) Word(s) Structure({) Number(1) Structure(}) Word(print) Word(s) Structure(() Number(1) Structure()) Structure(;)
+my sub x { 2 } print x(5), 3 x 2;
+    Word(my) Word(sub) Word(x) Structure({) Number(2) Structure(}) Word(print) Word(x) Structure(() Number(5) Structure()) Operator(,) Number(3) Operator(x) Number(2) Structure(;)
+{ my sub y { 1 } y(1); } y/a/b/;
+    Structure({) Word(my) Word(sub) Word(y) Structure({) Number(1) Structure(}) Word(y) Structure(() Number(1) Structure()) Structure(;) Structure(}) Regexp::Transliterate(y/a/b/) Structure(;)

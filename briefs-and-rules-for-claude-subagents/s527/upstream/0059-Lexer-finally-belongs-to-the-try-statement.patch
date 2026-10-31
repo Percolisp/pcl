@@ -1,7 +1,7 @@
 From 4e021b91b9881e8e551114482b3cfb70b420325d Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Thu, 29 Oct 2026 00:37:04 +0200
-Subject: [PATCH 59/89] Lexer: finally belongs to the try statement
+Subject: [PATCH 59/93] Lexer: finally belongs to the try statement
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

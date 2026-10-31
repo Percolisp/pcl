@@ -1,7 +1,7 @@
 From 2d9122945861d43b48d967cc6eb88d4215e38e8c Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 04:55:09 +0200
-Subject: [PATCH 72/89] Tests: a word in a ternary's middle operand is never a
+Subject: [PATCH 72/93] Tests: a word in a ternary's middle operand is never a
  label
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
