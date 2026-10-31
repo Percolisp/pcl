@@ -7,3 +7,5 @@ Box rebooted (uptime 1 min at 00:52); `HEAVY.holder*` empty.  Main `9c450fa2` = 
 Queue after them: s531b (register, after the review), s531d (one-file causes), a PPI-rows batch (#3962 `map { {` Lexer, §48 #3740, §40 format, §42), #4061 (representation decision).
 
 ## 01:0x -- verified: MODEL.txt = claude-fable-5-1 (review), claude-opus-5-5 x2 (s531a worktree agent-a50eb64c, s531c worktree agent-ac3a8d7d).
+
+## 01:1x -- USER clarified: Fable 5.1 is to do a REAL review of the whole register plan and DECIDE -- the USER is not certain about the plan and did not want a choice between two options.  Sent to the review agent: first-principles review (REWORK / "do not build" are legitimate verdicts), the companion question becomes Fable's RULING, decisions written as RULED; only genuine priority/cost trade-offs left open for the USER.
