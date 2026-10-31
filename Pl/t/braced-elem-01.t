@@ -16,6 +16,10 @@
 # `${sub {...}}` stays the deref of an anonymous sub: toke.c excludes exactly
 # that name for the `{` spelling (r15); a declared sub or another keyword name
 # is the element (r16).
+# r17-r22 (task #4140): the same spellings INTERPOLATED -- `"@{name[0,2]}"`
+# reached the string scanner's `@{ EXPR }` arm, which compiles only the guts
+# (`name[0,2]`, a call); the reference now goes WHOLE through the pipeline
+# when the block is the collapse's shape.  `"@{[ nm() ]}"` stays a call.
 # Every expected value is perl's own: the program runs under perl AND pcl and
 # each row compares its line.
 
@@ -51,9 +55,15 @@ my $i = 1; print "r13 ", ${l[$i + 1]}, "\n";
 our %g = (a => 1); { no strict 'refs'; print "r14 ", ${g{a}}, "\n"; }
 our %sub = (7 => 'x'); print "r15 ", (eval { ${sub{7}} } ? "elem" : ($@ =~ /^Not a SCALAR reference/ ? "anon-sub deref" : "?")), "\n";
 sub kk { 1 } our %kk = (1 => 'h'); our %do = (1 => 'd'); print "r16 ", ${kk {1}}, ${do{1}}, "\n";
+print "r17 @{a[0,2]} @{h{'k','new'}}\n";
+print "r18 @{P::Q::A[1,0]} ${P::Q::A[0]} ${P::Q::L{5}}\n";
+print qq{r19 @{ l[1,2] } @{a[0..1]}\n};
+my $s = "x4 6y"; (my $t = "Z") =~ s/Z/@{l[2,0]}/; print "r20 ", ($s =~ /@{a[0,2]}/ ? "m" : "n"), " $t\n";
+sub nm { "CALLED" } our @nm = (1, 2); print "r21 @{nm[1,0]} @{[ nm() ]} ${\ nm()}\n";
+{ local $" = "-"; print "r22 @{l[0,1,2]}\n"; }
 PERL
 
-my @labels = map { "r$_" } 1 .. 16;
+my @labels = map { "r$_" } 1 .. 22;
 plan tests => scalar(@labels);
 
 my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);

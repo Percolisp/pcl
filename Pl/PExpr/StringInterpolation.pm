@@ -361,6 +361,20 @@ sub _interp_reparse {
   return $parser->parse(\@parts);
 }
 
+# Is SRC (`@{...}`) a braced deref whose block is exactly an identifier and ONE
+# subscript group -- the shape Pl::PExpr::_block_word_subscript collapses into
+# the element / slice (#3864)?  Asks that predicate itself (rule 11), on a
+# fragment of the reference's own text.
+sub _is_braced_word_subscript {
+  my ($src) = @_;
+  require Pl::Parser;
+  my $doc = Pl::Parser::fragment_doc($src) or return 0;
+  my $cast = $doc->find_first('PPI::Token::Cast') or return 0;
+  my $blk = $cast->snext_sibling;
+  return 0 unless $blk && $blk->isa('PPI::Structure::Block');
+  return Pl::PExpr::_block_word_subscript($blk) ? 1 : 0;
+}
+
 sub _interp_symbol {
   my ($self, $parser, $text) = @_;
   return $parser->make_node(PPI::Token::Symbol->new($text));
@@ -454,7 +468,19 @@ sub _interp_array {
   # string literal was supposed to keep (probed against perl).
   if ($form eq 'expr') {
     my ($gs, $ge) = @{ $ev->{expr_span} };
-    my $id = $self->_interp_reparse($parser, substr($content, $gs, $ge - $gs));
+    my $guts = substr($content, $gs, $ge - $gs);
+    # `@{name[LIST]}` / `@{name{LIST}}` is the SLICE `@name[LIST]` (toke.c
+    # S_scan_ident), never a call of name() -- the CODE spelling's reading
+    # (#3864) lives in ONE place, PExpr's braced-deref collapse, so the WHOLE
+    # reference goes through the pipeline to reach it, then is joined like the
+    # other slices (#4140).  `${name{KEY}}` already reaches it: the scalar arm
+    # reparses the whole reference.
+    if ($guts =~ /\A\s*[A-Za-z_][\w:]*\s*[\[{]/
+        && _is_braced_word_subscript(_ev_src($content, $ev))) {
+      my $id = $self->_interp_reparse($parser, _ev_src($content, $ev));
+      return ($self->_interp_join($parser, $id), $end);
+    }
+    my $id = $self->_interp_reparse($parser, $guts);
     return ($self->_interp_join($parser, $id), $end);
   }
 
