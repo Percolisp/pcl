@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -238,4 +238,34 @@ PL
 16 PP
 17 Q
 18 ARRAY P
+OUT
+
+test_cl('an ARRAY ELEMENT holding a BLESSED qr// reads back with its class (#4001)',
+        <<'PL', <<'OUT');
+my $o4 = bless qr/x/, 'K';
+my @c4 = ($o4); print "1 ", ref($c4[0]), "\n";
+my $t = [$o4];  print "2 ", ref($t->[0]), "\n";
+my $c = $o4;    print "3 ", ref($c), "\n";
+my %h = (k => $o4); print "4 ", ref($h{k}), "\n";
+print "5 ", ("x" =~ $c4[0] ? "match" : "no"), " $c4[0]\n";
+for my $e (@c4) { print "6 ", ref($e), "\n" }
+my @m = map { ref } @c4; print "7 @m\n";
+my $p = qr/y/; my @pp = ($p); print "8 ", ref($pp[0]), "\n";
+{ package K; sub hi { "K::hi" } } print "10 ", $c4[0]->hi, "\n";
+my $sh = shift @c4; print "11 ", ref($sh), "\n";
+my @d = ($o4); my $pop = pop @d; print "12 ", ref($pop), "\n";
+my ($f) = @{[ $o4 ]}; print "13 ", ref($f), "\n";
+PL
+1 K
+2 K
+3 K
+4 K
+5 match (?^:x)
+6 K
+7 K
+8 Regexp
+10 K::hi
+11 K
+12 K
+13 K
 OUT

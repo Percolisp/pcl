@@ -13672,7 +13672,12 @@ per element."
                 ;; VALUE spelling.  Asked LAST: it is reached only by an
                 ;; element that is not a number, a string, an aggregate, a
                 ;; coderef or a box, so an ordinary read never evaluates it.
-                (%p-handle-payload-p v))
+                (%p-handle-payload-p v)
+                ;; A BLESSED qr// object: its class is the BOX's slot (a qr
+                ;; struct can be shared by several qr// results, so it cannot
+                ;; carry the class itself), and unboxing answered Regexp
+                ;; (#4001).  The hash twin keeps every classed box.
+                (and (p-regex-match-p v) (p-box-p elem) (p-box-class elem)))
             elem   ; reference or dualvar: return the box so both halves survive
             v))))  ; scalar: return unboxed value
 
