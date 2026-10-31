@@ -138,4 +138,18 @@ for my $b (@bugs) {
   }
 }
 
+# A DEREFERENCE as the foreach loop variable is perl's own form (yyl_foreach:
+# any scalar lvalue term before the `(`).  Once PCL's PPI lexes it (§6 §29,
+# s527c), the checker must walk `for $$f`, `for ${*$f}`, `for ${$r}` and
+# `for $$$rr` without a row -- before s527c it read the cast as a for-head
+# contradiction and the `(` after `$$f` as a paren after a term.
+if ($vendored) {
+  my $src = 'our ($z, $v); my $f = "z"; my $r = \$z; my $rr = \$r;'
+          . ' for $$f (5, 11) { 1 } for ${*$f} (5) { 1 } for ${$r} (1, 2) { 1 }'
+          . ' for $$$rr (1) { 1 } for my $x (1) { $x } for $v (1) { 1 } print "x\n";';
+  my @rows = check_source($src, file => 'deref-forvar');
+  ok(!@rows, 'the checker walks a dereference foreach loop variable without a row (s527c)')
+    or diag join("\n", map { "$_->{kind} '$_->{text}' \@$_->{state} col $_->{col}" } @rows);
+}
+
 done_testing();

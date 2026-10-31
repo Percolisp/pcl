@@ -754,7 +754,7 @@ $HANDLER{open_curly} = sub {
   elsif ($x eq 'XATTRTERM' || $x eq 'XTERMBLOCK') { ($kind, $after) = ('block', 'XOPERATOR') }
   elsif ($x eq 'XATTRBLOCK' || $x eq 'XBLOCK') { ($kind, $after) = ('block', 'XSTATE') }
   elsif ($x eq 'XBLOCKTERM') { ($kind, $after) = ('block', 'XTERM') }
-  elsif ($x eq 'XCAST') { ($kind, $after) = ('deref', 'XOPERATOR') }
+  elsif ($x eq 'XCAST') { ($kind, $after) = ('deref', $st->{forvar} ? 'XFORLIST' : 'XOPERATOR') }
   else {   # XSTATE, XREF: the lookahead
     my $is_hash = _curly_lookahead_is_hash($c);
     $after = $lop_adj ? 'XTERM' : 'XOPERATOR';
@@ -774,7 +774,7 @@ $HANDLER{open_curly} = sub {
                            owner => $owner, stmt_block => $stmt_block,
                            name_magic => $st->{name_magic},
                            after_lop => ($after eq 'XTERM' ? $st->{lop} : undef),
-                           lopname => $st->{lopname} };
+                           lopname => $st->{lopname}, forvar => $st->{forvar} };
   _set($w, $inner, subscript_open => ($kind eq 'subscript' ? 1 : 0));
 };
 
@@ -805,6 +805,7 @@ $HANDLER{close_curly} = sub {
     $w->{ended} = { open => $f->{tok}, owner => $f->{owner}, owner_name_magic => $f->{name_magic} };
   }
   my %keep = $f->{after_lop} ? (lop => $f->{after_lop}, lopname => $f->{lopname}, after_block => 1) : ();
+  %keep = (owner => $f->{forvar}) if $f->{forvar} && $f->{after} eq 'XFORLIST';
   _set($w, $f->{after}, callable => ($f->{kind} =~ /^(?:subscript|deref)$/ ? 1 : 0),
        subscriptable => ($f->{kind} =~ /^(?:subscript|deref|hash)$/ ? 1 : 0),
        deref_block => ($f->{kind} eq 'deref' ? $f->{tok} : undef), %keep);
@@ -1198,6 +1199,10 @@ sub _skip_format {
     if ($t->isa('PPI::Token::Word') && _core($t->content) =~ /^(?:my|our|state)$/) { $$seq .= 'my '; return 1 }
     if ($t->isa('PPI::Token::Cast') && $t->content eq '\\') { $$seq .= '\\ '; return 1 }
     if ($t->isa('PPI::Token::Symbol') || $t->isa('PPI::Token::Magic')) { _set($w, 'XFORLIST', owner => $own); return 1 }
+    # a DEREFERENCE is a loop variable too (yyl_foreach 7128: any scalar lvalue term
+    # before the `(`): `for $$f`, `for ${*$f}`, `for ${$r}` -- the cast, then its
+    # name or block, then the list (XCAST carries `forvar` to the right state).
+    if ($t->isa('PPI::Token::Cast') && $t->content =~ /^\$+$/) { _set($w, 'XCAST', cast => $t->content, forvar => $own); return 1 }
     if ($t->isa('PPI::Token::Structure') && $t->content eq '(') {
       # after `my`: the 5.36 n-at-a-time variable list; else the loop head
       my $kind = ($$seq // '') =~ /my $/ ? 'forvars' : 'forhead';
@@ -1264,6 +1269,7 @@ sub _skip_format {
     if ($t->isa('PPI::Token::Cast')) { $w->{st}{cast} = ($w->{st}{cast} // '') . $t->content; return 1 }
     if (($t->isa('PPI::Token::Symbol') || $t->isa('PPI::Token::Magic')) && $t->content ne '$') {
       my $cast = $w->{st}{cast} // '';
+      if ($w->{st}{forvar}) { _set($w, 'XFORLIST', owner => $w->{st}{forvar}); return 1 }
       _set($w, 'XOPERATOR', callable => ($cast =~ /&/ ? 1 : 0), subscriptable => 1); return 1;
     }
     return 0 if $t->isa('PPI::Token::Structure') && $t->content eq '{';
