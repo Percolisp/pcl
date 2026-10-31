@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 265;
+use Test::More tests => 266;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1673,4 +1673,18 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
 {
     my @t = map { short_class($_) } toks('sub f { my $c = 0 ? ref shift : shift; $c }');
     ok( !grep( /^Label=/, @t ), '0 ? ref shift : shift: no label in a ternary' ) or diag "got: @t";
+}
+
+# §13, the root: a PPI::Tokenizer used on its own (no PPI::Document, no
+# Lexer) reads the same tokens whatever the caller's $/ is.  The comment and
+# __END__ arms took their line end with chomp, which removes $/.
+{
+    my $src = "# c\nx; # d\n__END__ e\nfoo\n";
+    my $tokens = sub {
+        my $tz = PPI::Tokenizer->new( \$src );
+        join '|', map { short_class(ref $_) . '=' . $_->content } @{ $tz->all_tokens };
+    };
+    my $plain   = $tokens->();
+    my $slurped = do { local $/; $tokens->() };
+    is( $slurped, $plain, 'a standalone tokenizer: the tokens are the same when $/ is undef' );
 }

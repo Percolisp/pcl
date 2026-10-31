@@ -353,9 +353,12 @@ sub _preprocess_source {
   # alternative passes quoted strings through untouched.  Symbolic uses of
   # tick names in STRINGS (`&{"x'y"}`) are normalised at runtime instead
   # (%p-tick-package-seps).  Bareword calls `x'y()` stay unsupported.
-  $src =~ s{($skip_re)|\bsub(\s+)([A-Za-z_]\w*(?:'[A-Za-z_]\w*)+)}{
+  # A LEADING tick names the main package: `sub 'Hello'_x` is main'Hello'_x,
+  # i.e. Hello::_x (perl 5.40.3; t/comp/parser.t:456, ppi-upstream-bugs §46).
+  $src =~ s{($skip_re)|\bsub(\s+)('[A-Za-z_]\w*(?:'[A-Za-z_]\w*)*|[A-Za-z_]\w*(?:'[A-Za-z_]\w*)+)}{
     if (defined $1) { $1 } else {
       my ($ws, $name) = ($2, $3);
+      $name =~ s/^'//;
       $name =~ s/'/::/g;
       "sub$ws$name";
     }
@@ -430,6 +433,25 @@ sub _strip_format_blocks {
     $i = $end + 1;
   }
   return join '', @lines;
+}
+
+# PCL's PPI lexes a SPACED scalar (`$ bits`, docs/ppi-upstream-bugs.md §39)
+# as ONE Symbol whose text keeps the whitespace, as PPI keeps all text.  The
+# compiler keys on a variable's content, so the ONE place that drops the
+# whitespace is here, in place (no re-parse), for whole documents and for
+# fragment documents alike (both entries call it).  `$ _` is the Magic `$_`.
+sub _canonical_spaced_symbols {
+  my ($doc, $src) = @_;
+  return if defined $src && $src !~ /\$[ \t]/;   # the source names none
+  my $syms = $doc->find(sub {
+    ($_[1]->isa('PPI::Token::Symbol') || $_[1]->isa('PPI::Token::Magic'))
+      && $_[1]->content =~ /^\$[ \t]/
+  }) || [];
+  for my $tok (@$syms) {
+    (my $c = $tok->content) =~ s/^\$[ \t]+/\$/;
+    $tok->set_content($c);
+  }
+  return;
 }
 
 # Perl allows whitespace between a sigil and its identifier (`my $ bits = …`
@@ -781,6 +803,7 @@ sub _ppi_parse {
   }
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
+  _canonical_spaced_symbols($doc, $src) if $doc;
   _reclassify_bare_vwords($doc) if $doc;
   # A DIAGNOSTIC, not a repair — deliberately NOT one of the in-place
   # passes above, so `fragment_doc`'s re-parses do not announce a construct
@@ -823,6 +846,7 @@ sub fragment_doc {
   my ($src, %opt) = @_;
   my $doc = _ppi_new($src, %opt);
   return undef unless $doc;
+  _canonical_spaced_symbols($doc, $src);
   _reclassify_bare_vwords($doc);
   return $doc;
 }

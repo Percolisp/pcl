@@ -123,7 +123,7 @@ sub __TOKENIZER__on_char {
 
 	# Suck in till the end of the bareword
 	pos $t->{line} = $t->{line_cursor};
-	if ( $t->{line} =~ m/\G(\w+(?:(?:\'|::)\w+)*(?:::)?)/gc ) {
+	if ( $t->{line} =~ m/\G(\w+(?:(?:\'|(?:::)+)\w+)*(?:::)?)/gc ) {
 		my $word = $1;
 		# Special Case: If we accidentally treat eq'foo' like
 		# the word "eq'foo", then just make 'eq' (or whatever
@@ -198,7 +198,7 @@ sub __TOKENIZER__commit {
 	# Our current position is the first character of the bareword.
 	# Capture the bareword.
 	pos $t->{line} = $t->{line_cursor};
-	unless ( $t->{line} =~ m/\G((?!\d)\w+(?:(?:\'|::)\w+)*(?:::)?)/gc ) {
+	unless ( $t->{line} =~ m/\G((?!\d)\w+(?:(?:\'|(?:::)+)\w+)*(?:::)?)/gc ) {
 		# Programmer error
 		die sprintf "Fatal error... regex failed to match in '%s' when expected", substr $t->{line}, $t->{line_cursor};
 	}
@@ -220,8 +220,10 @@ sub __TOKENIZER__commit {
 			: $t->{class}->__TOKENIZER__on_char($t);
 	}
 
-	# Check for the end of the file
-	if ( $word eq '__END__' ) {
+	# Check for the end of the file.  CORE::__END__ ends it too: perl
+	# reads either spelling as the end of the code (toke.c
+	# yyl_data_handle), so the rest of the file is never code.
+	if ( $word eq '__END__' or $word eq 'CORE::__END__' ) {
 		# Create the token for the __END__ itself
 		$t->_new_token( 'Separator', $1 );
 		$t->_finalize_token;
@@ -235,7 +237,7 @@ sub __TOKENIZER__commit {
 		my $end_rest = substr( $t->{line}, $t->{line_cursor} );
 		$t->{line_cursor} = length $t->{line};
 		if ( $end_rest =~ /\n$/ ) {
-			chomp $end_rest;
+			$end_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
 			$t->_new_token( 'Comment', $end_rest ) if length $end_rest;
 			$t->_new_token( 'Whitespace', "\n" );
 		} else {
@@ -246,8 +248,8 @@ sub __TOKENIZER__commit {
 		return 0;
 	}
 
-	# Check for the data section
-	if ( $word eq '__DATA__' ) {
+	# Check for the data section (CORE::__DATA__ is the same)
+	if ( $word eq '__DATA__' or $word eq 'CORE::__DATA__' ) {
 		# Create the token for the __DATA__ itself
 		$t->_new_token( 'Separator', "$1" );
 		$t->_finalize_token;
@@ -259,7 +261,7 @@ sub __TOKENIZER__commit {
 		my $data_rest = substr( $t->{line}, $t->{line_cursor} );
 		$t->{line_cursor} = length $t->{line};
 		if ( $data_rest =~ /\n$/ ) {
-			chomp $data_rest;
+			$data_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
 			$t->_new_token( 'Comment', $data_rest ) if length $data_rest;
 			$t->_new_token( 'Whitespace', "\n" );
 		} else {
@@ -331,6 +333,23 @@ sub __TOKENIZER__commit {
 }
 
 
+
+# A sub name that opens with the old package separator ' (sub 'Hello'_x):
+# the caller (PPI::Token::Whitespace) has checked that a name follows.
+sub __TOKENIZER__commit_quoted_name {
+	my ( $class, $t ) = @_;
+	pos $t->{line} = $t->{line_cursor};
+	$t->{line} =~ m/\G('(?!\d)\w+(?:(?:'(?!\d)|(?:::)+)\w+)*)/gc
+	  or die "Fatal error... quoted sub name expected";
+	my $word = $1;
+	$t->{line_cursor} += length $word;
+	$t->_new_token( 'Word', $word );
+	if ( $t->{line_cursor} >= $t->{line_length} ) {
+		$t->_finalize_token;
+		return 0;
+	}
+	$t->_finalize_token->__TOKENIZER__on_char($t);
+}
 
 # Is the current Word really a subroutine attribute?
 sub __current_token_is_attribute {

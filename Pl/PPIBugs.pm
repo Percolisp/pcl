@@ -628,9 +628,9 @@ print g(), "\\n";
    tasks => [3942] },
  { id => 39, kind => 'token', dump => 'tokens',
    title => 'A SPACED sigil (`$ name`, perl\'s scan_ident skips the whitespace) lexes as Cast + Word',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XCAST', class => 'Word', content => '', pred => '', check => 'cast-then-word' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_fix_spaced_sigils' },
+   fix => { kind => 'relex', handler => 'Pl::Parser::_fix_spaced_sigils', commit => 'f780c125', group => 'AE', pr => undef },
    repro => 'my $ bits = 5; print $bits, "\\n";',
    perl => "5\n",
    tokens => {
@@ -659,9 +659,9 @@ print "after\\n";
    tasks => [3745] },
  { id => 41, kind => 'token', dump => 'tokens',
    title => 'A name with an EMPTY package segment (`foo::::bar`) is split into two Words; perl\'s scan_word6 takes it whole',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XATTRBLOCK', class => 'Word', content => '', pred => '', check => 'word-after-sub-name' },
-   fix => { kind => 'relex', handler => undef },
+   fix => { kind => 'relex', handler => undef, commit => 'cb213af0', group => 'AB', pr => undef },
    repro => 'sub foo::::bar { 7 } print foo::::bar(), "\\n";',
    perl => "7\n",
    tokens => {
@@ -702,9 +702,9 @@ print;
    tasks => [3750] },
  { id => 44, kind => 'token', dump => 'tokens',
    title => '`CORE::__END__` / `CORE::__DATA__` is a Word, not a Separator: the code does not end',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'data-marker-as-word', shape => 'a Word CORE::__END__ / CORE::__DATA__ under XSTATE' },
-   fix => { kind => 'relex', handler => undef },
+   fix => { kind => 'relex', handler => undef, commit => 'cf13afb5', group => 'AA', pr => undef },
    repro => 'print "x\\n";
 CORE::__END__
 not code
@@ -718,9 +718,9 @@ not code
    tasks => [3751] },
  { id => 45, kind => 'token', dump => 'tokens',
    title => '`& {BLOCK}` with a SPACE after the `&` where a term is expected is a bitwise and; perl reads the code sigil (yyl_ampersand)',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^&=?$/, pred => '', check => 'ampersand-as-bitand' },
-   fix => { kind => 'relex', handler => undef },
+   fix => { kind => 'relex', handler => undef, commit => 'bc7d176b', group => 'AD', pr => undef },
    repro => '& {sub { print "ok\\n" }};',
    perl => "ok\n",
    tokens => {
@@ -731,9 +731,9 @@ not code
    tasks => [3752] },
  { id => 46, kind => 'token', dump => 'tokens',
    title => 'The old package separator `\'` opening a SUB NAME (`sub \'Hello\'_he_said`) lexes as a Quote::Single + Word',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => 'a Quote::Single after `sub` (the next Word is word-after-term, not attributable to the row)' },
-   fix => { kind => 'relex', handler => undef },
+   fix => { kind => 'relex', handler => undef, commit => '45bf106d', group => 'AC', pr => undef },
    repro => 'no warnings; sub \'Hello\'_he_said { "hi" } print Hello::_he_said(), "\\n";',
    perl => "hi\n",
    tokens => {

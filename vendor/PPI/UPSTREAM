@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s527d
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: 2d9122945861d43b48d967cc6eb88d4215e38e8c
-lib-tree: 38d698c4a2e303244424a4887e2d0c2e71f0f314
+branch: pcl-s527d
+branch-sha: f780c1254ae58e302f3dc6c45ad35dc68cad7abc
+lib-tree: 142758926094afbc57b71f5b3647a26baefd7266
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -43,6 +43,12 @@ fix: W §5 a2f28ed9 Lexer: { STRING, ... } where a statement starts is an anonym
 fix: X §13 3a08ed1f Lexer: the caller's $/ does not reach the tokenizer
 fix: Y §37 56330a40 Lexer: a block filehandle right after print( is a block
 fix: Z §47 2d912294 Tests: a word in a ternary's middle operand is never a label
+fix: AA §44 cf13afb5 Word: CORE::__END__ and CORE::__DATA__ end the code
+fix: X §13 9b106126 Comment, Word: take the line end without chomp
+fix: AB §41 cb213af0 Word, Symbol: an empty package segment is part of the name
+fix: AC §46 45bf106d Whitespace, Word: a sub name may open with the ' package separator
+fix: AD §45 bc7d176b Unknown: & before whitespace and a block or a scalar is the code sigil
+fix: AE §39 f780c125 Unknown, Symbol: a $ may be spaced from its name
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -115,3 +121,10 @@ commit: 56330a40 Lexer: a block filehandle right after print( is a block
 commit: a2fa26a0 t/ppi_bugs_pcl.t: the for $$$r loop rows are no longer TODO
 commit: a8373d45 TODO tests: eight more tokenizer cases from PCL (§39-§46)
 commit: 2d912294 Tests: a word in a ternary's middle operand is never a label
+commit: cf13afb5 Word: CORE::__END__ and CORE::__DATA__ end the code
+commit: 40c6886d TODO test: a standalone tokenizer's tokens do not depend on $/
+commit: 9b106126 Comment, Word: take the line end without chomp
+commit: cb213af0 Word, Symbol: an empty package segment is part of the name
+commit: 45bf106d Whitespace, Word: a sub name may open with the ' package separator
+commit: bc7d176b Unknown: & before whitespace and a block or a scalar is the code sigil
+commit: f780c125 Unknown, Symbol: a $ may be spaced from its name

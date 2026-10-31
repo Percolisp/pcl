@@ -130,6 +130,20 @@ sub __TOKENIZER__on_char {
 			return 1;
 		}
 
+		# Whitespace may stand between the sigil and the name (toke.c
+		# scan_ident skips it): my $ bits is $bits.  The Symbol keeps the
+		# text; its canonical form drops the whitespace.  $ is never an
+		# operator, so no position test is needed.
+		if ( $char eq ' ' or $char eq "\t" ) {
+			pos $t->{line} = $t->{line_cursor};
+			if ( $t->{line} =~ m/\G([ \t]+)(?=[^\W\d])/gc ) {
+				$t->{token}->{content} .= $1;
+				$t->{line_cursor} += length $1;
+				$t->{class} = $t->{token}->set_class( 'Symbol' );
+				return $t->{class}->__TOKENIZER__on_char( $t );
+			}
+		}
+
 		# Is it a nameless arg in a signature?
 		my %noname = ( ')' => 1, '=' => 1, ',' => 1 );
 		if ( $noname{$char} and $t->_in_signature ) {
@@ -306,6 +320,17 @@ sub __TOKENIZER__on_char {
 		}
 
 		return $self->_as_cast_or_op($t) if $self->_is_cast_or_op($char);
+
+		# Where a term is expected & is the code sigil even before
+		# whitespace (toke.c yyl_ampersand: not XOPERATOR => scan_ident),
+		# so & {BLOCK} and & $code call code.
+		if ( $char =~ /\s/ ) {
+			pos $t->{line} = $t->{line_cursor};
+			if ( $t->{line} =~ m/\G\s+[{\$]/gc and _cast_or_op($t) eq 'Cast' ) {
+				$t->{class} = $t->{token}->set_class( 'Cast' );
+				return $t->_finalize_token->__TOKENIZER__on_char( $t );
+			}
+		}
 
 		# Probably the binary and operator
 		$t->{class} = $t->{token}->set_class( 'Operator' );

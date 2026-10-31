@@ -1,0 +1,91 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# ppi-token-rows-01.t -- s527d: the tokenizer rows fixed on PCL's PPI branch
+# (docs/ppi-upstream-bugs.md §39-§47, docs/ppi-fix-at-source-s527.md §8), each
+# run end to end against perl.  The PPI half of each row is guarded by the
+# registry canary (Pl/t/ppi-bugs-registry-01.t); these rows guard what PCL
+# DOES with the now-correct token -- the lowering half, which the corpora do
+# not reach (none of the shapes occurs in the 111 perl-tests files).
+
+use v5.30;
+use strict;
+use warnings;
+use Test::More;
+use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
+
+my $project_root = "$RealBin/../..";
+my $pl2cl        = "$project_root/pl2cl";
+my $runtime      = "$project_root/cl/pcl-runtime.lisp";
+my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
+
+plan skip_all => "pl2cl not found" unless -x $pl2cl;
+plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
+
+sub write_pl {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    return $pl_file;
+}
+
+sub run_cl {
+    my ($code) = @_;
+    my $cl_code = PCLCore::transpile("$pl2cl " . write_pl($code));
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code;
+    close $cl_fh;
+    my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
+    $output =~ s/^;.*\n//gm;
+    $output =~ s/^PCL Runtime loaded\n//gm;
+    $output =~ s/^\s*\n//gm;
+    return $output;
+}
+
+sub both_agree {
+    my ($code, $desc) = @_;
+    my $perl = `perl @{[ write_pl($code) ]} 2>&1`;
+    my $pcl  = run_cl($code);
+    is($pcl, $perl, "$desc (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
+}
+
+# §39 -- a spaced sigil is ONE Symbol whose text keeps the space; the
+# compiler sees the canonical name (Pl::Parser::_canonical_spaced_symbols),
+# in a whole document and in a string-eval fragment alike.
+both_agree('my $ bits = 5; $ x = 2; print $bits + $x, "\n";',
+           '§39: my $ bits / $ x are $bits / $x');
+both_agree('my $ s = 3; my $ y = 4; print $s * $y, "\n";',
+           '§39: $ s and $ y are variables, not a substitution / transliteration');
+both_agree('for (1, 2) { print $ _ } print "\n";',
+           '§39: $ _ is $_');
+both_agree('my $r = eval q{my $ z = 6; $z + 1}; print "$r\n";',
+           '§39: a spaced sigil inside a string eval');
+
+# §41 -- an empty package segment is part of the name.
+both_agree('sub foo::::bar { 7 } print foo::::bar(), "\n";',
+           '§41: sub foo::::bar and its call');
+
+# §45 -- & before whitespace and a block / a scalar is the code sigil.
+both_agree('& {sub { print "ok\n" }};',
+           '§45: & {BLOCK} calls the code');
+both_agree('sub c { print "c@_\n" } my $code = \&c; & $code(1);',
+           '§45: & $code(1) calls the code');
+both_agree('my ($a1, $b1) = (6, 3); print $a1 & $b1, "\n";',
+           '§45: after a term & is still the bitwise and (control)');
+
+# §46 -- the old package separator opening a sub name.
+both_agree(q{no warnings; sub 'Hello'_he_said { "hi" } print Hello::_he_said(), "\n";},
+           q{§46: sub 'Hello'_he_said defines Hello::_he_said});
+
+# §47 -- WORD : in a ternary's middle operand is not a label.
+both_agree('sub f { my $c = 0 ? ref shift : shift; return $c } print f(5), "\n";',
+           '§47: 0 ? ref shift : shift');
+
+done_testing();
