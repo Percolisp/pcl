@@ -6869,9 +6869,10 @@ sub _fix_ppi_glob_after_block {
         # `*` IS in term position by PPI's own reading (after the operator it
         # took the `<` or `/` for).  So `<*>` and `<op/*>` arrive as
         # `< Symbol(*>)` / `< op / Symbol(*>)`: the same run, one token fewer.
-        # It STAYS after s527d: PPI now lexes <...> after a BLOCK (group AH),
-        # but after a list operator (`sort <op/*>`) the mis-lex and this `*>`
-        # are still here -- probed: deleting the arm divides by zero.
+        # It STAYS after s527d and s527g: PPI now lexes <...> after a BLOCK and
+        # after an operator or a BUILTIN list operator (group AH, §14d), but
+        # after a USER sub (`foo <op/*>`: only a declaration makes it a list
+        # operator) the mis-lex and this `*>` are still here.
         if (ref($t) eq 'PPI::Token::Symbol' && $c eq '*>') {
           $glob_content .= '*';
           $has_glob_chars = 1;
