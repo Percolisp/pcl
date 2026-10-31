@@ -82,9 +82,10 @@ PL
 
 # ---- 3. the negatives: a map / grep / sort BLOCK stays a block ------------
 
-both_agree(<<'PL', 'PPI §50: { $_ => 1 } / {; "x" => 1 } / { lc($_) => 1 } / { +"$_" => 1 } stay map blocks');
+both_agree(<<'PL', 'PPI §50: { $_ => 1 } / {; "x" => 1 } / { lc($_) => 1 } / { +"$_" => 1 } stay map blocks; `map {;}` beside them forces the null-statement reparse');
 my @t = map { $_ => 1 } 1, 2; print scalar(@t), "\n";
 my @u = map {; "x$_" => 1 } 1, 2; print scalar(@u), "\n";
+my @z = map {;} 1, 2; print scalar(@z), "\n";
 my @v = map { lc($_) => 1 } "A"; print "@v\n";
 my %h = map { +"$_" => 1 } qw(a b); print join(",", sort keys %h), "\n";
 my @f = grep { $_ > 1 } 1, 2, 3; print "@f\n";

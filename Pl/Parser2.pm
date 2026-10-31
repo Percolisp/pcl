@@ -6495,8 +6495,14 @@ sub _normalize_null_statements {
     # classifier reads as an anon hash, where perl's `{;` is a BLOCK (Fable
     # review F2 on #2701).  The `;` becomes `();` (a statement with no
     # value), so the brace stays a block.  Only a brace that begins its
-    # statement: after `map`/`do`/a cast the brace is a block anyway, and a
-    # deref block (`${; ...}`) keeps the deletion below.
+    # statement: after `do` / a cast the brace is a block anyway, and a
+    # deref block (`${; ...}`) keeps the deletion below.  The brace of a map
+    # or a grep keeps its `;` untouched: PCL's PPI applies perl's look-ahead
+    # there (§50: `map { "$_" => 1 }` is an anon hash), so deleting the `;`
+    # of `map {; "$_" => 1 }` would turn the block into a hash on the
+    # reparse; its lowering skips the Null statement.
+    next if !$null->sprevious_sibling && $p->schildren
+         && _brace_of_map_or_grep($p);
     if (!$null->sprevious_sibling && $p->schildren
         && !$p->sprevious_sibling && $p->parent
         && $p->parent->isa('PPI::Statement')
@@ -6518,6 +6524,22 @@ sub _normalize_null_statements {
     $rewrote = 1;
   }
   return $rewrote ? $self->_reparse_doc($doc) : $doc;
+}
+
+# Is this brace the block of a map or a grep -- `map { ... } LIST`, or the
+# first thing in `map({ ... } LIST)`?
+sub _brace_of_map_or_grep {
+  my $brace = shift;
+  my $prev = $brace->sprevious_sibling;
+  if (!$prev) {
+    my $stmt = $brace->parent;
+    return 0 unless $stmt && $stmt->isa('PPI::Statement');
+    my $list = $stmt->parent;
+    return 0 unless $list && $list->isa('PPI::Structure::List');
+    $prev = $list->sprevious_sibling;
+  }
+  return $prev && $prev->isa('PPI::Token::Word')
+      && $prev->content =~ /\A(?:CORE::)?(?:map|grep)\z/ ? 1 : 0;
 }
 
 # `tie my $y, ARGS;` → `my $y; tie $y, ARGS;` (see the parse() comment).
