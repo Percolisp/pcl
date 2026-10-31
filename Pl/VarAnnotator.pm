@@ -2098,8 +2098,20 @@ sub _tw_scan_quote_leaf {
   my $c = $node->content;
   $c .= join '', $node->heredoc if $heredoc;
   my %esc = (in_regex => ($node->isa('PPI::Token::Regexp') ? 1 : 0));
+  # A pattern COMMENT holds no reference (task #3856): skip the spans the ONE
+  # scanner reports over the PATTERN section (never the delimiters or an
+  # s/// replacement), keyed on the token's trailing /x.
+  my %skip;
+  my $sec = $esc{in_regex} ? ($node->{sections} || [])->[0] : undef;
+  if ($sec) {
+    my %rx = (%esc, x => (($node->get_modifiers || {})->{x} ? 1 : 0));
+    my $pat = substr($c, $sec->{position}, $sec->{size});
+    $skip{ $_->[0] + $sec->{position} } = $_->[1] + $sec->{position}
+      for @{ Pl::InterpScan::comment_spans($pat, %rx) };
+  }
   my ($i, $n) = (0, length $c);
   while ($i < $n) {
+    if (exists $skip{$i}) { $i = $skip{$i}; next }
     my $ch = substr($c, $i, 1);
     if ($ch eq '\\') {
       $i += Pl::InterpScan::escape_skip($c, $i, %esc);

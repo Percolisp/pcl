@@ -548,7 +548,11 @@ sub _interp_texts {
 sub _interp_refs {
   my ($self, $t, $text, $in_regex, $pkg, $cv) = @_;
   return unless $text =~ /[\$\@]/;
-  my $evs = eval { Pl::InterpScan::scan($text, in_regex => $in_regex ? 1 : 0, postderef_qq => 1) } || [];
+  # A pattern's EXTENDED flag (the token's trailing /x) decides its `#`
+  # comments, which hold no references (task #3856).
+  my $x = ($in_regex && $t->can('get_modifiers') && ($t->get_modifiers || {})->{x}) ? 1 : 0;
+  my $evs = eval { Pl::InterpScan::scan($text, in_regex => $in_regex ? 1 : 0, x => $x,
+                                        postderef_qq => 1) } || [];
   for my $ev (@$evs) {
     my $canon = $ev->{canon};
     if (!defined $canon && $ev->{form} eq 'magic' && defined $ev->{name}) {

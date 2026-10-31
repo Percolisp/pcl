@@ -939,7 +939,10 @@ sub _regex_literal_form {
   # compiled -- never by the runtime (#3510, #2501): a pattern whose escapes
   # fold away entirely stays a literal; one that quotes a run-time value is an
   # interpolated pattern like any other.
-  if (my $cm = $self->_regex_case_mod_pattern($pattern, $delim, $node)) {
+  # The EXTENDED flag decides what a `#` is to the interpolation scanner
+  # (task #3856): the op's trailing modifiers, never an inline (?x).
+  my $x = ($flags // '') =~ /x/ ? 1 : 0;
+  if (my $cm = $self->_regex_case_mod_pattern($pattern, $delim, $node, $x)) {
     if (!ref $cm->[0]) {
       $pattern = $cm->[0];
     } else {
@@ -949,12 +952,12 @@ sub _regex_literal_form {
               ':tier',  ':dynamic'];
     }
   }
-  elsif (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
+  elsif (_delim_interpolates($delim) && _has_regex_interpolation($pattern, $x)) {
     # An interpolated pattern is not known until run time, so the TIER is a
     # run-time question for a target: `:dynamic` is a declared absence, never
     # a guess (Pl::RegexTier's header).
     return ['pcl::p-regex-from-parts',
-            ':pat',   $self->_gen_interp_regex_pattern($pattern),
+            ':pat',   $self->_gen_interp_regex_pattern($pattern, $x),
             ':flags', _cl_string_literal_form($flags),
             ':tier',  ':dynamic'];
   }
@@ -1035,9 +1038,9 @@ sub _subst_delims {
 # /^$1$/` matches in perl, missed here).  The `[\$\@]` pre-filter keeps the
 # no-sigil majority (most patterns) off the scanner entirely.
 sub _has_regex_interpolation {
-  my ($pattern) = @_;
+  my ($pattern, $x) = @_;
   return 0 if $pattern !~ /[\$\@]/;
-  return scalar @{ Pl::InterpScan::scan($pattern, in_regex => 1) };
+  return scalar @{ Pl::InterpScan::scan($pattern, in_regex => 1, x => $x ? 1 : 0) };
 }
 
 # Does an s/// REPLACEMENT need the interpolating (lambda) path?
@@ -1126,7 +1129,7 @@ sub _replacement_case_shifts {
 # `'`), else [RESULT] where RESULT is a plain perl string (the folded literal
 # pattern) or a CLForm (an interpolated pattern).
 sub _regex_case_mod_pattern {
-  my ($self, $pattern, $delim, $tok) = @_;
+  my ($self, $pattern, $delim, $tok, $x) = @_;
   return undef if !_delim_interpolates($delim) || !_regex_has_case_escape($pattern);
   # the case-mapping REGIME of a run-time \U \L \F \u \l (ir-spec §3.2h)
   my $u = $self->_unicode_strings_here($tok) ? 1 : 0;
@@ -1136,8 +1139,8 @@ sub _regex_case_mod_pattern {
     group => sub { _rx_case_group($_[0], $_[1], $undelim, $u) },
     char  => sub { _rx_case_char($_[0], $_[1], $u) },
   );
-  my $events = _has_regex_interpolation($pattern)
-             ? Pl::InterpScan::scan($pattern, in_regex => 1) : [];
+  my $events = _has_regex_interpolation($pattern, $x)
+             ? Pl::InterpScan::scan($pattern, in_regex => 1, x => $x ? 1 : 0) : [];
   my $pos = 0;
   for my $ev (@$events) {
     my ($s, $e) = @{ $ev->{span} };
@@ -1285,8 +1288,8 @@ sub _rx_undelimit {
 # BETWEEN them is copied verbatim, because regex escapes (\d, \b, \Q…) must
 # reach cl-ppcre unprocessed — the one way pattern text differs from dq text.
 sub _gen_interp_regex_pattern {
-  my ($self, $pattern) = @_;
-  my $events = Pl::InterpScan::scan($pattern, in_regex => 1);
+  my ($self, $pattern, $x) = @_;
+  my $events = Pl::InterpScan::scan($pattern, in_regex => 1, x => $x ? 1 : 0);
   my @parts;
   my $literal = '';
   my $flush = sub {
@@ -5913,12 +5916,12 @@ sub gen_substitution_form {
   my ($match_form, $tier);
   # Case escapes are applied where the literal is compiled (#3510) -- see
   # _regex_case_mod_pattern; the delimiter is the PATTERN half's opener.
-  my $cm = $self->_regex_case_mod_pattern($match, $mdelim, $node);
+  my $cm = $self->_regex_case_mod_pattern($match, $mdelim, $node, $mods->{x});
   $match = $cm->[0] if $cm && !ref $cm->[0];
   if ($cm && ref $cm->[0]) {
     ($match_form, $tier) = ($cm->[0], ':dynamic');
-  } elsif (_delim_interpolates($mdelim) && _has_regex_interpolation($match)) {
-    $match_form = $self->_gen_interp_regex_pattern($match);
+  } elsif (_delim_interpolates($mdelim) && _has_regex_interpolation($match, $mods->{x})) {
+    $match_form = $self->_gen_interp_regex_pattern($match, $mods->{x});
     $tier = ':dynamic';
   } else {
     $match_form = _cl_string_literal_form($match);

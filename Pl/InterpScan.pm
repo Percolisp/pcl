@@ -62,6 +62,12 @@ package Pl::InterpScan;
 #                         `()| \r\n\t`/end is an anchor; @ only before
 #                         \w : { $; @+/@- never interpolate) and the
 #                         intuit_more classifier on the FIRST bracket group
+#   x            => 0|1   the pattern's EXTENDED flag (the op's trailing /x or
+#                         /xx; never an inline (?x)): a `#` outside a character
+#                         class starts a comment to the end of the line, which
+#                         holds no reference (task #3856; `(?#...)` is a comment
+#                         in every pattern).  Read by scan()/comment_spans() only:
+#                         scan_one() is asked at a sigil its caller already chose.
 #   postderef_qq => 0|1   accept ->$* ->$#* ->@* ->@[..] ->@{..}
 #   known_name   => sub($name)->bool   the weigher's gv_fetchpvn_flags hook:
 #                         "is NAME a package glob already known?"  Default:
@@ -70,14 +76,16 @@ package Pl::InterpScan;
 #                         charclass, matching perl on an empty stash).
 #
 # Deliberate v1 non-goals (regex mode), each recorded in docs/interp-scan.md:
-# (?#..) comments, //x #-comments, (?{..}) code blocks, charclass state, and
-# the removed-in-5.38 $pkg'var spelling are scanned as ordinary text.
+# (?{..}) code blocks and the removed-in-5.38 $pkg'var spelling are scanned as
+# ordinary text.  Pattern COMMENTS are NOT a non-goal any more (task #3856, the
+# s529 ruling): `(?#...)` and /x `#`-comments are skipped, with toke.c's
+# charclass state tracked for that purpose only (see _walk).
 
 use v5.20;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(scan scan_one intuit_more regcurly);
+our @EXPORT_OK = qw(scan scan_one comment_spans intuit_more regcurly);
 
 # perl 5.40.3's always-on keyword set (keywords.h minus the 19
 # feature-gated entries keywords.c guards with FEATURE_*_IS_ENABLED —
@@ -152,21 +160,82 @@ my $PUNCT_ARRAY_SUBSCRIPT = '?!./~&%=<>';
 # qr/\c$x/ interpolates $x).
 sub scan {
   my ($text, %opt) = @_;
-  my @events;
+  return (_walk($text, %opt))[0];
+}
+
+# The PATTERN COMMENTS of $text, as [start, end) spans: the regions perl's
+# lexer copies through UNINTERPOLATED (task #3856).  Exported for a consumer
+# that runs its own narrower name scan over a pattern (VarAnnotator's
+# quote-leaf USE scan): it skips these spans, so it and scan() cannot disagree
+# about what a comment is -- both read it off the one walk below.
+sub comment_spans {
+  my ($text, %opt) = @_;
+  return (_walk($text, %opt))[1];
+}
+
+# THE walk: events, plus the comment spans it skipped.  toke.c S_scan_const,
+# in a pattern (in_regex), keeps `in_charclass` -- an unescaped `[` enters a
+# character class, an unescaped `]` leaves it -- and, NOT in a class, copies
+# through uninterpolated
+#   * `(?#` ... up to (not including) the next `)`, in any pattern;
+#   * `#` ... up to (not including) the end of the line, when the pattern has
+#     the EXTENDED flag (opt x => 1: the op's trailing /x or /xx -- an inline
+#     `(?x)` is the regex compiler's, which runs after interpolation, so it
+#     does not count).
+# No event is emitted inside such a region: `/ q # ${ ... } /x` is a literal
+# comment, not a reference (perl), and `# @{[ f() ]}` never calls f.
+# in_charclass is a local of scan_const, which RETURNS at each interpolated
+# variable and is re-entered after it, so the state starts over after every
+# event: `/^[$x#]$y/x` reads `#]$y` as a comment (probed perl 5.40.3:
+# "ab" =~ /^[$x#]$y/x with $x="a", $y="b" does not match).  toke.c's own
+# logic, no `[]...]` refinement.
+sub _walk {
+  my ($text, %opt) = @_;
+  my (@events, @skips);
   my ($i, $n) = (0, length $text);
+  my $rx = $opt{in_regex};
+  my $in_class = 0;
   while ($i < $n) {
     my $c = substr($text, $i, 1);
     if ($c eq '\\') {
       $i += escape_skip($text, $i, %opt);
       next;
     }
+    if ($rx && $in_class) {
+      $in_class = 0 if $c eq ']';
+    } elsif ($rx) {
+      if ($c eq '[') { $in_class = 1; $i++; next }
+      my $end = _comment_end($text, $i, $opt{x});
+      if (defined $end) { push @skips, [$i, $end]; $i = $end; next }
+    }
     if ($c eq '$' || $c eq '@') {
       my $ev = scan_one($text, $i, %opt);
-      if ($ev) { push @events, $ev; $i = $ev->{span}[1]; next }
+      if ($ev) {
+        push @events, $ev;
+        $i = $ev->{span}[1];
+        $in_class = 0;
+        next;
+      }
     }
     $i++;
   }
-  return \@events;
+  return (\@events, \@skips);
+}
+
+# The end of a pattern comment starting at $pos, or undef when none starts
+# there (see _walk; the caller has already established "not in a class").
+sub _comment_end {
+  my ($text, $pos, $x) = @_;
+  my $c = substr($text, $pos, 1);
+  if ($c eq '(' && substr($text, $pos, 3) eq '(?#') {
+    my $e = index($text, ')', $pos + 3);
+    return $e < 0 ? length $text : $e;
+  }
+  if ($c eq '#' && $x) {
+    my $e = index($text, "\n", $pos + 1);
+    return $e < 0 ? length $text : $e;
+  }
+  return undef;
 }
 
 # THE escape rule, as one step: given that $text[$pos] is a backslash, how

@@ -123,11 +123,21 @@ probe-and-guard (fix) or by clamping to the event subset it consumes today.
     unconsumed.  No legal program is affected.
 11. **Bracket-guts balance counting ignores quoting** (`$h{'}'}`
     miscounts) — StringInterpolation's rule, kept byte-for-byte.
-12. **Regex-mode non-goals (v1)**: `(?#...)` comments, `//x` `#`-comments,
-    `(?{...})` code blocks and charclass state are scanned as plain text
-    (events inside them are still emitted); `@'foo` / `$pkg'var` (perl-4
-    separator) unsupported.  Postderef `%`-forms never interpolate
+12. **Regex-mode non-goals (v1)**: `(?{...})` code blocks are scanned as
+    plain text (events inside them are still emitted); `@'foo` / `$pkg'var`
+    (perl-4 separator) unsupported.  Postderef `%`-forms never interpolate
     (matches perl).
+    **CONTRACT (task #3856, RULED s529 -- the v1 non-goal is lifted):** in a
+    pattern (`in_regex`), outside a character class, `(?#...)` up to the next
+    `)` and -- with `x => 1`, the op's TRAILING /x or /xx (an inline `(?x)`
+    does not count; `use re '/x'` is task #4042) -- a `#` up to the end of the
+    line are COMMENTS: no event is emitted inside them, and `comment_spans()`
+    reports them for a consumer running its own name scan (VarAnnotator).
+    Character-class state is TRACKED for this purpose only, with toke.c's
+    S_scan_const logic (an unescaped `[` enters, `]` leaves, no `[]...]`
+    refinement) and its reset after every interpolated variable (scan_const
+    returns there); the intuit_more classifier is unchanged.  Every in_regex
+    caller passes `x`: ExprToCL (m//, qr//, s/// pattern), Binder, VarAnnotator.
 
 ## Wiring plan (the Opus half)
 
