@@ -32,3 +32,5 @@ Box rebooted (uptime 2 min at 00:29); HEAVY.holder.1 held a dead pid (s527c's cu
 ## 07:5x -- container test on merged main (b14bd795) 17/17 PASS -> PUSHED MAIN-READY-54 + -55.
 
 ## 09:5x -- s527e MERGED LOCALLY = MAIN-READY-56 `2857cd7f` (Fable rebased it over s530a: generation conflict -> v2-9100, the three artifacts taken from main then REGENERATED on the combined compiler (stamp only), records both sides).  Fable: gate 343 / 11,595 PASS; corpus-diff vs ff265320 = loopctl magic method postfixderef ref reset sub (detector table); lib emission-ab: B.pm only (two detector rows + the comment echo `*{$ref}{"NAME"}`); install-pcl 61; vendor checks PASS.  **The container run EXITED 75**: it waited 60 min for all three slots behind s530b's whole-board leg (08:42 ->) -- Fable broke the 07:4x rule (an exclusive merge leg only when no long bounded leg holds a slot); no bounded leg was starved (only s530c's exclusive bench waited, behind the board anyway).  Container + push AFTER s530b's board leg ends.  **s527f LAUNCHED** (the Lexer rows left: #3981 §44, §52/§53, §48; IDs 4120-4139; gen v2-9400).
+
+## 10:0x -- container 17/17 on main (MAIN-READY-56) -> PUSHED.
