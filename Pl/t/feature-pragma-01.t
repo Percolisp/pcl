@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 43;
+plan tests => 45;
 
 # ---- 1. the table is perl's -----------------------------------------------
 
@@ -84,13 +84,13 @@ sub mods_for {
     return $inc->feature_mods;
 }
 
-is_deeply(mods_for('use v5.40;'),  { signatures => 'perl', try => 'perl' },
+is_deeply(mods_for('use v5.40;'),  { signatures => 'perl', try => 'perl', defer => 0, class => 0 },
     'use v5.40 enables try AND signatures');
-is_deeply(mods_for('use v5.36;'),  { signatures => 'perl', try => 0 },
+is_deeply(mods_for('use v5.36;'),  { signatures => 'perl', try => 0, defer => 0, class => 0 },
     'use v5.36 enables signatures and leaves try OFF (its bundle has no try)');
-is_deeply(mods_for('use 5.036;'),  { signatures => 'perl', try => 0 },
+is_deeply(mods_for('use 5.036;'),  { signatures => 'perl', try => 0, defer => 0, class => 0 },
     'the decimal spelling of a bundle answers the same');
-is_deeply(mods_for('use 5.010;'),  { signatures => 0, try => 0 },
+is_deeply(mods_for('use 5.010;'),  { signatures => 0, try => 0, defer => 0, class => 0 },
     'an old bundle turns both OFF — a version bundle REPLACES the feature set');
 is_deeply(mods_for(q{use feature 'try';}), { try => 'perl' },
     'use feature try');
@@ -102,9 +102,15 @@ is_deeply(mods_for(q{no feature 'try';}), { try => 0 }, 'no feature try');
 is_deeply(mods_for(q{no experimental 'try';}), { try => 0 }, 'no experimental try');
 is(mods_for('use strict;'), undef, 'an unrelated pragma is left to PPI');
 is(mods_for('require v5.40;'), undef, 'require enables nothing');
-is_deeply(mods_for(q{use experimental 'defer';}), {},
+is_deeply(mods_for(q{use experimental 'refaliasing';}), {},
     'a feature outside the table changes NOTHING — falling through to PPI here '
   . 'would answer signatures => 0 and silently disable signatures');
+
+# defer (5.36) and class (5.38): named by use feature / use experimental,
+# in no numbered bundle (s527d; PPI tracks them for the lexer's defer / class
+# rules).
+is_deeply(mods_for(q{use feature 'defer';}), { defer => 'perl' }, 'use feature defer');
+is_deeply(mods_for(q{use experimental 'class';}), { class => 'perl' }, 'use experimental class');
 
 # A feature BUNDLE NAME (#2692): `:5.NN`, `:all`, `:default` add (or remove)
 # exactly what `use v5.NN` of that version holds, and reset nothing else.
@@ -114,13 +120,13 @@ is_deeply(mods_for(q{use feature ':5.36';}), { signatures => 'perl' },
     'use feature :5.36 enables signatures and says NOTHING about try');
 is_deeply(mods_for(q{use feature ':5.40.1';}), { signatures => 'perl', try => 'perl' },
     'a third version component is ignored, as perl does');
-is_deeply(mods_for(q{use feature ':all';}), { signatures => 'perl', try => 'perl' },
+is_deeply(mods_for(q{use feature ':all';}), { signatures => 'perl', try => 'perl', defer => 'perl', class => 'perl' },
     'use feature :all');
 is_deeply(mods_for(q{use feature ':default';}), {},
     ':default holds neither');
 is_deeply(mods_for(q{no feature ':5.40';}), { signatures => 0, try => 0 },
     'no feature :5.40 turns both off');
-is_deeply(mods_for(q{no feature;}), { signatures => 0, try => 0 },
+is_deeply(mods_for(q{no feature;}), { signatures => 0, try => 0, defer => 0, class => 0 },
     'a bare no feature resets to the default bundle');
 
 # ---- 3. end to end, against perl -------------------------------------------

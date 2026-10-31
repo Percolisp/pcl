@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s527d
-branch-sha: a33452b4d4920a3c4da983771eb7fec63ff57f74
-lib-tree: 88084521d15645ab14bf62627752941adbd16523
+branch-sha: 40fed03628f9b5eb916882f88063d1985369cdbd
+lib-tree: c158a7545619de8e18d9f9510ae3a5c791ecaabe
 date: 2026-10-31
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -52,6 +52,7 @@ fix: AE §39 f780c125 Unknown, Symbol: a $ may be spaced from its name
 fix: AF §9 320d7a97 Unknown: braces around a punctuation name are the variable
 fix: AG §20 9e862724 Include: use experimental 'try' and the 5.40 bundle enable try
 fix: AH §14 a33452b4 Whitespace: <...> after a statement or map/grep block is a readline
+fix: AG §20 40fed036 Include: defer and class are features PPI tracks
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -135,3 +136,5 @@ commit: 320d7a97 Unknown: braces around a punctuation name are the variable
 commit: 9e862724 Include: use experimental 'try' and the 5.40 bundle enable try
 commit: 9a1332b2 TODO tests: <...> after a statement or map/grep block is a readline
 commit: a33452b4 Whitespace: <...> after a statement or map/grep block is a readline
+commit: b91ced6c TODO tests: use feature / use experimental 'defer' and 'class'
+commit: 40fed036 Include: defer and class are features PPI tracks

@@ -663,7 +663,11 @@ sub _brace_glob_slot_symbol {
 # They are a STATIC table on purpose — PCL must compile `use v5.40; try` the
 # same way whatever perl it happens to run under — and `Pl/t/feature-pragma-01.t`
 # re-derives them from the running perl so a drift fails a row.
-our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039);
+# `defer` (5.36) and `class` (5.38) are in NO numbered bundle (only `:all`):
+# 9e9 says so, so a version bundle turns them OFF, `no feature;` resets them
+# and `use feature`/`use experimental` name them (PPI tracks them since s527d,
+# PPI group AG, for the lexer rules of `defer {` and `class NAME`).
+our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039, defer => 9e9, class => 9e9);
 
 sub _pcl_feature_include_cb {
   my ($inc) = @_;
