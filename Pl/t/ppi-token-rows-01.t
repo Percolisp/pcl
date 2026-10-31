@@ -107,5 +107,11 @@ both_agree(qq{use experimental "try"; no warnings;\ntry { die "e\\n" } catch (\$
 # §14, the after-a-block half: <$fh> after a map block is a readline.
 both_agree('open my $fh, "<", \"a\nb\n"; my %h; my @l = map { $h{$_}++ } <$fh>; print scalar(@l), "\n";',
            '§14: map { ... } <$fh>');
+# ...and the half PPI does NOT fix: after a list operator the glob is still
+# mis-lexed, and its last `*` + `>` arrive as the glob Symbol `*>` that
+# Pl::PExpr::_fix_ppi_glob_after_block reads (deleting that arm divided by
+# zero here).
+both_agree('my @b = sort <./*>; print @b > 0 ? "y\n" : "n\n";',
+           '§14: sort <./*> (after a list operator: PCL\'s repair)');
 
 done_testing();
