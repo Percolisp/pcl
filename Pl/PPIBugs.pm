@@ -701,7 +701,7 @@ print;
    title => '`CORE::__END__` / `CORE::__DATA__` is a Word, not a Separator: the code does not end',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'data-marker-as-word', shape => 'a Word CORE::__END__ / CORE::__DATA__ under XSTATE' },
-   fix => { kind => 'relex', handler => undef, commit => 'cf13afb5', group => 'AA', pr => undef },
+   fix => { kind => 'relex', handler => undef, commit => 'cf13afb5 3e71c399', group => 'AA', pr => undef },
    repro => 'print "x\\n";
 CORE::__END__
 not code
@@ -810,9 +810,9 @@ not code
    tasks => [3743] },
  { id => 52, kind => 'structure', dump => 'statements',
    title => '`defer BLOCK` (perl 5.36) is not a statement of its own: the NEXT statement is swallowed into it',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'statement-not-ended', shape => 'the statement after `defer BLOCK` is inside it' },
-   fix => { kind => 'handler', handler => undef },
+   fix => { kind => 'handler', handler => undef, changed => 'NONE: PCL never repaired it; the refusal now reads the compound (Pl::Parser::feature_statement_refusal; defer joins PCL_FEATURE_BUNDLE)', commit => '5195c2fa', group => 'AL', pr => undef },
    repro => 'use feature \'defer\'; no warnings; defer { print "b\\n" } print "a\\n";
 ',
    perl => "a\\nb\\n",

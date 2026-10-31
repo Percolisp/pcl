@@ -374,9 +374,12 @@ my %STATEMENT_CLASSES = (
 	'return'    => 'PPI::Statement::Break',
 	'goto'      => 'PPI::Statement::Break',
 
-	# Special sections of the file
+	# Special sections of the file; CORE:: spells the same separators
+	# (toke.c yyl_data_handle)
 	'__DATA__'  => 'PPI::Statement::Data',
 	'__END__'   => 'PPI::Statement::End',
+	'CORE::__DATA__' => 'PPI::Statement::Data',
+	'CORE::__END__'  => 'PPI::Statement::End',
 );
 
 sub _statement {
@@ -425,8 +428,10 @@ sub _statement {
 
 	# Is it a token in our known classes list
 	my $content = $Token->content;
+	# try and defer open a compound statement only under their feature
 	my $class =
-	  ( $content eq 'try' and ( $self->{features_stack}[-1] || {} )->{try} )
+	  ( ( $content eq 'try' or $content eq 'defer' )
+		and ( $self->{features_stack}[-1] || {} )->{$content} )
 	  ? 'PPI::Statement::Compound'
 	  : $STATEMENT_CLASSES{$content};
 
@@ -916,6 +921,12 @@ sub _continues {
 			# Only a block will do
 			return $Token->isa('PPI::Token::Structure') && $Token->content eq '{';
 		}
+	}
+
+	if ( $type eq 'defer' ) {
+		# defer BLOCK (perly.y: KW_DEFER mblock): the block ends it
+		return $LastChild->isa('PPI::Token::Word')
+		  && $Token->isa('PPI::Token::Structure') && $Token->content eq '{';
 	}
 
 	# Handle the common continue case

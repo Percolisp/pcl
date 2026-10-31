@@ -1538,6 +1538,11 @@ cleanup the program depends on), and since s466 (task #1037) that refusal is
 PCL: defer blocks are not supported, at FILE line N
 ```
 
+Since s527f the refused statement is the `defer BLOCK` alone: PCL's PPI builds
+it as a compound statement under the feature (`docs/ppi-upstream-bugs.md`
+§52), where it used to join the NEXT statement into the refused one (and a
+`defer` ending its block lowered as a call to a sub named `defer`).
+
 **Why deferred, not rejected:** the semantics are `unwind-protect` over the
 enclosing block's lowering, which PCL already emits for other unwinding
 (`p-try`'s `finally`, `local` restoration), so the work is a `Pl/Parser2.pm`

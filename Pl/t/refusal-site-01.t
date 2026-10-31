@@ -77,7 +77,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 21;
 
 sub write_pl {
     my ($code) = @_;
@@ -184,11 +184,12 @@ like($cl_class,
      qr/\(progn ;; RULED REFUSAL: feature 'class' is not supported.*?PCL: feature 'class' is not supported, at \Q$pl_class\E line 4/s,
      'and emits the perl-shaped die at the statement site');
 
-# 7b `defer { … }` (perl 5.36).  The trailing statement is load-bearing: PPI
-# joins a block-form `defer` to the statement AFTER it, so a `defer` that ends
-# the file is not one statement PPI can lose — it lowers as a CALL to a sub
-# named `defer` and is a PRE-EXISTING silent wrong (filed separately, and not
-# this change's to fix).
+# 7b `defer { … }` (perl 5.36).  Under the feature PCL's PPI builds `defer
+# BLOCK` as a compound statement of its own (docs/ppi-upstream-bugs.md §52,
+# s527f), so the refusal is THAT statement and the print after it is the next
+# statement -- it used to be swallowed into the refused one.  A `defer` that
+# ends the file is a compound too, and refuses (it used to lower as a CALL to a
+# sub named `defer`, a silent wrong).
 my ($cl_defer, $err_defer, $rc_defer) = transpile_refusing(<<'PL');
 use feature 'defer';
 no warnings;
@@ -200,6 +201,16 @@ is($rc_defer, 0, '`defer { }` refuses at its statement')
     or diag("stderr was: $err_defer");
 like($cl_defer, qr/;; RULED REFUSAL: defer blocks are not supported/,
      'and takes the same emission');
+like($err_defer, qr/refused statement at \S+ line 4: defer \{ print "deferred\\n" \} -- /,
+     'the refused statement is `defer BLOCK` alone: the next statement is not swallowed (PPI §52)');
+my ($cl_defer2, $err_defer2, $rc_defer2) = transpile_refusing(<<'PL');
+use feature 'defer';
+no warnings;
+print "before\n";
+{ defer { print "deferred\n" } }
+PL
+like($cl_defer2, qr/;; RULED REFUSAL: defer blocks are not supported/,
+     'a defer ending its block refuses too (it used to lower as a call to sub defer)');
 
 # 7c infix `~~` (the smart match, removed in perl 5.42).
 my ($cl_sm, $err_sm, $rc_sm) = transpile_refusing(<<'PL');

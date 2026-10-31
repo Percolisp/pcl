@@ -477,9 +477,8 @@ sub _core_separator_statements {
     my $first = $st->schild(0) or next;
     next unless $first->isa('PPI::Token::Separator');
     my $c = $first->content;
-    bless $st, $c eq 'CORE::__DATA__' ? 'PPI::Statement::Data'
-             : $c eq 'CORE::__END__'  ? 'PPI::Statement::End'
-             : next;
+    die "s527f INERT: _core_separator_statements would act on $c\n"
+      if $c eq 'CORE::__DATA__' || $c eq 'CORE::__END__';
   }
   return;
 }
@@ -684,7 +683,13 @@ sub _brace_glob_slot_symbol {
 # They are a STATIC table on purpose — PCL must compile `use v5.40; try` the
 # same way whatever perl it happens to run under — and `Pl/t/feature-pragma-01.t`
 # re-derives them from the running perl so a drift fails a row.
-our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039);
+#
+# `defer` (5.36) is in NO numbered bundle -- only `:all` holds it (probed:
+# %feature::feature_bundle) -- so its threshold is the `:all` number (9e9)
+# the bundle-name branch below uses.  PPI's Lexer makes `defer BLOCK` a
+# compound statement under the feature (docs/ppi-upstream-bugs.md §52), which
+# `feature_statement_refusal` refuses statement by statement.
+our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039, defer => 9e9);
 
 sub _pcl_feature_include_cb {
   my ($inc) = @_;
@@ -12035,6 +12040,18 @@ sub class_statement_refusal {
   return undef if $after && $after->isa('PPI::Structure::Block');
   return undef unless $self->_class_feature_in_scope($stmt, 1);
   return "feature 'class' is not supported";
+}
+
+# The statements PPI builds only under a feature PCL does not lower: `defer
+# BLOCK` is a compound of type defer under `use feature 'defer'` (§52).  The
+# refusal TEXT is the drop-site classifier's -- asked, not copied, so the two
+# routes cannot drift (rule 11).  Then the `class NAME ;` refusal above.
+sub feature_statement_refusal {
+  my ($self, $stmt) = @_;
+  return undef unless ref $stmt && eval { $stmt->isa('PPI::Statement') };
+  return $self->_ruled_refusal_for_drop([$stmt])
+    if $stmt->isa('PPI::Statement::Compound') && ($stmt->type // '') eq 'defer';
+  return $self->class_statement_refusal($stmt);
 }
 
 # A `~~` that has a TERM to its left is the smart match; one that has an

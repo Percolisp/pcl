@@ -2420,6 +2420,8 @@ cannot see it); task #3750.
 
 **FIXED on PCL's PPI branch** (s527d: group AA, commit `cf13afb5` on branch `pcl`, vendored as vendor/PPI -- the token; the Lexer's statement-class table still keys on `__END__` / `__DATA__` (hand-over to s527e, task #3981)); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AA.md`).
 
+**The statement half FIXED** (s527f: group AA's second fix commit `3e71c399` on branch `pcl` -- the Lexer's `%STATEMENT_CLASSES` knows `CORE::__END__` / `CORE::__DATA__`, so the Separator leads a Statement::End / ::Data); PCL's `Pl::Parser::_core_separator_statements` repair made INERT (never fired, corpus IDENTICAL) and DELETED (task #3981).
+
 **Minimal repro** (perl prints `x`): `print "x\n";` then a line `CORE::__END__`
 then `not code`.  perl ends the code at either spelling (`yyl_data_handle`,
 t/op/coreamp.t:1225).  **PPI**: `Word[CORE::__END__] Operator[not] Word[code]`.
@@ -2630,6 +2632,8 @@ Task #3743.
 ---
 
 ## 52. `defer BLOCK` (perl 5.36) is not a statement of its own  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527f: group AL, commit `5195c2fa` on branch `pcl`, vendored as vendor/PPI -- under the feature `defer` opens a Statement::Compound of type `defer` that ends at its block, the shape of `try`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AL.md`).  PCL had no repair: `defer` joins `%Pl::Parser::PCL_FEATURE_BUNDLE` (threshold `:all` only) and `Pl::Parser::feature_statement_refusal` refuses the compound at its own statement, so the statement after it runs (guard `Pl/t/refusal-site-01.t` 7b).
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `a` then `b`):
 

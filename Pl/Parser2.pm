@@ -11640,14 +11640,15 @@ sub _lower_stmt {
   # indirect-object reading PCL would otherwise emit is a silent method call
   # where the author declared a class.  Refuse perl-shaped, like the Track A
   # families — but on code that COMPILES, so the key is the STRICT one (no
-  # version-bundle evidence).  See Pl::Parser::class_statement_refusal.
+  # version-bundle evidence).  See Pl::Parser::class_statement_refusal.  The
+  # same hook refuses a `defer BLOCK` compound (PPI §52): feature_statement_refusal.
   #
   # THE UNIT IS THE STATEMENT (RULED s465, USER; task #1037): the refusal is a
   # run-time die at this statement's own site, announced at transpile, so every
   # other statement of the file still compiles and runs.  ONE builder for both
   # refusal routes — Pl::Parser::refused_statement_form (which keeps the
   # eval-string transpile die, #363).
-  if (my $refusal = $self->fallback_parser->class_statement_refusal($stmt)) {
+  if (my $refusal = $self->fallback_parser->feature_statement_refusal($stmt)) {
     return raw($self->fallback_parser->refused_statement_form($stmt, $refusal));
   }
   if (my $r = $self->{_local_term_refusal}{ refaddr $stmt }) {      # #3370
