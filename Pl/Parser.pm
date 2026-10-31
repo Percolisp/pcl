@@ -3693,7 +3693,14 @@ sub _process_use_base {
   my $qualify  = $self->_reader_pkg_differs;
   my $cl_class = $qualify ? $self->_qualified_clos_class($pkg)
                           : $self->_pkg_to_clos_class($pkg);
-  my $parents_cl = $self->_clos_parent_names(\@parents);
+  # The CLOS superclass list names each parent ONCE: a repeated parent (`use
+  # base qw(A A)`, `use parent -norequire, "A", "A"`) is a circularity CLOS
+  # refuses at class finalization -- the program died where perl runs (#4040).
+  # The class itself is no superclass either (`package S; use base "S"`:
+  # base.pm warns and skips it; CLOS refused the self-reference outright).
+  my %seen_parent = ($pkg => 1);
+  my @class_parents = grep { !$seen_parent{$_}++ } @parents;
+  my $parents_cl = $self->_clos_parent_names(\@class_parents);
   $self->environment->set_isa($pkg, \@parents);
   $self->_with_bucket('preamble', sub {
     $self->_emit(";; $perl_code");
@@ -3740,9 +3747,27 @@ sub _process_use_base {
   # `BEGIN { push @ISA, ... }` in its place gets.  A cached program run sees it
   # too: the script fasl is built under *pcl-fasl-build*, where p-BEGIN fires
   # at that fasl's load in source order (measured s528).
+  #
+  # `use base` SKIPS a parent the class already isa (#4040) -- base.pm's
+  # `next if grep $_->isa($base), ($inheritor, @bases)` -- through the
+  # ordinary `->isa` method call, as base.pm makes it (an overriding `isa` is
+  # honoured).  Pushing one parent at a time makes `$inheritor->isa` cover the
+  # parents this list already accepted, so the one test is base.pm's two.
+  # parent.pm has no such test: `use parent -norequire, "A", "A"` pushes A
+  # twice (probed 5.40.3).
+  my $pkg_q = $pkg; $pkg_q =~ s/(["\\])/\\$1/g;
   $self->_with_bucket('definitions', sub {
     $self->_emit("(p-BEGIN");
-    $self->_emit("  (p-push $isa_sym \"$_\")") for @parents;
+    for my $p (@parents) {
+      # base.pm's own warning for a class naming itself (the isa test then
+      # skips it); unconditional in base.pm, not a `warnings` category.
+      $self->_emit("  (p-warn (p-esc \"Class '$pkg_q' tried to inherit from itself\\\\n\"))")
+        if $module eq 'base' && $p eq $pkg;
+      my $push = "(p-push $isa_sym \"$p\")";
+      $self->_emit($module eq 'base'
+        ? "  (unless (p-true-p (p-method-call \"$pkg_q\" \"isa\" \"$p\")) $push)"
+        : "  $push");
+    }
     $self->_emit(")");
     $self->_emit("");
   });

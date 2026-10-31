@@ -35,7 +35,7 @@ my $pcl_bin      = "$project_root/pcl";
 plan skip_all => "pcl not found"  unless -x $pcl_bin;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 13;
 
 my $dir = tempdir(CLEANUP => 1);
 my $n = 0;
@@ -124,3 +124,30 @@ PL
     is($run1, $perl, 'cached program: the first run (perl: ' . ($perl =~ s/\n/\\n/gr) . ')');
     is($run2, $perl, '... and the second run, from the compiled file');
 }
+
+# ---- #4040 (s530a): `use base` skips a parent the class already isa; `use parent` does not ----
+both_agree(<<'PL', '`use base` skips an already-isa parent (a repeat, one already inherited, a BEGIN @ISA); `use parent` pushes twice; repeated parents never reach CLOS twice');
+package Super; sub new { bless {}, shift } sub hi { "super" }
+package Sub; our @ISA = ('Super');
+package A; sub a { "a" }
+package X; use base "File::Spec"; use base "File::Spec";
+package Y; use base qw(Sub Super);
+package Z; use parent -norequire, "Super", "Super";
+package W; use base qw(Super); use base qw(Sub);
+package V; BEGIN { our @ISA = ('Super') } use base 'Super', 'Sub';
+package U; use base qw(A A);
+package main;
+print "X [@X::ISA]\nY [@Y::ISA]\nZ [@Z::ISA]\nW [@W::ISA]\nV [@V::ISA]\nU [@U::ISA]\n";
+print "hi ", Y->new->hi, " ", W->new->hi, " ", U->a, "\n";
+PL
+both_agree(<<'PL', 'the skip asks the ->isa METHOD (an overriding isa is honoured), qualified packages, a BEGIN-nested use base');
+package Foo; sub new { bless {}, shift } sub who { "foo" }
+package Foo::Bar; use base 'Foo'; use base 'Foo';
+package Odd; sub isa { 1 } sub who { "odd" }
+package Q; use base 'Odd'; use base 'Foo';
+package R; BEGIN { package R; use base 'Foo' } use base 'Foo';
+package main;
+print "1 [@Foo::Bar::ISA] ", Foo::Bar->new->who, "\n";
+print "2 [@Q::ISA]\n";
+print "3 [@R::ISA]\n";
+PL
