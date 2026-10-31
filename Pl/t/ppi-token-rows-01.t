@@ -94,6 +94,10 @@ both_agree('"ab" =~ /(a)(b)/; my @p = @{+}; my @m = @{ - }; print "@p|@m\n";',
            '§9: @{+} and @{ - } are @+ and @-');
 both_agree('$! = 2; my $e = ${ ! }; print $e + 0, "\n";',
            '§9: ${ ! } is $!');
+both_agree('"xab" =~ /(a)(b)/; print "@{+}|@{-}\n"; print "ok\n" if "A2B" =~ /A@{+}[2]B/ || 1;',
+           '§9: @{+} / @{-} interpolated in a string');
+both_agree('"ab" =~ /(a)/; my %c = (x => 1); my @k = keys %{+}; print scalar(@k), "\n";',
+           '§9: %{+} is %+');
 
 # §20 -- use experimental 'try' enables try for PPI too (the construct
 # is one compound statement; the next statement survives).

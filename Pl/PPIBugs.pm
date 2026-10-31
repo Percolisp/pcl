@@ -186,7 +186,7 @@ our @BUGS = (
    title => '`${ PUNCTUATION }` is a variable, but lexes as Cast + Block',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => '*', class => 'Operator', content => '', pred => 'sole_in_deref_block', check => 'punct-name-in-braces' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::braced_punct_magic_name', commit => '320d7a97', group => 'AF', pr => undef },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::braced_punct_magic_name', deleted => 'Pl::PExpr::_fold_braced_punct_magic (s527d: PPI fixed on the branch; the decision function stays for the string scanner and the canonical pass)', commit => '320d7a97', group => 'AF', pr => undef },
    repro => '"ab" =~ /(a)/; my @plus = @{+}; print "@plus\\n";',
    perl => "1 1\n",
    tokens => {

@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 271;
+use Test::More tests => 275;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1713,5 +1713,25 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
         my ( $code, $desc ) = @$r;
         my @t = map { short_class($_) } toks($code);
         ok( grep( $_ eq 'Operator=<', @t ), "$code: $desc" ) or diag "got: @t";
+    }
+}
+
+# §20, the rest of the feature set: perl 5.36's `defer` and 5.38's
+# `class` are enabled the same two ways (use feature, use experimental),
+# and a lexer that changes how `defer {` and `class NAME` lex has to know
+# they are on.  perl: use feature 'defer'; defer { print "b\n" } print "a\n"
+# prints a then b.  Neither is in a version bundle.
+{
+    for my $r (
+        [ q{use feature 'defer';},      'defer' ],
+        [ q{use experimental 'defer';}, 'defer' ],
+        [ q{use feature 'class';},      'class' ],
+        [ q{use experimental 'class';}, 'class' ],
+    ) {
+        my ( $code, $feature ) = @$r;
+        my $doc = PPI::Document->new( \$code );
+        my ($inc) = @{ $doc->find('PPI::Statement::Include') || [] };
+        my $mods = $inc ? $inc->feature_mods || {} : {};
+        is( $mods->{$feature}, 'perl', "$code enables $feature" );
     }
 }
