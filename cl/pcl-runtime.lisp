@@ -401,7 +401,7 @@
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-defclass #:p-ensure-class #:p-sub #:p-sub-frame #:p-cloned-sub #:p-anon-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
-   #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant #:p-amp-call
+   #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant #:p-amp-call #:p-amp-spread
    #:p-detect-table #:p-detect-at #:p-detect-end #:p-detect-declare
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-= #:p-array-fill #:p-hash-fill
@@ -14525,6 +14525,27 @@ create the key on a read-only call, which perl does not."
         (return-from p-flatten-args arg))
       (%p-flatten-arg-into arg result))
     result))
+
+(defun %p-amp-apply (fn args)
+  "Call FN (a sub's function name) with ARGS spread to perl's flat @_ when
+   any of them is an array or a hash (p-amp-spread).  With none, ARGS go as
+   they are -- one list, no copy."
+  (apply fn (if (some (lambda (a) (or (and (vectorp a) (not (stringp a)))
+                                      (hash-table-p a)))
+                      args)
+                (coerce (p-flatten-args args) 'list)
+                args)))
+
+(defmacro p-amp-spread (call)
+  "Perl `&NAME(LIST)' (task #3859): the & form IGNORES the prototype, so LIST
+   is passed as the flat @_ it is -- an array argument or a list-context
+   call's vector is SPREAD here, at the call, before the sub sees it.  A
+   Perl-defined sub would flatten it itself; a sub the runtime defines
+   natively with a fixed lambda list (the TAP entries: `&is(@pair)',
+   `&is(e(...), ...)') cannot.  Spreading keeps every element's own cell, so
+   `$_[N]' still aliases (p-flatten-args).
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  `(%p-amp-apply ',(first call) (list ,@(rest call))))
 
 ;;; ============================================================
 ;;; THE SUB-FRAME LEAVE RULE — perl's pp_leavesub (task #964).

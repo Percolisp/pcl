@@ -3175,9 +3175,10 @@ sub gen_funcall_form {
 
   # `&NAME(...)` IGNORES the prototype (perlsub), so it asks no prototype: no
   # slot context, no reference slot -- and no detector-table entry, since
-  # nothing installed later can change how it parses (#3260).
-  my $proto = ($self->environment && !$node->{force_user_sub})
-            ? $self->environment->get_prototype($func_name) : undef;
+  # nothing installed later can change how it parses (#3260).  The ONE reading
+  # is Pl::PExpr::call_prototype, which the argument CONTEXT asks too (#3859).
+  my $proto = $self->environment
+            ? $self->expr_o->call_prototype($node, $func_name) : undef;
   my @ref_params;
   if ($proto && $proto->{is_proto} && $proto->{params}) {
     @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
@@ -3368,9 +3369,18 @@ sub gen_funcall_form {
     my $first = (($call->[1] // '') eq ':loc') ? 3 : 1;
     $cb = $self->_copy_back_args($call, $first, [@$kids[1 .. $#$kids]],
                                  ($func_name =~ /::/ ? 'qualified' : 'bare'));
-    return _copy_back_wrap($self->_gen_funcall_tail($call, $ctx, $func_name, $force_user), $cb)
-      if @$cb;
   }
+  # `&NAME(LIST)` passes LIST as perl's flat @_ (#3859): the prototype is not
+  # asked (Pl::PExpr::call_prototype), so an argument may be an array or a
+  # list-context call's vector.  A Perl-defined sub flattens it itself; a
+  # sub the runtime defines natively with a fixed lambda list (the TAP
+  # entries, `&is(@pair)`) cannot, so the & call SPREADS its arguments at the
+  # call (p-amp-spread).  After the copy-back above: it names the call's
+  # argument positions.
+  $call = ['p-amp-spread', $call]
+    if $force_user && $user_call && ref $call eq 'ARRAY' && @$call > 1;
+  return _copy_back_wrap($self->_gen_funcall_tail($call, $ctx, $func_name, $force_user), $cb)
+    if @$cb;
 
   # split: p-split always returns a vector; scalar context takes its length.
   if ($func_name eq 'split') {

@@ -5338,6 +5338,20 @@ sub annotate_contexts {
 
 # Determine what context a child should be evaluated in.
 # This is where we encode the rules about context propagation.
+# The prototype a CALL node of FUNC_NAME obeys, or undef: THE one reading of
+# perlsub's "the & form ignores the prototype" (task #3859, #3260 half 2).  A
+# `&NAME(LIST)` call (force_user_sub) asks no prototype -- no slot context,
+# no reference slot, no slurpy tail: LIST is passed in LIST context as it
+# stands, whatever the prototype says.  ExprToCL's argument emission asks the
+# same question through here (rule 11).
+sub call_prototype {
+  my ($self, $call_node, $func_name) = @_;
+  return undef if (Scalar::Util::reftype($call_node) // "") eq "HASH"
+                   && $call_node->{force_user_sub};
+  return undef unless $self->environment && defined $func_name;
+  return $self->environment->get_prototype($func_name);
+}
+
 sub child_context {
   my $self          = shift;
   my $parent_node   = shift;
@@ -5484,8 +5498,8 @@ sub child_context {
       # KNOWN prototype; unprototyped subs and $-proto positions (e.g.
       # Test::More's is($$;$)) are left to inherit, matching Perl when the
       # prototype isn't known to us — this keeps is(unpack(...), ...) scalar.
-      if ($func_name && $child_index >= 1 && $self->environment) {
-        my $proto = $self->environment->get_prototype($func_name);
+      if ($func_name && $child_index >= 1) {
+        my $proto = $self->call_prototype($parent_node, $func_name);
         if ($proto && $proto->{is_proto} && $proto->{params}) {
           my @p = @{$proto->{params}};
           my $slurpy_at;

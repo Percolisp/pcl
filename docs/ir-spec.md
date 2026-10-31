@@ -2124,6 +2124,19 @@ The `map`/`grep`/`sort` arm stays, because it answers a STRUCTURAL question
     my $s = sprintf("%02d:%02d", @t[2,1]);   # "14:35" — the slice is a LIST
     my $k = pack("ss", @_[4,5]);             # two shorts, not one element
 
+**An `&NAME(LIST)` call has no signature** (perlsub: the & form ignores the
+prototype; task #3859): LIST is passed in LIST context as the flat `@_` it
+is -- no `$` slot, no reference slot.  The one reading is
+`Pl::PExpr::call_prototype` (undef for a `force_user_sub` call), asked by the
+argument context and by the emitter alike.  Because an argument may then be an
+array or a list-context call's vector, the call is emitted as
+`(p-amp-spread (NAME ARGS...))`, which spreads such arguments at the call: a
+Perl-defined sub would flatten them itself, a sub the runtime defines natively
+with a fixed lambda list (the TAP entries) cannot.
+
+    sub g ($) { print "[@_]" }  sub L { (7, 8) }
+    &g(L());          # [7 8] -- (p-amp-spread (pl-g (pl-L))), L in list context
+
 Three sites read that same rule, and each was a silent wrong before it:
 
 * **A LIST SLICE's list and its INDEX list are always LIST context.**
