@@ -693,7 +693,6 @@ sub parse {
   }
 
   $e            = $self->cleanup_for_parsing($e);
-  $self->_merge_split_qualified_words($e);
   $self->_fold_braced_punct_magic($e);
   $self->_retag_magic_array_index($e);
   $self->_default_filetest_operand($e);
@@ -5063,20 +5062,6 @@ sub op_info {
 # default-$_ machinery (the [1,-2] spec) never sees them.  Insert an explicit
 # `$_` token after such a bare filetest so both the single-element and the
 # operator-precedence parse paths handle it uniformly with no special-casing.
-# PPI splits a call into a trailing-:: package (`Bear::::baz`, perl: sub baz
-# in package "Bear::") into TWO Words, `Bear::` + `::baz`.  Merge them back
-# into one Word so every downstream path sees the qualified name whole.
-sub _merge_split_qualified_words {
-  my ($self, $e) = @_;
-  for (my $i = 0; $i < scalar(@$e) - 1; $i++) {
-    my ($a, $b) = ($e->[$i], $e->[$i + 1]);
-    next unless ref($a) eq 'PPI::Token::Word' && ref($b) eq 'PPI::Token::Word'
-             && $a->content =~ /::$/ && $b->content =~ /^::/;
-    splice @$e, $i, 2, PPI::Token::Word->new($a->content . $b->content);
-    $i--;   # re-examine: the merged word may join a further ::-fragment
-  }
-}
-
 # Perl's `Bareword::` form: a bareword ENDING in :: evaluates to the package
 # name as a string ("Foo::" eq "Foo", "Foo::Bar::" eq "Foo::Bar") — used as
 # `tie $x, Pkg::` or `Pkg::->method` to name a class unambiguously.  Left
@@ -5095,12 +5080,6 @@ sub _stringify_trailing_colon_package {
     my $prev = $i > 0 ? $e->[$i - 1] : undef;
     next if defined $prev && ref($prev) eq 'PPI::Token::Word'
          && $prev->content =~ /^(?:sub|package)$/;
-    # `Bear::::baz` reaches PPI as Word "Bear::" + Word "::baz" — that pair
-    # is a CALL into the ::-suffixed package, glued later by
-    # _merge_split_qualified_words (which runs after cleanup).  Leave it.
-    my $next = $e->[$i + 1];
-    next if defined $next && ref($next) eq 'PPI::Token::Word'
-         && $next->content =~ /^::/;
     splice @$e, $i, 1, PPI::Token::Quote::Single->new("'$name'");
   }
 }

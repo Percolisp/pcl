@@ -661,7 +661,7 @@ print "after\\n";
    title => 'A name with an EMPTY package segment (`foo::::bar`) is split into two Words; perl\'s scan_word6 takes it whole',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XATTRBLOCK', class => 'Word', content => '', pred => '', check => 'word-after-sub-name' },
-   fix => { kind => 'relex', handler => undef, commit => 'cb213af0', group => 'AB', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser2 sub-name Word merge + Pl::PExpr::_merge_split_qualified_words (s527d: PPI fixed on the branch)', commit => 'cb213af0', group => 'AB', pr => undef },
    repro => 'sub foo::::bar { 7 } print foo::::bar(), "\\n";',
    perl => "7\n",
    tokens => {
