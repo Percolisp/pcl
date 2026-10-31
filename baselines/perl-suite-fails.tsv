@@ -144,6 +144,13 @@
 # descriptions interpolate perl's own hash order ("uses >0 heads (6)", "k1:
 # delete", "key '2' incremented correctly") and were measured DIFFERENT in two
 # runs of ONE tree.
+#
+# *desc-unstable*: the ONE-ROW version (task #3923, s529a).  A row whose CAUSE
+# starts with `*desc-unstable*` has a description that changes from run to run
+# (op/each.t row 29 is built from whichever hash key comes first), so the row
+# diff joins it by (file, perl's test NUMBER) and prints it as `=`, never NEW +
+# FIXED; a bless carries its cause by number.  The rest of the file keeps the
+# description join, so a real mover beside it is still seen.
 # taken-at: s468bc 2026-09-04 (main) + s468be + s469bf + s470bi +
 #   s470bk + s470br (see the notes below) + s470bs-merge 2026-09-06
 #   (op/filetest.t + op/stat_errors.t ONLY, --bless-fails
@@ -3833,7 +3840,7 @@ op/dor.t	23	ok	not ok	-f // ... compiles	NS:Error compatibility for invalid Perl
 op/dor.t	26	ok	not ok	Caught unterminated search pattern error message: empty subroutine	NS:Error compatibility for invalid Perl input -- the rows eval text that perl rejects at compile time ("Search pattern not terminated"), and `-f // ...` is the filetest-vs-empty-pattern ambiguity perl resolves in the lexer
 op/dor.t	28	ok	not ok	Caught unterminated search pattern error message: sub with built-in function	NS:Error compatibility for invalid Perl input -- the rows eval text that perl rejects at compile time ("Search pattern not terminated"), and `-f // ...` is the filetest-vs-empty-pattern ambiguity perl resolves in the lexer
 op/each.t	0	(none)	renumbered	*summary*
-op/each.t	29	ok	(missing)	Check length of "\x{10fffd}"	s514e (#3163): no longer behind the `use Hash::Util` abort (the shim loads); NOT isolated -- the description is built from a hash KEY (_qq of U+10FFFD), and that one key's row does not pair
+op/each.t	29	ok	(missing)	Check length of "\x{10fffd}"	*desc-unstable* (s529a, #3923: the description is a hash KEY, matched by row NUMBER) s514e (#3163): no longer behind the `use Hash::Util` abort (the shim loads); NOT isolated -- the description is built from a hash KEY (_qq of U+10FFFD), and that one key's row does not pair
 op/each.t	58	ok	not ok	Hash iterator reset warnings fires when expected	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row needs the `Use of each() on hash after insertion` warning
 op/each.t	36	ok	not ok	U+00B6        -> 1	NS:Unicode semantics differences -- measured s473t6d: the U+00B6 key collides with its byte twin
 op/each.t	38	ok	not ok	U+0100        -> 3	NS:Unicode semantics differences -- measured s473t6d: the U+0100 key collides with its byte twin

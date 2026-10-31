@@ -1375,6 +1375,45 @@ sub fails_rows_unstable {
   return (@r == 1 && $r[0] =~ /^\*rows-unstable\*/) ? $r[0] : undef;
 }
 
+# The ONE-ROW version of that opt-out (task #3923): a blessed row whose CAUSE
+# starts with `*desc-unstable*` has a DESCRIPTION that differs from run to run
+# (op/each.t row 29 builds it from whichever hash key the iteration hands out
+# first), so it is joined by (file, perl's test NUMBER) instead of by its
+# description, and the diff prints it as `=` -- never NEW + FIXED.  The rest of
+# the file keeps the description join.  Answers num -> [rowkey, cause].
+sub fails_desc_unstable {
+  my ($rel) = @_;
+  my %by_num;
+  for my $m (@{ $blessed_fail_meta{$rel} || [] }) {
+    my $cause = $blessed_fail_cause{"$rel\t$m->[3]"} // '';
+    $by_num{ $m->[0] } = [ $m->[3], $cause ] if $cause =~ /^\*desc-unstable\*/;
+  }
+  return \%by_num;
+}
+
+# Take the `*desc-unstable*` rows of REL out of the two multisets before they
+# are compared: a run row with the blessed row's NUMBER is that row, whatever
+# its description says.  Returns the matched [rel, num, cause] triples; a
+# blessed row whose number did not diverge this run stays in @$reg and so
+# reads FIXED, as it should.
+sub match_desc_unstable {
+  my ($rel, $rows, $reg) = @_;
+  my $du = fails_desc_unstable($rel);
+  return () unless %$du;
+  my @matched;
+  for my $num (sort { $a <=> $b } keys %$du) {
+    my ($i) = grep { $rows->[$_][0] eq $num } 0 .. $#$rows;
+    next unless defined $i;
+    my ($key, $cause) = @{ $du->{$num} };
+    my ($j) = grep { $reg->[$_] eq $key } 0 .. $#$reg;
+    next unless defined $j;
+    splice @$rows, $i, 1;
+    splice @$reg, $j, 1;
+    push @matched, [$rel, $num, $cause];
+  }
+  return @matched;
+}
+
 # Did this run produce a COMPARABLE TAP stream for this file?  A file that
 # never got to its assertions cannot verify anything about its blessed rows —
 # the same rule as sweep-diff.pl's ran_clean(), and the reason a TRANSPILE this
@@ -1419,6 +1458,13 @@ sub bless_fail_rows {
     # attributions of the rows it DID re-measure, which is what an
     # un-carried column would do.
     $_->[4] = $blessed_fail_cause{"$rel\t$_->[3]"} for @$rr;
+    # a *desc-unstable* row's description moved, so its cause rides on the
+    # NUMBER (#3923) -- or the marker would be lost at the first bless
+    my $du = fails_desc_unstable($rel);
+    for my $r (@$rr) {
+      next if defined $r->[4] && length $r->[4];
+      $r->[4] = $du->{ $r->[0] }[1] if $du->{ $r->[0] };
+    }
     $rows{$rel} = $rr if @$rr;
   }
   my $hdr = <<'HDR';
@@ -1468,6 +1514,13 @@ sub bless_fail_rows {
 # descriptions interpolate perl's own hash order ("uses >0 heads (6)", "k1:
 # delete", "key '2' incremented correctly") and were measured DIFFERENT in two
 # runs of ONE tree.
+#
+# *desc-unstable*: the ONE-ROW version (task #3923, s529a).  A row whose CAUSE
+# starts with `*desc-unstable*` has a description that changes from run to run
+# (op/each.t row 29 is built from whichever hash key comes first), so the row
+# diff joins it by (file, perl's test NUMBER) and prints it as `=`, never NEW +
+# FIXED; a bless carries its cause by number.  The rest of the file keeps the
+# description join, so a real mover beside it is still seen.
 HDR
   my (%blocks, $n);
   $n = 0;
@@ -1662,7 +1715,7 @@ sub report_row_diff {
         . " (bless one with: tools/run-perl-suite.pl --all --bless-fails)\n";
     return;
   }
-  my (@new, @fixed, @unver, @trunc, @unstable, @optout);
+  my (@new, @fixed, @unver, @trunc, @unstable, @optout, @descun);
   my %seen;
   for my $rel (sort keys %results) {
     $seen{$rel} = 1;
@@ -1674,6 +1727,12 @@ sub report_row_diff {
     my @reg = @{ $blessed_fails{$rel} || [] };
     my ($rows, undef, $tr) = diverging_rows_full($rel);
     push @trunc, $rel if $tr;
+    # *desc-unstable* rows join by NUMBER (#3923) -- only when the file ran
+    if (row_verifiable($st)) {
+      my @copy = @$rows;
+      push @descun, match_desc_unstable($rel, \@copy, \@reg);
+      $rows = \@copy;
+    }
     my @actual = sort map { $_->[3] } @$rows;
     my ($only_now, $only_reg) = multiset_diff(\@actual, \@reg);
     if (row_verifiable($st)) {
@@ -1733,6 +1792,8 @@ sub report_row_diff {
       $_, $by{$_} for sort keys %by;
   }
   printf "  = %-24s %s\n", $_->[0], short_cause($_->[1], 100) for @optout;
+  printf "  = %-24s row %s matched by NUMBER: %s\n", $_->[0], $_->[1], short_cause($_->[2], 80)
+    for @descun;
   printf "  ! %-24s -%d passing row(s) (snapshot %s, now %s)\n", @$_[0,1,2,3] for @lost_rows;
   printf "  %d blessed row(s) in %d file(s) this run did not look at — NOT verified, not fixed\n",
     $absent_rows, $absent_files if $absent_rows;
