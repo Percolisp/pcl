@@ -2,6 +2,14 @@
 
 Append new entries at the top. One section per session.
 
+## Session s527g (Opus agent, 2026-10-31) -- PCL's PATCHED PPI, batch 5 tokenizer rows: #4100 (§14's operator / builtin half, group AH second pair) and §43 (keyword-named lexical subs, group AL) fixed on `pcl` (`dd90e749` -> `c4d0da86`, pushed); §42 handed over, §40 not done
+
+- **#4100** (`sort </tmp/x-1/y/*.pl>` died with a Lisp backtrace): PPI read the `<` after `sort` as less-than, the `-1` as a Number and `y/` as a transliteration swallowing the next line.  It is §14's list-operator half, so no §58: PPI now lexes `<...>` as one readline where perl expects a term (after an operator, after a builtin taking an operand, at a document start), through the `~~` term test moved to `PPI::Tokenizer::_term_expected`.  The user-sub half stays PCL's: `_repair_glob_pattern_cascade` now also reads a `y/` derail.  Five §14 report rows un-TODO'd.
+- **§43** (#3750): the tokenizer keeps the names a `my`/`state`/`our sub` declares, per brace depth, and calls them by their bare name where perl does not expect an operator (`s(1)` `y(2)` `q(3)` `x(5)`; `3 x 2` repeats).  PCL's lowering needed nothing.
+- **What the measurements found**: the gate caught `reduce-term-01.t` asserting PPI's old three-token `<STDIN>;` (edited under the four-conjunct rule); the gate-SET scan moved exactly t/op/lexsub.t DROP -> OK (census row left by edit); the companion one-file runs fixed five rows -- three op/glob.t rows filed under #489 / #1664 were really `eval "<.>"` mis-lexed.
+- **Numbers**: corpus-diff IDENTICAL (111); WIDE emission-ab 1,360 files, 1,358 SAME, DIFF lexsub.t (the fix) + coreamp.t (a stderr warning's line number), RCDIFF 0; lib 51 SAME; the report 273 -> 283 ok of 298; expect raw 895 -> 786, pcl 841 -> 732 (#4141: the checker's lexical-sub gap, 11 false rows); sweep TOTAL 18761 (+0) GATE clean; companion op/glob.t 14/4 -> 17/1, op/lexsub.t 81/61 -> 83/60; EVERYDAY 116 of 122 -> 116 of 122; install-pcl.t PASS.
+- **Not done**: §42 (#3749) needs Document.pm (hand-over), §40 (#3745) a new token class + the Lexer.  Filed #4141.
+
 ## Session s530c (Opus agent, 2026-10-31) -- the next silent wrongs and loud failures from the s526-s530 batches: #4042 #3859 #4060 #4062 #3864 #3854 all fixed; four residues filed (#4101-#4104); generation v2-9300
 
 **#4042** (Pl/): `use re '/FLAGS'` was read by nobody.  ONE scope walk `Pl::Parser2::re_pragma_at` (the `use re 'eval'` walk, now shared) applies preceding `use re` / `no re` statements with re.pm bits()'s rules; `re_merge_default_flags` ORs the defaults into m// qr// s/// split literals (before ExprToCL reads /x, so the #3856 scanner follows) and a run-time `=~ $p` operand becomes `p-regex-from-parts` with them.  Guard re-pragma-flags-01.t (28 rows, 17 fail on the base).  String eval not carried: #4101.
