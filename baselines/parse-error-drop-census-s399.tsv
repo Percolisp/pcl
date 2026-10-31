@@ -790,6 +790,14 @@
 #         `for (sub :lvalue { $] }->(), …) {…} continue {…}`: on main `sub :` lexed as a
 #         LABEL (§7) and the statement swallowed the `if` and the squibble / squebble /
 #         squabble subs after it; group S reads the attribute.
+#   s527c ONE row ADDED by hand (task #1580): t/op/for.t 1 -- the file was a
+#         whole-file PPI failure ("Illegal state in 'for' compound statement",
+#         no emission, so no row) and PCL's PPI now lexes a DEREFERENCE as the
+#         foreach loop variable (ppi-upstream-bugs.md §6 §29, group U).  PCL has
+#         no lowering for that loop (`for ${*$f} (5,11,33) { ... }`, line 767), so
+#         the ONE statement drops -- announced, a run-time die if reached -- and
+#         the file's other rows run.  Measured: ./pl2cl < t/op/for.t, one
+#         `;; PARSE ERROR:` progn.  The row leaves with #1580's lowering.
 board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Parser2 TODO: unsupported `local` target: *{"${caller}::a"} x2
 perl-tests/method.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$obj>','Token::Quote::Double<"a">'] x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">'] x1
@@ -798,6 +806,7 @@ perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: ['Statement::Null<;>','Token::Pod<=pod x1 | Bug. Fell through. Missing case: ['Statement<check_line(537, \'first line of interp in here-doc\');>','Stateme x1 | Bug. Fell through. Missing case: ['Statement<check_line(540, \'first line of interp in second here-doc on ...> x1 | Bug. Fell through. Missing case: ['Token::Quote::Single<\'Hello\'>',bless( {'id' => 0,'type' => 'funcall'}, 'P x1 | Handle single node of unknown type. Dump: x1
 t/op/coreamp.t	4	PCL: Can't modify non-lvalue subroutine call in assignment x4
+t/op/for.t	1	foreach whose loop variable is a dereference (#1580) x1
 t/op/lex.t	1	Bug. Fell through. Missing case: ['Statement::Include<no strict;>','Statement<\\$_>'] x1
 t/op/lexsub.t	1	Bug. Fell through. Missing case: ['Token::Regexp::Transliterate<y, 43, \'my sub that looks like constant closu x1
 t/op/method.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$obj>','Token::Quote::Double<"a">'] x1

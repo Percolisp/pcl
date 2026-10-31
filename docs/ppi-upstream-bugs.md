@@ -217,6 +217,8 @@ re-parsed (so strings/regexes are untouched). Regression guard in
 
 ## 5. `{ LITERAL , ... }` (anon hash, comma-separated) misclassified as a Block  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527c: group W, commit `134ced7d` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-W.md`).  PCL's _bare_block_is_anon_hash is deleted.  Not covered (a different toke.c rule): a { first inside a map/grep block, #3962.
+
 **Perl:** in term context, a leading `{` whose first element is a *string or
 number literal* followed by `,` is an anonymous-hash constructor, exactly like the
 `=>` form.  `eval "{ 'a' , 'foo' }"` returns a HASH ref (`{a => 'foo'}`); `{ 1, 2 }`
@@ -252,6 +254,8 @@ genuine code block.  Regression guard in `Pl/t/transpile-test-04.t`.
 ---
 
 ## 6. `for ${*$f} (LIST) { }` — LEXER DIES: "Illegal state in 'for' compound statement"  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527c: group U, commit `1c6a13e0` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-U.md`).  A dereference loop variable now costs its STATEMENT (announced, run-time die; #1580), not the file.
 
 Minimal repro (found s358, task #253 — kills `t/op/for.t` line 767 whole-file):
 
@@ -455,6 +459,8 @@ re-tokenization, no new emission case. `t/re/pat_rt_report.t` 0 → 2431.
 ---
 
 ## 10. `for` accepts only `[my] $scalar` as its loop variable — and mis-lexes the rest of the FILE  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527c: group U, commit `1c6a13e0` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-U.md`).  _repair_nary_foreach / _repair_alias_foreach STAY: they are the lowering of the two heads, not a PPI repair.
 
 Minimal repros (found s396, tasks #327 and #329):
 
@@ -749,6 +755,8 @@ real glob, and the tree is what tells them apart.
 
 ## 13. Tokenization of a trailing `__END__`/`__DATA__` section depends on `$/`  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527c: group X, commit `9d33245a` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-X.md`).  The Lexer runs the tokenizer with $/ = "\n"; PCL's _trim_invented_tail is deleted.  A standalone PPI::Tokenizer still reads $/ in Token::Word / Token::Comment's chomp (a token-file change, handed over).
+
 **Perl:** `$/` is an input-record separator for *reading*; it has nothing to do
 with how source text is parsed.
 
@@ -968,6 +976,8 @@ the log).
 
 ## 17. A SUBSCRIPT after a deref or a KV slice is structured as something else  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527c: group V, commit `ab3ccfc9` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-V.md`).  PCL's _retag_braced_deref_subscript and the Block/Constructor arms of the four KV-slice predicates are deleted.
+
 **Perl:** `${$r}[0]` is element 0 of `@$r`, and `%h{...}` (5.20+) is a key/value
 hash slice — in both, the bracketed part SUBSCRIPTS what precedes it.
 
@@ -993,6 +1003,8 @@ noted around `_parse_subscript_ix` (the braced-deref case) and the `%h{…}` /
 ---
 
 ## 18. `finally { … }` is not part of the `try` statement — and eats the next one  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527c: group T, commit `ab6fb665` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-T.md`).  PCL's _repair_try_finally and the _lower_block finally join are deleted.
 
 **Perl:** `try BLOCK catch (VAR) BLOCK finally BLOCK` (5.34's `use feature
 'try'`, finally since 5.36) is ONE statement, and it self-terminates: no `;` is
@@ -1753,6 +1765,8 @@ rows: `Pl/t/minus-word-01.t`.
 
 ## 29. A DEREFERENCE as the `foreach` loop variable fails the LEXER: "Illegal state in 'for' compound statement"  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527c: group U, commit `1c6a13e0` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-U.md`).  A dereference loop variable now costs its STATEMENT (announced, run-time die; #1580), not the file.
+
 Not a mis-tokenization — a hard lexer failure.  `PPI::Document->new` returns
 `undef` and `PPI::Document->errstr` says `Lexer failed: Illegal state in 'for'
 compound statement`, so the WHOLE FILE is unparseable, not one statement.
@@ -2158,6 +2172,8 @@ in PCL (task #2670).  Upstream row: `docs/ppi-bug-report.t`.
 
 ## 36. The `[i]` of a braced element `${name}[i]` is lexed as an anonymous-array CONSTRUCTOR  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527c: group V, commit `ab3ccfc9` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-V.md`).  The Constructor branch of _brace_name_refs is deleted (the helper stays).
+
 **Minimal repro** (valid perl; perl 5.40.3 prints `2`):
 
 ```perl
@@ -2182,6 +2198,8 @@ read the package `@x`.  The emitter already read the shape right.  Upstream row:
 ---
 
 ## 37. `print({$fh} LIST)` -- the parenthesised block filehandle -- is split into two statements, or its block is a CONSTRUCTOR  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527c: group Y, commit `5ce95d4a` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-Y.md`).  PPI's own fixture t/data/05_lexer/13_braces_in_parens.dump stored the bug and is updated in the fix commit (s529 ruling).  PCL's _repair_paren_block_filehandle is deleted.
 
 **Minimal repro** (valid perl; perl 5.40.3 prints `ab` then `c`):
 
