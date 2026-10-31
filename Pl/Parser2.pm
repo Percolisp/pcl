@@ -1184,6 +1184,11 @@ sub _package_of_element {
   my ($el) = @_;
   for (my $n = $el; $n; $n = $n->parent) {
     for (my $p = $n->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+      # A `package NAME { ... }` BLOCK governs only its own contents, never
+      # the statements after it (task #3870: index.t's `package o { use
+      # overload ... }` put the file's later `use constant`s in `o`).
+      next if ref $p && $p->isa('PPI::Statement::Package')
+              && grep { $_->isa('PPI::Structure::Block') } $p->schildren;
       return $p->namespace
         if ref $p && $p->isa('PPI::Statement::Package') && $p->namespace;
     }

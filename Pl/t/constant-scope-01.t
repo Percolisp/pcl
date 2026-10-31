@@ -41,7 +41,7 @@ my $pcl_bin      = "$project_root/pcl";
 plan skip_all => "pl2cl not found" unless -x $pl2cl && -x $pcl_bin;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 my $libdir = tempdir(CLEANUP => 1);
 make_path("$libdir/C3870");
@@ -133,6 +133,18 @@ sub both_agree {
     my $calls = () = $cl =~ /\(C3870::A::pl-_D\)|\(\|C3870::A\|::pl-_D\)/g;
     is($calls, 2, '... both reads of `_D` are calls of the package constant');
     unlike($cl, qr/\("main" "_D"/, '... and no `main` record of a constant `package C3870::A` declares');
+}
+{
+    # The package a pre-merged registration lands in is _package_of_element's
+    # answer, and a `package NAME { ... }` BLOCK above the `use` does not govern
+    # it (perl-tests/index.t: `package o { use overload ... }` then
+    # `use constant quire => ...` in main).
+    my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh "package Blk3870 { sub x { 1 } }\nuse constant K3870 => 5;\nsub f { K3870 + 1 }\nprint f(), \"\\n\";\n";
+    close $fh;
+    my $cl = PCLCore::transpile("$pl2cl $f");
+    unlike($cl, qr/\("Blk3870" "K3870"/, 'a `package NAME { }` block does not own a later `use constant`');
+    like($cl, qr/\("main" "K3870" "" 2\)/, '... main does');
 }
 
 # ---- behaviour: what perl prints, nothing more ----------------------------
