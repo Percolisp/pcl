@@ -1924,6 +1924,9 @@ sub parse {
   my $consume_pkg = sub {
     my ($child) = @_;
     return 0 unless $child->isa('PPI::Statement::Package');
+    # `class NAME …` (PPI §53) is a Package statement PCL does not lower: it
+    # stays an ordinary statement, refused whole at _lower_block_1.
+    return 0 if $self->fallback_parser->feature_statement_refusal($child);
     my ($block) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
     my $pkg = $child->namespace // 'main';
     my $version = eval { $child->version };
@@ -10497,6 +10500,15 @@ sub _lower_block_1 {
   # nested sub body lowered mid-statement restores the enclosing region's
   # verdicts when it returns.
   local $self->{_cur_vi} = $vi;
+
+  # A statement PPI builds only under a feature PCL does not lower (`defer`,
+  # the class syntax, §52 §53): refused HERE, like #3370 below, because the
+  # declaration / package / sub paths of this function never reach
+  # _lower_stmt's copy of the same hook (`field $v` is a Variable).
+  if (my $r = $self->fallback_parser->feature_statement_refusal($first)) {
+    return (raw($self->fallback_parser->refused_statement_form($first, $r)),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
 
   # #3370: a statement holding a `local` term no lowering reaches.
   if (my $r = $self->{_local_term_refusal}{ refaddr $first }) {

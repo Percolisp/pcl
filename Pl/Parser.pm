@@ -664,12 +664,13 @@ sub _brace_glob_slot_symbol {
 # same way whatever perl it happens to run under — and `Pl/t/feature-pragma-01.t`
 # re-derives them from the running perl so a drift fails a row.
 #
-# `defer` (5.36) is in NO numbered bundle -- only `:all` holds it (probed:
-# %feature::feature_bundle) -- so its threshold is the `:all` number (9e9)
-# the bundle-name branch below uses.  PPI's Lexer makes `defer BLOCK` a
-# compound statement under the feature (docs/ppi-upstream-bugs.md §52), which
-# `feature_statement_refusal` refuses statement by statement.
-our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039, defer => 9e9);
+# `defer` (5.36) and `class` (5.38) are in NO numbered bundle -- only `:all`
+# holds them (probed: %feature::feature_bundle) -- so their threshold is the
+# `:all` number (9e9) the bundle-name branch below uses.  PPI's Lexer builds
+# their statements under the feature (docs/ppi-upstream-bugs.md §52 §53),
+# which `feature_statement_refusal` refuses statement by statement.
+our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039,
+                           defer => 9e9, class => 9e9);
 
 sub _pcl_feature_include_cb {
   my ($inc) = @_;
@@ -12021,14 +12022,26 @@ sub class_statement_refusal {
 }
 
 # The statements PPI builds only under a feature PCL does not lower: `defer
-# BLOCK` is a compound of type defer under `use feature 'defer'` (§52).  The
-# refusal TEXT is the drop-site classifier's -- asked, not copied, so the two
-# routes cannot drift (rule 11).  Then the `class NAME ;` refusal above.
+# BLOCK` is a compound of type defer under `use feature 'defer'` (§52), and
+# under `use feature 'class'` (§53) `class` leads a Package, `method` a Sub,
+# `field` a Variable and `ADJUST` a Scheduled statement -- each class is
+# built for that word ONLY under the feature, so the pair is the evidence.
+# The refusal TEXT is the drop-site classifier's -- asked, not copied, so the
+# two routes cannot drift (rule 11).  Then the `class NAME ;` refusal above.
+my %CLASS_FEATURE_STATEMENT = (
+  class  => 'PPI::Statement::Package',  method => 'PPI::Statement::Sub',
+  field  => 'PPI::Statement::Variable', ADJUST => 'PPI::Statement::Scheduled',
+);
 sub feature_statement_refusal {
   my ($self, $stmt) = @_;
   return undef unless ref $stmt && eval { $stmt->isa('PPI::Statement') };
   return $self->_ruled_refusal_for_drop([$stmt])
     if $stmt->isa('PPI::Statement::Compound') && ($stmt->type // '') eq 'defer';
+  my $w = $stmt->schild(0);
+  if ($w && $w->isa('PPI::Token::Word')) {
+    my $cls = $CLASS_FEATURE_STATEMENT{ $w->content };
+    return "feature 'class' is not supported" if $cls && ref($stmt) eq $cls;
+  }
   return $self->class_statement_refusal($stmt);
 }
 

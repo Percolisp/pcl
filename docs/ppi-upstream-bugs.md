@@ -2654,6 +2654,8 @@ blocks"); the refusal reads `Word(defer) + Block` and stays.  Task #3746.
 
 ## 53. Perl 5.38 CLASS syntax builds no statements of its own  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527f: group AM, commit `85c383f8` on branch `pcl`, vendored as vendor/PPI -- under the feature `class` leads a Statement::Package, `field` a ::Variable, `ADJUST` a ::Scheduled and `method NAME` a ::Sub: the statement classes of upstream PR #346, credited); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AM.md`).  PCL had no repair and builds no lowering: `class` joins `%Pl::Parser::PCL_FEATURE_BUNDLE`, `Pl::Parser::feature_statement_refusal` refuses each of the four statements at its own site (Parser2 `_lower_block_1`, before the declaration paths; `$consume_pkg` keeps a class out of the package sections), so the statement after a class block is no longer swallowed (guard `Pl/t/refusal-site-01.t` 7a').
+
 **Minimal repro** (valid perl; perl 5.40.3 prints `1`):
 
 ```perl

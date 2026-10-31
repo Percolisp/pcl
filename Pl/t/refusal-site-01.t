@@ -77,7 +77,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 23;
 
 sub write_pl {
     my ($code) = @_;
@@ -183,6 +183,26 @@ is($rc_class, 0, '`class NAME ;` refuses at its statement, not at the file')
 like($cl_class,
      qr/\(progn ;; RULED REFUSAL: feature 'class' is not supported.*?PCL: feature 'class' is not supported, at \Q$pl_class\E line 4/s,
      'and emits the perl-shaped die at the statement site');
+
+# 7a' the BLOCK form: under the feature PCL's PPI builds `class NAME BLOCK` as
+#     a statement of its own (docs/ppi-upstream-bugs.md §53, s527f) -- it used
+#     to swallow the statement after it -- and `field` / `method` / `ADJUST`
+#     are statements of their own too, each refused at its site.
+my ($cl_cls2, $err_cls2, $rc_cls2) = transpile_refusing(<<'PL');
+use v5.38; use experimental 'class';
+print "before\n";
+class P { field $v = 1; method get { $v } }
+print "after\n";
+PL
+like($err_cls2, qr/refused statement at \S+ line 3: class P \{ field \$v = 1; method get \{ \$v \} \} -- feature 'class'/,
+     '`class NAME BLOCK` is refused whole and alone: the next statement is not swallowed (PPI §53)');
+my ($cl_cls3, $err_cls3, $rc_cls3) = transpile_refusing(<<'PL');
+use v5.38; use experimental 'class';
+sub f { 1 }
+{ field $w; ADJUST { 1 } }
+PL
+is(scalar(() = $err_cls3 =~ /refused statement at .* -- feature 'class' is not supported/g), 2,
+   '`field` and `ADJUST` each refuse at their own statement');
 
 # 7b `defer { … }` (perl 5.36).  Under the feature PCL's PPI builds `defer
 # BLOCK` as a compound statement of its own (docs/ppi-upstream-bugs.md §52,

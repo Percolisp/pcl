@@ -824,9 +824,9 @@ not code
    tasks => [3746] },
  { id => 53, kind => 'structure', dump => 'statements',
    title => 'Perl 5.38 CLASS syntax (`class NAME BLOCK`, `field`, `method NAME BLOCK`, `ADJUST BLOCK`) builds no statements of its own: the statement after a class block is swallowed',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'statement-not-ended', shape => 'the statement after `class NAME BLOCK` is inside it' },
-   fix => { kind => 'handler', handler => undef },
+   fix => { kind => 'handler', handler => undef, changed => 'NONE: PCL never repaired it; class joins PCL_FEATURE_BUNDLE and Pl::Parser::feature_statement_refusal refuses the class / field / method / ADJUST statements (Parser2: _lower_block_1 before the declaration paths, $consume_pkg keeps a class out of the package sections)', commit => '85c383f8', group => 'AM', pr => undef },
    repro => 'use v5.38; use experimental \'class\'; class P { field $v = 1; method get { $v } } print P->new->get, "\\n";
 ',
    perl => "1\\n",

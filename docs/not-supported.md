@@ -3090,6 +3090,12 @@ with this text when it is reached:
 PCL: feature 'class' is not supported, at FILE line N
 ```
 
+Since s527f PCL's PPI builds the class syntax as statements of its own under
+`use feature 'class'` / `use experimental 'class'` (`docs/ppi-upstream-bugs.md`
+§53): `class NAME BLOCK` no longer swallows the statement after it, and the
+refusal names the class statement alone.  The rules below still decide the
+spellings PPI does not see as the feature.
+
 `class NAME` is recognised on its own (a call would be followed by a list);
 `field`, `method` and `ADJUST` are refused only when the file itself says the
 feature is on — a `use feature 'class'` / `use experimental 'class'` / `use
