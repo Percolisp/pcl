@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530b (Opus agent, 2026-10-31), from the Template-Toolkit re-census.  PRE-EXISTING.  SILENT (the output goes nowhere).\n\n    my $r = \"\";\n    open(Foo::OUT, \">\", \\$r) or die;\n    eval \"package Foo; print OUT qq{a}; 1\" or print \"ERR $@\";\n    package Foo; print OUT \"b\";\n    package main; close Foo::OUT;\n    print \"[$r]\\n\";\nperl: [ab].  PCL: [b] -- the file-level `package Foo; print OUT` is right, the same statement in a STRING EVAL after `package Foo;` is not.  The tied-handle spelling (TIEHANDLE on *Foo::OUT, `print OUT` / `printf OUT` in the eval) loses both too: scratch/s530b/p/tieh.pl, perl [a 007 b c], PCL [b c].\nProbably the eval-mode name resolution of a bareword handle (the #240 family: the region package `p-eval-thunk` binds) -- the handle's NAME is resolved against main, not the eval's current package.\n\nTemplate-Toolkit: Template::Directive::perl generates `tie *Template::Perl::PERLOUT, 'Template::TieString', \\$_tt_result; ... eval \"package Template::Perl; ... print PERLOUT ...\"` -- t/evalperl.t rows 17 and 23 (`print PERLOUT \"\\nbar\\n\"`, `printf PERLOUT \"value: %05d\\n\", 7` lost).",
+   "id" : "4085",
+   "status" : "pending",
+   "subject" : "A bareword FILEHANDLE inside a string eval's `package X;` region names main's handle, not X's: `eval \"package Foo; print OUT 'a'\"` misses Foo::OUT -- Template's [% PERL %] blocks write `print PERLOUT ...` and the output is lost"
+}

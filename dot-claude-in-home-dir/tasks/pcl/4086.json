@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-31",
+   "description" : "FILED s530b (Opus agent, 2026-10-31), from the Template-Toolkit re-census.  PRE-EXISTING.  SILENT.\n\n    my $s = sub { for ($_[3]) { s/^'//; s/'$//; s/\\\\'/'/g }; [ @_[1, 3] ] };\n    my @args = (0, 'author', '=', \"'Andy Wardley'\");\n    my $r = $s->(@args);\n    print \"@$r | $args[3]\\n\";                                    # perl: author Andy Wardley | Andy Wardley\n    my $v = \"pxq\"; sub h { for ($_[0]) { s/x/z/ } } h($v); print \"$v\\n\";            # perl pzq\n    my $w = \"pxq\"; sub k { for my $e ($_[0]) { $e =~ s/x/z/ } } k($w); print \"$w\\n\";  # perl pzq\nPCL: author 'Andy Wardley' | 'Andy Wardley' / pxq / pxq -- neither the @_ element nor the caller's variable changes.  (`$_[0] =~ s/x/z/` directly is the documented-working @_ aliasing, docs/not-supported.md \"@_ argument aliasing -- PARTIAL\"; the miss is the FOREACH alias of an @_ element, and probably the writes_args scan not seeing a write through the loop variable.)  Probe: scratch/s530b/p/foral.pl.\n\nTemplate-Toolkit: Template/Grammar.pm rule 100 (`meta: IDENT ASSIGN LITERAL`) is `{ for ($_[3]) { s/^'//; s/'$//; s/\\\\'/'/g }; [ @_[1,3] ] }` -- t/evalperl.t rows 13 and 15 (`author: 'Andy Wardley'`).",
+   "id" : "4086",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `for ($_[N]) { s/// }` does not write through to the caller's argument -- foreach over an @_ ELEMENT is a copy, not an alias; Template::Grammar's META rule strips the quotes this way, so `[% META author = 'Andy Wardley' %]` keeps them"
+}
