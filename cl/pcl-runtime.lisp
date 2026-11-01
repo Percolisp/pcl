@@ -9986,7 +9986,20 @@ per element."
        (cons (if (eq (car form) 'p-aslice) '%p-aslice-viv '%p-hslice-viv)
              (cdr form)))
       ((and (consp form) (= (length form) 3)
-            (member (car form) '(p-aref p-gethash p-aref-deref p-gethash-deref)))
+            (member (car form) '(p-aref p-gethash p-aref-deref p-gethash-deref))
+            ;; An ELEMENT only: its container is a variable or an element
+            ;; chain, never a value form -- a LIST SLICE `(lstat $p)[2,4]'
+            ;; is emitted with the same head over (p-list-ctx ...) and a
+            ;; (vector ...) index (Archive::Tar::File, the everyday row).
+            (let ((c (second form)) (i (third form)))
+              (and (or (symbolp c)
+                       (and (consp c)
+                            (member (car c) '(p-aref p-gethash p-aref-deref
+                                              p-gethash-deref p-viv-container
+                                              p-viv-array-container))))
+                   (not (and (consp i)
+                             (member (car i) '(vector p-.. p-... p-flatten-args
+                                               list)))))))
        (list 'vector
              (cons (ecase (car form)
                      (p-aref 'p-aref-box)

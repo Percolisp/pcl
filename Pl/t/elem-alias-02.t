@@ -19,7 +19,10 @@
 #     accessor (p-aref-box / p-gethash-box / the -deref twins);
 #   * each element of a parenthesised `\(E1, E2)` (the one-element `\(ELEM)`
 #     was fixed in s526w2) -- one helper, _backslash_lvalue_form.
-# Every expected line is perl 5.40.3's output (scratch/s532a/p/g[123].pl).
+# Row 4 is the CONTROL the first cut broke (the everyday Archive::Tar row):
+# a LIST SLICE `(lstat $p)[2,4]` uses the element head over a value form and
+# a (vector ...) index -- it is a list, never one element.
+# Every expected line is perl 5.40.3's output (scratch/s532a/p/g[123].pl, ls.pl).
 
 use v5.30;
 use strict;
@@ -38,7 +41,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 4;
 
 sub run_cl {
     my ($code) = @_;
@@ -140,5 +143,15 @@ Zbc
 2 R 8
 0 8
 uxwy
+OUT
+
+test_cl('a LIST SLICE in an aliasing consumer stays a list (control, #4086)',
+        <<'PL', <<'OUT');
+my @x = map { $_ } (lstat "/etc")[2,4]; print scalar(@x), "\n"; my $r = [1,2,3]; my @y = map { $_ * 2 } ($r->[0], @$r[1,2]); print "@y\n"; my @z = map { $_ } (10,20,30)[1,2]; print "@z\n"; for ((5,6,7)[0,2], 9) { print $_ } print "\n";
+PL
+2
+2 4 6
+20 30
+579
 OUT
 

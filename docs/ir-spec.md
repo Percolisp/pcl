@@ -1738,7 +1738,9 @@ the status quo, never a wrong value.
 `@_` element `$_[i]`) is ALIASED, never copied, and taken by the same box
 accessor the vivifying slice readers call (`p-aref-box` / `p-gethash-box` /
 `p-aref-deref-box` / `p-gethash-deref-box`): the runtime's one rewrite
-(`%p-aliasing-slice-form`) turns an element form into `(vector BOX-ACCESSOR)`,
+(`%p-aliasing-slice-form`) turns an element form -- its container a variable
+or an element chain, never a value form: a LIST SLICE `(lstat $p)[2,4]` uses
+the same head and stays a list -- into `(vector BOX-ACCESSOR)`,
 and `\(E1, E2)` references each term in lvalue context exactly as `\E` does.
 Example: `sub f { for ($_[0], "lit") { $_ .= "+" } } my $v = "x";
 eval { f($v) }; print $v` prints `x+` (then the literal's write dies).  An
