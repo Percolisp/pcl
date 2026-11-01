@@ -997,6 +997,8 @@ $HANDLER{word} = sub {
   my $k = $KEYWORD{$core};
   # yyl_keylookup 9013: ANY word before `=>` is a string.
   return _set($w, 'XOPERATOR') if $n && $n->isa('PPI::Token::Operator') && $nc eq '=>';
+  # yyl_keylookup 9040: a lexical sub of this name (`my sub s`) wins over the keyword.
+  $k = undef if $k && $st->{x} ne 'XOPERATOR' && _lexsub_in_scope($w, $t, $core);
   # The subscript lookahead of yyl_leftcurly 6324-6343: `{word}` / `{-word}`.
   return _set($w, 'XOPERATOR') if _in_subscript_forced_word($c);
   if ($st->{x} eq 'XOPERATOR') {
@@ -1196,7 +1198,7 @@ sub _skip_format {
   },
   XATTRDECL => sub {  # `my $x : shared = 1` -- the attribute words and arguments
     my ($w, $c) = @_; my $t = $c->{t};
-    return 1 if $t->isa('PPI::Token::Word');
+    return 1 if $t->isa('PPI::Token::Word') || $t->isa('PPI::Token::Attribute');
     if ($t->isa('PPI::Token::Structure') && $t->content eq '(') {
       push @{ $w->{stack} }, { open => '(', kind => 'attrargs', tok => $t };
       _set($w, 'XTERM'); return 1;
@@ -1248,6 +1250,11 @@ sub _skip_format {
   },
   XPKG => sub {       # package NAME [VERSION] ; | BLOCK   (class NAME [VERSION] [:ATTRS] ...)
     my ($w, $c) = @_; my $t = $c->{t}; my $own = $w->{st}{owner};
+    if ($t->isa('PPI::Token::Operator') && $t->content eq ':') { $w->{st}{pkg_attrs} = 1; return 1 }
+    if ($w->{st}{pkg_attrs} && $t->isa('PPI::Token::Structure') && $t->content eq '(') {   # `class X :isa(Y)` (#3946)
+      push @{ $w->{stack} }, { open => '(', kind => 'attrargs', tok => $t, owner => $own };
+      _set($w, 'XTERM'); return 1;
+    }
     if ($t->isa('PPI::Token::Word') || $t->isa('PPI::Token::Number') || $t->isa('PPI::Token::Attribute')
         || ($t->isa('PPI::Token::Operator') && $t->content eq ':')) { return 1 }
     if ($t->isa('PPI::Token::Structure') && $t->content eq '{') { _set($w, 'XBLOCK', owner => $own, stmt_block => 1); return 0 }
@@ -1314,6 +1321,10 @@ $PSEUDO_STEP{XOPERATOR} = sub {
       _set($w, 'XATTRDECL');
       return 1;
     }
+    if ($n && $n->isa('PPI::Token::Attribute')) {     # the stream PCL's PPI builds (group S, #3946)
+      _set($w, 'XATTRDECL');
+      return 1;
+    }
   }
   return 0;
 };
@@ -1338,6 +1349,11 @@ sub _declared_words {
   $d{"\0pkgs"} = \@pkgs;
   for my $s (@{ $doc->find('PPI::Statement::Sub') || [] }) {
     my $name = $s->name // next;
+    # `my` / `state` / `our sub NAME`: NAME is a sub in the pad from here to the
+    # end of the enclosing block (#4141; yyl_keylookup looks in the pad first).
+    my $lead = $s->schild(0);
+    push @{ $d{"\0lexsubs"}{$name} }, [$s, $s->parent]
+      if $lead && $lead->content =~ /^(?:my|state|our)$/;
     my $at = $s->location;
     my $proto;
     for my $tk ($s->children) {
@@ -1434,6 +1450,19 @@ sub _decl_before {
     $hit = $e->[1];
   }
   return $hit;
+}
+
+# Is a `my` / `state` / `our sub NAME` in scope at T: declared before T in a
+# block (or the document) that holds T (#4141)?
+sub _lexsub_in_scope {
+  my ($w, $t, $name) = @_;
+  my $at = $t->location or return 0;
+  for my $e (@{ $w->{decl}{"\0lexsubs"}{$name} || [] }) {
+    my ($s, $scope) = @$e;
+    next if _loc_cmp($s->location, $at) >= 0;
+    for (my $p = $t->parent; $p; $p = $p->parent) { return 1 if $p == $scope }
+  }
+  return 0;
 }
 
 # The fully qualified name of NAME as perl's symbol-table lookup sees it at
