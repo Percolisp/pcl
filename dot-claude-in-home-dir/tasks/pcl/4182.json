@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01) as the KEY of six UNREDUCED rows of baselines/cpan-board14-fails.tsv (Fable ruling s531 #1).  Their causes read '#1749 probable (the same unpack/pack U family; not isolated)' (112_upgrade.t, the unnamed row) and '#1389 (utf8::downgrade never fails ...) + #1749 (the incremental parser's \\u / utf8 rows; not isolated row by row)' (119_incr_parse_utf8.t, five unnamed rows) -- attributions by family, never reduced; neither #1749 nor #1389 names these files.\n\nTHE HUNT: run each file alone (`tools/run-dist-t.pl --rows ~/.cpan/build/JSON-PP-4.18-0 t/112_upgrade.t`, t/119_incr_parse_utf8.t), reduce each failing row to a standalone perl-vs-PCL probe, and re-cause it to #1749 / #1389 (when the probe shows that mechanism) or to a new task.  The rows leave or re-cause BY EDIT.",
+   "id" : "4182",
+   "status" : "pending",
+   "subject" : "UNREDUCED hunt: JSON-PP 112_upgrade.t + 119_incr_parse_utf8.t -- six board rows attributed to #1749 / #1389 \"not isolated row by row\""
+}

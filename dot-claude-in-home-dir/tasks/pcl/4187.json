@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01): `prove tools/t/` (not in the Pl/t gate) is RED on main -- measured on an archive extraction of main 7a9badce and again on the s531b tree rebased onto MAIN-READY-61; s531b touches neither file.\n\n1. tools/t/ppi-expect-check.t rows 1 5 7 9 11 12 -- 'Â§4 flagged: my $m = 7%-3;', 'Â§12 flagged: $s += length($k)*length($k);', 'Â§28 flagged: my $x = $_.2;', 'Â§25 flagged: my $z = length(\"abc\")-length(\"a\");', 'tools/ppi-expect-check.pl: one row for one mis-lex', 'the row: line, text, class, state, kind, Â§, primary'.  The checker no longer flags these shapes because the VENDORED PPI (vendor/PPI, branch pcl) now lexes them right (s527 batches); the test still asserts the old mis-lexes as its positives.  Fix = pick positives the vendored PPI still mis-lexes (Pl/PPIBugs.pm rows without fixed_in), or run the positives under PCL_SYSTEM_PPI=1; the controls stay.\n2. tools/t/runpcl-streams.t row 14 'TAP: without $| the rows wait for exit' -- fails on main too; not investigated (stdout buffering of a TAP stream without $|).\n",
+   "id" : "4187",
+   "status" : "pending",
+   "subject" : "tools/t/ is red on main: ppi-expect-check.t asserts PPI mis-lexes the vendored PPI has fixed (rows 1 5 7 9 11 12); runpcl-streams.t row 14 (\"without $| the rows wait for exit\")"
+}

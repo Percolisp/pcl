@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01), found by the board's new perl ORACLE (a MISMATCH line: two blessed PERL-SKIP rows on files perl RUNS on this box).\n\nIO-Compress-2.214-0 t/999pod.t and Text-CSV-2.04 t/00_pod.t both do `eval \"use Test::Pod 1.00\"; plan skip_all => \"Test::Pod 1.00 required for testing POD\" if $@;`.  Test::Pod 1.52 is installed in the box perl's site_perl, so perl RUNS the files (31 rows / 2 rows, all ok); PCL prints the skip line, so both files read FAIL under the SKIP rule (PCL skipping a file perl runs is a divergence).  Before s531b both rows were blessed PERL-SKIP (\"Test::Pod ... not installed on this box\") -- true when blessed, stale since the module arrived; the key could not see it, the oracle does.\n\nREPRODUCER (scratch/s531b/p-testpod.pl):\n  eval \"use Test::Pod 1.00\";\n  print $@ ? \"FAIL: \" . substr($@, 0, 300) . \"\\n\" : \"loaded Test::Pod $Test::Pod::VERSION\\n\";\nperl 5.40.3: loaded Test::Pod 1.52\nPCL (main ade297e7): FAIL: Can't locate object method \"exported_to\" via package \"Test::Builder\" at - line 1.\n\nTest::Pod's import calls Test::Builder->exported_to (Test::Builder's API, used by every Test::Builder-based test module of the Test::Pod generation); PCL's Test::Builder (the TAP layer, cl/pcl-test.lisp + its shim) lacks it.  Probably a family: grep the other Test::Builder methods Test::Pod / Test::Pod::Coverage / Test::CPAN::Meta call (exported_to, plan, ok, diag, has_plan ...).  The board rows were re-caused to this task by s531b.",
+   "id" : "4186",
+   "status" : "pending",
+   "subject" : "Test::Pod (installed) does not load under PCL: Test::Builder->exported_to is missing -- two board files PCL skips and perl runs (IO-Compress 999pod.t, Text-CSV 00_pod.t)"
+}

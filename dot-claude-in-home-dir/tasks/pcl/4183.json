@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01) as the KEY of two UNREDUCED rows of baselines/cpan-board14-fails.tsv (Fable ruling s531 #1).\n  * t/76_magic.t row 12 'columns fetched on magic': is_deeply([$bar,$f0,$f1,$f2], \\@foo) got 'ARRAY(0x1)' / expected 'ARRAY(0x2)' (one-file run s531b, 43/1; perl 44/0).  Was '#966 probable (a tied scalar bound by bind_columns; not isolated beyond the parse family)' -- #966 is COMPLETED, so the key was stale (the validator Pl/t/verdict-register-01.t reads it).  The file ties $foo / $bar (packages Foo / Bar) and binds them with bind_columns.\n  * t/70_rt.t row 464 'Length': '#1389 probable (newly reached after #3613; Text::CSV_PP 2206 `$ctx->{utf8} = utf8::is_utf8($src)` -- the byte string reads as upgraded, so the field is not decoded; not emulated)'.  #1389 does not name the file.\n\nTHE HUNT: reduce each to a standalone probe (perl -> PCL); re-cause to the mechanism found.  Measure: `tools/run-dist-t.pl --rows cpan-tests/modules/Text-CSV-2.04 t/76_magic.t` (and t/70_rt.t).",
+   "id" : "4183",
+   "status" : "pending",
+   "subject" : "UNREDUCED hunt: Text-CSV 76_magic.t \"columns fetched on magic\" (#966 closed) + 70_rt.t \"Length\" (#1389 probable) -- two unverified attributions"
+}

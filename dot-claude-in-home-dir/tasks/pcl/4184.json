@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01), found re-causing Text-CSV 10_base.t row 2 (its key #966 + #1747 were both COMPLETED; the row still fails: PCL reports it UNNAMED).\n\nREPRODUCER (scratch/s531b/p-indirect.pl in the s531b worktree):\n  package Foo; sub new { my $c = shift; print \"new got \", scalar(@_), \" arg(s)\\n\"; bless {}, $c }\n  package main;\n  sub ok2 { print scalar(@_), \" [\", ($_[1] // 'undef'), \"]\\n\" }\n  ok2 (new Foo, \"named\");\n  ok2 (new Foo(), \"named2\");\nperl 5.40.3:  new got 0 arg(s) / 2 [named] / new got 0 arg(s) / 2 [named2]\nPCL (main ade297e7): new got 1 arg(s) / 1 [undef] / new got 0 arg(s) / 2 [named2]\n\nperl's indirect object `new Foo` with no parenthesised argument list takes NO arguments when a comma follows (the comma ends it); PCL takes the rest of the list as new's arguments.  t/10_base.t:22 `ok (new Text::CSV, \"Indirect object notation\");` -- the row is the board's Text-CSV 10_base.t row 2 (re-caused to this task by s531b).  Layer: Pl/ (the indirect-object parse); docs/not-supported.md ns-indirect-object-scalar is about a SCALAR invocant, not this.",
+   "id" : "4184",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: indirect object `new CLASS, LIST` inside a call's parens passes the LIST to new -- `ok(new Foo, \"named\")` calls Foo->new(\"named\") and ok() gets one argument (Text-CSV 10_base.t row 2)"
+}

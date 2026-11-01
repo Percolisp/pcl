@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01), found re-causing Mojo-DOM58 collection.t's *PLAN* row, whose key #564 is DONE (#564 fixed the SILENT half: the statement is now refused loudly; the feature itself has no task).\n\nREPRODUCER (scratch/s531b/p-localglob.pl):\n  no strict 'refs';\n  my $caller = \"main\";\n  our ($x, $y) = (\"x0\", \"y0\");\n  { local (*{\"${caller}::x\"}, *{\"${caller}::y\"}) = (\\\"x1\", \\\"y1\"); print \"$x $y\\n\" }\n  print \"$x $y\\n\";\nperl 5.40.3: x1 y1 / x0 y0\nPCL (main ade297e7): `PCL: statement dropped at ... line 4: local (*{\"${caller}::x\"}, ...) -- Parser2 TODO: unsupported `local` target: *{\"${caller}::x\"}`, then the run dies at the statement.\n\nIn the board: Mojo-DOM58 t/collection.t runs 15 rows and stops (rc 255, no plan) at lib/Mojo/DOM58/_Collection.pm:101 `local (*{\"${caller}::a\"}, *{\"${caller}::b\"}) = (\\$a, \\$b);` (the List::Util-style $a/$b aliasing of a sort/reduce callback).  Siblings: #540, #652 (other `local` target shapes), #3470 (a deref inside a parenthesised local LIST, completed).",
+   "id" : "4185",
+   "status" : "pending",
+   "subject" : "`local (*{\"PKG::x\"}, *{\"PKG::y\"}) = LIST` -- a LIST local of symbolic globs is refused (\"Parser2 TODO: unsupported `local` target\"); Mojo::DOM58::_Collection:101 stops collection.t (perl 20 rows)"
+}

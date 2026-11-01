@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531b (Opus, 2026-11-01) as the KEY of two UNREDUCED rows of baselines/cpan-board14-fails.tsv (Fable ruling s531 #1: an UNREDUCED key is an OPEN task that names the file and the measurement taken).  Before s531b the two rows read the prose 'cause not isolated', with no task.\n\nText-CSV-2.04 t/80_diag.t:\n  * 'OK in list context' -- s522a: $csv->error_diag in list context prints 0||0|0|0 under perl AND PCL in isolation (scratch/s522a/pr/diag.pl); the row's is_deeply differs only inside the file -- not #1389 / #3611 by emulation.\n  * 'Cache debugging output' -- s523d: `$csv->_cache_diag` answers false after `open STDERR, '>', FILE`; it was masked by #3611.\n\nTHE HUNT: reduce each to a standalone program (perl -> PCL) inside the file's own state; re-cause the row to the bug found (or leave it by edit).  Measure: `tools/run-dist-t.pl --rows cpan-tests/modules/Text-CSV-2.04 t/80_diag.t`.",
+   "id" : "4181",
+   "status" : "pending",
+   "subject" : "UNREDUCED hunt: Text-CSV 80_diag.t \"OK in list context\" + \"Cache debugging output\" -- two board rows whose cause is not isolated (no task held them)"
+}
