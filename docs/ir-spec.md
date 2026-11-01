@@ -5880,7 +5880,16 @@ never a run-time state: a sub DEFINED outside the scope keeps its own.
 
     { use re '/i'; print "Q" =~ /q/ ? "ok" : "no" }   # ok -- (p-regex :pat "q" :flags "i" ...)
 
-Not carried yet: a STRING eval compiled inside the scope (task #4101).
+**A STRING eval inherits them (normative, s531c, task #4101):** perl compiles
+the eval text with its site's hints, so the defaults (and `use re 'eval'`) in
+force at the eval SITE are in force from the text's first statement, and the
+text's own `use re` / `no re` statements apply on top.  The site hands them to
+the eval's transpile as pseudo-features of the #364 list -- `re-flags:LETTERS`
+and `re-eval`, read off the same scope walk -- so they are part of the eval
+cache key like the features; the eval's compile starts `re_pragma_at` from
+them.  A sub defined outside the scope that calls `eval` gets nothing.
+
+    { use re '/i'; print eval q{"Q" =~ /q/} ? "ok" : "no" }   # ok -- (p-eval "..." nil '("re-flags:i"))
 
 ### 10-prop. Unicode properties are answered from PERL'S OWN tables; an unknown one DIES at compile (normative, s496a, tasks #2060 #2372)
 
