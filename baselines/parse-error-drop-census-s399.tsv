@@ -798,6 +798,9 @@
 #         the ONE statement drops -- announced, a run-time die if reached -- and
 #         the file's other rows run.  Measured: ./pl2cl < t/op/for.t, one
 #         `;; PARSE ERROR:` progn.  The row leaves with #1580's lowering.
+#   s531d (2026-11-02, the round attribution, edited not re-blessed): t/comp/parser.t 5 -> 4 --
+#     `sub 'Hello'_he_said (_);` (line 456) lowers since s527d (MAIN-READY-54, b14bd795:
+#     PPI group AC §46); bisected with one-file runs (s531d scratch/s531d/bislog).
 #   s527g (2026-10-31) ONE row LEFT by edit: t/op/lexsub.t 1 -> 0 -- the drop was
 #         `is y, 43, ...` after `my sub y`: PPI read y as a transliteration that
 #         swallowed the statement; PCL's PPI calls a lexical sub named like a
@@ -809,7 +812,7 @@ perl-tests/ref.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$object>','T
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: ['Structure::Constructor<{ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
-t/comp/parser.t	5	Bug. Fell through. Missing case: ['Statement::Null<;>','Token::Pod<=pod x1 | Bug. Fell through. Missing case: ['Statement<check_line(537, \'first line of interp in here-doc\');>','Stateme x1 | Bug. Fell through. Missing case: ['Statement<check_line(540, \'first line of interp in second here-doc on ...> x1 | Bug. Fell through. Missing case: ['Token::Quote::Single<\'Hello\'>',bless( {'id' => 0,'type' => 'funcall'}, 'P x1 | Handle single node of unknown type. Dump: x1
+t/comp/parser.t	4	Bug. Fell through. Missing case: ['Statement::Null<;>','Token::Pod<=pod x1 | Bug. Fell through. Missing case: ['Statement<check_line(537, \'first line of interp in here-doc\');>','Stateme x1 | Bug. Fell through. Missing case: ['Statement<check_line(540, \'first line of interp in second here-doc on ...> x1 | Handle single node of unknown type. Dump: x1
 t/op/coreamp.t	4	PCL: Can't modify non-lvalue subroutine call in assignment x4
 t/op/for.t	1	foreach whose loop variable is a dereference (#1580) x1
 t/op/lex.t	1	Bug. Fell through. Missing case: ['Statement::Include<no strict;>','Statement<\\$_>'] x1
