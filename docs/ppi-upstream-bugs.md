@@ -2730,6 +2730,8 @@ statement was DROPPED (`Fell through. Missing case: [methodcall,
 template with `[% IF %]` / `[% UNLESS %]` / `[% WHILE %]`.  s531c fixed the
 PCL half (the statement-modifier split, #4083).  Task #4201.
 
+**FIXED on PCL's PPI branch** (s531e: group AO, commit `db20f1eb` on branch `pcl`, vendored as vendor/PPI -- `_round` skips `%ROUND` when the word follows `->`, the test its own List branch already makes for `->(`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AO.md`).  PCL had no repair; `./pl2cl --module lib/Template/Grammar.pm` drops 6 -> 0 and the 153 Template-Toolkit board rows keyed on #4201 left `baselines/cpan-board14-fails.tsv` BY EDIT (one-file runs); guard `Pl/t/method-modifier-name-01.t` rows 10-11.
+
 ---
 
 ## 59. A `{` FIRST inside a map / grep / sort block or a dereference block is built as a BLOCK  [CONFIRMED 1.291 and PCL's branch 9286f7c0]
@@ -2759,6 +2761,8 @@ flattened into map's result (a silent wrong: `map { { %$_, x => 1 } }` returned
 the pairs, not one hash per element).  For the dereference block
 `Pl::PExpr::_deref_inner_brace` + `_block_is_hash_constructor($b, 'deref')`
 (#2085) read PPI's `Statement::Compound` + bare `Block` as the hash.  Task #3962.
+
+**FIXED on PCL's PPI branch** (s531e: group AP, commit `0aae7704` on branch `pcl`, vendored as vendor/PPI -- `_curly` asks the new `_opens_xref_block` for a `{` that starts the first statement of a map / grep / sort block, a print-family filehandle block or a dereference block (a null statement counts, so `map {; {` stays a block): a `PPI::Structure::Constructor`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AP.md`).  PCL's repair DELETED: `Pl::PExpr::_deref_inner_brace` and the 'deref' position of `_block_is_hash_constructor` (#2085; instrumented to die first: never fired over the corpus, perl's t/ + core lib, lib/ and the board's 402 files; corpus-diff IDENTICAL after the deletion).  The map-block half was a silent wrong with no repair: 6 core-lib / 4 board files change emission (ExtUtils::Constant::ProxySubs, Term::Table, Test2::Event / ::Pass / ::Fail / ::V2 -- `[map {{ %$_ }} LIST]` now copies each hash, as perl does).  Guard `Pl/t/anon-hash-term-01.t` rows 4-5 (FAIL on the base).
 
 ---
 
