@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -216,4 +216,33 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'open on a scalar ref held in a VARIABLE reads and writes the referent (#3202)');
+}
+
+# #4164 (s532a): the TWO-argument open drops the white space around its mode
+# and its file name (perlfunc open; doio.c skips isSPACE before and after the
+# mode and strips it from the end) -- YAML-Tiny's t/lib/TestUtils.pm slurps
+# with `open( FILE, " $file" )`, which died ENOENT.  The THREE-argument form
+# keeps the blank (row 6, the control: perl fails it too).  Not here: an
+# all-blank name (#4262) and `close` on a `>-` handle (#4263).
+{
+    my $code = <<'PERL';
+my $d = "/tmp/pcl-open2ws-$$"; mkdir $d; my $f = "$d/f.txt";
+open(W, "> $f ") or die "w: $!"; print W "line\n"; close W; print "1 ", -s $f, "\n";
+open(FILE, " $f") or die "open1 failed: $!"; my $l = <FILE>; close FILE; print "2 $l";
+open(my $fh, "< $f  ") or die "open2 failed: $!"; print "3 ", scalar(<$fh>); close $fh;
+open(F3, "  <$f") or die "open3 failed: $!"; print "4 ", scalar(<F3>); close F3;
+open(F4, ">>  $f\t") or die "open4: $!"; print F4 "more\n"; close F4; print "5 ", -s $f, "\n";
+open(F5, "<", " $f") ? print "6 opened\n" : print "6 failed\n";
+open(P1, " echo hi | ") or die "p1: $!"; print "7 ", scalar(<P1>); close P1;
+open(P2, " | cat ") or die "p2: $!"; print P2 "8 piped\n"; close P2;
+open(D, ">&STDOUT ") or die "d: $!"; print D "9 dup\n"; close D;
+open(F6, "$f ") or die "f6: $!"; print "10 ", scalar(<F6>); close F6;
+unlink $f; rmdir $d;
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'a 2-arg open drops the white space around its mode and name (#4164)');
 }

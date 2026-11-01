@@ -19319,43 +19319,53 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                             (string= m (subseq s 0 (length m)))))
            +p-open-dup-modes+))
 
+(defparameter +p-open-2arg-blanks+
+  (list #\Space #\Tab #\Newline #\Return #\Page (code-char 11))
+  "perl's isSPACE: the white space a 2-arg open string drops around its mode
+   and its file name (%p-open-parse-2arg, task #4164).")
+
 (defun %p-open-parse-2arg (expr)
   "Parse a 2-arg open expression into (mode . filename).
-   E.g. '>file.txt' -> ('>' . 'file.txt'), 'file.txt' -> ('<' . 'file.txt')"
-  (let* ((s   (to-string expr))
+   E.g. '>file.txt' -> ('>' . 'file.txt'), 'file.txt' -> ('<' . 'file.txt').
+   WHITE SPACE AROUND the mode and the name is not part of either (task
+   #4164, perlfunc open; doio.c skips isSPACE before and after the mode and
+   strips it from the end): `open(FH, \" $f\")`, `\"< $f  \"` open $f.  The
+   THREE-argument form keeps it -- that is why it exists -- and never comes
+   here."
+  (let* ((s   (string-trim +p-open-2arg-blanks+ (to-string expr)))
          (dup (%p-open-dup-mode-prefix s)))
     (cond
       ;; Dup-opens FIRST: ">&FH" / "<&FH" / "+<&FH" duplicate FH's file
       ;; descriptor, and the "=" forms (">&=FH", "+<&=N") are fdopen-style —
       ;; same fd, no dup (#70, #543).  This must precede the "+<"/"+>" arms:
       ;; they are prefixes of the read-write dup spellings and used to win.
-      (dup (cons dup (string-left-trim " " (subseq s (length dup)))))
+      (dup (cons dup (string-left-trim +p-open-2arg-blanks+ (subseq s (length dup)))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) ">>"))
-       (cons ">>" (string-left-trim " " (subseq s 2))))
+       (cons ">>" (string-left-trim +p-open-2arg-blanks+ (subseq s 2))))
       ;; "+>>" BEFORE "+>", longest first: the shorter arm used to win and
       ;; leave the second ">" on the FILENAME, so `open($fh,"+>>$path")`
       ;; created (and read-failed on) a file literally named ">/tmp/…".
       ((and (>= (length s) 3) (string= (subseq s 0 3) "+>>"))
-       (cons "+>>" (string-left-trim " " (subseq s 3))))
+       (cons "+>>" (string-left-trim +p-open-2arg-blanks+ (subseq s 3))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "+<"))
-       (cons "+<" (string-left-trim " " (subseq s 2))))
+       (cons "+<" (string-left-trim +p-open-2arg-blanks+ (subseq s 2))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "+>"))
-       (cons "+>" (string-left-trim " " (subseq s 2))))
+       (cons "+>" (string-left-trim +p-open-2arg-blanks+ (subseq s 2))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "|-"))
-       (cons "|-" (string-left-trim " " (subseq s 2))))
+       (cons "|-" (string-left-trim +p-open-2arg-blanks+ (subseq s 2))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "-|"))
-       (cons "-|" (string-left-trim " " (subseq s 2))))
+       (cons "-|" (string-left-trim +p-open-2arg-blanks+ (subseq s 2))))
       ;; Classic 2-arg command pipes: "| cmd" writes to cmd's stdin,
       ;; "cmd |" reads cmd's stdout (#70).
       ((and (>= (length s) 1) (char= (char s 0) #\|))
-       (cons "|-" (string-left-trim " " (subseq s 1))))
+       (cons "|-" (string-left-trim +p-open-2arg-blanks+ (subseq s 1))))
       ((and (>= (length s) 1)
             (char= (char s (1- (length s))) #\|))
-       (cons "-|" (string-right-trim " " (subseq s 0 (1- (length s))))))
+       (cons "-|" (string-right-trim +p-open-2arg-blanks+ (subseq s 0 (1- (length s))))))
       ((and (>= (length s) 1) (char= (char s 0) #\>))
-       (cons ">" (string-left-trim " " (subseq s 1))))
+       (cons ">" (string-left-trim +p-open-2arg-blanks+ (subseq s 1))))
       ((and (>= (length s) 1) (char= (char s 0) #\<))
-       (cons "<" (string-left-trim " " (subseq s 1))))
+       (cons "<" (string-left-trim +p-open-2arg-blanks+ (subseq s 1))))
       (t
        (cons "<" s)))))
 
