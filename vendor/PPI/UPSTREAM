@@ -1,14 +1,14 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s531e
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: 9286f7c07449d368ca605ec3f9c68527d41d3116
-lib-tree: 8c21d51ddcccac839ce6aa912781b37f152b0ef5
-date: 2026-10-31
+branch: pcl-s531e
+branch-sha: db20f1eb77e6809a04741e77cffec8fe5aa7f03c
+lib-tree: f4790fbbf1773fc46dee3d5a1eff9ef35a2d6d1c
+date: 2026-11-01
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
@@ -61,6 +61,7 @@ fix: AL §43 c4d0da86 Tokenizer: a lexical sub named like a keyword is called by
 fix: AA §44 49a24b96 Lexer: CORE::__END__ / CORE::__DATA__ start an End / Data statement
 fix: AM §52 41cf1558 Lexer: defer BLOCK is a compound statement of its own
 fix: AN §53 9286f7c0 Lexer: the class feature builds its statements
+fix: AO §58 db20f1eb Lexer: the ( after a method named if or while holds its arguments
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -160,3 +161,5 @@ commit: d21a9b3f TODO tests: defer BLOCK is a compound statement of its own
 commit: 41cf1558 Lexer: defer BLOCK is a compound statement of its own
 commit: 634d8e6d TODO tests: the class feature builds its statements
 commit: 9286f7c0 Lexer: the class feature builds its statements
+commit: 7bd8dfcd TODO tests: the ( after a method named if or while holds its arguments
+commit: db20f1eb Lexer: the ( after a method named if or while holds its arguments

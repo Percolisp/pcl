@@ -18,12 +18,13 @@
 # Pl::PExpr::Config::is_statement_modifier_word, which answers NO after `->`
 # and before `=>`.
 #
-# NOT HERE (a PPI row, filed for the PPI batch): `$f->if(1)` / `->while(` /
-# `->unless(` / `->until(` / `->elsif(` -- PPI's Lexer builds the parenthesis
-# after those words as a Structure::Condition even after `->`, and PCL's
-# method-call lowering takes a List.  The rows below use `->foreach(` /
-# `->for(` (a List to PPI) and the paren-less spellings, which reach the split
-# alone.  Every expectation is the live `perl` answer to the same source.
+# The PARENTHESISED spellings `$f->if(1)` / `->while(` / `->unless(` /
+# `->until(` / `->elsif(` (task #4201, s531e) were the PPI half: PPI's Lexer
+# built the parenthesis after those words as a Structure::Condition even after
+# `->` (docs/ppi-upstream-bugs.md §58), and PCL's method-call lowering dropped
+# the statement.  PCL's PPI branch fixed `_round` (group AO); the last two rows
+# are its guard.  Every expectation is the live `perl` answer to the same
+# source.
 
 use v5.30;
 use strict;
@@ -42,7 +43,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -133,4 +134,21 @@ PL
 both_agree(<<'PL', 'a modifier word as a hash key and a qualified sub name');
 sub if { "IF(@_)" }
 my %h; $h{while} = 5; print main::if(2), " $h{while}\n";
+PL
+
+# #4201 (PPI §58): the parenthesis after a method named if / elsif / unless /
+# while / until holds its arguments.
+both_agree($F . <<'PL', '->if(SLICE) / ->while( / ->unless( / ->until( / ->elsif( with parens');
+my @a = (0 .. 5);
+my $s = sub { $f->if(@a[2, 4, 5]) };
+print $s->(), " ", $f->while(1), " ", $f->unless(2), " ", $f->until(3), " ", $f->elsif(4), "\n";
+PL
+
+both_agree($F . <<'PL', '->if(...) / ->while(...) beside real modifiers, as a class method, in a condition');
+my $x = 1;
+print $f->if(1), "\n" if $x;
+print $f->while(9), "\n" unless !$x;
+print F->until(5), "\n";
+if ($f->unless(0)) { print "cond ", $f->elsif(6), "\n" }
+my $n = 0; while ($f->while($n) && $n < 2) { $n++ } print "n=$n\n";
 PL
