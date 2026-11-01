@@ -850,6 +850,20 @@ not code
    },
    unblocks => [],
    tasks => [3753] },
+ { id => 58, kind => 'structure', dump => 'structure',
+   title => 'The `(` after a METHOD named `if` / `elsif` / `unless` / `while` / `until` (`$f->if(1)`) is built as a Structure::Condition, where perl reads the method\'s argument list',
+   ppi => { confirmed => '1.291', fixed_in => undef },
+   when => { check => undef, shape => 'the ( after `->if` / `->while` (a method named like a condition keyword) built as Condition' },
+   fix => { kind => 'handler', handler => undef },
+   repro => 'sub F::if { "if$_[1]" } print F->if(1), "\\n";
+',
+   perl => "if1\\n",
+   tokens => {
+     got  => ['Word=sub', 'Word=F::if', 'Structure={ in Structure::Block < Statement::Sub', 'Quote::Double="if$_[1]"', 'Structure=} in Structure::Block < Statement::Sub', 'Word=print', 'Word=F', 'Operator=->', 'Word=if', 'Structure=( in Structure::Condition < Statement', 'Number=1', 'Structure=) in Structure::Condition < Statement', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=sub', 'Word=F::if', 'Structure={ in Structure::Block < Statement::Sub', 'Quote::Double="if$_[1]"', 'Structure=} in Structure::Block < Statement::Sub', 'Word=print', 'Word=F', 'Operator=->', 'Word=if', 'Structure=( in Structure::List < Statement', 'Number=1', 'Structure=) in Structure::List < Statement', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [4201, 4083] },
 );
 
 # The one accessor.

@@ -2705,6 +2705,33 @@ Filed twice: #3741 from the expect-state checker's measurement (s525p) and
 
 ---
 
+## 58. The `(` after a METHOD named `if` / `elsif` / `unless` / `while` / `until` is built as a CONDITION  [CONFIRMED 1.291 and PCL's branch 9286f7c0]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `if1`):
+
+```perl
+sub F::if { "if$_[1]" } print F->if(1), "\n";
+```
+
+**PPI structure**: `Word[F] Operator[->] Word[if] Structure::Condition[(1)]`.
+**Expected**: `Structure::List` holding a `Statement::Expression`, as after
+any method name (`$f->foo(1)`) -- a word after `->` is a method name (toke.c
+reads it where it expects an operator, as a METHCALL, never as a keyword).
+The cause is `PPI::Lexer::_round`, which looks the word up in its keyword
+table (`%ROUND`) without asking whether it follows `->`; `->for(` and
+`->foreach(` come out a List only because the ForLoop check reblesses a For
+with fewer than two statements.
+
+**PCL's workaround**: none -- the method call met a Condition and the
+statement was DROPPED (`Fell through. Missing case: [methodcall,
+'Structure::Condition<(1)>']`).  Template Toolkit's generated grammar
+(`lib/Template/Grammar.pm`) calls `$factory->if(...)` and
+`$factory->while(...)`: six statement drops, and 153 board rows of every
+template with `[% IF %]` / `[% UNLESS %]` / `[% WHILE %]`.  s531c fixed the
+PCL half (the statement-modifier split, #4083).  Task #4201.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`

@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 304;
+use Test::More tests => 310;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1890,4 +1890,19 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;' 
 {
     my @t = map { short_class($_) } toks('{ my sub s { 1 } s(1); } s/a/b/;');
     is( $t[-2], 'Regexp::Substitute=s/a/b/', 'after the block of my sub s, s/a/b/ substitutes again' ) or diag "got: @t";
+}
+
+# §58 -- a METHOD named like a condition keyword: a word after -> is a
+# method name (toke.c reads it where it expects an operator), so the ( after
+# it holds the method's arguments, as after any other method name:
+# `sub F::if { "if$_[1]" } print F->if(1)` prints if1.
+{
+    for my $kw (qw(if elsif unless while until)) {
+        my @c = bracket_classes( "\$f->$kw(1);", '(' );
+        is( $c[0], 'PPI::Structure::List', "\$f->$kw(1): the ( after a method named $kw is a List" );
+    }
+}
+{
+    my @c = bracket_classes( 'if ($x) { 1 } elsif ($y) { 2 }', '(' );
+    is( "@c", 'PPI::Structure::Condition PPI::Structure::Condition', 'if (...) / elsif (...): conditions (control)' );
 }
