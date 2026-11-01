@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s532a (Opus 5.5, 2026-11-01), found probing #4085.  PRE-EXISTING (base 10cdc985 identical).  LOUD (a run-time die).\n\n    my $r = \"\"; open(Foo::OUT, \">\", \\$r) or die;\n    eval \"package Foo; print {OUT} qq{c}; 1\" or print \"ERR $@\";\n    close Foo::OUT; print \"[$r]\\n\";\n  perl 5.40.3: [c]\n  PCL: ERR Undefined subroutine &Foo::OUT called at (eval 1) line 1.  / []\n\nThe file-level spelling works when the file opens OUT itself (`open(OUT, ...); print {OUT} \"c\"`, and `open(Foo::OUT,...); package Foo; print {OUT} \"c\"`): the emitter knows OUT is a filehandle there.  In the eval unit OUT is never seen as a handle, so the block's bareword is classified as a CALL ((p-list-ctx (Foo::pl-OUT))).  perl (no strict subs): a bareword that is not a known sub, alone in a print BLOCK, is the handle name.  Layer: Pl/ (the print-block filehandle classifier).  Probe: scratch/s532a/p/ev1.pl in the s532a worktree.",
+   "id" : "4261",
+   "status" : "pending",
+   "subject" : "`print {OUT} LIST` in a string eval whose unit never names OUT as a handle calls a sub OUT (\"Undefined subroutine &Foo::OUT\") -- perl reads the bareword in the block as the handle name"
+}

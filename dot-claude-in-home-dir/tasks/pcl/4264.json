@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s532a (Opus 5.5, 2026-11-01), found writing ir-spec Â§3.2d's #4086 example.  PRE-EXISTING (base 10cdc985 identical).  A missing die (the program runs on where perl stops).\n\n    eval { for (\"lit\") { s/x/z/ } }; print \"1 \", ($@ ? \"died\" : \"ok\"), \"\\n\";   # perl died   PCL ok\n    eval { for (\"lit\") { tr/x/z/ } }; print \"2 \", ($@ ? \"died\" : \"ok\"), \"\\n\";  # perl died   PCL died\n    eval { for (\"lit\") { s/l/L/ } }; print \"3 \", ($@ ? \"died\" : \"ok\"), \"\\n\";   # perl died   PCL died\n\nperl's pp_subst checks the target's read-only flag BEFORE it matches (s/// on a constant dies even when nothing would change); tr/// already does.  PCL's s/// only reaches the read-only check on the write.  Layer: cl/pcl-runtime.lisp p-subst's target write path (the #1391 marked read-only slot).  Probe: scratch/s532a/p/ro.pl in the s532a worktree.",
+   "id" : "4264",
+   "status" : "pending",
+   "subject" : "s/// that does NOT match on a READ-ONLY value (a foreach-aliased literal) succeeds in PCL -- perl dies \"Modification of a read-only value attempted\" before matching"
+}

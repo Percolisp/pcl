@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s532a (Opus 5.5, 2026-11-01), found probing #4164.  PRE-EXISTING (base 10cdc985 identical).  SILENT (a failure perl reports is a success).\n\n    open(B, \"\") ? print \"e opened\\n\" : print \"e failed $!\\n\";\n    open(C, \"<\") ? print \"c opened\\n\" : print \"c failed $!\\n\";\n  perl 5.40.3: e failed No such file or directory / c failed No such file or directory\n  PCL: e opened / c opened\n\nAfter #4164 an all-blank 2-arg name trims to \"\" and takes the same path.  Find what the runtime's open does with an empty file name (it opens something -- STDIN?) and make it fail with ENOENT as perl's PerlIO_open does.  Layer: cl/pcl-runtime.lisp p-open / %p-open-impl.  Probe: scratch/s532a/p/op2.pl.",
+   "id" : "4262",
+   "status" : "pending",
+   "subject" : "open(F, \"\") / open(F, \"   \") / open(F, \"<\", \"\") SUCCEED in PCL -- perl fails them ENOENT (an empty file name)"
+}

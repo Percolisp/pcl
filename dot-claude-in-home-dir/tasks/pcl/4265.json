@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s532a (Opus 5.5, 2026-11-01) when #4084 (the BLOCKS table alias) was fixed and chomp.t's 18 other rows passed: rows 21 (winsux2 out) and 25 (winsux4 out) still fail.  PRE-EXISTING (base 10cdc985 renders the same).\n\n    use lib \"$ENV{HOME}/.cpan/build/Template-Toolkit-3.106-0/lib\"; use Template;\n    my $tt = Template->new({ BLOCKS => { w2 => \"[% ding -%]\\015\\012\\015\\012[% dong %]\", w4 => \"[% ding %]\\015\\012\\015\\012[%- dong %]\" } });\n    for my $b (qw(w2 w4)) { my $out = ''; $tt->process($b, { ding => 'Hello', dong => 'World' }, \\$out);\n      $out =~ s/([^\\w ])/sprintf('\\\\%03o', ord $1)/ge; print \"$b [$out]\\n\" }\n  perl 5.40.3: w2 [Hello\\015\\012World] / w4 [Hello\\015\\012World]\n  PCL: w2 [Hello\\012World] / w4 [Hello\\012World]\n\nNOT the chomp regexes themselves: `s{ ^ ([^\\S\\n]* \\n) }{}x` and `s{ (\\r?\\n|^) [^\\S\\n]* \\z }{}mx` on the same strings answer as perl (scratch/s532a/p/cr.pl).  winsux1 / winsux3 (one CRLF) pass.  Next: instrument Template::Parser::split_text's $pre / $text around the CHOMP_ALL arms with the double-CRLF input (scratch/s532a/p/tt2.pl in the s532a worktree).",
+   "id" : "4265",
+   "status" : "pending",
+   "subject" : "Template-Toolkit chomp.t winsux2 / winsux4: a CR before a DOUBLE CRLF is lost around a chomping directive -- `[% ding -%]\\015\\012\\015\\012[% dong %]` renders Hello\\012World, perl Hello\\015\\012World (NOT REDUCED past Template::Parser)"
+}

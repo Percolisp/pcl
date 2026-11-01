@@ -1,9 +1,10 @@
 {
    "blockedBy" : [],
    "blocks" : [],
+   "completed" : "2026-11-02 (s532 merge of s532a = MAIN-READY-66)",
    "created" : "2026-10-31",
-   "description" : "FILED s527d (2026-10-31), found probing §9.  `\"ab\" =~ /(a)/; print \"$#{+}\\n\";` -- perl 5.40.3 prints 1; PCL (main df8e1ec9 and the s527d tree alike) drops the print statement loudly ('Handle single node of unknown type').  The CODE spelling `$#{+}` and `$#+` work; only the interpolated braced form fails -- Pl::InterpScan / StringInterpolation's `$#{...}` arm does not ask Pl::PExpr::braced_punct_magic_name.  Pre-existing; the PPI side (§9) is not involved (strings are PCL's own scan).",
+   "description" : "FILED s527d (2026-10-31), found probing §9.  `\"ab\" =~ /(a)/; print \"$#{+}\\n\";` -- perl 5.40.3 prints 1; PCL (main df8e1ec9 and the s527d tree alike) drops the print statement loudly ('Handle single node of unknown type').  The CODE spelling `$#{+}` and `$#+` work; only the interpolated braced form fails -- Pl::InterpScan / StringInterpolation's `$#{...}` arm does not ask Pl::PExpr::braced_punct_magic_name.  Pre-existing; the PPI side (§9) is not involved (strings are PCL's own scan).\n\n=== DONE (s532a) ===\nFIXED (63c1188a): Pl::InterpScan::_scan_array_index's `$#{...}` arm takes a braced PUNCTUATION name as the `${...}` / `@{...}` arms do (_braced_magic_name); a caret name keeps the expression path (it reads it right; routing it as magic broke `$#{^CAPTURE}`).  Guard Pl/t/punct-array-glob-01.t row 47 (perl oracle; inverse-verified).\n",
    "id" : "3982",
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "PCL: \\\"$#{+}\\\" / \\\"$#{-}\\\" inside a double-quoted string DROPS the statement (Handle single node of unknown type)"
 }
