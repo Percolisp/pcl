@@ -122,3 +122,7 @@ anonymous hash (`PR-AP.md`); **AQ** §42 a here-doc introduced in the code of a
 quote-like (an `s///e` replacement, a `(?{ })` block) takes the lines after it
 -- the tokenizer half and the Document half together (`PR-AQ.md`).
 t/ppi_bugs_pcl.t: 304 -> 323 rows.
+
+## s532 (2026-11-02): the fork exists; the first two PRs are OPEN
+
+The USER created `https://github.com/Percolisp/PPI` and logged `gh` in as Percolisp; `pcl` (`a376a6d8`, 105 commits) is pushed there.  The series shares one test file, so the PRs are STACKED in branch order, each branch `pr-<letter>` = the group's fix commit (the series is linear, so a stacked PR is just a ref at the group's last commit): **#457** = `pr-A` (`a737c524`: 0001 the test file + group A) https://github.com/Perl-Critic/PPI/pull/457; **#458** = `pr-B` (`1cff9293`, stacked on #457) https://github.com/Perl-Critic/PPI/pull/458.  Body = a series preamble + `PR-<letter>.md` without its heading.  The remaining 42 groups (C .. AQ) wait for the USER's word on cadence (all at once vs after a maintainer response); upstream had 30 open PRs at the time (the newest human ones from 2026-09 / 2026-10).
