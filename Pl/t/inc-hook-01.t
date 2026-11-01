@@ -118,4 +118,12 @@ print "explicit path offered to the hook: ", ($got // 'undef'), "\n";
 PL
 is($pcl, $perl, 'an explicit path that does not open is offered to the @INC hooks only');
 
+($perl, $pcl) = both('hookfilterdie', <<'PL');
+my $die = sub { die "filt\n" }; my $data = [];
+unshift @INC, sub { $die, $data };
+my $r = do "foo"; print "r=", (defined $r ? $r : "undef"), " err=$@";
+do "bar"; print "again err=$@"; print "alive\n";
+PL
+is($pcl, $perl, 'a die in a hook\'s source filter is the do-file\'s error ($@), never the caller\'s ([perl #92252])');
+
 done_testing;

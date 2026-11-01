@@ -18646,7 +18646,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Binds *pcl-caller-wantarray* so wantarray() in the do-file sees the calling context."
   (let ((*pcl-caller-wantarray* *wantarray*)
         (filename (to-string (unbox filename-val))))
-    (multiple-value-bind (abs-path hook) (%p-do-locate filename)
+    ;; An @INC hook's source filter runs while the file is READ, and a die in
+    ;; it is the do-file's error: $@, undef (t/op/inccode.t [perl #92252]).
+    (multiple-value-bind (abs-path hook)
+        (handler-case (%p-do-locate filename)
+          (error (e)
+            (box-set $@ (make-p-box (format nil "~A" e)))
+            (return-from p-do *p-undef*)))
       (when hook
         (return-from p-do (%p-do-hook filename hook)))
       (%p-do-path filename abs-path))))
