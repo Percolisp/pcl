@@ -289,7 +289,7 @@ EXPECTED
 # #2198 map's result copy is RAW where it can be.  MECHANISM: %p-map-copy-scalar
 # answers a plain number or string box with the bare value (no fresh box), and
 # still a FRESH box for undef, a numified string (the cached numeric half) and a
-# dualvar; a blessed box is returned itself, as before.
+# dualvar; a REFERENCE box (blessed or not) a fresh container (#4084, s532a).
 # ─────────────────────────────────────────────────────────────────────────────
 my $mapmech = run_lisp(<<'LISP');
 (in-package :pcl)
@@ -299,7 +299,9 @@ my $mapmech = run_lisp(<<'LISP');
   (format t "mc-str ~a ~a~%" (p-box-p (%p-map-copy-scalar s)) (%p-map-copy-scalar s))
   (let ((c (%p-map-copy-scalar u)))
     (format t "mc-undef ~a ~a~%" (p-box-p c) (eq c u)))
-  (format t "mc-obj ~a~%" (eq (%p-map-copy-scalar o) o))
+  (let ((c (%p-map-copy-scalar o)))
+    (format t "mc-obj ~a ~a ~a~%" (eq c o) (eq (p-box-value c) (p-box-value o))
+            (p-box-class c)))
   (let ((ns (make-p-box "12")))
     (to-number ns)
     (let ((c (%p-map-copy-scalar ns)))
@@ -308,7 +310,11 @@ LISP
 like($mapmech, qr/^mc-num NIL 5$/mi,   '#2198: a number box is copied RAW (no fresh box)');
 like($mapmech, qr/^mc-str NIL str$/mi, '#2198: a plain string box is copied RAW');
 like($mapmech, qr/^mc-undef T NIL$/mi, '#2198: undef still gets a FRESH box (NIL is the hole marker)');
-like($mapmech, qr/^mc-obj T$/mi,       '#2198: a blessed box is not copied (unchanged)');
+# #4084 (s532a) REVISED this row: a blessed box WAS returned itself, which is
+# exactly the alias #4084 removes (`map { $o = ...; $o }` stored the variable).
+# It is now a FRESH container holding the SAME referent and the same class
+# (%p-ref-container-copy, the #3824 rule).
+like($mapmech, qr/^mc-obj NIL T K$/mi, '#2198 + #4084: a blessed box is a fresh container, same referent, same class');
 like($mapmech, qr/^mc-numstr T NIL$/mi,
      '#2198: a string with a cached numeric half keeps a fresh box (the element rule)');
 
