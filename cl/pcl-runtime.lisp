@@ -9973,10 +9973,28 @@ per element."
      p-map / p-grep / p-refgen-list compiler macros, and the emitter's
      `p-viv-slice' marker on a slice in a USER SUB's argument list — the one
      site with no runtime form to look at.  A consumer this rule misses keeps
-     the aliasing read it has today, i.e. the status quo, never a wrong value."
-    (when (and (consp form) (member (car form) '(p-aslice p-hslice)))
-      (cons (if (eq (car form) 'p-aslice) '%p-aslice-viv '%p-hslice-viv)
-            (cdr form))))
+     the aliasing read it has today, i.e. the status quo, never a wrong value.
+
+     An ELEMENT is a one-slot slice (task #4086, ir-spec §3.2d): `$a[0]`,
+     `$h{k}`, `$r->[0]`, `$r->{k}` in the same consumer is the alias to that
+     slot, taken by the box accessor the slice readers themselves call
+     (p-aref-box / p-gethash-box, and the -deref twins), so `for ($_[0],
+     \"lit\") { s/x/z/ }` writes the caller's argument as `for (@_[0], …)`
+     already did."
+    (cond
+      ((and (consp form) (member (car form) '(p-aslice p-hslice)))
+       (cons (if (eq (car form) 'p-aslice) '%p-aslice-viv '%p-hslice-viv)
+             (cdr form)))
+      ((and (consp form) (= (length form) 3)
+            (member (car form) '(p-aref p-gethash p-aref-deref p-gethash-deref)))
+       (list 'vector
+             (cons (ecase (car form)
+                     (p-aref 'p-aref-box)
+                     (p-gethash 'p-gethash-box)
+                     (p-aref-deref 'p-aref-deref-box)
+                     (p-gethash-deref 'p-gethash-deref-box))
+                   (cdr form))))
+      (t nil)))
 
   (defun %p-marked-slice-form (form)
     "FORM with the SLICE that the emitter's `p-viv-slice' marker names

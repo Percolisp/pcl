@@ -8036,7 +8036,10 @@ sub _foreach_single_scalar_p {
   }
   return 0 unless $i < @sig;
   my $prim = $sig[$i];
-  if (ref($prim) eq 'PPI::Token::Symbol') {
+  # isa, not ref-eq: `$_[0]` (@_'s element, #4086) starts with a
+  # PPI::Token::Magic `$_`, a Symbol subclass -- an exact-class test sent
+  # `for ($_[0]) { s/// }` down the copying flattener.
+  if ($prim->isa('PPI::Token::Symbol')) {
     # Without a cast the sigil must be '$'; after a '$' cast the symbol is
     # the ref being dereferenced ($$r), and after `\` any sigil is fine
     # (the reference, not the aggregate, is the value).

@@ -13979,6 +13979,23 @@ sub _args_elem_written {
       return 1 if $c && $c->isa('PPI::Token::Cast') && $c->content eq '\\';
     }
   }
+  # An element in a FOREACH list is aliased by the loop variable (#4086), so
+  # it is written exactly when the body writes that variable -- the rule @_
+  # itself gets (_foreach_over_args_writes).  `for my $e ($_[0]) { $e =~ … }`
+  # has no owner Word (the list follows the Symbol `$e`), so it fell to "not
+  # an argument position" = a read, and a raw-slot caller passed a copy.
+  {
+    my $st = $sym->parent;
+    my $li = $st && $st->isa('PPI::Statement') && $st->parent;
+    my $co = $li && $li->isa('PPI::Structure::List') && $li->parent;
+    if ($co && $co->isa('PPI::Statement::Compound')) {
+      my $kw = $co->schild(0);
+      $kw = $co->schild(1) if $kw && $kw->isa('PPI::Token::Label');
+      return _foreach_over_args_writes($li)
+        if $kw && $kw->isa('PPI::Token::Word')
+        && $kw->content =~ /\A(?:for|foreach)\z/;
+    }
+  }
   my $w = _arg_owner_word($sym) or return 0;
   my $n = $w->content;
   return 1 if Pl::VarAnnotator::arg_writing_builtin($n);

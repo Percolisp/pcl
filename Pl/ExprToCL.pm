@@ -4127,17 +4127,9 @@ sub gen_prefix_op_form {
           # at a copy (#3862; Pod::Simple::TiedOutFH's `(\($_[0]))[0]`).
           my $saved_ctx = $self->expr_o->get_node_context($operand_id);
           $self->expr_o->set_node_context($operand_id, 0);
-          my $saved_lv = $self->lvalue_context;
-          $self->lvalue_context(1);
-          my $scalar_form = $self->gen_node_form($operand_id);
-          $self->lvalue_context($saved_lv);
+          my $ref_form = $self->_backslash_lvalue_form($operand_id);
           $self->expr_o->set_node_context($operand_id, $saved_ctx);
-          my $sh = (ref($scalar_form) eq 'ARRAY' && !ref($scalar_form->[0]))
-                 ? $scalar_form->[0] : '';
-          return [$MAGIC_LVALUE_BASE{$sh} . '-ref',
-                  @$scalar_form[1 .. $#$scalar_form]]
-            if $MAGIC_LVALUE_BASE{$sh};
-          return _backslash_of($scalar_form);
+          return $ref_form;
         }
         if (@$tv_kids > 1) {
           return $self->_gen_backslash_multi_term_form($tv_kids);
@@ -5650,6 +5642,23 @@ sub _refgen_list_place_target {
 # declines to the text path.  Layout is the printer's (flat under to_flat,
 # depth-indented under to_string), not the text twin's hand-rolled multiline
 # let — the one deliberate byte change of the conversion.
+# `\TERM` for ONE term of a refgen: the term generated in LVALUE context, so an
+# element (`$a[0]`, `$_[0]`, `$h{k}`, `$r->[0]`) yields its own live box and a
+# magic lvalue (substr / pos / vec / ...) its write-through cell -- the
+# unparenthesised `\ELEM`'s rule, shared by the one-element `\(ELEM)` (#3862)
+# and each element of `\(E1, E2, ...)` (#4086).  The caller owns the context.
+sub _backslash_lvalue_form {
+  my ($self, $id) = @_;
+  my $saved_lv = $self->lvalue_context;
+  $self->lvalue_context(1);
+  my $form = $self->gen_node_form($id);
+  $self->lvalue_context($saved_lv);
+  my $sh = (ref($form) eq 'ARRAY' && !ref($form->[0])) ? $form->[0] : '';
+  return [$MAGIC_LVALUE_BASE{$sh} . '-ref', @$form[1 .. $#$form]]
+    if $MAGIC_LVALUE_BASE{$sh};
+  return _backslash_of($form);
+}
+
 sub _gen_backslash_multi_term_form {
   my ($self, $tv_kids) = @_;
   my $id = $g_refgen_count++;
@@ -5670,8 +5679,10 @@ sub _gen_backslash_multi_term_form {
       # (CODE, SCALAR) in perl and calls nothing.  Same helper as the bare
       # `\&foo` and the one-element `\(&foo)`.
       my $amp_ref = $self->_backslash_amp_ref_form($kid_id);
-      push @parts, ['single', $amp_ref // ['p-backslash',
-                                           $self->gen_node_form($kid_id)]];
+      # Every other element is referenced IN PLACE -- the one-element
+      # `\(ELEM)`'s rule, per element (#4086): `\($a[0], $h{k})` is refs to
+      # the two slots, and a value read here pointed both refs at copies.
+      push @parts, ['single', $amp_ref // $self->_backslash_lvalue_form($kid_id)];
     }
   }
 
