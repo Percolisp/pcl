@@ -51,6 +51,7 @@ use PCLProc ();  # the ONE child-isolation helper: a run killed by `timeout`
 use PCLDistPrereq ();  # the dist's BUILT prerequisites' blibs (task #3520)
 use Digest::MD5 ();    # the oracle cache key (s531b)
 use File::Path ();
+use File::Spec ();
 use Time::HiRes ();
 
 my $root = abs_path(dirname(abs_path($0)) . "/..");
@@ -91,6 +92,8 @@ my $iflags = join " ", map { "-I$_" } @inc;
 # the board's perl oracle run a t-file: a test that reads a RELATIVE path
 # (`do "./t/util.pl"`, a `corpus/` fixture) otherwise fails for a reason that
 # is not PCL's.  Every path this script passes on is absolute.
+# A relative PCL_ORACLE_CACHE names a directory under the CALLER's cwd, not the dist's.
+$ENV{PCL_ORACLE_CACHE} = File::Spec->rel2abs($ENV{PCL_ORACLE_CACHE}) if defined $ENV{PCL_ORACLE_CACHE};
 chdir $dist or die "cannot chdir to $dist: $!\n";
 
 my $lisp = "/tmp/run-dist-t_$$.lisp";
