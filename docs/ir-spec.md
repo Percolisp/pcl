@@ -2337,7 +2337,7 @@ to the flattened values.
 
 **A sub's DEFINING name is a run-time fact (normative, s518e, #3281).**  `p-sub` records at install the function -> 'Pkg::name' it was defined under (`%pcl-sub-names`, read by `builtin::sub_name`); an alias (`*a = \&f`, an Exporter import) installs the same function and does not change it; a function with no record was not defined by `sub NAME` and is anonymous (`__ANON__`).  Example: `package Foo; sub bar {} package main; BEGIN { *al = \&Foo::bar } use B; B::svref_2object(\&al)->GV->NAME` is `bar`, `->GV->STASH->NAME` is `Foo`.
 
-**A raw slot holds a raw value or a CONTAINER box (normative, s514b, #3081).**  A box found in a raw slot is read as a VARIABLE (`p-cast-$` unboxes it once), so a reference VALUE (an is-ref wrapper from `p-backslash`) whose referent is itself a box binds in a fresh container, never bare: `sub t { my ($v) = @_; ref $$v } t(\\$x)` is `SCALAR`, and `d($$v)` recursing down `\\\\[2]` sees every level.  **The ELEMENT read keeps the container too (s520a, #3390):** a hash value or array element whose slot holds a box (a scalar ref, a ref to a ref) is handed out as that box, never its inner ref value, so `my $w = ${ $h{k} }` with `$h{k} = \$r`, `$r = [1]` makes `$w` the array reference.
+**A raw slot holds a raw value or a CONTAINER box (normative, s514b, #3081).**  A box found in a raw slot is read as a VARIABLE (`p-cast-$` unboxes it once), so a reference VALUE (an is-ref wrapper from `p-backslash`) whose referent is itself a box binds in a fresh container, never bare: `sub t { my ($v) = @_; ref $$v } t(\\$x)` is `SCALAR`, and `d($$v)` recursing down `\\\\[2]` sees every level.  **The ELEMENT read keeps the container too (s520a, #3390):** a hash value or array element whose slot holds a box (a scalar ref, a ref to a ref) is handed out as that box, never its inner ref value, so `my $w = ${ $h{k} }` with `$h{k} = \$r`, `$r = [1]` makes `$w` the array reference.  **The same holds for a reference VALUE (s531d, #3551, #3827):** `(p-cast-$ R)` where R's referent box holds a hash / array / code reference answers that referent BOX (the box IS the reference), never its bare payload -- the symbolic arm's #3394 rule -- so `print ${ \$x }` with `$x = [7,8]` prints `ARRAY(0x..)`, and a method called on `${ f() }` gets the object.
 
 **An lvalue BUILT-IN in an argument slot passes its write-through cell
 (normative, s514f, #3141).**  `@_` aliases what the caller wrote, and for
@@ -4337,7 +4337,9 @@ conversion.
 
 **Which program runs, and with which argv (normative, s501b, task #2082).**
 `system` and `exec` share ONE reading of their arguments (`%p-command-words`):
-the argument list is FLATTENED first (`exec @_` is a LIST); a LIST of more
+the argument list is FLATTENED first (`exec @_` is a LIST), and each word is
+the STRING of its value -- an object's `""` overload runs (perl's SvPV; s531d
+#3556), as it does for a pipe open's LIST form; a LIST of more
 than one element NEVER goes through a shell and its first element is execvp'd
 with PATH search; ONE string goes to `/bin/sh -c` only when perl's `do_exec3`
 rule says so (a leading `. ` or `exec `, an `=` in the first word, or one of
@@ -5369,7 +5371,11 @@ already carries the `-I` list, the cwd and `PERL5LIB` (below), and the search
 path in force while a script's own entry is validated is the seed `pcl` hands
 over, not the one its child was given; an eval's transpile runs through the
 `pl2cl --server`, which is spawned with no `-I` list at all. R1 runs for all
-three layers.
+three layers.  Every transpile (a run-time module load, the eval server) runs
+the `perl` that was first on the PATH when the PROCESS started
+(`*p-transpiler-perl*`, re-read at each image boot), never a PATH search at
+spawn time: a program's `$ENV{PATH} = ...` is a real setenv and must not
+choose the compiler's perl (s531d, #3822).
 
 **A `dep mod` line with no `resolve` line makes the manifest INVALID** — a
 recording path the transpile side missed costs a re-transpile, never a stale

@@ -74,6 +74,15 @@ not-supported.md → only then probe.*
 - **`tools/migrate-causes.pl` is KEPT and IDEMPOTENT** (`--check` lists what it cannot map); a decided row is a `%HAND` entry keyed (dist, file, description [, #num]) so a rebase re-run reproduces it.
 - **#8212 is not a key** (a character code inside a note; Pod-Simple encod04.t is keyed on the open #1389): the board had 20 bad keys, not 21.
 
+## s531d (2026-11-01, Opus) -- the CPAN board's whole-file failures, part 2 (the one-file causes): #4205 #3556 #3822 #3553 #3551 (+ #3827 shape 1) fixed; #1749 left to s531a; runtime + harness only, emission identical
+- **#4205** (SILENT WRONG): p-array-init's vector / list arms send a NESTED group (raw non-string vector, cons, hash, %ENV marker) back through add-element, the canonical flatten's recursion -- `[ $p ? ((7) x $n) : () ]` is two elements; a reference is always a box, never re-spread.  Guard `Pl/t/anon-array-flatten-01.t`.
+- **#3556**: exec / system / pipe-open LIST words are `to-string` of the BOX (the `""` overload runs, perl's SvPV), never of the unboxed referent.  ir-spec §exec; guard `system-block-01.t` row 46.
+- **#3822**: the transpiler's perl is `*p-transpiler-perl*` = the first `perl` on the PATH at PROCESS START (load time + an init hook), used by p-transpile-file, the eval server and the compiler stamp; never a spawn-time PATH search (a program's `$ENV{PATH}` is a real setenv).  ir-spec §cache keys; guard `Pl/t/transpiler-perl-01.t`.
+- **#3553** (harness): is_deeply applies Test::More's `_unoverload_str` at the top and every level (`%test-unoverload-str`: a class with a `""` overload, inherited counts, `0+` alone does not).  Guard `tap-assert-01.t` row 14.
+- **#3551 + #3827 shape 1** (SILENT WRONG): p-cast-$'s box arm answers the referent BOX for a hash / array / code payload (the symbolic arm's #3394 rule) -- `${ \$x }`, `${ f() }`, `${ scalar($r) }`, an overload handler's `${$_[0]}` no longer hand out the bare payload.  #3827's `$$$a` chain shape is a different mechanism and stays open.  ir-spec §raw slot; guard `Pl/t/scalar-deref-value-01.t`.
+- **#1749 belongs to s531a**: its M1 ported #3650 (pack U0) and runs #1749's acceptance; s531d does not touch `cl/pack-impl.pl`.
+- Not reached (budget): #3835 #4104 #3862 #3830 #135 #4087.  Filed: #4221 (Mojo-DOM58 dom.t residue after #3551, UNREDUCED).
+
 ## s527g (2026-10-31, Opus) -- PCL's PPI, batch 5 tokenizer rows: #4100 = §14's operator / builtin half (group AH, second pair) and §43 keyword-named lexical subs (group AL) fixed on `pcl` (`dd90e749` -> `c4d0da86`); §42 handed over, §40 not done
 - **#4100 is §14, not a new §58**: `<...>` where a term is expected (after an operator, after a builtin taking an operand, at a document start) is one readline -- PPI `Tokenizer::_term_expected` (the `~~` test, moved and shared); `docs/ppi-upstream-bugs.md` §14d.
 - **After a USER sub the `<...>` half stays PCL's**: `_repair_glob_pattern_cascade` also reads a `y/` / `s/` / `tr/` / `m/` derail (#4100's `-DIGIT` path); the `*>` arm of `_fix_ppi_glob_after_block` stays (`foo <op/*>`).
