@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 310;
+use Test::More tests => 317;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1905,4 +1905,23 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;' 
 {
     my @c = bracket_classes( 'if ($x) { 1 } elsif ($y) { 2 }', '(' );
     is( "@c", 'PPI::Structure::Condition PPI::Structure::Condition', 'if (...) / elsif (...): conditions (control)' );
+}
+
+# §59 -- perl lexes the block of map, grep and sort, a print-family
+# filehandle block and the block of a $ @ % & dereference where it expects
+# a reference, and a { right after that block's { is an anonymous hash
+# whatever follows it (toke.c yyl_leftcurly, block_expectation: "treat it
+# as a term to make ${{...}}{k} ... dwim"):
+# `my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c)` prints 1.
+{
+    for my $code ( 'my @c = map { { %$_, x => 1 } } @l;', 'my @c = map { { $_, 1 } } @l;',
+                   'my @g = grep { { $_, 1 } } @l;', 'my @c = map({ { %$_ } } @l);',
+                   'my $v = ${ { $k, 1 } }{a};' ) {
+        my @c = bracket_classes( $code, '{' );
+        is( $c[1], 'PPI::Structure::Constructor', "$code: the inner { is an anonymous hash" );
+    }
+}
+for my $code ( 'my @c = map {; { $_, 1 } } @l;', 'my @c = do { { $_, 1 } };' ) {
+    my @c = bracket_classes( $code, '{' );
+    is( $c[1], 'PPI::Structure::Block', "$code: a block where perl starts a statement (control)" );
 }

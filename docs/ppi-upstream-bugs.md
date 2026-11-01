@@ -2732,6 +2732,36 @@ PCL half (the statement-modifier split, #4083).  Task #4201.
 
 ---
 
+## 59. A `{` FIRST inside a map / grep / sort block or a dereference block is built as a BLOCK  [CONFIRMED 1.291 and PCL's branch 9286f7c0]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `1 HASH`):
+
+```perl
+my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c), " ", ref $c[0], "\n";
+```
+
+**PPI structure**: `Word[map] Structure::Block[{ Statement::Compound[Structure::Block[{ %$_, x => 1 }]] }]`.
+**Expected**: the inner `{` a `Structure::Constructor` -- perl lexes the
+block of map, grep and sort, the filehandle block of print / printf / say /
+exec / system, and the block of a `$ @ % & $#` dereference where it expects
+a REFERENCE (toke.c: those list operators are `LOP(..., XREF)`, a cast is
+`PREREF`), and a `{` right after that block's `{` makes it expect a TERM
+(`yyl_leftcurly`, `block_expectation`: "treat it as a term to make
+`${{...}}{k}` ... dwim"), so that `{` is an anonymous hash whatever follows it
+(`perl -MO=Deparse` gives `map({+{$_, 1};} 1, 2)`).  PPI decided the inner `{`
+by the statement-start look-ahead (a word or string then `,` / `=>`), which
+takes `{ %$_, x => 1 }` and `{ $_, 1 }` for blocks.  After `map {;` the `{`
+starts a statement and is a block again (perl: `map {; { $_, 1 } } 1..2`
+returns 4 elements); `map { {; 1 } }` is a perl syntax error.
+
+**PCL's workaround**: none for the map/grep block -- the bare block's list was
+flattened into map's result (a silent wrong: `map { { %$_, x => 1 } }` returned
+the pairs, not one hash per element).  For the dereference block
+`Pl::PExpr::_deref_inner_brace` + `_block_is_hash_constructor($b, 'deref')`
+(#2085) read PPI's `Statement::Compound` + bare `Block` as the hash.  Task #3962.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`

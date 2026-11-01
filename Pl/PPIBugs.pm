@@ -864,6 +864,20 @@ not code
    },
    unblocks => [],
    tasks => [4201, 4083] },
+ { id => 59, kind => 'structure', dump => 'structure',
+   title => 'A `{` FIRST inside a map / grep / sort block or a dereference block (`map { { %$_, x => 1 } } LIST`, `${ { $k, 1 } }{a}`) is built as a BLOCK, where perl reads an anonymous hash',
+   ppi => { confirmed => '1.291', fixed_in => undef },
+   when => { check => undef, shape => 'the first { inside a map/grep/sort block, a print-family filehandle block or a $ @ % & $# dereference block built as Block (the statement-start look-ahead)' },
+   fix => { kind => 'handler', handler => 'Pl::PExpr::_deref_inner_brace' },
+   repro => 'my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c), " ", ref $c[0], "\\n";
+',
+   perl => "1 HASH\\n",
+   tokens => {
+     got  => ['Word=my', 'Symbol=@c', 'Operator==', 'Word=map', 'Structure={ in Structure::Block < Statement::Variable', 'Structure={ in Structure::Block < Statement::Compound', 'Cast=%', 'Magic=$_', 'Operator=,', 'Word=x', 'Operator==>', 'Number=1', 'Structure=} in Structure::Block < Statement::Compound', 'Structure=} in Structure::Block < Statement::Variable', 'Structure=( in Structure::List < Statement::Variable', 'Structure={ in Structure::Constructor < Statement', 'Word=a', 'Operator==>', 'Number=1', 'Structure=} in Structure::Constructor < Statement', 'Structure=) in Structure::List < Statement::Variable', 'Structure=;', 'Word=print', 'Word=scalar', 'Structure=( in Structure::List < Statement', 'Symbol=@c', 'Structure=) in Structure::List < Statement', 'Operator=,', 'Quote::Double=" "', 'Operator=,', 'Word=ref', 'Symbol=$c', 'Structure=[ in Structure::Subscript < Statement', 'Number=0', 'Structure=] in Structure::Subscript < Statement', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=my', 'Symbol=@c', 'Operator==', 'Word=map', 'Structure={ in Structure::Block < Statement::Variable', 'Structure={ in Structure::Constructor < Statement', 'Cast=%', 'Magic=$_', 'Operator=,', 'Word=x', 'Operator==>', 'Number=1', 'Structure=} in Structure::Constructor < Statement', 'Structure=} in Structure::Block < Statement::Variable', 'Structure=( in Structure::List < Statement::Variable', 'Structure={ in Structure::Constructor < Statement', 'Word=a', 'Operator==>', 'Number=1', 'Structure=} in Structure::Constructor < Statement', 'Structure=) in Structure::List < Statement::Variable', 'Structure=;', 'Word=print', 'Word=scalar', 'Structure=( in Structure::List < Statement', 'Symbol=@c', 'Structure=) in Structure::List < Statement', 'Operator=,', 'Quote::Double=" "', 'Operator=,', 'Word=ref', 'Symbol=$c', 'Structure=[ in Structure::Subscript < Statement', 'Number=0', 'Structure=] in Structure::Subscript < Statement', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [3962, 2085] },
 );
 
 # The one accessor.
