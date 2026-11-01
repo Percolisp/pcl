@@ -586,7 +586,10 @@ say Deep::Deeper::Module::dive();
   like($output, qr/deep dive/, 'three-level module hierarchy');
 }
 
-# Test: Module that returns false (should work - we don't check return value)
+# Test: Module that returns false.  perl DIES "FalseRet.pm did not return a
+# true value" (probed 5.40.3; rc 255) and never reaches the call -- this row
+# asserted the opposite while PCL did not check the value at all (#1688,
+# s531a: the expectation now asserts perl's behaviour).
 {
   my $mod = File::Spec->catfile($tempdir, "FalseRet.pm");
   open my $fh, '>', $mod or die;
@@ -603,7 +606,9 @@ require FalseRet;
 say FalseRet::val();
 });
 
-  like($output, qr/it works/, 'module returning 0 still works');
+  ok($output =~ /FalseRet\.pm did not return a true value/ && $output !~ /it works/,
+     'a module returning 0 dies "did not return a true value" (perl)')
+    or diag $output;
 }
 
 # ============================================================

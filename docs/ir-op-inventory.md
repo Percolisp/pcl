@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **763**
+* names exported: **766**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 763
+* with a machine-readable `Contract:` tail: **71** of 766
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -825,7 +825,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-reset` | function | `(&optional pattern)` | — | — | — | — | — | — | — |
 | `p-study` | function | `(&optional str)` | — | — | — | — | — | — | — |
 
-## module-system (7)
+## module-system (10)
 
 *No ir-spec §10 row.*  use/require and the @INC bookkeeping — ir-spec §9
 
@@ -837,6 +837,9 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-require-parent` | function | `(module-name)` | — | — | — | — | — | — | — |
 | `p-require-version` | function | `(ver)` | — | — | — | — | — | — | — |
 | `p-unimport` | function | `(module-name args)` | — | — | — | — | — | — | — |
+| `p-unit-module-true` | function | `nil` | — | — | — | — | — | — | — |
+| `p-unit-value` | macro | `(form)` | — | — | — | — | — | — | — |
+| `p-unit-value-assumed` | function | `nil` | — | — | — | — | — | — | — |
 | `p-use` | function | `(module-name &key (import-args :default) (do-import t) into)` | — | — | — | — | — | — | — |
 
 ## oo (8)
