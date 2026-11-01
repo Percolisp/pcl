@@ -313,7 +313,7 @@ our @CONTRADICTIONS = (
  [ 'Operator',  'BINARY',            'TERM!', '',                     'missing-operand',            'a term',                    '', 'perly: a binary operator needs a left term' ],
  [ 'Structure', qr/^[;,)\]}]$/,      'TERM!', '',                     'missing-operand',            'a term',                    '', 'perly: an operator needs its right term' ],
  [ 'Label',     qr/^sub\s*:$/,       'TERM',  '',                     'label-not-at-statement-start','Word(sub) Operator(:) Attribute', 7, 'a label only under XSTATE; `sub` is never a label' ],
- [ 'Label',     '',                  '*',     'not_xstate',           'label-not-at-statement-start','an expression',            '', 'a label only under XSTATE' ],
+ [ 'Label',     '',                  '*',     'not_xstate',           'label-not-at-statement-start','an expression',            47, 'a label only under XSTATE (§47: `WORD :` in the middle operand of a ternary)' ],
  [ 'Word',      '',                  'XATTRBLOCK', '',                'word-after-sub-name',        'one sub NAME',              41, 'yyl_sub 5535 scan_word6: the sub name is ONE word (`main::::x`)' ],
  [ 'Prototype', '',                  '*',     'not_xattr',            'prototype-out-of-place',     'a list',                    '', 'yyl_sub 5535' ],
  # ── operator position: the terms PPI built where an operator stands ──
