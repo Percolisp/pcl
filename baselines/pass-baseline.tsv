@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s531a (2026-11-01, Opus, EDITED BY HAND): pack.t 5637/88 -> 5652/73 -- #3650 (a template that begins with U is U0 character mode) makes 15 more rows pass (none of them in fail-baseline.tsv); length.t 36/2 -> 34/2 (+ 2 registered) -- rows 7 + 10 (length(pack 'U', N) is 1 char) PASS and leave the skip registry, rows 8 9 11 12 (`use bytes` length / byte_utf8a_to_utf8n of a pack 'U' string) now fail: they passed on the old UTF-8-octet pack 'U', and PCL has no per-scalar UTF-8 flag for `use bytes` to read (#1389) -- registered with rows 14-23's reason.
 # s525u (2026-10-24, Opus, EDITED BY HAND): bop.t 485/24 -> 487/22 -- rows "neg UV (sic) left shift" / "right shift" pass: a shift reads its left operand as a UV (#3760); both rows left fail-baseline.tsv by edit.
 # s523d (2026-10-22, Opus, EDITED BY HAND): ref.t 203 -> 204 -- row 200 "freeing freed glob in global destruction" passes again: #3691 (the stash delete of a non-sub symbol removes the glob; no announcement on the child's stderr).
 # s522b (2026-10-20, Opus, EDITED BY HAND): ref.t 204 -> 203 -- row 200 "freeing freed glob in global destruction" now fails by the stash-delete ANNOUNCEMENT its runperl child compares (stderr => 1; Fable s523 withdrew the death -- the row still fails on the stderr text alone); added to fail-baseline.tsv with that cause.
@@ -504,7 +505,7 @@ join.t	OK	43	0	43
 kvaslice.t	OK	17	0	17
 kvhslice.t	OK	23	1	39
 lc.t	OK	85	0	2662
-length.t	PARTIAL	36	2	49
+length.t	PARTIAL	34	2	49
 lex.t	OK	45	0	53
 local.t	OK	305	8	319
 loopctl.t	OK	64	0	67
@@ -554,7 +555,7 @@ num.t	OK	56	0	56
 oct.t	OK	79	0	79
 or.t	OK	11	2	14
 ord.t	OK	38	0	38
-pack.t	OK	5637	88	14722
+pack.t	OK	5652	73	14722
 parent.t	OK	7	2	9
 pos.t	OK	19	11	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's

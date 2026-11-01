@@ -292,16 +292,18 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
 
 ;; length.t — UTF-8 / `use bytes` / `pack "U"` byte-vs-character tests.  PCL has
 ;; no per-scalar UTF-8 flag (CL strings are always Unicode), `use bytes` is not
-;; implemented, and `pack "U", N` yields the UTF-8 bytes as characters rather than
-;; a flagged 1-char string.  So `length` under `use bytes` (byte count) and the
+;; implemented; `pack "U", N` is the 1-char string perl's is (#3650, s531a) but
+;; carries no flag for `use bytes` to read.  So `length` under `use bytes` (byte count) and the
 ;; byte_utf8a_to_utf8n string comparisons cannot match Perl.  All unnamed -> keyed
 ;; by test number.  not-supported.md: 'Unicode semantics differences'
 ;; (utf8 flag / `use bytes` / `pack 'U'`).  NOT registered (other reasons / fix
 ;; targets): 34 (length of tied undef into a reused TARG), 36/42 (uninit-stringify
 ;; warning emission).
 (register-skips "length.t"
-                (7  :utf8 "length(pack 'U',0xFF) must be 1 char -- PCL's pack 'U' yields UTF-8 bytes as chars (got 2). not-supported.md: 'Unicode semantics differences' (pack 'U').")
-                (10 :utf8 "length(pack 'U',0xB6) must be 1 char -- pack 'U' yields UTF-8 bytes as chars. not-supported.md: 'Unicode semantics differences' (pack 'U').")
+                (8  :utf8 "use bytes: pack('U',0xFF) eq byte_utf8a_to_utf8n('\\xc3\\xbf') -- no per-scalar UTF-8 flag (since #3650, s531a, pack 'U' is the 1-char string perl's is). not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (9  :utf8 "use bytes: length(pack('U',0xFF)) must be 2 bytes -- use bytes not implemented (got 1 char). not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (11 :utf8 "use bytes: pack('U',0xB6) eq byte_utf8a_to_utf8n('\\xc2\\xb6') -- no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (12 :utf8 "use bytes: length(pack('U',0xB6)) must be 2 bytes -- use bytes not implemented (got 1 char). not-supported.md: 'Unicode semantics differences' (use bytes).")
                 (14 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc4\\x80') -- no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
                 (15 :utf8 "use bytes: length(\\x{100}) must be 2 bytes -- use bytes not implemented (got 1 char). not-supported.md: 'Unicode semantics differences' (use bytes).")
                 (17 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc4\\x80\\xc2\\xb6') -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
