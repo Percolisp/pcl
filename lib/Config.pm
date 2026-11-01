@@ -16,6 +16,15 @@ use Exporter 'import';
 our @EXPORT = qw(%Config);
 our @EXPORT_OK = qw(config_vars config_re myconfig);
 
+# THE EXTENSIONS PCL PROVIDES (task #1705): every module PCL ships as a
+# replacement for an XS one -- the `# pcl-shim: must-win` marker in lib/, the
+# one list -- named as perl names an extension (`Foo/Bar`).  Tests guard on
+# `$Config{extensions} =~ /\bEncode\b/` (Pod-Simple's corpus.t, perl's
+# io/socket.t), so an empty list skipped files PCL can run.
+# Pl/t/config-extensions-01.t keeps this line equal to the marker and prints
+# the line to paste when a shim is added or removed.
+my $PCL_SHIM_EXTENSIONS = 'B B/Deparse Carp Clone Compress/Raw/Zlib Cwd Digest/MD5 Digest/SHA Encode Fcntl File/Glob Hash/Util IO List/Util MIME/Base64 Math/BigInt/Calc POSIX PerlIO/encoding Scalar/Util Socket Storable Sub/Util Test/More Time/HiRes attributes mro version';
+
 our %Config = (
     # Type sizes (standard 64-bit C ABI, used by pack/unpack tests)
     intsize      => 4,
@@ -91,6 +100,7 @@ our %Config = (
     d_select    => 'define',
     d_socket    => 'define',
     d_socketpair => 'define',
+    d_getpbyname => 'define',      # getprotobyname via /etc/protocols (s338, #1705)
     d_msg       => 'define',
     d_sem       => 'define',
     d_shm       => 'define',
@@ -99,8 +109,10 @@ our %Config = (
     d_pseudofork => '',            # No pseudofork
     ebcdic      => '',             # Not EBCDIC
 
-    # Extensions / modules
-    extensions => '',
+    # Extensions / modules (#1705): the shims above, all of them XS
+    # replacements; no static or non-XS list is claimed.
+    extensions  => $PCL_SHIM_EXTENSIONS,
+    dynamic_ext => $PCL_SHIM_EXTENSIONS,
 
     # Signal names and numbers (Linux x86_64)
     sig_name => 'ZERO HUP INT QUIT ILL TRAP ABRT BUS FPE KILL USR1 SEGV USR2 PIPE ALRM TERM STKFLT CHLD CONT STOP TSTP TTIN TTOU URG XCPU XFSZ VTALRM PROF WINCH IO PWR SYS',
