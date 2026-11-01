@@ -1,0 +1,8 @@
+# s532 running notes (Fable 5.1, 2026-11-01)
+
+## 22:2x -- SESSION START; the USER: "look over the tasks of the last 3 days, put any needed fixes on the queue; then work as usual with multiple Opus 5.5 (effort high) subtasks"
+Box rebooted (uptime 2 min at 22:23); main `b31345ca` = MAIN-READY-63 + records, pushed, CI GREEN (b31345ca 04:05 UTC).  s531's owed `--all --quick` companion for the skip-registry edit COMPLETED before the reboot (`~/pcl-agent-scratch/s531/merge/companion-quick.log`: 20 NEW / 39 FIXED / 3 LOST, all on MAIN's code per s531d's movers.log -- the round attribution, handed to s531d's resume).  The three stale `HEAVY.holder*` (its dead pid) cleared.  Reviewed the 60 tasks filed 2026-10-29 .. 11-01 (46 still open): the queue is `s532/SHARED-BOX.md` "THE QUEUE" -- s532a now (the silent wrongs with 53 board rows behind them), s532b / s532c / PPI batch 7 next; two Fable rulings written there (#4061's representation: the referent table read only on the unblessed path behind a flag, bench-bounded; #4165: size joins mtime).  Parked: #4170 #4204 #4167 #3943 #3944.
+
+## 22:3x -- the ROUND BOARD run started on main's tree (`git archive b31345ca`, slot 1, log `~/pcl-agent-scratch/s513/review/round-s532-board.log`, out `~/pcl-agent-scratch/s532/review/board-main63.*`).  Compare: `tools/cpan-scoreboard.pl --diff baselines/cpan-board14-fails.tsv ~/pcl-agent-scratch/s532/review/board-main63.rows.tsv`.
+
+## 22:4x -- written: `s532/SHARED-BOX.md`, `resume-s531d.md`, `resume-s531e.md`, `s532a-prompt.md`.  LAUNCHING three agents (opus, effort high): s531d resume (worktree agent-a5284a29), s531e resume (worktree agent-a4ecd024), s532a (new worktree).
