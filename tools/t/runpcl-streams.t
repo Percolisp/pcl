@@ -128,6 +128,12 @@ PL
 
 sub flush_race {
     my ($runner, $code, $want, $desc) = @_;
+    is(race_verdict($runner, $code), $want, $desc);
+}
+
+# The race itself: 'stdout', 'marker' or 'timeout' for RUNNER on CODE.
+sub race_verdict {
+    my ($runner, $code) = @_;
     my (undef, $out)    = tempfile(SUFFIX => '.out',    UNLINK => 1);
     my (undef, $marker) = tempfile(SUFFIX => '.marker', UNLINK => 1);
     unlink $out, $marker;
@@ -148,7 +154,7 @@ sub flush_race {
     }
     waitpid($pid, 0);
     unlink $out, $marker;
-    is($saw, $want, $desc);
+    return $saw;
 }
 
 # TWO busy windows, not one: the marker must be written far enough from the
@@ -177,8 +183,13 @@ SKIP: {
                'pclperl-for-tests: without $| the line waits for exit');
 }
 
-# The TAP writer is the harness's own `print`, so it obeys the same flag: this
-# is the half the companion's kept .out depends on (cl/pcl-test.lisp %tap-out).
+# The TAP writer obeys $| (cl/pcl-test.lisp %tap-out, #1850) -- and once a
+# program has `use`d Test::More it writes to Test::Builder's own AUTOFLUSHED dup
+# of fd 1, as perl's Test::Builder does (#3530, s521c cffd6598).  So without $|
+# the rows still reach the fd as they are emitted, in perl AND in PCL: the
+# row's old constant 'marker' was PCL's pre-#3530 answer, not perl's (measured
+# s532a, #4187: perl 'stdout'; an extraction of cffd6598^ 'marker', of
+# cffd6598 'stdout').  The row asks perl itself for the verdict.
 my $TAP = <<'PL';
 use Test::More tests => 2;
 ok(1, 'first');
@@ -189,8 +200,8 @@ ok(1, 'last');
 PL
 flush_race($runpcl, "\$| = 1;\n$TAP", 'stdout',
            'TAP: $| = 1 puts a row on the fd as it is emitted');
-flush_race($runpcl, $TAP, 'marker',
-           'TAP: without $| the rows wait for exit');
+flush_race($runpcl, $TAP, race_verdict($^X, $TAP),
+           'TAP: without $| Test::More rows reach the fd as perl\'s autoflushed Test::Builder writes them');
 
 # And the stub carries the line, where perl's harness carries it.
 my $stub = do {
