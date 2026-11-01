@@ -56,7 +56,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 17;
+plan tests => 18;
 
 # 1. RHS reads @_, which *_ localization would otherwise clear first.
 is(run_pl(<<'PL'), "foobar\n", 'local *_ = \join("",@_) sees old @_');
@@ -231,6 +231,14 @@ sub mkh { local *FH; ${*FH} = "sv"; ${*FH}{k} = "hv"; return *FH }
 my $h = mkh(); print ${*$h}, " ", ${*$h}{k}, " ", "$h", "\n";
 sub mkc { local *FH; *FH = sub { "code" }; return *FH }
 my $cg = mkc(); print((defined &FH ? "outer-defined" : "outer-undef"), " ", *{$cg}{CODE}->(), "\n");
+PL
+
+is(run_file(<<'PL'), "implicit: 42\nzero kept: 0\nexplicit: 7\nreaped: -1\n", q{the IMPLICIT close of a pipe at a local *FH scope end reaps the child and leaves $? as it was; an explicit close stores the status (#4361, t/io/pipe.t "status unaffected by implicit close")});
+{ local(*NIL); open NIL, q{| sh -c "exit 23"} or die; $? = 42; }
+print "implicit: $?\n";
+{ local *E; open E, q{| sh -c "exit 5"} or die; $? = 0; } print "zero kept: $?\n";
+{ local(*NIL2); open NIL2, q{| sh -c "exit 7"} or die; close NIL2; print "explicit: ", $? >> 8, "\n"; }
+print "reaped: ", wait(), "\n";
 PL
 
 is(run_file(<<'PL'), "1 undef\n1b boo\n2 undef\n2b b\n3 undef\n3b boo\n4 9\n4b 5\n5 7\n5b 1\n6 G\n6b E\n7 Fx\n7b undef\n8 0\n8b 2\n9 undef\n9b U\n", 'local *NAME hides the scalar / array an enclosing local $NAME / @NAME set; the restore brings it back (#3963, t/op/for.t NULL GvSV)');

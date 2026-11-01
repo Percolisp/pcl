@@ -20771,10 +20771,20 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; FH is the handle's BOX.  A condition-`my' handle is closed through a hidden
   ;; cell of the enclosing block (see Pl::Parser2::_fh_cond_late) that still
   ;; holds NIL when the statement never stored into it — nothing to close.
-  (when (p-box-p fh)
-    (let ((errno *p-stored-errno*))
-      (%p-close-previous-stream fh)
-      (setf *p-stored-errno* errno)))
+  (when (p-box-p fh) (%p-close-implicit fh))
+  (values))
+
+(defun %p-close-implicit (fh)
+  "perl's IMPLICIT close of handle FH: the one a scope exit performs (a
+   non-escaping lexical handle, %p-scope-close; the glob a `local *NAME` scope
+   opened, %p-local-glob-leave, task #4361).  It is %p-close-previous-stream's
+   close -- only an OPEN stream or socket is closed, a pipe's child is reaped
+   and `$?' keeps its value (perl's io_close with not_implicit false stores no
+   status; probed 5.40.3) -- with `$!' saved and restored as well: an implicit
+   close is invisible to the program.  Never signals."
+  (let ((errno *p-stored-errno*))
+    (%p-close-previous-stream fh)
+    (setf *p-stored-errno* errno))
   (values))
 
 (defmacro p-scope-close ((&rest handles) &body body)
@@ -33779,7 +33789,7 @@ would consume, so it dies naming the stream (rule 12)."
                 ((and (streamp cur) (eq cur (%p-lgf-opened frame))
                       (not (eq cur (aref saved 9)))
                       (not (%p-local-glob-io-shared-p io-sym cur)))
-                 (%p-close-impl io-sym)))
+                 (%p-close-implicit io-sym)))
           (if (aref saved 9)
               (setf (gethash io-sym *p-filehandles*) (aref saved 9))
               (remhash io-sym *p-filehandles*))
