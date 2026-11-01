@@ -117,6 +117,36 @@ Y's final rebase turns the row red and Y re-causes at the rebase (seconds, no
 SBCL).  A task closed as a duplicate or superseded is the same event: its rows
 move to the successor.
 
+## The CPAN board: SKIP, the perl oracle, the split (s531b; rulings 4 and 6)
+
+`tools/cpan-scoreboard.pl` runs every t-file under real perl too —
+`tools/run-dist-t.pl --oracle-only`, from the dist root, with the same `@INC`
+rule and the run's `PERL5LIB` — as its OWN timed call before the PCL run, so a
+slow perl never eats the PCL run's timeout.  The answer is CACHED under
+`~/.pcl-cache/oracle/` (`$PCL_ORACLE_CACHE`), keyed by the oracle perl's
+version, the t-file's real path + size + mtime and the `@INC` / `PERL5LIB`;
+the key cannot see a module installed on the box (which changes perl's skips),
+so the round run passes `--refresh-oracle`.  `--no-oracle` turns it off.
+
+* **File verdicts**: PASS / PARTIAL / FAIL / **SKIP**.  SKIP = PCL printed
+  `1..0 # SKIP` AND perl skips the file too (#4160).  PCL skipping a file perl
+  RUNS stays FAIL.  A SKIP file still writes its `*FILE*` row (the blessed
+  `PERL-SKIP` row is its record), so `--diff` reports it neither FIXED nor
+  LOST; the per-file table says SKIP; the run's bad count is FAIL alone.
+* **The split** (`--causes <blessed rows>`; `tools/cpan-board.sh` passes the
+  tree's own): per dist and in total, the run's failing assertion rows by the
+  group of their blessed cause — **ours** (`#N`, `UNREDUCED`) / **ruled**
+  (`NS:`, `PARKED:`) / **perl's** (`PERL-SKIP`, `PERL-FAILS`) / **harness** /
+  **unblessed** (no blessed row) — and "+ M assertions never reached behind K
+  whole-file rows (J of them ours)": a `*PLAN*` row's `ran M of N` hides
+  N − M, a `*FILE*` row hides perl's own row count, a SKIP file hides none.
+* **MISMATCH** lines: a blessed `PERL-SKIP` on a file perl runs, a blessed
+  `PERL-FAILS` on a row perl passes — a report of the board run, never a gate,
+  because perl's answer depends on the box.  A blessed row of another class
+  whose description perl also fails prints as a `PERL-FAILS CANDIDATE`.
+* `tools/cause-census.pl --by-id` is the ruled cost per not-supported id across
+  the populations (the s521 review's "NOT IN THE PLAN" table, as a query).
+
 ## Where the classes are printed
 
 `causes_line`'s third answer **is** `census_line`, so every runner that blesses

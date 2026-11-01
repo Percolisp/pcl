@@ -4,6 +4,8 @@ Status: **proposal** (s530, 2026-10-31, Fable; the USER asked for a register of 
 
 **REVIEWED s531 (Fable 5.1, 2026-11-01) -- RULED: REWORK, SMALLER.  Do not build this as written; the rulings at the end (`## Review`) replace sections 1-5 and the open question, and `briefs-and-rules-for-claude-subagents/s531/s531b-prompt.md` is the batch that builds the ruled shape.**  Sections 1-5 below stay as the record of what was proposed.
 
+**BUILT s531b (2026-11-01) in the ruled shape**: the grammar, the ids, the validator, the oracle + SKIP + the split and the migration are described where they live -- `docs/failure-cause-classes.md` ("The grammar", "The KEY is checked", "The CPAN board"), `docs/not-supported.md` ("How to read an entry"), DECIDED `## s531b`.
+
 ## The problem, measured
 
 The CPAN board's file verdicts are PASS / PARTIAL / FAIL, and FAIL mixes three different things.  At s530 (30 dists, 896 files) **138 files read FAIL**, and a review had to join three files by hand to find that only **41** of them are PCL bugs:
