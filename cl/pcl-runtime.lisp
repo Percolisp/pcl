@@ -14606,7 +14606,14 @@ create the key on a read-only call, which perl does not."
    natively with a fixed lambda list (the TAP entries: `&is(@pair)',
    `&is(e(...), ...)') cannot.  Spreading keeps every element's own cell, so
    `$_[N]' still aliases (p-flatten-args).
+   A runtime MACRO head cannot be APPLIED: the emitter never spreads one
+   (`&CORE::NAME(LIST)' is the builtin call, #4362), and a head that is one
+   anyway dies HERE naming it (rule 12), never as SBCL's undefined-function
+   at run time.
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (when (and (symbolp (first call)) (macro-function (first call)))
+    (error "PCL: p-amp-spread: ~S is a runtime macro, not a function -- an & call cannot spread its arguments into it"
+           (first call)))
   `(%p-amp-apply ',(first call) (list ,@(rest call))))
 
 ;;; ============================================================

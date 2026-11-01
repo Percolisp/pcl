@@ -37,6 +37,21 @@ plan skip_all => "pcl not found"  unless -x $pcl_bin;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
 my @progs = (
+  # #4362 (s532a): `&CORE::NAME(LIST)` is the BUILTIN call -- never the
+  # prototype-ignoring & spread, which APPLIED a runtime macro head (p-binmode,
+  # p-push, p-open) and died "is a macro, not a function" (a regression of
+  # #3859; base d47caabe ran these).  The coreargs ARITY rows (`&CORE::undef(1)`
+  # dies, `&CORE::pop(\@a)`) are #1577's family and are not asserted here.
+  ['core-amp', q{
+my @b = &CORE::binmode(\*STDOUT); print "binmode:", scalar(@b), "\n";
+print "lc:", &CORE::lc("Ab"), " join:", &CORE::join("-", 1, 2), " len:", &CORE::length("Ab"), "\n";
+print "sprintf:", &CORE::sprintf("%03d", 7), " abs:", &CORE::abs(-3), " ref:", &CORE::ref([]), "\n";
+print &CORE::open(my $fh, '<', $0) ? "open:ok\n" : "open:fail\n";
+my @l = &CORE::uc("x"); print scalar(@l), " @l\n";
+print eval { &CORE::ucfirst(1,2); 1 } ? "nodie" : "die", "\n";
+my @u = &CORE::ucfirst("q"); print scalar(@u), " ", &CORE::ucfirst("ab"), "\n";
+sub f ($) { scalar(@_) } my @two = (1, 2); print "f:", &f(@two), " ", &f(1, 2), "\n";
+}],
   ['context', q{
 sub L { return (7,8) }
 sub g ($) { print "g [@_]\n" }

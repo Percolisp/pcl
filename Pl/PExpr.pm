@@ -3347,6 +3347,9 @@ sub handle_subcalls {
       my $word_token = PPI::Token::Word->new($func_name);
       my($top_node, $top_id) = $self->make_node_insert('funcall');
       $top_node->{force_user_sub} = 1;
+      # `&CORE::NAME(LIST)` is the BUILTIN with its arity enforced (perl's
+      # pp_coreargs), never the prototype-ignoring & form (#4362).
+      $top_node->{amp_core} = 1 if $func_name =~ /\ACORE::(?!GLOBAL::)/;
       my $c_ids = $self->make_nodes_from_list($next);
       my $node_id = $self->make_node($word_token);
       $self->add_child_to_node($top_id, $node_id);
@@ -5370,10 +5373,22 @@ sub annotate_contexts {
 # no reference slot, no slurpy tail: LIST is passed in LIST context as it
 # stands, whatever the prototype says.  ExprToCL's argument emission asks the
 # same question through here (rule 11).
+# THE predicate (#3859, #4362): does this CALL node take perlsub's "the &
+# form ignores the prototype" rule?  `&NAME(LIST)` does; `&CORE::NAME(LIST)`
+# does NOT -- perl's CORE:: subs check the builtin's own arity at call time
+# (pp_coreargs: `&CORE::ucfirst(1,2)` dies "Too many arguments"), so it
+# lowers as the builtin call.  Asked by call_prototype and by ExprToCL's
+# p-amp-spread, which applied a runtime MACRO head (p-binmode, p-push,
+# p-open) and died "is a macro, not a function".
+sub amp_ignores_prototype {
+  my ($call_node) = @_;
+  return 0 unless (Scalar::Util::reftype($call_node) // "") eq "HASH";
+  return ($call_node->{force_user_sub} && !$call_node->{amp_core}) ? 1 : 0;
+}
+
 sub call_prototype {
   my ($self, $call_node, $func_name) = @_;
-  return undef if (Scalar::Util::reftype($call_node) // "") eq "HASH"
-                   && $call_node->{force_user_sub};
+  return undef if amp_ignores_prototype($call_node);
   return undef unless $self->environment && defined $func_name;
   return $self->environment->get_prototype($func_name);
 }

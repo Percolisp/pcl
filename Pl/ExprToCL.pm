@@ -3400,8 +3400,10 @@ sub gen_funcall_form {
   # entries, `&is(@pair)`) cannot, so the & call SPREADS its arguments at the
   # call (p-amp-spread).  After the copy-back above: it names the call's
   # argument positions.
+  # Never for `&CORE::NAME(LIST)` (#4362, Pl::PExpr::amp_ignores_prototype).
   $call = ['p-amp-spread', $call]
-    if $force_user && $user_call && ref $call eq 'ARRAY' && @$call > 1;
+    if $force_user && $user_call && Pl::PExpr::amp_ignores_prototype($node)
+    && ref $call eq 'ARRAY' && @$call > 1;
   return _copy_back_wrap($self->_gen_funcall_tail($call, $ctx, $func_name, $force_user), $cb)
     if @$cb;
 

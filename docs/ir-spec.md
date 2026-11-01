@@ -2160,6 +2160,16 @@ with a fixed lambda list (the TAP entries) cannot.
     sub g ($) { print "[@_]" }  sub L { (7, 8) }
     &g(L());          # [7 8] -- (p-amp-spread (pl-g (pl-L))), L in list context
 
+**Never for a `CORE::`-qualified name (normative, s532a, #4362).**
+`&CORE::NAME(LIST)` is the BUILTIN called with its own arity (perl's
+pp_coreargs: `&CORE::ucfirst(1,2)` dies "Too many arguments"), so it lowers
+as the builtin call, never `p-amp-spread` -- the one predicate is
+`Pl::PExpr::amp_ignores_prototype` (force_user_sub and not `amp_core`).  A
+runtime MACRO head (`p-binmode`, `p-push`, `p-open`) cannot be applied, and
+`p-amp-spread` refuses one at expansion time.  `&CORE::binmode(\*STDOUT)` ->
+`(p-binmode ...)`.  NOT modelled: the coreargs arity CHECK itself (#1577):
+`&CORE::exit((1)x2)` exits with 2 where perl dies "Too many arguments".
+
 Three sites read that same rule, and each was a silent wrong before it:
 
 * **A LIST SLICE's list and its INDEX list are always LIST context.**
