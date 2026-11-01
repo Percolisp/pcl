@@ -2,6 +2,16 @@
 
 Append new entries at the top. One section per session.
 
+## Session 531 (Opus 5.5 reviewing session, 2026-11-01) -- the verdict-register plan reviewed by Fable 5.1 (REWORK SMALLER), two batches merged (MAIN-READY-61 s531c, -62 s531b), three batches checkpointed at the session end
+
+**The USER's word:** three subtasks at a time, Opus 5.5 at xhigh effort.  Asked the s530 proposal's open question (the companion suite in the same batch or later), the USER had **Fable 5.1 review the whole plan** and decide -- the USER was not certain about the plan itself.  The review (`docs/test-verdict-register-proposal.md` "## Review (s531, Fable 5.1) -- RULED") found the three-way split already answered by `PCLCauses::cause_class` (s486a) and ruled **no new register**: harden the existing cause column (leading-marker grammar, a key-only gate validator + CLOSE-WITH-ROWS, a perl oracle for the board -- the proposal's "the board already runs perl" was false -- the SKIP verdict, stable `ns-` ids, an idempotent migration); the companion suite moves with #1836 after the v0.2.0 tag.  The old s531b was split: s531b = that hardening, s531d = its one-file causes.
+
+**Merged:** **MAIN-READY-61 = s531c** (#4083 the PCL half: a method named like a statement modifier no longer splits -- 157 Template-Toolkit rows pass, 153 re-caused to the PPI half #4201; #3851 glob-alias prototypes; #4140 interpolated `@{name[...]}`; #4101 string eval inherits `use re` flags; #4020 `*main::{HASH}` reads the stash; #4103 dissolved into #932, which now also holds core Text::Wrap; gen v2-9900; gate 347 / 11,685).  **MAIN-READY-62 = s531b** (the cause column hardened; on code ade297e7 the board reads FAIL 133 -> 66, SKIP 67, PASS / PARTIAL unchanged; not-ok rows 1,249 ours / 793 ruled / 6 perl's; gate 348 / 11,692; filed #4181-#4187, among them #4184 -- `ok(new Foo, "x")` passes "x" to `new`, a silent wrong).  Merge checks: s531c's rebase was records-only (code tree byte-identical to the one it gated), probes perl -> base -> tree all tree = perl except the deliberately-deferred stash WRITE; s531b fast-forwarded, the validator STRICT against the live task store PASS.
+
+**Not merged (checkpointed at the session end; resume from each worktree's `scratch/<label>/STOP.md`):** s531a (the multi-file board causes), s531d (the one-file causes + #4205), s531e (the PPI batch: #4201 fixed on its clone -- Grammar.pm drops 6 -> 0 -- and #3962 catalogued as §59; NOT pushed to `pcl`).  An account rate limit stopped all three at ~04:3x; their queued heavy legs died with them; resumed at 05:5x, then checkpointed when the USER ended the session.
+
+**Lessons:** a question put to the USER about a plan the USER is unsure of is better routed to a reviewer who may also reject the plan's shape (the review's REWORK verdict made the batch smaller); an account rate limit kills the agents AND their queued heavy legs -- the resume message must say which legs to re-queue.
+
 ## Session 530 (Fable, 2026-10-31) -- TWELVE batches merged (MAIN-READY-49..60), three heavy slots, the CPAN whole-file FAIL review + the verdict-register proposal, the speed A/B
 
 **The USER's word:** three subtasks at a time (later in the day: no more subtasks this session).  The box had rebooted; the three s529 checkpoints (s526w2, s527b, s527c) resumed from `s530/resume-*.md`.
