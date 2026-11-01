@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531c (Opus agent, 2026-11-01), from #4020's probes.  PRE-EXISTING (base ade297e7 identical).  SILENT WRONG (rare spellings; no board row known).\n\n    package Foo; sub bar {} package main;\n    my $g = *Foo::; print \"1 $g\\n\";\n    print \"2 \", (\\%Foo:: == \\%Foo:: ? \"same\" : \"diff\"), \"\\n\";\n    print \"3 \", ref(*Foo::{SCALAR}), \"\\n\";\n    print \"4 \", \"\" . *main::, \"\\n\";\n  perl 5.40.3: 1 *main::Foo:: / 2 same / 3 SCALAR / 4 *main::main::\n  PCL:         1 1            / 2 diff / 3        / 4 HASH(0x3)\nProbe: scratch/s531c/p/stash4.pl in the s531c worktree.\n\nMechanism: the spelling `*Pkg::` (and `%Pkg::`) compiles to `(p-stash \"Pkg\")`, a FRESH snapshot hash per evaluation (ir-spec \"The stash as a hash\"), so a stash glob VALUE is a hash table: in scalar context it is its count (`my $g = *Foo::` -> 1), stringified it is `HASH(...)`, two `\\%Foo::` are two tables.  s531c (#4020) taught p-glob-slot that such a value IS a stash glob (`%p-stash-glob-pkg`: a hash in *p-stash-pkg-table*, or an empty-named typeglob from `*{\"Pkg::\"}`) for the HASH / NAME / PACKAGE / GLOB slots; the glob VALUE itself (its string, its scalar-context value, its identity) and the SCALAR slot are this task.  Fix shape to measure: the scalar-context / stringify readers of a p-stash view answer the glob name `*main::Pkg::` (one predicate, %p-stash-glob-pkg), and `\\%Pkg::` returns one cached view per package (identity) -- inside the s522 deferral (a live stash object stays deferred).\n",
+   "id" : "4204",
+   "status" : "pending",
+   "subject" : "A stash glob as a VALUE is the p-stash snapshot hash, not a glob: `my $g = *Foo::; print $g` prints `1` (perl `*main::Foo::`), `\"\" . *main::` prints `HASH(0x3)`, `\\%Foo:: == \\%Foo::` is false, `*Foo::{SCALAR}` is undef -- silent wrongs"
+}

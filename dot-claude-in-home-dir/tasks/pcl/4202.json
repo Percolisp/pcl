@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531c (Opus agent, 2026-11-01), from #4083's non-keyword-position probes.  PRE-EXISTING (base ade297e7 identical).  LOUD (a drop).  Rare in real code (no board / everyday row known).\n\n    sub unless { \"U(@_)\" }  sub while { \"W(@_)\" }\n    print &unless(5), \" \", &while(6, 7), \"\\n\";\n    print main::unless(8), \"\\n\";\n  perl 5.40.3: U(5) W(6 7) / U(8)\n  PCL: PCL: statement dropped ... line 2: print &unless(5), ... -- statement keyword `unless` used as a function   (the qualified `main::unless(8)` works)\nProbe: scratch/s531c/p/amp.pl in the s531c worktree.\n\nPPI reads `&unless` as ONE Symbol (correct).  The refusal is Pl/ExprToCL.pm gen_funcall_form's #374 guard (`statement_keywords->{ $fn->content }` -> die), reached with a Word `unless` -- so the `&NAME` Symbol is turned into a plain funcall Word somewhere upstream (PExpr's `&NAME(LIST)` path, #3859's p-amp-spread neighbourhood) and the guard cannot tell it came from an `&`.  Fix shape: the `&`-call keeps its origin to the guard (or the guard asks the node's form), so only a BARE keyword reaching the funcall generator is refused.\n",
+   "id" : "4202",
+   "status" : "pending",
+   "subject" : "`&unless(5)` / `&while(6, 7)` -- an `&`-call of a user sub named like a statement keyword is refused (\"statement keyword `unless` used as a function\") and the statement dropped; perl calls the sub (an `&NAME` is never a keyword)"
+}

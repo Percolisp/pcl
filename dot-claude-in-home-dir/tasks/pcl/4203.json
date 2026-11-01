@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531c (Opus agent, 2026-11-01), the next cause of YAML-PP t/32.cyclic-refs.t once #3851 let its first `warning_like { ... } qr{...}, \"d\";` call parse.  LOUD (a die; the file stops after row 1).\n\n    use Test::Builder; my $re = Test::Builder->new->maybe_regex(q{/ab+c/i}); print \"$re\\n\";\n  perl 5.40.3: (?i)ab+c\n  PCL: Can't locate object method \"maybe_regex\" via package \"Test::Builder\"\nTest::Warn 0.37 lib/Test/Warn.pm:418 `if (my $re = $Tester->maybe_regex($exp_msg)) { #qr// or '//'` -- every warning_like / warnings_like call.\n\nWhere: cl/pcl-test.lisp's Test::Builder object (the \"every OTHER Test::Builder method is deliberately absent\" list, ~line 1600).  The reading already exists as %test-more-maybe-regex (#3436: `/RE/flags` and `m<d>RE<d>flags`, else NIL) plus the qr// arm (a qr object passes through): `|Test::Builder|::pl-maybe_regex` returns the qr object, the `(?MODS)RE` string, or undef -- Test::Builder's own sub.  A HARNESS change (cl/pcl-test.lisp): the WHAT-TO-RUN-WHEN harness row applies (full sweep + `--all --quick` companion per batch), which is why s531c did not add it beside #3851.\nROWS: YAML-PP-v0.39.0-0 32.cyclic-refs.t *PLAN* (re-caused from #3851 to this task by s531c; perl 8 rows, PCL 1).\n",
+   "id" : "4203",
+   "status" : "pending",
+   "subject" : "PCL's TAP layer has no `Test::Builder->maybe_regex` method: Test::Warn's warning_like / warnings_like die \"Can't locate object method \\\"maybe_regex\\\" via package \\\"Test::Builder\\\"\" (YAML-PP t/32.cyclic-refs.t, after #3851)"
+}
