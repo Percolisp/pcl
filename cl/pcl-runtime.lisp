@@ -15908,13 +15908,28 @@ which is one of #1140's escape spellings (probed)."
                   (add-element (%p-flatten-list e)))
                  ;; Vector (array) - flatten its contents, preserving bless class
                  ((vectorp e)
-                  (loop for item across e do (%p-array-store-scalar result item)))
+                  (loop for item across e do (add-item item)))
                  ;; List - flatten its contents, preserving bless class
                  ((listp e)
-                  (loop for item in e do (%p-array-store-scalar result item)))
+                  (loop for item in e do (add-item item)))
                  ;; Scalar value - preserve bless class via %p-array-store-scalar
                  (t
-                  (%p-array-store-scalar result e)))))
+                  (%p-array-store-scalar result e))))
+             (add-item (item)
+               ;; One item of a flattened group.  A NESTED group -- a raw
+               ;; non-string vector, a cons, a raw hash or the %ENV marker --
+               ;; is a list inside the list (`[ $p ? ((7) x $n) : () ]`, the
+               ;; ternary's vector holding p-list-x's) and spreads like the
+               ;; canonical flatten's walk (%p-flatten-list-general); it used
+               ;; to be stored as ONE element, a reference (task #4205).  A
+               ;; reference is always a p-box, never a raw vector, so nothing
+               ;; that IS a value is re-spread.  Raw nil keeps its old arm.
+               (if (or (consp item)
+                       (hash-table-p item)
+                       (and (vectorp item) (not (stringp item)))
+                       (%p-hash-marker-p item))
+                   (add-element item)
+                   (%p-array-store-scalar result item))))
       (dolist (elem elements)
         (add-element elem)))
     result))
