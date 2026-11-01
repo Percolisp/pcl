@@ -3775,7 +3775,9 @@ still printed `*PKG::NAME`) that receives the scope's four slots and its IO;
 then the old slots, IO and glob alias come back.  A REFERENCE `\*NAME` taken
 in the scope is a ref to the GV and keeps following the name (`p-backslash`
 drops it from the scope).  With no glob value taken, a handle an `open` in
-the scope gave the glob is closed at the scope's end, as perl frees the GP;
+the scope gave the glob is closed at the scope's end, as perl frees the GP --
+the IMPLICIT close of §7.5a (task #4361): a pipe's child is reaped and `$?`
+keeps its value;
 an aliased handle (`local *FH = *STDOUT`, `= $fh`) is never closed.  The
 standard handles and ARGV / ARGVOUT keep their own IO localization.
 

@@ -29,6 +29,17 @@ not-supported.md → only then probe.*
 - Rulings written into `s532/SHARED-BOX.md` THE QUEUE: **#4061** = the first ARRAY/CODE bless recorded in #4000's referent table, READ ONLY on the unblessed path behind a second flag, bench-bounded; **#4165** = the source SIZE joins the mtime in `p-cache-valid-p`; the full source hash is not built.
 - The round companion's 20 NEW rows on MAIN-READY-63 are attributed by s531d (bisect per file); the review named four from the diff (§6).
 
+## s531d (2026-11-01 .. 11-02, Opus; resumed in s532) -- the CPAN board's whole-file failures, part 2 (the one-file causes): #4205 #3556 #3822 #3553 #3551 (+ #3827 shape 1) fixed; #1749 left to s531a, #4361 fixed (a regression on main); the ROUND ATTRIBUTION of the MAIN-READY-63 companion; runtime + harness only, emission identical
+- **#4205** (SILENT WRONG): p-array-init's vector / list arms send a NESTED group (raw non-string vector, cons, hash, %ENV marker) back through add-element, the canonical flatten's recursion -- `[ $p ? ((7) x $n) : () ]` is two elements; a reference is always a box, never re-spread.  Guard `Pl/t/anon-array-flatten-01.t`.
+- **#3556**: exec / system / pipe-open LIST words are `to-string` of the BOX (the `""` overload runs, perl's SvPV), never of the unboxed referent.  ir-spec §exec; guard `system-block-01.t` row 46.
+- **#3822**: the transpiler's perl is `*p-transpiler-perl*` = the first `perl` on the PATH at PROCESS START (load time + an init hook), used by p-transpile-file, the eval server and the compiler stamp; never a spawn-time PATH search (a program's `$ENV{PATH}` is a real setenv).  ir-spec §cache keys; guard `Pl/t/transpiler-perl-01.t`.
+- **#3553** (harness): is_deeply applies Test::More's `_unoverload_str` at the top and every level (`%test-unoverload-str`: a class with a `""` overload, inherited counts, `0+` alone does not).  Guard `tap-assert-01.t` row 14.
+- **#3551 + #3827 shape 1** (SILENT WRONG): p-cast-$'s box arm answers the referent BOX for a hash / array / code payload (the symbolic arm's #3394 rule) -- `${ \$x }`, `${ f() }`, `${ scalar($r) }`, an overload handler's `${$_[0]}` no longer hand out the bare payload.  #3827's `$$$a` chain shape is a different mechanism and stays open.  ir-spec §raw slot; guard `Pl/t/scalar-deref-value-01.t`.
+- **#1749 belongs to s531a**: its M1 ported #3650 (pack U0) and runs #1749's acceptance; s531d does not touch `cl/pack-impl.pl`.
+- **#4361** (REGRESSION from s529a #3868): the scope-exit close of a `local *NAME` handle is the IMPLICIT close -- `%p-close-implicit`, the one helper `%p-scope-close` already used (reap the pipe child, keep `$?`, keep `$!`); never `%p-close-impl`.  ir-spec §local *NAME; guard `local-glob-01.t` row 16.
+- **Round attribution (DECIDED ## s519 duty, handed to s531d)**: a companion mover is bisected with one-file runs over the MAIN-READY merge commits; with `run-perl-suite.pl`'s 500-row log cap a row ABSENT from a capped fails file is unknown past the cap's last perl row, and a NEW `(missing)` row beyond the old cap is "never produced", not a regression (op/coreamp.t).  Table in the session log; rows in the four companion baselines.
+- Filed: #4221 (Mojo-DOM58 dom.t residue, UNREDUCED), #4222 (`-NAME LIST` names a sub by the negated form; parser.t "-F"), #4223 (= #4361, duplicate), #4224 (`wait` with no child leaves `$?`).  Not reached: #3835 #4104 #3862 #3830 #135 #4087 -- re-queued by the s532 review (s532a / s532c / s532d).
+
 ## s531a (2026-11-01, Opus) -- the CPAN board's whole-file failures, part 1: #3282 (via #3650) #1815 #3831 + #3696 #1688 #1705 #3821 fixed; generation v2-10100
 - a pack/unpack template that BEGINS with U is U0 character mode (#3650, the USER-lifted one rule; s523c's checkpoint ported, bench no cost) -- JSON-PP 099_binary 1536/1536 x 16 (#3282); guard Pl/t/pack-u0-01.t.
 - an @INC element that is a REFERENCE is a hook, called in its place by require / require "x.pl" / do FILE (#1815); the directory resolver p-find-module-in-inc never calls one; ir-spec 9.0b; guard Pl/t/inc-hook-01.t.
@@ -73,15 +84,6 @@ not-supported.md → only then probe.*
 - **The board's split** = not-ok rows ours / ruled / perl's / harness / unblessed + "M assertions never reached behind K whole-file rows (J ours)", per dist and in TOTAL (`--causes`, which `tools/cpan-board.sh` passes); `cause-census.pl --by-id` = the ruled cost per id.
 - **`tools/migrate-causes.pl` is KEPT and IDEMPOTENT** (`--check` lists what it cannot map); a decided row is a `%HAND` entry keyed (dist, file, description [, #num]) so a rebase re-run reproduces it.
 - **#8212 is not a key** (a character code inside a note; Pod-Simple encod04.t is keyed on the open #1389): the board had 20 bad keys, not 21.
-
-## s531d (2026-11-01, Opus) -- the CPAN board's whole-file failures, part 2 (the one-file causes): #4205 #3556 #3822 #3553 #3551 (+ #3827 shape 1) fixed; #1749 left to s531a; runtime + harness only, emission identical
-- **#4205** (SILENT WRONG): p-array-init's vector / list arms send a NESTED group (raw non-string vector, cons, hash, %ENV marker) back through add-element, the canonical flatten's recursion -- `[ $p ? ((7) x $n) : () ]` is two elements; a reference is always a box, never re-spread.  Guard `Pl/t/anon-array-flatten-01.t`.
-- **#3556**: exec / system / pipe-open LIST words are `to-string` of the BOX (the `""` overload runs, perl's SvPV), never of the unboxed referent.  ir-spec §exec; guard `system-block-01.t` row 46.
-- **#3822**: the transpiler's perl is `*p-transpiler-perl*` = the first `perl` on the PATH at PROCESS START (load time + an init hook), used by p-transpile-file, the eval server and the compiler stamp; never a spawn-time PATH search (a program's `$ENV{PATH}` is a real setenv).  ir-spec §cache keys; guard `Pl/t/transpiler-perl-01.t`.
-- **#3553** (harness): is_deeply applies Test::More's `_unoverload_str` at the top and every level (`%test-unoverload-str`: a class with a `""` overload, inherited counts, `0+` alone does not).  Guard `tap-assert-01.t` row 14.
-- **#3551 + #3827 shape 1** (SILENT WRONG): p-cast-$'s box arm answers the referent BOX for a hash / array / code payload (the symbolic arm's #3394 rule) -- `${ \$x }`, `${ f() }`, `${ scalar($r) }`, an overload handler's `${$_[0]}` no longer hand out the bare payload.  #3827's `$$$a` chain shape is a different mechanism and stays open.  ir-spec §raw slot; guard `Pl/t/scalar-deref-value-01.t`.
-- **#1749 belongs to s531a**: its M1 ported #3650 (pack U0) and runs #1749's acceptance; s531d does not touch `cl/pack-impl.pl`.
-- Not reached (budget): #3835 #4104 #3862 #3830 #135 #4087.  Filed: #4221 (Mojo-DOM58 dom.t residue after #3551, UNREDUCED).
 
 ## s527g (2026-10-31, Opus) -- PCL's PPI, batch 5 tokenizer rows: #4100 = §14's operator / builtin half (group AH, second pair) and §43 keyword-named lexical subs (group AL) fixed on `pcl` (`dd90e749` -> `c4d0da86`); §42 handed over, §40 not done
 - **#4100 is §14, not a new §58**: `<...>` where a term is expected (after an operator, after a builtin taking an operand, at a document start) is one readline -- PPI `Tokenizer::_term_expected` (the `~~` test, moved and shared); `docs/ppi-upstream-bugs.md` §14d.
@@ -1230,7 +1232,6 @@ not-supported.md → only then probe.*
 - **Queue position: s496a = the correctness slot after s494g; s494p #2098 = the perf slot when s495f's slot frees** (the interleaved plan, one perf + one correctness).
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
-
 ## s499f (2026-09-27, Opus) -- perf round 36: the three RUN-phase levers from real programs, sized first and shipped by measured gain (#2424 hash copy, #2425 `**`, #2198 map copies)
 - **Round 36 ORDER = measured real-program gain** (USER ruling 2026-09-27): sizing A/B (patched saved cores through `pcl`, warm, interleaved best-of-5, control pair) = #2424 Mian-Chowla -43.3 % > #2425 Digit-fifth-powers -16.4 % / Disarium -13.7 % > #2198 Perfect-shuffle -12.2 %; all >= 5 %, all shipped; faster-codegen §0.2s.
 - **#2424 `%a = %b` from a TABLE source = key-by-key copy** (`%p-hash-fill-from-hash`: keys raw, values by `%p-make-hash-entry`); `%h = %h` keeps the snapshot path; **`my %h = %src` binds a PRESIZED table** (`%p-let-presize` at `p-let` expansion -> `%p-make-hash-like`, > 16 keys); no emission change.
@@ -1851,7 +1852,6 @@ not-supported.md → only then probe.*
 - **#1604 the USER's GitHub-settings checklist** — description, topics, making the ghcr.io package public after the first run, the v0.1.0-vs-v0.1.1 release decision, the license-badge remedy, branch protection.  In the session-log record.
 - The empty untracked `memory/` at the repo ROOT is removed; the one comment naming it (PCLLicense.pm) is corrected.
 - **Bar**: gate 233 files / 8049 rows, only the 13 pclxs xs rows failing (the standing state); `tools/corpus-diff.pl bb5a6d77` IDENTICAL over 111 files, silent drops 5 unchanged, shapes identical (no generation bump — a load-path push is not emission); `tools/ir-conform --jobs 2` 321 pass / 0 fail / 24 known / 0 stale; full sweep GATE clean, **TOTAL passing 18675 (+0)**, drops 5 = census; `tools/t/install-container.t` + `install-pcl.t` + `sbcl-prefix.t` green on the final tree; bench `json-rt` 1.72× / `textproc` 3.27× (Fable's quiet-box board the same session: 1.85× / 3.40×).
-
 
 ## s481b (2026-09-10, Opus) — #1607 MEASURED: the critical-infrastructure milestone is **1 of 21** (Getopt::Long); two fillers shipped; nine bugs filed
 
@@ -3175,7 +3175,6 @@ not-supported.md → only then probe.*
 - **Legs on the final tree `ea34c0f` (Fable):** gate 193 / 6557 (only the 13 pclxs xs rows); sweep TOTAL 18266 (+0 against the row-edited baselines: 18346 → 18265 by AY's honest restorations, +1 by AW's bop.t row), GATE clean, drops 5 = census; bench K=3 ALONE on the box, PCL absolute seconds main vs an 80b715c worktree: slices 0.2027 → 0.1687 (**3.01× → 2.54×**), ovlsub 0.1371 → 0.1356, arrhash 0.0815 → 0.0843, fib(27) 0.4152 → 0.4117, gcdrec 0.0944 → 0.0947, symref 0.0319 → 0.0319 — every row but slices inside the ±5 % band; Fable probes: ovl.pl 37 rows (AW) and ay.pl 16 rows (AY's findings re-probed, 12 reproduce on main), both PCL_OPT paths.  Records commit `be5c611` + this fix-up; CI to check next session.
 - Filed this session in total: #987, #988, #993–#996, #1000–#1008, #1010–#1012, #1020–#1033.  Round-22 worktrees: AW/AX prunable; **AY's `scratch/` (128 probe files the filed tasks cite) is copied to the session scratchpad and the worktree is KEPT until the probes are re-homed.**
 
-
 ## s464aw (2026-09-02, Opus, round 22) — #987: AN EVAL IS A FRAME (the sibling of #964's sub-frame leave rule)
 
 - **perl's `pp_leaveeval` mortal-copies the value an `eval { }` or a string `eval` leaves with, exactly as `pp_leavesub` does at a sub's exit** — and #964 deliberately scoped that out, so the eval frame still handed the caller the variable's own box and every aliasing consumer wrote through it.  EIGHT probe rows leaked, identically under `PCL_OPT=none`: `for (eval { $x }) { $_ = 5 }`, `\eval { $x }`, the two string-eval twins, `eval { @l }` in a foreach, `eval '@l'`, `eval { %h }`, and an `@_`-writing callee given `eval { $x }`.
@@ -3416,7 +3415,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
 - **USER RULING (2026-09-01): the RETURN PROTOCOL is a BIG change and is done ONLY AFTER round 20 is merged, as its own task** — #964 (an ordinary sub returns the BOX of a returned scalar variable, so foreach/map/grep/`\f()`/an `@_`-writer write into the caller's variable; perl copies unless `:lvalue`) together with #930's scalar half (`:lvalue` subs) as ONE switch at the return site under ONE owner of the return family, never bundled with a perf slot.  Found by a USER question; the suite HAD the row (t/op/sub.t "result of shift is copied when returned") and it was disarmed twice — commented into `ok(1,'SKIP')` in the sweep copy with a wrong rationale, and inside a blessed DIFF in the companion — while the Pl/t guard named for it tests a sub-local `my` and asserts only "ok".  **#965**: 132 such inline `ok(1,'SKIP')` rows remain in perl-tests (runbook §5's unfinished migration) — a filler in chunks, sub.t first with #964.
 - Record: session-log §463f (part 2).
 
-
 ## s463au (2026-09-01, Opus agent AU, round 20) — the empty list is a VALUE, and a magic-lvalue window's TARGET is a place in all three write spellings
 
 - **A FAILED `m//` ANSWERS BY CONTEXT AND BY NOTHING ELSE (#962 = #459, both
@@ -3495,7 +3493,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
 - **Two tooling lessons, recorded in memory**: `pkill -f`/`pgrep -f` kills the calling shell when the SAME command line mentions the pattern's text anywhere else (a heredoc, a `setsid bash -c` string) — long chains go in a SCRIPT FILE; and the Agent tool's worktree isolation branches from the SESSION-START commit, not main's HEAD at launch — every agent is told its real base and to rebase first.
 - Bars on 6e6f191: gate COLD 191 files / 6498 rows (only the 13 pclxs xs rows; `~/pclxs` is ABI 8 vs pin 6, standing); sweep TOTAL 18343 (+0) GATE clean, drops 5 = census, 4 UNSTABLE = crash-file noise; companion `--dir re --quick` 80 files, the two movers above; bench (quiet, K=3) strcat 2.21×, ovlsub 3.36× (PCL 0.129 s, under the record), regexg 2.21× — held.
 - Round 20: AU = #962(=#459) → #960 → #920 → #938(3); AV = #950 measured at K=5 + speed-3 note harvest + core compile time → §0.2f bench re-tabulation → worst lagging runtime row, profile-then-fix.  Ownership and IDs in memory (`project_s421_opus_agents_inflight`).  Filed: #963 (round-21 correctness pool).
-
 
 ## s462at (2026-09-01, Opus, round 19 correctness slot) — #939 + #934 + #940 SHIPPED; #936 sized and declined
 
@@ -7513,7 +7510,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   edited row by row; census 32/104 → 29/94; gen v2-175; guard
   `Pl/t/elided-call-01.t`.  #411 CLOSED; B3.2 (#259) and B3.3 (#374(b)) remain.
 
-
 ## s428 (2026-08-22, Fable) — s427 reviewed + APPROVED + merged (ff, `821f0bb`); generation v2-174 (`53dcd2e`); round 2 of the Opus fan-out complete
 
 - **s427 (O3: #442, #422.2, #421, #415 items 1+4) APPROVED as shipped**, merged
@@ -7570,7 +7566,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   TOTAL passing baseline 18365 / current **18365 (+0)**, drops census 7 /
   current **7 (+0)**, 0 new / 0 fixed (7 unstable = crash-file noise, 10
   unverified inside the same aborted files).  Neither baseline touched.
-
 
 ## s427 (2026-08-22, Opus) — O3 fillers: #442, #421, #422.2, #415
 
@@ -7771,7 +7766,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   consumer 2 = O4; the narrow `is_filehandle` gate stands (#434); #435 fragment
   re-parses skip the #410 repair; **launcher rule: per-agent generation strings
   get a GAP above main** (B's rebase renumber landed on F's key).
-
 
 ## s424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE differ by the EXISTING `is-ref` flag; no new slot
 
@@ -8614,7 +8608,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   shell command and left a file named `{_v2_embed}` in the tree).  Write
   commit messages to a file with a quoted heredoc and `git commit -F`.
 
-
 ## s411 (2026-08-18, Fable) — #379: the one-compiler plan; the duplicate-code census; structural first (USER)
 
 - **STRUCTURAL FIRST, NOT AT ANY COST (USER 2026-08-18)** — the queue is
@@ -8772,7 +8765,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   if if if` deparses to `(my $x = if()) if if()` — the middle `if` is the
   modifier keyword.  Fix is in the renamer's classification; exotic; behind
   Option B phase 2.  → task #374, answers §2.3.
-
 
 ## s408 (2026-08-16, Opus 5) — an eval-mode DROP dies (#363); `qq {…}` (#375)
 
@@ -8970,7 +8962,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   Recipe: `tools/drop-census.pl` (counts) + **`tools/drop-harvest.pl`** (the
   TEXT — new s407).
 
-
 ## s406 (2026-08-16, Opus 5) — #348 lands, one gate transpile helper (#355), the compiler's own leak (#128)
 
 - **A self-referential closure (`my $w; $w = sub { … $w->(…) … }`) is BANNED in
@@ -9145,7 +9136,6 @@ the per-element rule is `%p-leavesub-element`, not the scalar rule** — a raw a
   → task #355.
 - **#353 folds into session B** (one-line compiler change; B owes a sweep
   anyway; acceptance = the six companion files + one guard row).  → §4.
-
 
 ## s402 (2026-08-15, Opus 5) — the drop family gets a voice, a runner column and a spec promise
 

@@ -37,6 +37,45 @@ Append new entries at the top. One section per session.
 
 **Gate at the end:** 346 files / 11,660 rows PASS; sweep 18,761 +0; EVERYDAY 116 of 122; CI green on every push.
 
+## Session s531d (Opus agent, 2026-11-01 .. 11-02) -- the CPAN board's whole-file failures, part 2 (the one-file causes): #4205 #3556 #3822 #3553 #3551 (+ #3827 shape 1) fixed, runtime + harness only, emission identical; resumed in s532: #4361 fixed (a regression on main) and the ROUND COMPANION ATTRIBUTION of MAIN-READY-63
+
+**#4205 (SILENT WRONG).**  `p-array-init`'s vector / list arms stored a NESTED group (a raw vector, a cons, a hash, the %ENV marker) as ONE element, so `[ $p ? ((7) x $n) : () ]` was `[ARRAY(..)]`; a local `add-item` now sends a nested group back through `add-element`, the canonical flatten's recursion, and stores anything else as before (a reference is always a box, so nothing is re-spread).  The launch block's spellings (`[ (1, (2, (3))) ]`, `[ ((1) x 2), ((2) x 0) ]`, `[ $c ? (1, (2)) : () ]`) = perl.  Guard `Pl/t/anon-array-flatten-01.t` (2 rows, row 1 fails on ade297e7).  Board: Template-Toolkit table.t 21/0 (one-file, over s531c's #4083), rows 5 / 9 left.
+
+**#3556.**  exec / system (LIST and `{ PROG } LIST`) and the fork-pipe LIST open took the string of the UNBOXED value, which for a blessed array / hash object is the referent (`ARRAY(0x..)`); they now take `to-string` of the BOX, perl's SvPV, so a `""` overload runs.  Guard `system-block-01.t` row 46.  Board: Path-Tiny locking.t 2/0, rows 1-2 left.  Companion: op/filetest.t "-l \*foo is a file name" passes (`system 'ln', '-s', FILE, \*foo` made no link: 374/62 -> 375/61, probed perl / 436d82e4 / tree).
+
+**#3822.**  The transpiler's perl is `*p-transpiler-perl*`, the first `perl` on the PATH the PROCESS started with (computed at load and by an init hook at every image boot), used by `p-transpile-file`, the eval server and the compiler stamp; a program that sets `$ENV{PATH}` no longer loses its later run-time transpiles.  Guard `Pl/t/transpiler-perl-01.t` (3 rows; a PATH whose only `perl` is a failing stub, so the row means the same on CI).  Board: URI cwd.t 1/0 (cold cache), its row left.
+
+**#3553 (HARNESS).**  `is_deeply` applies Test::More's `_unoverload_str` at every level (`%test-unoverload-str` in `cl/pcl-test.lisp`: a class with a `""` overload, inherited counts, `0+` alone does not).  Guard `tap-assert-01.t` row 14.  Board: Path-Tiny mutable_tree_while_iterating.t 2/0, rows 1-2 left.
+
+**#3551 + #3827 shape 1 (SILENT WRONG).**  `p-cast-$`'s box arm handed out the referent's bare PAYLOAD for a reference VALUE (through a variable it already returned the box): Mojo::DOM58's `""` handler `${$_[0]}` reached a method as a raw hash and `my $self = shift` stored its key count.  A hash / array / code payload now answers the referent BOX (the symbolic arm's #3394 rule, one function).  Guard `Pl/t/scalar-deref-value-01.t` (3 rows).  Board: Mojo-DOM58 dom.t row 1 passes, its residue = #4221 (filed, UNREDUCED); HTTP-Message message.t 86 / 87 left.  Companion: op/decl-refs.t "first retval of my (\@f, @g) is \@f" passes (`${$ret[0]}` of `\my (\@f, @g)`; probed on ef92157e = the commit before: not ok).  #3827 shape 2 (the `$$$a` chain) is a different mechanism and stays on the task.
+
+**Not reached:** #3835 #4104 #3862 #3830 #135 #4087 -- re-queued by the s532 review (#3862 -> s532a, #3830 -> s532d, the hunts -> s532c).  #1749 went to s531a (its #3650 port).
+
+**#4361 (REGRESSION on main, s529a #3868; handed over by the s532 merge review).**  The scope-exit close of a handle a `local *NAME` scope opened went through `%p-close-impl`, the EXPLICIT close, whose pipe arm stores the child status: `{ local *NIL; open NIL, "| ... exit 23"; $? = 42 }` left `$?` = 5888, perl 42.  It now calls `%p-close-implicit`, the one implicit close `%p-scope-close` already used (factored out of it: reap the child, keep `$?`, keep `$!`).  Guard `Pl/t/local-glob-01.t` row 16 (fails on a `10cdc985` extraction -- the bug is on main, not on d47caabe).  io/pipe.t one-file 22/11 -> 23/10.  #4223 (filed by this batch at the same moment) is its duplicate.
+
+**The round attribution (DECIDED ## s519, handed to s531d).**  The MAIN-READY-63 companion `--all --quick` (`~/pcl-agent-scratch/s531/merge/companion-quick.log`: 20 NEW / 39 FIXED / 3 LOST) against the last blessed read (s528's round-5 full run on d47caabe): the 13 mover files run one-file on `git archive` extractions of all 13 MAIN-READY merges between (four bounded legs, `scratch/s531d/bislog/`), main's own `.suitelog` as the end point, `scratch/s531d/bisdiff.pl` diffing each file's fails rows point to point.  One trap: `run-perl-suite.pl` lists only the first 500 diverging rows, so a row absent from a capped file is unknown past the cap's last perl row (op/coreamp.t: 12 of its 16 NEW rows, perl 511-522, were never produced on 9aa02173 either).
+
+| file | rows | merge | task |
+|---|---|---|---|
+| comp/parser.t | NEW 45 "-F calls the F function" | MAIN-READY-50 c65c9dac (s527b: `-F` after `}` is one Word) | #4222 (exposure; `-NAME LIST` head arm of #3344, #476's family) |
+| comp/parser.t | drops 5 -> 4 (`sub 'Hello'_he_said (_);`) | MAIN-READY-54 b14bd795 (s527d AC §46) | -- |
+| op/tr_latin1.t | FIXED gh#17227 | MAIN-READY-50 c65c9dac (s527b) | -- |
+| op/decl-refs.t | FIXED 7 (`state` rows 208-215 produced; 214 fails) | MAIN-READY-51 87ee8368 (s527c) | -- |
+| io/pipe.t | FIXED 25 "child reaped", NEW 24 "status unaffected by implicit close" | MAIN-READY-53 44d39de3 (s529a #3868) | #4361 (fixed here) |
+| re/reg_namedcapture.t | FIXED 1 (`*X{HASH}{X}`) | MAIN-READY-56 9aa02173 (s527e AI §49) | -- |
+| op/coreamp.t | NEW 16 (4 regressions: perl 33 42 61 67; 12 never produced), FIXED 16 (1 genuine, 15 newly reached) | MAIN-READY-57 deb1125d (s530c #3859) | #4362 (s532a fixes) |
+| op/attrs.t | FIXED 127 "referencing closure prototype" (`&::is(@proto, ...)`) | MAIN-READY-57 deb1125d (s530c #3859) | -- |
+| comp/filter_exception.t | NEW 1, 3 (the hook now runs; `int(1,2)` must not compile) | MAIN-READY-63 b31345ca (s531a #1815) | NS:ns-invalid-perl (rows 2/4 re-keyed from the duplicate #1687) |
+| op/require_gh20577.t | FIXED 4 | MAIN-READY-63 (s531a #1815) | -- |
+| op/symbolcache.t | FIXED 2 | MAIN-READY-63 (s531a #3831) | -- |
+| op/each.t + uni/sprintf.t | FIXED 3 + 3 (`pack "U0U"`, `unpack "U*"`) | MAIN-READY-63 (s531a #3650) | -- |
+| op/lexsub.t | SHORTFALL 14 -> 13 | MAIN-READY-59 (s527g §43, its 81/61 -> 83/60) | -- |
+| op/decl-refs.t, op/filetest.t | FIXED 174, "-l \*foo" | this batch (#3551, #3556) | -- |
+
+The 3 LOST files are io/pipe.t (#4361, now fixed), comp/parser.t (#4222) and comp/filter_exception.t (the #1815 exposure).  The four companion baselines were edited row by row (`perl-suite-fails.tsv` 41 out / 19 in / 3 re-keyed; `perl-suite-run.tsv` 13 rows; `row-shortfall.tsv` 4; the drop census's comp/parser.t row 5 -> 4).  Two regressions in the range: #4361 (fixed here) and #4362 (s532a); #4222 is an older bug that s527b's correct PPI change exposed.
+
+**Bars (final tree, code `ca8bbc08` + the baseline edits `238f8390`, rebased onto main b3244e24; reference code sha `10cdc985`).**  Gate `Result: PASS` 357 files / 11,715 rows (main 354 / 11,704 + the batch's 11 guard rows: 8 in 3 new files, 3 in existing ones); full sweep GATE clean, TOTAL passing 18,774 (+0), 0 new / 0 fixed / 0 LOST, drops 5 = census (magic.t / method.t UNSTABLE as on main); corpus-diff vs 10cdc985 IDENTICAL over 111 (runtime + harness only, no generation bump, no artifact); emission-ab lib 57 SAME / 0 DIFF / 0 RCDIFF; ir-conform 328 / 0 / 17 known / 0 stale; ir-host-leak 31 = main; tag-license clean; the companion acceptance of the 14 mover files one-file on the tree after the edits: 0 NEW / 0 FIXED / 0 UNVERIFIED / 0 LOST, no snapshot mover, shortfall and drops match; `EVERYDAY: 116 of 122 identical to perl (95.1 %)` before and after (NEW 0 / FIXED 0 / MOVED 0 / UNEXPLAINED 0 / STALE 0).  `verdict-register-01.t` PASS in the gate; under `PCL_VERDICT_STRICT=1` with the live store row 5 FAILS on 153 board rows keyed on #4201 (completed in the store; s531e's PPI batch, not this one).  The whole-file one-file board runs of the first part stand (locking.t, mutable_tree_while_iterating.t, cwd.t, table.t PASS; message.t 86/87 and dom.t row 1 pass).  No new row needs perl >= 5.40 (the #4361 row runs `sh -c` children).
+
 ## Session s531e (Opus agent, 2026-11-01) -- PCL's PPI batch 6: §58 #4201, §59 #3962, §42 #3749 on the `pcl` branch (groups AO AP AQ) with their PCL halves; #3980 (#4187 half 1), #3946, #4141 the checker and its test; generation v2-10200 (checkpointed at the s531 end, resumed s532)
 
 **§58 #4201.**  PPI's `_round` looked a word up in `%ROUND` without asking whether it follows `->`, so `$factory->if(...)` built a Condition and Template::Grammar dropped six statements.  Group AO (`7bd8dfcd` + `db20f1eb`) skips the table after `->`.  PCL needed nothing (s531c's statement-modifier split); `./pl2cl --module` of Grammar.pm drops 6 -> 0; one-file board runs of the 17 TT files: the 153 rows keyed on #4201 left `baselines/cpan-board14-fails.tsv` by edit (TT blessed rows 261 -> 108; the rebase onto MAIN-READY-63 re-applied the edit to main's re-caused file, the same 153 rows); guard `method-modifier-name-01.t` rows 10-11.
@@ -130,7 +169,6 @@ Bars: gate PASS 345 files / 11,629 rows (+3 / +49); sweep GATE clean, 0 new / 0 
 **Measured (on ddac6e97 unless said).**  PPI suite PASS plain + AUTHOR at every branch commit (71 files).  Report (PCL twin, vendored lib): 241 ok / 32 not ok -> 250 / 23.  Expect raw 1,075 -> 910 (brace-class 154 -> 21, continuation-split 11 -> 0, statement-not-ended 107 -> 96, word-after-term 37 -> 32; data-marker-as-word 2 -> 0 and word-after-sub-name 4 -> 1 are s527d's), pcl 1,025 -> 853.  corpus-diff vs c903838f: 7 files, all the #2610 detector table (a slot word / the orphan `continue` no longer recorded as a bareword call; loopctl.t cmp_ok's site 942 -> 943, its real line); drops 5 = census.  WIDE emission-ab (1,412 files): 47 detector-table-only, the rest explained above (require_errors.t: §54 `*{"\0a"}` no longer a hash; map {; comments; gv.t fixed forward; coreamp / coresubs = s527d).  Full sweep GATE clean, TOTAL passing 18761 (+0), 0 new / 0 fixed / 0 LOST.  Gate-SET vs M0: t/op/gv.t + t/uni/gv.t lose the `$kind` warning (G1), t/op/coresubs.t drops `CORE::__END__` (s527d §44).  Gate (ddac6e97): 342 files / 11,558 rows, the ONE red row = vendor-ppi-01 row 13 (s527d's stamp sections without registry rows on main -- clears at s527d's merge).  `EVERYDAY: 116 of 122` -> 116 of 122 (NEW 0 / UNEXPLAINED 0 / STALE 0).  Generation v2-9100.
 **Push step (after s527d merged, Fable's word).**  Rebased onto main `38616933` (M1's registry / report conflicts kept both sides; the vendor conflicts re-vendored with the tool at each step, never by hand); `pcl-s527e` rebased onto `origin/pcl` `40fed036` (twin conflict: plan 275 + 20 = 295), PPI's suite PASS plain + AUTHOR at all four commits, pushed fast-forward `40fed036` -> `dd90e749`, vendored from `pcl`: the tool lettered the groups **AI** (§49 §54 §57, `52c4e102`), **AJ** (§51, `b23d5869`), **AK** (§50, `dd90e749`) -- registry, catalogue and records re-lettered.  Twins identical row for row (295; PCL's on the vendored lib 273 ok / 22 not ok).  Upstream package regenerated in this worktree (0001-0089 + bundle + PR-AI/AJ/AK).  Artifacts byte-identical.  corpus-diff vs `38616933`: the same 7 files, detector table only; vendor-ppi-01 GREEN; gate **343 files / 11,586 rows, Result: PASS**; WIDE emission-ab 1,412 files: SAME 1,352, DIFF 60 = 53 detector-table-only + 6 comment-text-only (`map {;`, `*x{CODE}` echoes) + require_errors.t's §54 fix, RCDIFF 0; `EVERYDAY: 116 of 122` (recorded at `606f5533`).  Not done (budget): the §52 / §53 Lexer halves and #3981 (§44's statement class) -- catalogued + registered.
 
-
 ## Session s530a (Opus agent, 2026-10-31) -- the silent wrongs the s529 / s530 batches filed: #4000 (the re-bless half), #4001, #3963, #3865, #3945, #4040 fixed; #4000's first-bless half measured and filed (#4061); #4042 not reached; generation v2-9000
 
 **#4000** (cl/): perl blesses the REFERENT; PCL caches an ARRAY / CODE object's class on each container's box.  The audit of the 55 class-slot sites (in the task) found four class READERS, all reached through `%p-target-class` / `p-get-class` / `p-ref`.  The first design -- every bless writes a weak table keyed by the referent, every reader asks it -- passed all 38 probe rows, but the A/B bench measured methret-arr +69 % and refarr 5x (a weak SBCL gethash ~54 ns vs ~3 ns strong; `:synchronized nil` does not help).  Shipped instead: only a RE-bless into a different class is recorded on the referent (`*p-rebless-stash*`, one fixnum test until a program re-blesses); bench A/B (BENCH_RT_B = the base runtime, K=9): methret-arr -1.2 %, methret -3.4 %, moo-objs -2.6 %, refarr -3.5 % (K=5), ovlsub +1.9 %, localvar +0.8 %.  The copy-before-first-bless half (incl. `bless \@s; return \@s`) is #4061.  Guard blessed-copy-01.t 5-6.
@@ -181,7 +219,6 @@ BARS (on the rebased tree, over MAIN-READY-50; code ref f6ceec03): gate 340 file
 **PCL.**  Every fix vendored and measured with corpus-diff IDENTICAL; every repair instrumented to die and shown never reached, then deleted with corpus-diff IDENTICAL again: `_repair_try_finally` + the finally join (40 lines), `_retag_braced_deref_subscript` + the Constructor/Block arms of the KV-slice predicates + `_brace_name_refs`' Constructor branch (35), `_bare_block_is_anon_hash` + three call sites (38), `_trim_invented_tail` + two calls (28), `_repair_paren_block_filehandle` + two calls (51).  The PExpr KV predicates read a Subscript (without it `%h{'a','b'}` became an element access: a silent wrong the PPI fix would have caused).  A dereference loop variable is one announced statement drop (#1580): `t/op/for.t` was a whole-file loss and now runs, perl 148/1, PCL 136/12, the 12 rows blessed with causes (#3963 new: `local *foo` does not hide a scalar an enclosing `local $foo` set).  Kept emission changes, probed perl -> base -> tree: `${$r}[i][j]` lowers like `$r->[i][j]`; `{ Foo, 1 }` at statement start is a hash (a flat list on main -- fixed, guard row).  The expect-state checker's one raised kind was its own gap (a dereference loop variable), modelled with a guard row.
 
 **Measured (final, on main c65c9dac + this batch).**  corpus-diff vs main's code `f6ceec03` IDENTICAL (111 files + 6 shapes, drops 5); the WIDE emission-ab (1,412 files: perl's t/, core lib, lib/**) vs `f6ceec03`: SAME 1,409, DIFF 3 = t/op/for.t (whole-file loss -> one drop), t/op/try.t (the bogus `finally` detector row gone), Pod/Simple/BlackBox.pm (`${$r}[i][j]` as `$r->[i][j]`), all probed perl -> base -> tree.  Gate PASS 337 / 11,488 (main 11,493: +4 guard rows, -9 checker rows of the nine sections now `fixed_in pcl`).  Expect raw on s527b's head 1,280 -> 1,075.  install-pcl.t PASS; tag-license clean.  Generation v2-8885 (above main's v2-8785), the three artifacts regenerated (stamp-only).  Filed #3961 (CPAN/FirstTime.pm's emission is not reproducible), #3962 (`map { { %$_, x => 1 } }`: perl's XREF block_expectation), #3963, #3964 (s527b's hand-over: a `{` after a glob symbol is a Block, for s527e).
-
 
 ## Session s527b (Opus agent, 2026-10-25..31; resumed in s529 and s530) -- PCL's PPI, the tokenizer rows: the term-end rule and groups J-S on the `pcl` branch (`8955ba30` -> `ded727c3`), twelve PCL repairs deleted, two narrowed, YAML::PP out of the dependencies, two holes the corpus could not see found by the M4 legs and fixed
 
@@ -1384,7 +1421,6 @@ process (`perl tools/sweep-perl-tests.pl`); the row-level companion baselines
 behind three batches (#2389) and get one read-then-bless at the next full
 `--all` companion run.
 
-
 ## Session 498 (Fable, 2026-09-26) — s494p perf round 35 merged; CI found red on the s494g push and a fix agent launched; three agents in flight
 
 The session opened on the USER's "run 2 parallel jobs", raised minutes later to
@@ -1443,8 +1479,6 @@ its new die surfaced; thirteen commits, bars owed).  Both rebase once more onto
 review: a cold gate on the sha, the sweep on the merged tree, and probes against
 perl through a harness-faithful driver.
 
-
-
 ## Session 497 (Fable, 2026-09-25 late / 2026-09-26) — s494g signals MERGED (EVERYDAY 101 of 122), perf round 35 launched, two briefs ready
 
 USER: "Please continue. Start two Opus 5.5 subjobs at a time." — later "No more subjobs, will close session soon."  Main `3e8bff3e` → **`f6a2348b`** + this records commit; gen v2-1980 (runtime-only batch); gate 262/8675 → **263/8696**; sweep TOTAL 18686 → **18690**; **`EVERYDAY: 100 → 101 of 122 (82.8 %)`** (`index/proc`, the USR1 handler runs).
@@ -1480,7 +1514,6 @@ USER at the start: "Please continue." then the two queued questions answered -- 
 * Review probes for s495f written BEFORE its report (`~/pcl-agent-scratch/s496/review/s495f/r*.pl`, perl -> base: all eleven differ on the base); s494g's review reuses the s494 signal battery (`~/pcl-agent-scratch/s494/q5/sig/run-sig.pl`).
 * Docs commit `8efdd90e` pushed (DECIDED `## s496`, plan §7a).  Next free Fable task ID 2373 (2380-2399 reserved by s496a).
 * **s495f (EVERYDAY ROUND A) MERGED** (ff `25d7fede`) after Fable's review: probes 8 of 11 identical, gate 262 / 8675 PASS, everyday `100 of 122` re-run, container install test PASS.  `EVERYDAY: 92 -> 100 of 122 (82.0 %)`.  Its HIGH finding #2341 (raw-slot: a never-assigned `my $u` cannot be vivified through a deref) is the next correctness candidate.  USER late in the session: no new subtasks; one read-only Opus README review + an Opus README rewrite were USER-asked exceptions -- README.md in the checkout is now that draft, uncommitted, for the USER to judge.
-
 
 ## Session s499g (Opus agent, 2026-09-27) -- no "." and no script directory on @INC (#2442), the TAP load banner gone (#526), `tie *FH` says "a filehandle"
 
@@ -7688,7 +7721,6 @@ legs 0 NEW / 0 FIXED / 0 LOST, `corpus-diff.pl d59e58c` emission identical
 across 111 files, `ir-host-leak.pl` identical to a `git archive d59e58c`
 extraction (31 symbols / 111 files).
 
-
 ## Session 470br (Opus agent, 2026-09-05) — #1115: a filehandle carries OCTETS unless a layer says otherwise — the default open, `binmode`, `use open`, and perl's wide-character rule on a byte handle
 
 **#1115** was the widest silent divergence PCL had left: `%p-split-open-mode`
@@ -8750,7 +8782,6 @@ a bare `last` skips the continue block exactly as `last L` does (probed both
 spellings).  It is the ONLY emission change outside loopctl.t: the token-level
 A/B against main says 49 files differ with the gate OFF and the only tokens
 added are `(block nil`, and ONE file differs with it on.
-
 
 ## Session 470bm (Opus agent, 2026-09-05) — Part B instruments B1 + B2 + B4: the op inventory as DATA, the per-program manifest, the host-leak census
 
@@ -10227,7 +10258,6 @@ it never looks at — re/ 36 files / 11,272 rows (`re/reg_posixcc.t` alone
 7,130), run/ 18, opbasic/ 3, base/ 1, cmd/ 1 — reachable only by the full
 `--all` form (I4, the round-end item).
 
-
 ## Session 467 (Fable, 2026-09-04) — s466 died mid-round and was RECONSTRUCTED (agents relaunched, then stopped at the USER's word); the README REWRITTEN as an introduction (USER ask) with every linked doc re-measured the same day; three bugs found by checking its claims, FILED
 
 **Part 0 — the reconstruction.**  s466's context was lost at ~00:25 with
@@ -10905,7 +10935,6 @@ instrument doing its job.
   over both populations, i.e. its own session.  The measurement, the located
   line and the acceptance list are written into task #995; neither candidate
   (a) raw-string slot nor (b) box reuse is needed for this row.
-
 
 ## Session 465 (2026-09-02, Fable) — the found-bugs REPORT + the ignored-tests audit plan PRESENTED (#993, §2 re-measured on `ea34c0f`); #1034 filed (LOW PRIO: declaration-site type hints visible in the IR)
 
@@ -11727,7 +11756,6 @@ main's HEAD (both round-20 agents started three commits behind and were
 messaged to rebase first); a Fable probe can be invalid Perl — run the perl
 side alone and read its stderr before calling a DIFF a finding.
 
-
 ## Session 463au (2026-09-01, Opus, agent AU — round 20 CORRECTNESS slot) — the empty list is a VALUE; a magic-lvalue window's TARGET is a place in all three write spellings; an untaken modifier answers its CONDITION
 
 Three tasks shipped, one half declined with its evidence.  All three shipped
@@ -12493,7 +12521,6 @@ mid-round; AP rebased over the docs scrub -> `19d4283` = main tip, pushed).
    **Next: round 18 = census push (op/sub_lval.t's 34-drop lvalue-sub
    family first) + the JS-prototype question (USER leaning yes — slot it
    beside the census track).**
-
 
 ## Session 460ap (2026-09-01, Opus agent AP, round 17) — three SILENT-WRONGS in the reference/lvalue family: the swap that loses references (#891), `\` over a slice (#892), the read-only capture (#873); gen v2-530
 
@@ -17135,7 +17162,6 @@ s425: the tag decouples from the flip).
 
 ---
 
-
 ## Session 427 (2026-08-22, Opus) — O3, the fillers: #442, #422.2, #421, #415 — two of the four were one-member fixes of a family with a latent crash next door
 
 **State at open:** agent F of the s425 fan-out, branch
@@ -17409,7 +17435,6 @@ Word leaf, B's ask 2), #435 (fragment re-parses skip the #410 repair —
 the final generation renumber + artifacts, the COLD gate + full sweep on the
 final tree (main's numbers are B's f02fe2a + two guard-verified fixes), the
 worktree pruning.  Checklist in memory `project_s421_opus_agents_inflight`.
-
 
 ## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered
 
@@ -19315,7 +19340,6 @@ small bits can be extracted to subs"** — the same session's second half
 grammar, boxed aggregates post-v0.1, #221 post-release.  USER decisions still
 open: public name, pclxs bundling, hosting.
 
-
 ## Session 408 (2026-08-16, Opus 5) — #337 `my sub` is a LEXICAL, then #360 the feature pragmas
 
 *(Sessions F and the first half of the next item in `plan-post-s400.md` §2d.)*
@@ -19691,7 +19715,6 @@ unary — the one Fable-designed grammar piece, A/B by the fold recipe), **B2
 drops.  Do NOT rewrite `parse()`'s main loop for this.  Next Fable item: #281
 (the IR pass design).
 
-
 ## Session 406 (2026-08-16, Opus 5) — #348 lands for free, one transpile helper for the gate (#355), and the compiler's own memory leak (#128)
 
 `docs/plan-post-s400.md` §2c said: do not wait for the s405 review, continue at
@@ -20039,7 +20062,6 @@ Next: session B (#345, #349, #350 + #353), sizing counts for #351/#354 as a
 by-product of B's measurement pass, then #354+#351, #355.
 
 ---
-
 
 ## Session 402 (2026-08-15, Opus 5) — plan session A: the drop family gets a voice (#339), a runner column (#343) and a spec promise (ir-spec §9.2)
 
@@ -22363,7 +22385,6 @@ I FIXED the s377 §9.1 `our`-alias sibling instead of filing it as the
 companion the ruling reserved.
 
 ---
-
 
 ## Session 378 (2026-08-09, Opus) — #239 DONE: an in-block `package X;` now re-homes globals
 
