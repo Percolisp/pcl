@@ -51,6 +51,19 @@ not-supported.md → only then probe.*
 - use-require-01.t row 41 (a module returning 0 "still works") rewritten to perl's die under the four-conjunct expectation rule.
 - CLOSE-WITH-ROWS applied after s531b's grammar: the batch's board edits re-applied ONCE on main's migrated rows from one-file runs on the rebased tree; report-population rows keyed on #1815 / #1705 re-caused (#4161, #4169, UNEXPLAINED).
 
+## s532a (2026-11-01, Opus) -- the silent wrongs filed 10-29 .. 11-01 with the most board rows: #4184 #4086 + #3862 #4084 #4085 #4164 #4202 #3982 fixed, #4187 half 2 measured (a stale row, not a flake); generation v2-10300
+- indirect object `new CLASS` followed by a COMMA or an ARROW takes no arguments: the comma continues the enclosing list, `new Foo->m` is `Foo->new->m` (#4184; PExpr's `new` pre-pass) -> guard `Pl/t/transpile-test-05.t`.
+- an ELEMENT in an aliasing consumer (foreach / map / grep list, each term of `\(E1, E2)`) is a one-slot slice taken by the box accessor, never a copy; an `@_` element in a foreach list is a write when the body writes the loop variable (#4086 #3862) -> ir-spec §3.2d, `Pl/t/elem-alias-02.t`.
+- a `map` block's result is a COPY, a reference into a fresh container (`%p-ref-container-copy`, the #3824 rule); grep / sort still alias (#4084) -> ir-spec §2.6, `Pl/t/map-copy-01.t`.
+- a bareword filehandle after a run-time `package X;` (an eval region, inside a block) is X's: the emitter spells it for the section's READER package, `Environment::reader_package` (#4085); a multi-segment package is `|A::B|::NAME` -> `Pl/t/transpile-test-09.t` row 14.
+- the 2-arg open drops perl's isSPACE around its mode and file name; the 3-arg form keeps it (#4164) -> `Pl/t/open-modes-01.t` row 8.
+- an `&NAME(...)` call is never a statement keyword (#4202; the #374 guard skips `force_user_sub`) -> `Pl/t/lexical-sub-02.t` row 7.
+- `"$#{+}"` / `"$#{-}"` interpolate the magic arrays' last index; InterpScan's `$#{...}` arm takes the braced punctuation name as `${...}` / `@{...}` do (#3982) -> `Pl/t/punct-array-glob-01.t`.
+- `tools/t/runpcl-streams.t` row 14 was STALE since cffd6598 (#3530 made Test::More's TAP autoflushed as Test::Builder's is): the row now asks perl for the verdict (#4187 half 2).
+- Pod-Simple tiedfh.t (6 rows) = the copy-back residue of `ns-args-aliasing` (a callee that KEEPS `\$_[0]` past its return, Pod::Simple::TiedOutFH) -> rows re-caused NS:ns-args-aliasing.
+- `&CORE::NAME(LIST)` is the builtin call with its arity, never the prototype-ignoring `p-amp-spread` (#4362, a #3859 regression: a runtime macro head was APPLIED); one predicate `Pl::PExpr::amp_ignores_prototype`, `p-amp-spread` refuses a macro head at expansion -> ir-spec §4.1 (the & call), `Pl/t/amp-call-proto-01.t` row 1.
+- Filed: #4261 (`print {OUT}` in an eval unit that never names OUT is a call), #4262 (`open(F, "")` succeeds), #4263 (close of a `>-` handle closes STDOUT), #4264 (a no-match s/// on a read-only value does not die), #4265 (TT chomp.t winsux2 / winsux4 lose the CR of a double CRLF, UNREDUCED).
+
 ## s531e (2026-11-01, Opus) -- PCL's PPI batch 6: §58 #4201, §59 #3962, §42 #3749 fixed on the `pcl` branch (groups AO AP AQ) with their PCL halves; the checker gaps #3946 #4141 and the stale tools/t/ppi-expect-check.t (#3980) fixed; generation v2-10200
 - a word after `->` is a METHOD name, so `->if(` / `->while(` ... open a List, never a Condition (PPI group AO, `_round`); PCL needed no change (s531c's split); TT Grammar.pm drops 6 -> 0, 153 board rows left by edit; catalogue §58.
 - a `{` first inside a map / grep / sort block, a print-family filehandle block or a dereference block is an ANON HASH (toke.c XREF + block_expectation; PPI group AP); `map {; {` stays a block; `Pl::PExpr::_deref_inner_brace` (#2085) DELETED; catalogue §59.
