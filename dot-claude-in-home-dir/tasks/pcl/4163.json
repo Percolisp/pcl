@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01) from #1815's probes (an /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3 /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3 hook object written `package Foo; sub INC {...}` -- perl: no Foo::INC, the object hook dies \"Can't locate object method INC\"; PCL: works).  PRE-EXISTING.\n\nREPRO (perl 5.40.3):\n  package Q; sub INC { 1 } sub ENV { 2 } sub STDIN { 3 } sub qq1 { 4 }\n  package main;\n  print join(',', map { defined &{$_} ? 1 : 0 } qw(main::INC Q::INC main::ENV Q::ENV main::STDIN Q::STDIN Q::qq1)), \"\\n\";\nperl 1,0,1,0,1,0,1   PCL 0,1,0,1,0,1,1\n\nperl's rule (gv.c, S_gv_magicalize / the `global' names): an unqualified identifier in ENV INC ARGV ARGVOUT SIG STDIN STDOUT STDERR (and the punctuation / ^X names) always refers to main::.  The same rule should hold for the variables (`package Q; our @INC` is @main::INC).  LOW: real code qualifies hook methods (`sub Foo::INC`) because perl forces it.  Probe: s531a scratch/s531a/pr/specname.pl.",
+   "id" : "4163",
+   "status" : "pending",
+   "subject" : "A sub named like a FORCED-main identifier (INC, ENV, STDIN, STDOUT, STDERR, ARGV, ARGVOUT, SIG, _ ...) declared inside another package lives in main:: in perl; PCL defines it in the current package"
+}

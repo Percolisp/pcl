@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01), split out of #1705 (closed by s531a with its %Config half: extensions / dynamic_ext / d_getpbyname).\n\n#1705's ORDER item (3): t/run/locale.t does `eval { require POSIX; POSIX->import(\"locale_h\") }` and skips the whole file when it fails; lib/POSIX.pm exists but has no `locale_h` tag (setlocale, localeconv, the LC_* constants) -- 44 perl rows never produced.  Independent of the %Config change and cheap per #1705: add the tag to lib/POSIX.pm's %EXPORT_TAGS with the names PCL implements (rule 9a: shim data), then measure t/run/locale.t's next wall (it un-skips 44 rows that will mostly need a real setlocale).  Companion rows: run/locale.t (perl-suite-fails *summary*, row-shortfall 44), re-caused to this task by s531a.",
+   "id" : "4169",
+   "status" : "pending",
+   "subject" : "lib/POSIX.pm has no `locale_h` export tag: `eval { require POSIX; POSIX->import(\"locale_h\") }` fails, so t/run/locale.t skip_alls (\"could not load the POSIX module\") -- the third part of #1705"
+}

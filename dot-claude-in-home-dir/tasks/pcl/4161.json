@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01) from #1815's implementation.  PRE-EXISTING in the sense that hooks did not load at all before s531a.\n\nPCL loads a hook's source by spooling it to a private temporary file (%p-inc-hook-spool, cl/pcl-runtime.lisp) and transpiling that file on the uncached path, so the code's __FILE__, caller() file and every die/warn location name the spool path.  perl names the file `/loader/0x<addr>/NAME` -- or, when the hook stored $INC{NAME} itself before returning, THAT string (t/op/inccode.t: $INC{$filename} = \"/custom/path/to/$filename\" then __FILE__ eq it, and warn() reports it).\n\nREPRO (perl 5.40.3):\n  unshift @INC, sub { return unless $_[1] eq 'Fh.pm'; $INC{$_[1]} = '/custom/Fh.pm'; open my $fh, '<', \\\"package Fh; \\$main::f = __FILE__; 1;\"; $fh };\n  require Fh; print \"$main::f\\n\";      # perl /custom/Fh.pm   PCL /tmp/pcl-inc-XXXXXX/Fh.pm\n\nFIX SHAPE: the transpiler needs a display-name input (pl2cl --source-name exists for programs: check whether module mode honours it), fed from %INC when the hook set it, else perl's /loader/0x.../NAME.  op/inccode.t's \"__FILE__ set correctly\" and \"warn() reports correct file source\" rows.",
+   "id" : "4161",
+   "status" : "pending",
+   "subject" : "A module loaded through an @INC HOOK reports __FILE__ / die locations as the spool file /tmp/pcl-inc-XXXXXX/NAME; perl says /loader/0x.../NAME, or the %INC entry the hook stored before returning"
+}

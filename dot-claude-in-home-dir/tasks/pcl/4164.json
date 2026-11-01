@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01) from the YAML-Tiny 12_write.t board run after #3831 (its t/lib/TestUtils.pm slurp: `open( FILE, \" $file\" ) or die`).  PRE-EXISTING (ade297e7 the same).\n\nREPRO (perl 5.40.3):\n  my $f = '/etc/hostname';\n  open(FILE, \" $f\") or die \"open1 failed: $!\";   print \"1 ok\\n\";\n  open(my $fh, \"< $f  \") or die \"open2 failed: $!\"; print \"2 ok\\n\";\n  open(F3, \"  <$f\") or die \"open3 failed: $!\";    print \"3 ok\\n\";\nperl: 1 ok / 2 ok / 3 ok.  PCL: dies \"open1 failed: No such file or directory\".\n\nperlfunc open (2-arg): leading and trailing white space is stripped from the filename (the reason the 3-arg form exists).  Layer: the runtime's 2-arg open mode parser (cl/pcl-runtime.lisp, p-open's string-spec split).  Acceptance: YAML-Tiny 12_write.t rows 2-4 (blessed to this task by s531a) -- one-file run `tools/run-dist-t.pl --rows cpan-tests/modules/YAML-Tiny-1.74 t/12_write.t` 1/3 -> 4/0.  Probe: s531a scratch/s531a/pr/open2ws.pl.",
+   "id" : "4164",
+   "status" : "pending",
+   "subject" : "Two-arg open keeps LEADING / TRAILING white space of the path: open(FH, \" $file\") and open(FH, \"< $file  \") die ENOENT; perl trims the white space around the name"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01) from #1688 acceptance (TT compile2.t row 9 after require started answering the file value).  PRE-EXISTING design trade-off, now visible.\n\np-cache-valid-p (cl/pcl-runtime.lisp) calls an entry valid when the cache file is NEWER than the source (%p-mtime) and the dependency manifest still hashes; the SOURCE itself is never hashed.  t/compile2.t reads t/test/src/foo.ttc, rewrites \"the foo file\" -> \"the hacked foo file\", restores the old atime/mtime with utime, and then `require`s it through Template::Provider: perl reads the new text, PCL loads the module cache entry built from the OLD text (\"This is the foo file, a is any value\" where perl prints \"hacked\").\n\nREPRO (perl 5.40.3): write lib/Hk.pm = `package Hk; sub v {\"old\"} 1;`, run `perl -Ilib -MHk -e print Hk::v()` under ./pcl once (builds the entry), then rewrite the file to `sub v {\"new\"}` keeping its mtime (`my @t=(stat $f)[8,9]; ...write...; utime @t, $f`) and run again: perl new, PCL old.\n\nFIX SHAPE (a cache-validity decision, ir-spec 9.2b): also key on the source SIZE (cheap, catches this TT case) or a content hash (#1261 already hashes dependencies; the cost is one read of each module per load).  Measure the load-path cost first.  Board row: Template-Toolkit compile2.t 9 (blessed to this task by s531a).",
+   "id" : "4165",
+   "status" : "pending",
+   "subject" : "The module cache trusts the source file MTIME: a file rewritten with its old mtime restored (utime) is served from the stale compile -- Template Toolkit compile2.t hacks a compiled .ttc and expects the hacked text"
+}

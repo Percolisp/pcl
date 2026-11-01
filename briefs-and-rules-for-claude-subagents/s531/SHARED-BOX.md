@@ -13,5 +13,6 @@ RULES FOR THIS ROUND:
 2. **Neighbours.**  s531a works the require / `@INC` path, stash-delete vs compiled call, `%Config`, the case-folded class names; s531c works the statement-modifier split, InterpScan, glob-alias prototypes, string-eval hints, the stash glob's HASH slot.  #3831/#3696 (s531a) and #4020 (s531c) are both STASH code: different functions; whoever finds the other's function in its diff names it in the report as FLAGGED.  Neither batch touches the PPI files (`vendor/PPI`, `Pl/PPIBugs.pm`, `Pl/PPIExpect.pm`, the `_repair_*` / `_fix_ppi_*` / `_merge_*` subs, `docs/ppi-*`).
 3. **Re-run only what a rebase can move** (s530 lesson): after a rebase over another batch's merge, corpus-diff + the targeted gate + the one-file board runs; the full gate / sweep / everyday ONCE, at the end.  The reviewing session's merge gate runs on the combined tree.
 4. **Merge order**: whichever is MERGE-READY first; the second renumbers its generation ABOVE main's and regenerates the artifacts (COMMON).
+5. **(added at the s531 end) A task you fix is NOT set `completed` by you** -- write the `=== DONE (<label>) ===` note, leave the status `in_progress`; the reviewing session sets `completed` in the merge commit (the store is shared and live; your rows leave main only at merge -- DECIDED ## s531).
 
 Running notes: `s531/PAUSE-s531.md`.

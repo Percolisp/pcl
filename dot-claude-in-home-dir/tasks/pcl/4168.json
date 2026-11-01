@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01) from #1688 (s531a) -- comp/require.t rows 1742 1743 1746 1747 (the Demo1..Demo4 matrix, lines ~520-580).\n\nPCL (s531a): Parser2 emits (p-unit-module-true) when module_true is in force at the END of the file (Pl::Parser::feature_regions_of / feature_at at [9e8,0]); %p-unit-result answers 1 for such a unit, else a top-level return's value, else the wrapped last statement, else true for (p-unit-value-assumed).\nperl: a top-level `return` answers by the module_true hint AT THE RETURN (Demo2: `use feature 'module_true'; ... return 0 if $main::test_mode == 2; ... no feature 'module_true';` -> require answers 1); falling off the end answers by the hint at the end; and a last statement whose CL value PCL does not trust (a statement-modifier if/unless, a bare block) is assumed TRUE where perl reads its real value (Demo4: the last run statement is `{ no feature 'module_true'; return 0 if $main::test_mode == 3 }`, the modifier does not fire, the value is false -> perl dies \"did not return a true value\", PCL answers true).\n\nFIX SHAPE: (1) a top-level `return` in a module unit is emitted with the module_true state AT ITS SITE; (2) give a statement-modifier if/unless and a bare block their perl value (the condition's value when the modifier does not fire; the block's last statement), so fewer statements need (p-unit-value-assumed) -- the same values a sub's implicit return gets wrong today (`sub f { 5 unless 1 }` returns 1 in perl, undef in PCL).  Probes: s531a scratch/s531a/pr/mt2.pl (E7 E13 edges).",
+   "id" : "4168",
+   "status" : "pending",
+   "subject" : "module_true is decided at the END of the file only: a top-level `return 0` under `use feature 'module_true'` answers 0 when the file ends with `no feature 'module_true'` (perl: 1, the hint at the return site); an opaque last statement is assumed true where perl dies"
+}

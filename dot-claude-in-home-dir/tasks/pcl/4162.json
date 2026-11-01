@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-01",
+   "description" : "FILED s531a (Opus 5.5, 2026-11-01) from #1815's probes.  PRE-EXISTING (ade297e7 the same).\n\nREPRO (perl 5.40.3), lib/DiesMod.pm = `package DiesMod; die \"dm\\n\"; 1;`:\n  use lib 'lib';\n  eval { require DiesMod }; print \"err=$@\"; print exists $INC{'DiesMod.pm'} ? 1 : 0, defined $INC{'DiesMod.pm'} ? 1 : 0, \"\\n\";\n  eval { require DiesMod }; print \"again=$@\";\nperl: err=dm / Compilation failed in require at ...  10  again=Attempt to reload DiesMod.pm aborted. / Compilation failed in require ...\nPCL:  err=dm  00  again=dm   -- the module body runs a SECOND time (every side effect twice: a silent wrong for a module that registers, pushes or prints at load).\n\nTwo halves: (1) a failed load stores $INC{NAME} = undef (p-use / p-require-file / the hook path; `exists` true, `defined` false); (2) a require that finds an undef entry dies \"Attempt to reload NAME aborted.\\nCompilation failed in require\" (perl's message text is not a goal; the die is).  The \"Compilation failed in require\" suffix on the FIRST die is text only.  Probe: s531a scratch/s531a/pr/diesmod.pl.  NOTE the #1688 half is separate: a file that returns FALSE leaves %INC ABSENT in perl (probed), which PCL now matches.",
+   "id" : "4162",
+   "status" : "pending",
+   "subject" : "A require whose file DIES leaves no %INC entry, so a second require of it RUNS THE FILE AGAIN; perl stores $INC{NAME} = undef and dies \"Attempt to reload NAME aborted. Compilation failed in require\""
+}
