@@ -5435,7 +5435,13 @@ sub _fh_sym {
                          $perl);
     return cl_sym($short) if $pkg eq $reader
                           || ($pkg eq 'main' && Pl::Environment::fh_forced_main_name($short));
-    $perl = "${pkg}::${short}";
+    return Pl::CLForm::cl_whole_sym("${pkg}::${short}")
+      if Pl::Environment::fh_forced_main_name($short);
+    # The CL spelling, package and name each through the one rule: a
+    # MULTI-segment package (`Template::Perl`) is `|Template::Perl|::PERLOUT`,
+    # never a bare `Template::Perl::PERLOUT` (a reader error: too many colons).
+    $env->add_referenced_package($pkg) if $pkg ne 'main';
+    return cl_pkg($pkg) . '::' . cl_sym($short);
   }
   else {
     $perl = $env->canon_filehandle_name($perl) if $env;

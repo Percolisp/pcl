@@ -501,6 +501,8 @@ print "10 ", ref($o), "\n";
 # package reads it (Environment::reader_package): an unqualified `'OUT` was
 # interned in main.  Template's [% PERL %] blocks print to PERLOUT this way.
 # The controls: the file-level `package Foo;` statement, `main::OUT`, STDOUT.
+# Row 4 includes a MULTI-segment package: its handle is `|Tz::Deep|::H2` (the
+# first cut spelled `Tz::Deep::H2`, a CL reader error -- caught by TT evalperl.t).
 test_transpile("a bareword handle after a run-time package switch is that package's (#4085)", q{
 my $r = "";
 open(Foo::OUT, ">", \$r) or die;
@@ -519,6 +521,8 @@ my $res = '';
   sub PRINT { my $s = shift; ${ $s->{r} } .= join('', @_); 1 } }
 tie *Tz::H, 'TS', \$res;
 eval "package Tz; print H 'x'; 1" or print "ERR $@";
+tie *Tz::Deep::H2, 'TS', \$res;
+eval "package Tz::Deep; print H2 'y'; print {*H2} 'z'; 1" or print "ERR $@";
 print "4 [$res]\n";
 });
 
