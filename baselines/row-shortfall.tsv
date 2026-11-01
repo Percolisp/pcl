@@ -106,6 +106,7 @@
 # taken-at: 0690d7dc 2026-10-18 (6 companion file(s) re-measured)
 # taken-at: 0690d7dc 2026-10-18 (1 companion file(s) re-measured)
 # taken-at: 88231298 2026-11-01 (9 companion file(s) re-measured)
+# taken-at: d6d6ec8a 2026-11-01 (3 companion file(s) re-measured)
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
 perl-tests/bop.t	1	s473t1: STALE PLAN, not a lost row -- `plan tests => 510` but session 245 commented out the `pack "P"` block and left the count, so the file holds 509 assertions.  REAL PERL 5.40.3 runs 509 too ("Looks like you planned 510 tests but ran 509").  PCL produces all 509.  Task #1438.
@@ -223,7 +224,6 @@ t/op/hash-clear-placeholders.t	9	NS:Readouts of perl's own internals -- `use Dev
 t/op/hash-rt85026.t	1	NS:Readouts of perl's own internals -- the same Devel::Peek dump shape as t/op/hash-clear-placeholders.t (both files are one RT ticket's fixture)
 t/op/inc.t	0	s488a #1248(b) FIXED (was 18): e2536f81 (s473d member 3, `**` returns an NV wherever perl is not sure of an integer), measured 62/13 at its parent 9089d12a and 67/26 at it -- the file produces all 93 of perl's rows now
 t/op/inccode-tie.t	89	#1642 -- a BLOCK-form package in a BARE BLOCK whose tail is not literal-only; #1587 (s484a) fixed the VERSION and BLOCK spellings and the flattened bare block, and uni/opcroak.t now runs, but this file's `push @INC, …` tail keeps the ruled refusal
-t/op/inccode.t	30	#1815 — @INC HOOKS are not implemented: `%p-inc-dir-file` calls `namestring` on every @INC element, so a CODE ref / ARRAY ref / blessed object there leaks a raw SBCL type error ("The value #<function …> is not of type (or string pathname synonym-stream file-stream)") instead of being CALLED — the four aborted forms are the raw SBCL type error a non-string @INC element produces (three) plus `Not a SCALAR reference`; perl rows 40-89 sit behind them.  s488a: 48 -> 50, SPLICED and ATTRIBUTED -- the two rows changed verb from `not ok` to `(missing)` at 319d0f4d (s483a member 1, #1592: `${$coderef}` is perl's fatal -- the CODE exclusion), measured 13/28 at its parent eabff00d and 13/26 at it.  Same rowkeys, so the fail multiset is unchanged.  s473t6d member 4: 50 -> 48 by #1950 in this round -- inccode.t:312 `tie $INC[0], 'INCtie'` is a tie on an ARRAY ELEMENT and used to be announced and dropped; with it working the file reaches 41 rows instead of 39 (13/26 -> 16/25).  Measured --jobs 1 + serial re-run, and 50 on a `git archive 268d7e00` extraction
 t/op/incfilter.t	153	NS:Source filters -- not-supported.md §Source filters (`Filter::Util::Call`, `Filter::Simple`, `use Switch`, …).  The file's whole subject is source filters in coderef-@INC and `Filter::Util::Call` is XS (Call.so), so `use Filter::Util::Call` at incfilter.t:18 aborts and the file produces 0 of perl's 153 rows
 t/op/index.t	308	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`, same reason as op/write.t
 t/op/kvhslice.t	0	s473t1 #1024 FIXED (was 1): a lone BAREWORD key in a kv-slice was compiled as a sub call, so the assertion inside `eval '… %h{i} …'` never ran
@@ -307,7 +307,7 @@ t/re/uniprops07.t	29260	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/run/locale.t	44	#1705 -- the file skip_alls because `require POSIX; POSIX->import("locale_h")` fails; lib/POSIX.pm exists but has no `locale_h` export tag
+t/run/locale.t	44	#4169 (s531a: split out of #1705 -- lib/POSIX.pm has no locale_h export tag, so the file skip_alls)
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
 t/run/switchd-78586.t	2	not-supported.md#perls-command-line-switches-what-pcl-does-not-do-s506f (its #! line carries -d:Mod, which pcl refuses: the file does not transpile)
 t/run/switches.t	0	s488a BOOKKEEPING, not a move (was 11): the s473t5d splice wrote 11 beside its own verdict row of 28/112 = 140 rows produced of perl's 140, i.e. zero short.  Re-measured 0 on this tree AND on a `git archive f6b56feb` extraction; #1700 + #1699 had already removed both of the file's aborts, and the 11 skip rows it names are rows PCL does produce
