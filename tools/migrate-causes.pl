@@ -140,8 +140,29 @@ my %HAND = (
     . 's531b: PCL prints the same 1..0 # SKIP line, both sides skip)',
 );
 # The seven #930 rows (Class-Method-Modifiers 140-lvalue.t): perl TODO-fails
-# two of them -- which two is the oracle's PERLROW `# TODO` lines; the other
-# five map mechanically to `NS:ns-lvalue-subs -- #930 ...` (step 4).
+# rows 6 and 7 (the oracle's PERLROW `# TODO` lines, s531b board run); row 6
+# PASSES under PCL and is no blessed row, so ONE is PERL-FAILS and the other
+# six map mechanically to `NS:ns-lvalue-subs -- #930 ...` (step 4).
+$HAND{"Class-Method-Modifiers-2.15-0\t140-lvalue.t\tafter array lvalue attribute sets values # TODO can't apply after to array lvalue method"} =
+  'PERL-FAILS (perl: not ok # TODO "can\'t apply after to array lvalue method", the oracle s531b) -- '
+  . '#930 (NS:Lvalue subroutines — USER-DEFERRED)';
+# The board run's PERL-FAILS CANDIDATE lines (s531b): perl TODO-fails this row too.
+$HAND{"Class-Method-Modifiers-2.15-0\t060-caller.t\tparent with modifiers sees 'main' as caller # TODO caller magic not implemented yet"} =
+  'PERL-FAILS (perl: not ok # TODO "caller magic not implemented yet", the oracle s531b) -- NS:caller() fidelity '
+  . '[DEFERRED, USER s488] + #233 (a modifier must not appear as the caller)';
+# The board run's MISMATCH lines (s531b): blessed PERL-SKIP, but perl RUNS the
+# file on this box (Test::Pod 1.52 is installed) and PCL skips it -> FAIL.
+$HAND{"IO-Compress-2.214-0\t999pod.t\t*FILE*"} =
+  '#4186 (PCL skips a file perl RUNS: `use Test::Pod 1.00` dies, "Can\'t locate object method exported_to via '
+  . 'package Test::Builder"; perl runs 31 rows -- was PERL-SKIP, a MISMATCH of the s531b oracle)';
+$HAND{"Text-CSV-2.04\t00_pod.t\t*FILE*"} =
+  '#4186 (PCL skips a file perl RUNS: `use Test::Pod 1.00` dies, "Can\'t locate object method exported_to via '
+  . 'package Test::Builder"; perl runs 2 rows -- was PERL-SKIP, a MISMATCH of the s531b oracle)';
+# NOT converted, recorded so nobody re-derives it: the oracle also prints
+# PERL-FAILS CANDIDATE lines for Template-Toolkit compile2.t / compile3.t /
+# compile5.t -- those files read the .ttc files compile1.t writes (#1688), and
+# the oracle runs each file alone and unordered, so perl fails them too there.
+# They are order effects, not perl's own failures; they stay keyed on their task.
 
 # ── the rewrite ─────────────────────────────────────────────────────────────
 sub ns_from_spelling {

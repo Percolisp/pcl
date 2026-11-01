@@ -120,6 +120,8 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
      'the note is never classified: an NS:<id> cell stays not-supported');
   is((parse_cause('#77 (then UNREDUCED / HARNESS / PERL-FAILS)'))[0], 'bug',
      'the note is never classified: the grammar\'s new markers inside a #N note are text');
+  is_deeply([(parse_cause('#4186 (PCL skips a file perl runs -- was PERL-SKIP)'))[0, 1, 3]], ['bug', 4186, 0],
+            'the note is never classified: "was PERL-SKIP" in a #N note is history, the cell is a bug keyed on N');
 
   # A cell written before the grammar keeps s486a's class and is flagged LEGACY.
   is_deeply([parse_cause('#221 (NS:Warnings-gated diagnostics are absent)')],

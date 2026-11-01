@@ -101,10 +101,12 @@ my %GROUP = ('bug' => 'ours', 'unreduced' => 'ours',
              'other' => 'unread', 'unexplained' => 'unread');
 sub class_group { return $GROUP{ $_[0] // '' } // 'unread' }
 
-# s486a's rule, verbatim, for a cell that is not in the grammar.
+# s486a's rule for a cell that is not in the grammar (verbatim but for `NS:` as a
+# word -- measured s531b: no cell in any population changes class by it).
 sub _s486a_class {
     my ($cause) = @_;
-    return 'not-supported' if $cause =~ /NS:/ || $cause =~ /not-supported\.md/;
+    # `NS:` as a WORD: "perl RUNS: ..." is not a citation.
+    return 'not-supported' if $cause =~ /(?<![A-Za-z])NS:/ || $cause =~ /not-supported\.md/;
     return 'parked'        if $cause =~ /PARKED:/;
     return 'perl-skip'     if $cause =~ /PERL-SKIP/;
     return 'bug'           if $cause =~ /#\d+/;
@@ -133,9 +135,12 @@ sub parse_cause {
     if ($c =~ /^#(\d+)(?!\d)(.*)\z/s) {
         my ($n, $note) = ($1, $2);
         my $old = _s486a_class($c);
-        # s486a's order for a cell naming a ruling AND a task: the ruling is
-        # the class.  Written task-first, that is the pre-grammar spelling.
-        return ($old, undef, $c, 1) if $old ne 'bug';
+        # s486a's order for a cell naming a RULING and a task: the ruling (a
+        # not-supported section, a USER parking) is the class.  Written
+        # task-first, that is the pre-grammar spelling.  Anything else in the
+        # note -- "was PERL-SKIP", a second task -- is text (no cell in any
+        # population spelled a task-first PERL-SKIP when the grammar arrived).
+        return ($old, undef, $c, 1) if $old eq 'not-supported' || $old eq 'parked';
         return ('bug', $n, $note, 0);
     }
     # Not in the grammar.  An `NS:` + section TITLE keeps the title as the
