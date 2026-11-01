@@ -2399,6 +2399,8 @@ belong to the substitution; `print;` is the next statement.  **PCL**: no
 repair; the body becomes code and the program dies ("Undefined subroutine
 &main::END").  Registry §42 (not attributable by the checker); task #3749.
 
+**FIXED on PCL's PPI branch** (s531e: group AQ, commit `a376a6d8` on branch `pcl`, vendored as vendor/PPI -- `_QuoteEngine::Full::_read_code_heredocs` reads the lines after the token for each here-doc a code part of an `s///e` replacement or a `(?{ })` / `(??{ })` block introduces on the token's last line and keeps them on the token (`heredoc_lines`); `Document::serialize` writes them back after the next newline and `index_locations` counts them, so the round trip and every later line number are unchanged); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AQ.md`).  PCL's half: `Pl::ExprToCL` compiles the `s///e` replacement with the token's `heredoc_lines` after it (a `(?{ })` block is not compiled by PCL, its here-doc only stops swallowing code); guard `Pl/t/regexp-subst-01.t` (its last row FAILS on the base; the row before it is the perl oracle).
+
 ---
 
 ## 43. A LEXICAL SUB named like a keyword keeps the keyword lexing  [CONFIRMED 1.291 and PCL's branch a2fa26a0]

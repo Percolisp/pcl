@@ -691,4 +691,44 @@ EOP
     is($got, $want, 'an s///e replacement puts a list operator\'s arguments in list context (#1025)');
 }
 
+# PPI §42 (#3749, s531e): a here-doc introduced in an s///e replacement on the
+# statement's line takes its body from the lines after it (perl 5.18+).  PCL's
+# PPI keeps those lines on the token (heredoc_lines) and the replacement is
+# compiled with them after it; before, the body was lexed as CODE and the
+# program died ("Undefined subroutine &main::END").
+{
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'EOP';
+$_ = "a"; s/a/<<END/e;
+foo
+END
+print;
+my $foo = "not ok 30\n";
+$foo =~ s/^not /substr(<<EOF, 0, 0)/e;
+  Ignored
+EOF
+print $foo;
+my $r = "q"; $r =~ s/q/<<A . <<B/e; print "($r)", <<C;
+a1
+A
+b1
+B
+c1
+C
+sub f { my $s = shift; $s =~ s/(\w)/uc($1) . <<~E/e; return $s }
+    -tail
+    E
+print f("zz");
+print qr/(?{<<HD})/ eq q{(?^:(?{<<HD}))} ? "qr ok\n" : "qr NOT\n";
+body
+HD
+print "end\n";
+EOP
+    close $fh;
+    my $want = `$^X $file 2>&1`;
+    my $got  = `$RealBin/../../runpcl $file 2>/dev/null`;
+    is($want, "foo\nok 30\n(a1\nb1\n)c1\nZ-tail\nzqr ok\nend\n", 'perl oracle for the here-doc-in-s///e rows (PPI §42)');
+    is($got, $want, 'a here-doc in an s///e replacement or a (?{ }) block takes the lines after the statement (PPI §42)');
+}
+
 done_testing();

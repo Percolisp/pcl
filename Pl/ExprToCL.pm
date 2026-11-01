@@ -6055,6 +6055,12 @@ sub gen_substitution_form {
     # through _gen_eval_string_form, so each gets the capture alist and the
     # site's features a written-out `eval` would get, rather than a bare
     # (p-eval …) that could not see a lexical.
+    # A here-doc the replacement introduces on the token's last line takes
+    # its body from the lines after it (perl 5.18+); PPI keeps those lines
+    # on the token (PPI §42, heredoc_lines), so the code is compiled with
+    # them after it, as perl reads it.
+    my @hd = $node->can('heredoc_lines') ? $node->heredoc_lines : ();
+    $subst .= "\n" . join('', @hd) if @hd;
     my $body = $self->_compile_subst_e_expr($subst);
     for (2 .. _subst_e_count($node)) {
       $body = $self->_gen_eval_string_form($body);

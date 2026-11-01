@@ -669,9 +669,9 @@ print "after\\n";
    tasks => [3748] },
  { id => 42, kind => 'token', dump => 'tokens',
    title => 'A HERE-DOC introduced inside a quote-like body (`s/a/<<END/e`) does not consume its body: the body lines are lexed as code',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => 'the swallowed body surfaces as words after the statement (word-after-term, not attributable to the row)' },
-   fix => { kind => 'relex', handler => undef },
+   fix => { kind => 'relex', handler => undef, changed => 'PPI keeps the lines on the token (heredoc_lines, group AQ); Pl::ExprToCL compiles an s///e replacement with them after it (s531e)', commit => 'a376a6d8', group => 'AQ', pr => undef },
    repro => '$_ = "a"; s/a/<<END/e;
 foo
 END
