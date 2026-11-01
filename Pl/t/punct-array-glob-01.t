@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 46;
+plan tests => 47;
 
 sub write_pl {
     my ($code) = @_;
@@ -831,4 +831,19 @@ print N %.5e1, " ", N %~$y, " ", g %.3e1, " ", (time %.1e1 < 10 ? "ok" : "no"), 
 PL
     is(run_cl($prog), run_perl($prog),
        '§24: % after a declared term word is modulo, not a punctuation hash (perl oracle)');
+}
+
+# #3982 (s532a): `"$#{+}"` / `"$#{-}"` in a STRING -- the braced punctuation
+# name is the magic array, as `$#+` and the code spelling `$#{+}` are (the
+# scanner sent it down the expression path and the lone `+` dropped the
+# statement).  The caret and named spellings are the controls.
+{
+    my $prog = <<'PL';
+"abc" =~ /(a)(b)?(x)?/;
+print "1 $#{+} 2 $#{-} 3 $#+ 4 $#- 5 $#{^CAPTURE}\n";
+my @a = (1, 2, 3); my $r = \@a;
+print "6 $#{a} 7 $#{$r} 8 $#a $#$r\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3982: "$#{+}" / "$#{-}" interpolate the magic array\'s last index (perl oracle)');
 }

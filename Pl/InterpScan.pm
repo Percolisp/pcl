@@ -517,6 +517,17 @@ sub _scan_array_index {
   if ($c2 eq '{') {
     my ($name, $name_span, $after) = _braced_ident($text, $pos + 2);
     return undef unless $after;
+    # $#{+} / $#{-}: the braced PUNCTUATION name, the `${…}` and `@{…}` arms'
+    # rule (#3982 -- `"$#{+}"` reached the expression path and the lone `+`
+    # dropped the statement).  A CARET name (`$#{^CAPTURE}`) keeps the
+    # expression path, whose re-parse already reads it right.
+    my ($magic) = _braced_magic_name(
+      substr($text, $pos + 3, $after - 1 - ($pos + 3)));
+    if (defined $magic && $magic !~ /\A\^/) {
+      return _ev(sigil => '$#', form => 'magic', name => $magic, canon => undef,
+                 name_span => [$pos + 3, $after - 1],
+                 span => [$pos, $after]);
+    }
     if (defined $name) {
       return _ev(sigil => '$#', form => 'braced', name => $name,
                  canon => (_digits($name) ? undef : '@' . $name),
