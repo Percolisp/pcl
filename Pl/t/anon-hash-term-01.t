@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 5;
 
 sub write_pl {
     my ($code) = @_;
@@ -90,4 +90,30 @@ my @v = map { lc($_) => 1 } "A"; print "@v\n";
 my %h = map { +"$_" => 1 } qw(a b); print join(",", sort keys %h), "\n";
 my @f = grep { $_ > 1 } 1, 2, 3; print "@f\n";
 my @s = sort { $a <=> $b } 3, 1; print "@s\n";
+PL
+
+# PPI §59 (#3962, s531e): a `{` FIRST inside a map / grep / sort block or a
+# dereference block is an anonymous hash whatever follows it (toke.c
+# block_expectation).  Before, PPI's statement-start look-ahead made
+# `{ %$_, x => 1 }` and `{ $_, 1 }` bare blocks whose lists were flattened
+# into map's result (a silent wrong), and `grep { { $_, 1 }->{$_} }` dropped.
+both_agree(<<'PL', 'PPI §59: map / grep / sort { { ... } } and ${ { ... } }{k} build hashes, at statement start, in a call, in a sub, after a comment');
+package O; sub new { bless {}, shift } sub m { shift; scalar(@_) . ":" . join(",", map { ref } @_) }
+package main;
+my @l = ({a => 1}, {b => 2});
+print map { ref } map { { %$_, x => 1 } } @l; print "\n";
+my $o = O->new; print $o->m(map { { $_, 1 } } 1, 2), "\n";
+sub f { map { { $_, 1 } } @_ } my @r = f(3, 4); print scalar(@r), " ", ref $r[1], "\n";
+my %h = (a => 1); my @c = map { { %h, n => $_ } } 1 .. 3; print scalar(@c), " $c[2]{n} $c[0]{a}\n";
+my @p = map({ { %$_, y => 2 } } ({b => 1})); print scalar(@p), " ", ref $p[0], "\n";
+my $v = ${ { %h, z => 9 } }{z}; print "$v\n";
+my @g = grep { { $_, 1 }->{$_} } 1 .. 2; print scalar(@g), "\n";
+my @k = map { # comment
+  { id => $_, %h } } 1; print join(",", sort keys %{ $k[0] }), "\n";
+PL
+
+both_agree(<<'PL', 'PPI §59 negatives: after map {; and inside do { } the { starts a statement (a block)');
+my @m = map {; { $_, 1 } } 1 .. 2; print scalar(@m), "\n";
+my @e = do { { 7, 1 } }; print scalar(@e), "\n";
+my @n = map { +{ $_ => 2 } } 1; print ref $n[0], "\n";
 PL

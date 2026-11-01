@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s531e
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> v59
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl-s531e
-branch-sha: db20f1eb77e6809a04741e77cffec8fe5aa7f03c
-lib-tree: f4790fbbf1773fc46dee3d5a1eff9ef35a2d6d1c
+branch: v59
+branch-sha: 0aae7704c08151663973ad27baf1f7f0078b4e32
+lib-tree: bd3e15af3580f93f6e31b77c40516e2fa7cb6517
 date: 2026-11-01
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -62,6 +62,7 @@ fix: AA §44 49a24b96 Lexer: CORE::__END__ / CORE::__DATA__ start an End / Data 
 fix: AM §52 41cf1558 Lexer: defer BLOCK is a compound statement of its own
 fix: AN §53 9286f7c0 Lexer: the class feature builds its statements
 fix: AO §58 db20f1eb Lexer: the ( after a method named if or while holds its arguments
+fix: AP §59 0aae7704 Lexer: a { first inside a map block or a dereference block is a hash
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -163,3 +164,5 @@ commit: 634d8e6d TODO tests: the class feature builds its statements
 commit: 9286f7c0 Lexer: the class feature builds its statements
 commit: 7bd8dfcd TODO tests: the ( after a method named if or while holds its arguments
 commit: db20f1eb Lexer: the ( after a method named if or while holds its arguments
+commit: fb23f551 TODO tests: a { first inside a map block or a dereference block is a hash
+commit: 0aae7704 Lexer: a { first inside a map block or a dereference block is a hash

@@ -866,9 +866,9 @@ not code
    tasks => [4201, 4083] },
  { id => 59, kind => 'structure', dump => 'structure',
    title => 'A `{` FIRST inside a map / grep / sort block or a dereference block (`map { { %$_, x => 1 } } LIST`, `${ { $k, 1 } }{a}`) is built as a BLOCK, where perl reads an anonymous hash',
-   ppi => { confirmed => '1.291', fixed_in => undef },
-   when => { check => undef, shape => 'the first { inside a map/grep/sort block, a print-family filehandle block or a $ @ % & $# dereference block built as Block (the statement-start look-ahead)' },
-   fix => { kind => 'handler', handler => 'Pl::PExpr::_deref_inner_brace' },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'brace-class', shape => 'the first { inside a map/grep/sort block, a print-family filehandle block or a $ @ % & $# dereference block built as Block (the statement-start look-ahead)' },
+   fix => { kind => 'handler', handler => 'Pl::PExpr::_deref_inner_brace', changed => 'PPI decides the first { of an XREF block (group AP); Pl::PExpr::_deref_inner_brace (#2085) read the deref case and is DELETED (s531e)', commit => '0aae7704', group => 'AP', pr => undef },
    repro => 'my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c), " ", ref $c[0], "\\n";
 ',
    perl => "1 HASH\\n",

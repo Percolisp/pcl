@@ -754,7 +754,10 @@ $HANDLER{open_curly} = sub {
   elsif ($x eq 'XATTRTERM' || $x eq 'XTERMBLOCK') { ($kind, $after) = ('block', 'XOPERATOR') }
   elsif ($x eq 'XATTRBLOCK' || $x eq 'XBLOCK') { ($kind, $after) = ('block', 'XSTATE') }
   elsif ($x eq 'XBLOCKTERM') { ($kind, $after) = ('block', 'XTERM') }
-  elsif ($x eq 'XCAST') { ($kind, $after) = ('deref', $st->{forvar} ? 'XFORLIST' : 'XOPERATOR') }
+  elsif ($x eq 'XCAST') {
+    ($kind, $after) = ('deref', $st->{forvar} ? 'XFORLIST' : 'XOPERATOR');
+    $inner = 'XTERM' if _next_is_open_curly($c);   # block_expectation (6491-6496)
+  }
   else {   # XSTATE, XREF: the lookahead
     my $is_hash = _curly_lookahead_is_hash($c);
     $after = $lop_adj ? 'XTERM' : 'XOPERATOR';
@@ -762,6 +765,10 @@ $HANDLER{open_curly} = sub {
     else {
       $kind = 'block';
       $after = 'XSTATE' if $x eq 'XSTATE';
+      # block_expectation (6488-6496): in a block opened under XREF (map /
+      # grep / sort, a print-family filehandle block) a `{` right after the
+      # `{` makes perl expect a term -- an anonymous hash (PPI §59)
+      $inner = 'XTERM' if $x eq 'XREF' && _next_is_open_curly($c);
     }
   }
   my $owner = $st->{owner};
@@ -777,6 +784,13 @@ $HANDLER{open_curly} = sub {
                            lopname => $st->{lopname}, forvar => $st->{forvar} };
   _set($w, $inner, subscript_open => ($kind eq 'subscript' ? 1 : 0));
 };
+
+# Is the next significant token a `{` (toke.c skipspace + `*s == '{'`)?
+sub _next_is_open_curly {
+  my ($c) = @_;
+  my $t1 = $c->{toks}[$c->{i} + 1] or return 0;
+  return $t1->isa('PPI::Token::Structure') && $t1->content eq '{' ? 1 : 0;
+}
 
 sub _curly_lookahead_is_hash {
   my ($c) = @_;
@@ -872,6 +886,11 @@ sub _structure_section {
   my ($w, $c, $kind, $got, $fhblock) = @_;
   return 37 if $fhblock;
   return 5 if $kind eq 'hash' && $got eq 'Block' && $w->{st}{x} eq 'XSTATE';
+  # #3962: the first `{` inside a map/grep/sort, print-family or dereference
+  # block (block_expectation)
+  my $top = $w->{stack}[-1];
+  return 59 if $kind eq 'hash' && $got eq 'Block' && $top && $top->{kind} =~ /^(?:block|deref)$/
+            && $c->{prev} && $c->{prev} == $top->{tok};
   return 50 if $kind eq 'hash' && $got eq 'Block';   # #3742: XTERM / the XREF look-ahead
   my $p = $c->{prev};
   return 1 if $kind eq 'deref' && $p && $p->isa('PPI::Token::Magic') && $p->content eq '$$';   # §1b
