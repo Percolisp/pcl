@@ -758,12 +758,23 @@
 
 ;;; ----- Test::More structural / module asserts (for CPAN module test suites) -----
 
+;;; Test::More's _unoverload_str (task #3553): an OBJECT whose class has a
+;;; '""' overload (overload::Method, so inherited counts and a 0+ / bool
+;;; overload does not) takes part in a comparison as its STRING.  is_deeply
+;;; applies it to both operands at the top and again at every level of
+;;; _deep_check, so `is_deeply([$path_obj], ['base/a'])` is ok and so is
+;;; `is_deeply($obj, 'x')` (probed 5.40.3's Test::More).
+(defun %test-unoverload-str (x)
+  (if (and (p-box-p x) (p-find-overload x "\"\""))
+      (to-string x)
+      x))
+
 ;;; Recursive deep comparison for is_deeply: unwrap boxes at each level, compare
 ;;; arrayrefs elementwise, hashrefs key-by-key, scalars by stringification (with
 ;;; undef handling).  Covers the common ref shapes Test::More::is_deeply is used on.
 (defun test-deeply-equal (a b)
-  (let ((a (if (p-box-p a) (p-box-value a) a))
-        (b (if (p-box-p b) (p-box-value b) b)))
+  (let ((a (let ((u (%test-unoverload-str a))) (if (p-box-p u) (p-box-value u) u)))
+        (b (let ((u (%test-unoverload-str b))) (if (p-box-p u) (p-box-value u) u))))
     (cond
       ((and (test-undef-p a) (test-undef-p b)) t)
       ((or (test-undef-p a) (test-undef-p b)) nil)

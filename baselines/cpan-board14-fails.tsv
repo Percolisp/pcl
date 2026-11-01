@@ -663,8 +663,6 @@ Path-Tiny-0.150-0	input_output_no_PU_UU.t	0	*PLAN*	ran 2 of no plan, rc 2	a plan
 Path-Tiny-0.150-0	input_output_no_UU.t	0	*PLAN*	ran 2 of no plan, rc 2	a plan	#660 (slurp-mode readline on an EMPTY file answers undef, perl "": ->slurp dies "Error read" in subtest 3 -- s521c, #1576/#3432 one-file run) -- s531a: the @INC hook loads now (#1815 fixed) and `do "./t/input_output.t"` runs to input_output.t's own face
 Path-Tiny-0.150-0	temp.t	1	tempdir			#2370 (child row 'tempdir destroyed': no scope-exit DESTROY -- s521c, #1576/#3432 one-file run)
 Path-Tiny-0.150-0	temp.t	2	tempfile			#3552 + #2370 (child 'cached_temp': a blessed glob returned from a sub loses its class; 'tempfile destroyed' -- s521c, #1576/#3432 one-file run)
-Path-Tiny-0.150-0	mutable_tree_while_iterating.t	1	iterator			#3553 (is_deeply does not stringify a ""-overloaded Path::Tiny object, child 'remaining files' -- s521c, #1576/#3432 one-file run)
-Path-Tiny-0.150-0	mutable_tree_while_iterating.t	2	visit			#3553 (same -- s521c, #1576/#3432 one-file run)
 Path-Tiny-0.150-0	filesystem.t	70	slurp+crlf+utf8	'Line1	'Line1	#2853 (:crlf:utf8 does not translate CR LF on read -- s521c, #1576/#3432 one-file run)
 Path-Tiny-0.150-0	filesystem.t	71	lines+crlf+utf8	'ARRAY(0x2)'	'ARRAY(0x3)'	#2853 (same -- s521c, #1576/#3432 one-file run)
 Path-Tiny-0.150-0	filesystem.t	0	*PLAN*	ran 93 of no plan, rc 2	a plan	#3554 (after lstat(SYMLINK) `-d _` follows the link: File::Path remove_tree aborts "changed before chdir" -- s521c, #1576/#3432 one-file run)

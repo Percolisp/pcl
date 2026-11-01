@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 36;
+plan tests => 37;
 
 sub run_cl {
     my ($code) = @_;
@@ -185,6 +185,28 @@ ok(eq_set([[1],[2]],[[1],[2]]), 'eq_set refs compare deeply');
 ok(!eq_set([1],[1,1]), 'eq_set length');
 }), "1..5\nok 1 - eq_set order-free\nok 2 - eq_set duplicates count\nok 3 - eq_set refs keep their order\nok 4 - eq_set refs compare deeply\nok 5 - eq_set length\n",
    'eq_set exists and both of its verdicts are reachable');
+
+# ------------------------------- 3c. is_deeply unoverloads "" (task #3553)
+# Test::More's _unoverload_str: an object with a '""' overload (inherited
+# too; a 0+-only one is not) compares as its STRING, at the top and at every
+# level (Path::Tiny objects vs path strings).  Verdicts probed vs perl 5.40.3.
+is(join('', grep { /^(?:not )?ok / } split /^/, run_cl(q{
+package P; use overload '""' => sub { "x" }, fallback => 1;
+package N; use overload '0+' => sub { 7 }, fallback => 1;
+package C; our @ISA = ('P');
+package main; use Test::More tests => 9;
+is_deeply([bless [], 'P'], ['x'], 'nested');
+is_deeply(['x'], [bless {}, 'P'], 'nested, expected side');
+is_deeply([bless [], 'C'], ['x'], 'inherited');
+is_deeply({ k => [bless [], 'P'] }, { k => ['x'] }, 'two levels');
+is_deeply(bless([], 'P'), 'x', 'top level');
+is_deeply([bless [], 'N'], ['7'], 'numify only');
+is_deeply([bless [], 'P'], ['y'], 'mismatch');
+is_deeply(bless([1], 'P'), [1], 'top-level object vs array');
+is_deeply([1], 'ARRAY', 'ref vs string');
+})), "ok 1 - nested\nok 2 - nested, expected side\nok 3 - inherited\nok 4 - two levels\nok 5 - top level\n"
+   . "not ok 6 - numify only\nnot ok 7 - mismatch\nnot ok 8 - top-level object vs array\nnot ok 9 - ref vs string\n",
+   'is_deeply compares a "" -overloaded object as its string, at every level (#3553)');
 
 # ---------------------------------------------------- 4. Test::More's wording
 
