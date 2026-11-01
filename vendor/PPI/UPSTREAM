@@ -1,14 +1,14 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s531e
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl-s531e
+branch: pcl
 branch-sha: a376a6d86f7a6d6d6d3da8e8f2094d75ef23b1e1
 lib-tree: f47448b816619a1465cbb42f0f1e70ba9e532874
-date: 2026-11-01
+date: 2026-11-02
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or

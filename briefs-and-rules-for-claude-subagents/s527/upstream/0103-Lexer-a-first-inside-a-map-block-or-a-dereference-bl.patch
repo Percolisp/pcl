@@ -1,0 +1,114 @@
+From 0aae7704c08151663973ad27baf1f7f0078b4e32 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 1 Nov 2026 04:08:12 +0200
+Subject: [PATCH 103/105] Lexer: a { first inside a map block or a dereference
+ block is a hash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl lexes the block of map, grep and sort, the filehandle block of
+print, printf, say, exec and system, and the block of a $ @ % & or $#
+dereference where it expects a reference (toke.c: those list operators
+are LOP(..., XREF), a cast is PREREF), and a { right after that block's
+{ makes it expect a term (yyl_leftcurly, block_expectation), so that {
+is an anonymous hash whatever follows it:
+
+    perl -e 'my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c), " ", ref $c[0], "\n"'
+    # 1 HASH
+
+_curly now asks a new _opens_xref_block for a { that starts a
+statement: when that statement is the first child of such a block (a
+null statement counts, so after map {; the { still starts a statement;
+whitespace, comments and POD do not), the { is a
+PPI::Structure::Constructor.  map({ ... } LIST) is the same block one
+list deeper.  The blocks of do, eval and sub, and a bare block, keep
+the statement-start look-ahead -- perl opens those where it expects a
+statement.
+
+Fixes PCL §59 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm | 43 +++++++++++++++++++++++++++++++++++++++++++
+ t/ppi_bugs_pcl.t |  3 +--
+ 2 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index ea1190be..9f1cfe82 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1228,6 +1228,44 @@ sub _deref_block {
+ 	return $prior->isa('PPI::Token::Cast') && $prior->content =~ /^[\$\@\%\*]\z/;
+ }
+ 
++# The list operators whose block perl lexes where it expects a reference
++# (toke.c: LOP(..., XREF)): the block of map, grep and sort, and the
++# filehandle block of print, printf, say, exec and system.
++my %XREF_BLOCK_WORD = map { $_ => 1 } qw{map grep sort print printf say exec system};
++
++# Is the (still empty) statement the first thing inside a block that perl
++# opens where it expects a reference -- the block of map, grep or sort, a
++# print-family filehandle block, or the block of a $ @ % & $# dereference?
++# toke.c yyl_leftcurly, block_expectation: a { right after such a { makes
++# perl expect a term, so that { is an anonymous hash ("treat it as a term
++# to make ${{...}}{k} ... dwim"), whatever follows it:
++# map { { %$_, x => 1 } } LIST returns one hash per element.
++sub _opens_xref_block {
++	my $Statement = shift;
++	my $Block = $Statement->parent;
++	return '' if !_INSTANCE($Block, 'PPI::Structure::Block');
++	# the first child that is not whitespace, a comment or POD (a null
++	# statement counts: after map {; the { opens a statement)
++	my ($first) = grep { !$_->isa('PPI::Token') or $_->significant } $Block->children;
++	return '' if !$first or $first != $Statement;
++	my $prior = $Block->sprevious_sibling;
++	if ( !$prior ) {
++		# map({ ... } LIST): the block opens the list after the word
++		my $Outer = $Block->parent;
++		return '' if !$Outer or $Outer->schild(0) != $Block;
++		my $List = $Outer->parent;
++		return '' if !_INSTANCE($List, 'PPI::Structure::List');
++		return '' if $List->schild(0) != $Outer;
++		$prior = $List->sprevious_sibling or return '';
++		return '' if !$prior->isa('PPI::Token::Word');
++	}
++	return 1 if $prior->isa('PPI::Token::Cast') and $prior->content =~ /\A(?:\$\#?|\@|\%|\&)\z/;
++	return '' if !$prior->isa('PPI::Token::Word');
++	my $word = $prior->content;
++	$word =~ s/\ACORE:://;
++	return $XREF_BLOCK_WORD{$word} ? 1 : '';
++}
++
+ # Given a parent element, and a [ token to open a structure, determine
+ # the class that the structure should be.
+ sub _square {
+@@ -1414,6 +1452,11 @@ sub _curly {
+ 	### FIXME This is possibly a bad choice, but will have to do for now.
+ 	return 'PPI::Structure::Block' if $Element;
+ 
++	# The first thing inside a block opened where perl expects a reference
++	# -- map { { %$_, x => 1 } } LIST, ${ { $k, 1 } }{a} -- is an anonymous
++	# hash, whatever follows it
++	return 'PPI::Structure::Constructor' if _opens_xref_block($Parent);
++
+ 	if (
+ 		$Parent->isa('PPI::Statement')
+ 		and
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 3b927774..d7380e43 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1931,8 +1931,7 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;'
+ # whatever follows it (toke.c yyl_leftcurly, block_expectation: "treat it
+ # as a term to make ${{...}}{k} ... dwim"):
+ # `my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c)` prints 1.
+-TODO: {
+-    local $TODO = 'PCL §59: a { first inside a map / grep / sort or dereference block is a Block';
++{
+     for my $code ( 'my @c = map { { %$_, x => 1 } } @l;', 'my @c = map { { $_, 1 } } @l;',
+                    'my @g = grep { { $_, 1 } } @l;', 'my @c = map({ { %$_ } } @l);',
+                    'my $v = ${ { $k, 1 } }{a};' ) {
+-- 
+2.53.0
+

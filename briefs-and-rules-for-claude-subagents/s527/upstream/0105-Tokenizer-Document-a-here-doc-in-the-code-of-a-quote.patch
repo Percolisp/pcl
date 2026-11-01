@@ -1,0 +1,214 @@
+From a376a6d86f7a6d6d6d3da8e8f2094d75ef23b1e1 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 1 Nov 2026 04:20:47 +0200
+Subject: [PATCH 105/105] Tokenizer, Document: a here-doc in the code of a
+ quote-like takes the lines after it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A here-doc introduced in the CODE of a quote-like -- the replacement of
+s///e, a (?{ }) or (??{ }) block of a pattern -- takes its body from the
+lines after the line its marker is on (perl5180delta: "The body of a
+here-document inside a quote-like operator now always begins on the line
+after the "<<foo" marker"):
+
+    printf '%s\n' '$_ = "a"; s/a/<<END/e;' foo END 'print;' | perl
+    # foo
+
+Two halves, which only work together:
+
+  * _QuoteEngine::Full::_fill ends a Regexp::Match, Regexp::Substitute
+    or QuoteLike::Regexp token by asking _read_code_heredocs: for each
+    code part that ends on the token's last line it runs a tokenizer
+    over that code, and for each here-doc in it that found no body
+    there, it reads the following source lines up to the terminator, as
+    PPI::Token::HereDoc does, and keeps them as written (body and
+    terminator lines) in _heredoc_lines -- a new heredoc_lines method
+    returns them.  A marker on an earlier line of the token has its body
+    inside the token's own text and is left alone; 1 << 2 is no
+    here-doc to the tokenizer.
+
+  * Document::serialize writes a token's _heredoc_lines after the next
+    newline, exactly as it writes a HereDoc's body, and
+    index_locations counts them, so the round trip and the line numbers
+    of what follows are unchanged.
+
+Fixes PCL §42 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Document.pm                | 30 +++++-----
+ lib/PPI/Token/_QuoteEngine/Full.pm | 89 ++++++++++++++++++++++++++++++
+ t/ppi_bugs_pcl.t                   |  3 +-
+ 3 files changed, 107 insertions(+), 15 deletions(-)
+
+diff --git a/lib/PPI/Document.pm b/lib/PPI/Document.pm
+index f5b2771a..8c544910 100644
+--- a/lib/PPI/Document.pm
++++ b/lib/PPI/Document.pm
+@@ -492,23 +492,25 @@ sub serialize {
+ 			my $content = $Token->content;
+ 
+ 			# Handle the trivial cases
+-			unless ( $heredoc ne '' and $content =~ /\n/ ) {
+-				$output .= $content;
+-				next;
+-			}
+-
+-			# We have pending here-doc content that needs to be
+-			# inserted just after the first newline in the content.
+-			if ( $content eq "\n" ) {
+-				# Shortcut the most common case for speed
+-				$output .= $content . $heredoc;
++			if ( $heredoc ne '' and $content =~ /\n/ ) {
++				# We have pending here-doc content that needs to be
++				# inserted just after the first newline in the content.
++				if ( $content eq "\n" ) {
++					# Shortcut the most common case for speed
++					$output .= $content . $heredoc;
++				} else {
++					# Slower and more general version
++					$content =~ s/\n/\n$heredoc/;
++					$output .= $content;
++				}
++				$heredoc = '';
+ 			} else {
+-				# Slower and more general version
+-				$content =~ s/\n/\n$heredoc/;
+ 				$output .= $content;
+ 			}
+ 
+-			$heredoc = '';
++			# A quote-like whose code introduces here-docs
++			# (s/a/<<END/e) carries their lines
++			$heredoc .= join '', @{ $Token->{_heredoc_lines} } if $Token->{_heredoc_lines};
+ 			next;
+ 		}
+ 
+@@ -685,6 +687,8 @@ sub index_locations {
+ 			# Add any here-doc lines to the counter
+ 			if ( $Token->isa('PPI::Token::HereDoc') ) {
+ 				$heredoc += $Token->heredoc + 1;
++			} elsif ( $Token->{_heredoc_lines} ) {
++				$heredoc += @{ $Token->{_heredoc_lines} };
+ 			}
+ 		}
+ 	}
+diff --git a/lib/PPI/Token/_QuoteEngine/Full.pm b/lib/PPI/Token/_QuoteEngine/Full.pm
+index 676e2681..6da84272 100644
+--- a/lib/PPI/Token/_QuoteEngine/Full.pm
++++ b/lib/PPI/Token/_QuoteEngine/Full.pm
+@@ -134,6 +134,95 @@ sub _fill {
+ 		$self->{modifiers}->{lc $char} = 1;
+ 		$t->{line_cursor}++;
+ 	}
++
++	$self->_read_code_heredocs($t);
++	1;
++}
++
++# A here-doc introduced in the CODE of a quote-like -- the replacement of
++# s///e, or a (?{ }) / (??{ }) block of a pattern -- takes its body from
++# the lines after the line its marker is on, as anywhere else (perl 5.18:
++# "The body of a here-document inside a quote-like operator now always
++# begins on the line after the <<foo marker").  When the code ends on the
++# token's last line those lines follow the token: read them here, as
++# PPI::Token::HereDoc does, so they are not lexed as code, and keep them
++# (body and terminator lines, as written) for serialize.  A marker on an
++# earlier line of the token has its body inside the token's own text.
++sub _read_code_heredocs {
++	my ( $self, $t ) = @_;
++	return if !$self->isa('PPI::Token::Regexp::Match')
++		and !$self->isa('PPI::Token::Regexp::Substitute')
++		and !$self->isa('PPI::Token::QuoteLike::Regexp');
++	my $content  = $self->content;
++	my @sections = @{ $self->{sections} || [] };
++	my @code;
++	if ( $self->{modifiers}->{e} and @sections > 1 ) {
++		push @code, [ $sections[1]->{position}, $sections[1]->{size} ];
++	}
++	if ( @sections ) {
++		push @code, _code_blocks( $content, $sections[0]->{position}, $sections[0]->{size} );
++	}
++	my @lines;
++	foreach my $span ( @code ) {
++		my ( $position, $size ) = @$span;
++		next if substr( $content, $position + $size ) =~ /\n/;
++		my $code   = substr( $content, $position, $size );
++		my $tokens = PPI::Tokenizer->new( \$code )->all_tokens or next;
++		foreach my $HereDoc ( grep { $_->isa('PPI::Token::HereDoc') } @$tokens ) {
++			next if @{ $HereDoc->{_heredoc} || [] } or defined $HereDoc->{_terminator_line};
++			my $terminator = $HereDoc->{_terminator};
++			while ( defined( my $line = $t->_get_line ) ) {
++				if ( $t->{source_eof_chop} and $t->{source} and !@{ $t->{source} } ) {
++					# The last line of the document, which the tokenizer
++					# ended with a space of its own (see PPI::Tokenizer)
++					chop $line;
++					$t->{source_eof_chop} = '';
++				}
++				push @lines, $line;
++				last if PPI::Token::HereDoc->_is_terminator( $terminator, $line, $HereDoc->{_indented} )
++					or PPI::Token::HereDoc->_is_terminator( "$terminator\n", $line, $HereDoc->{_indented} );
++			}
++		}
++	}
++	$self->{_heredoc_lines} = \@lines if @lines;
++	return;
++}
++
++# The ( position, size ) of the code of each (?{ ... }) and (??{ ... })
++# block in the pattern section at ( position, size ) of the content.
++sub _code_blocks {
++	my ( $content, $position, $size ) = @_;
++	my $pattern = substr( $content, $position, $size );
++	my @blocks;
++	while ( $pattern =~ /\(\?\??\{/g ) {
++		my $start = pos $pattern;
++		my $depth = 1;
++		my $i     = $start;
++		while ( $depth and $i < length $pattern ) {
++			my $c = substr( $pattern, $i++, 1 );
++			if ( $c eq '\\' ) { $i++; next }
++			$depth++ if $c eq '{';
++			$depth-- if $c eq '}';
++		}
++		last if $depth;
++		push @blocks, [ $position + $start, $i - 1 - $start ];
++		pos $pattern = $i;
++	}
++	return @blocks;
++}
++
++=pod
++
++=head2 heredoc_lines
++
++The lines that follow a quote-like on its last line and belong to the
++here-docs its code introduces -- C<s/a/E<lt>E<lt>END/e> -- as written:
++each body, then its terminator line.  Empty if there are none.
++
++=cut
++
++sub heredoc_lines {
++	@{ $_[0]->{_heredoc_lines} || [] };
+ }
+ 
+ # Handle the content parsing path for normally separated
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 0d804a53..f1223994 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1647,8 +1647,7 @@ TODO: {
+ # §42 -- a here-doc introduced inside a quote-like body takes its body
+ # from the lines after the statement, as anywhere else:
+ # `$_ = "a"; s/a/<<END/e;\nfoo\nEND\nprint;` prints foo.
+-TODO: {
+-    local $TODO = 'PCL §42: a here-doc inside a quote-like body does not consume its body';
++{
+     my @t = map { short_class($_) } toks("\$_ = 'a'; s/a/<<END/e;\nfoo\nEND\nprint;\n");
+     ok( !grep( $_ eq 'Word=END', @t ), 's/a/<<END/e: the here-doc body is not code' ) or diag "got: @t";
+     # a regex code block introduces a here-doc too (t/base/lex.t)
+-- 
+2.53.0
+

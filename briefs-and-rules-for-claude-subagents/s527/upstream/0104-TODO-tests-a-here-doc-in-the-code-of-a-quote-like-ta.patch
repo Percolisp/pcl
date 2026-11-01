@@ -1,0 +1,83 @@
+From e876be8bf040862de02d7cb61fb698957e1be368 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 1 Nov 2026 04:19:48 +0200
+Subject: [PATCH 104/105] TODO tests: a here-doc in the code of a quote-like
+ takes the lines after it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A here-doc introduced in the CODE of a quote-like -- the replacement of
+s///e, a (?{ }) block of a pattern -- takes its body from the lines after
+the line its marker is on, as anywhere else (perl5180delta: "The body of
+a here-document inside a quote-like operator now always begins on the
+line after the "<<foo" marker"):
+
+    printf '%s\n' '$_ = "a"; s/a/<<END/e;' foo END 'print;' | perl
+    # foo
+
+PPI reads the body of a PPI::Token::HereDoc only, so after s/a/<<END/e
+the body lines are lexed as code, and a here-doc later on the same line
+takes them as its own body.
+
+Two rows join the existing PCL §42 TODO block (a qr/(?{<<END})/ code
+block, as in perl's t/base/lex.t; and print <<C after s/a/<<A . <<B/e,
+whose body must be C's alone), plus two guards outside it that hold today
+and must keep holding -- the document round-trips and the statement after
+the bodies is on line 8 -- and two controls: a marker on an earlier line
+of the token has its body inside the token, and 1 << 2 is a shift.
+Plan 317 -> 323.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index d7380e43..0d804a53 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 317 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 323 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1651,6 +1651,31 @@ TODO: {
+     local $TODO = 'PCL §42: a here-doc inside a quote-like body does not consume its body';
+     my @t = map { short_class($_) } toks("\$_ = 'a'; s/a/<<END/e;\nfoo\nEND\nprint;\n");
+     ok( !grep( $_ eq 'Word=END', @t ), 's/a/<<END/e: the here-doc body is not code' ) or diag "got: @t";
++    # a regex code block introduces a here-doc too (t/base/lex.t)
++    @t = map { short_class($_) } toks("print 1 unless qr/(?{<<END})/ eq 'x';\nfoo\nEND\nprint 2;\n");
++    ok( !grep( $_ eq 'Word=END', @t ), 'qr/(?{<<END})/: the here-doc body is not code' ) or diag "got: @t";
++    # two markers in the replacement and a here-doc after it: the bodies
++    # follow in the order of their markers
++    my $src = "s/a/<<A . <<B/e; print <<C;\na\nA\nb\nB\nc\nC\nprint 4;\n";
++    my $doc = PPI::Document->new(\$src);
++    my ($c) = @{ $doc->find('PPI::Token::HereDoc') || [] };
++    is( $c && join( '', $c->heredoc ), "c\n", 's/a/<<A . <<B/e; print <<C: C reads its own body' );
++}
++# the bodies a quote-like takes are written back by serialize, and counted
++# by the locations (both hold today because the bodies are code tokens)
++{
++    my $src = "s/a/<<A . <<B/e; print <<C;\na\nA\nb\nB\nc\nC\nprint 4;\n";
++    my $doc = PPI::Document->new(\$src);
++    is( $doc->serialize, $src, 's/a/<<A . <<B/e; print <<C: the document round-trips' );
++    $doc->index_locations;
++    my $last = ( grep { $_->significant } $doc->tokens )[-1];
++    is( $last->location->[0], 8, 'the statement after the bodies is on line 8' );
++}
++# a marker on an earlier line of the token has its body inside the token,
++# and 1 << 2 is a shift
++for my $src ( "s/a/<<END\nfoo\nEND\n/e; print 6;\n", "s/a/1 << 2/e; print 7;\n" ) {
++    my $doc = PPI::Document->new(\$src);
++    is( $doc->serialize, $src, 'a here-doc body inside the replacement, or a shift: round-trips (control)' );
+ }
+ 
+ # §43 -- a lexical sub may be named like a keyword, and its name is then
+-- 
+2.53.0
+

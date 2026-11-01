@@ -1,0 +1,72 @@
+From fb23f5517a236f966221b07212a7267895b67e3e Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 1 Nov 2026 04:07:26 +0200
+Subject: [PATCH 102/105] TODO tests: a { first inside a map block or a
+ dereference block is a hash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl lexes the block of map, grep and sort, the filehandle block of
+print, printf, say, exec and system, and the block of a $ @ % &
+dereference where it expects a reference (toke.c XREF), and a { right
+after that block's { makes it expect a term, so that { is an anonymous
+hash whatever follows it (yyl_leftcurly, block_expectation: "treat it
+as a term to make ${{...}}{k} ... dwim"):
+
+    perl -e 'my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c), " ", ref $c[0], "\n"'
+    # 1 HASH
+
+PPI's _curly decides the inner { by the statement-start look-ahead,
+which takes { %$_, x => 1 } and { $_, 1 } for blocks, so the copy-with-
+one-more-key idiom reads as a bare block whose list is flattened.
+
+Five rows inside a new PCL §59 TODO block, and two controls: after
+map {; the { starts a statement (a block), and do { opens a block whose
+first { is a statement too.  Plan 310 -> 317.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 111e6532..3b927774 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 310 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 317 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1924,3 +1924,23 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;'
+     my @c = bracket_classes( 'if ($x) { 1 } elsif ($y) { 2 }', '(' );
+     is( "@c", 'PPI::Structure::Condition PPI::Structure::Condition', 'if (...) / elsif (...): conditions (control)' );
+ }
++
++# §59 -- perl lexes the block of map, grep and sort, a print-family
++# filehandle block and the block of a $ @ % & dereference where it expects
++# a reference, and a { right after that block's { is an anonymous hash
++# whatever follows it (toke.c yyl_leftcurly, block_expectation: "treat it
++# as a term to make ${{...}}{k} ... dwim"):
++# `my @c = map { { %$_, x => 1 } } ({a => 1}); print scalar(@c)` prints 1.
++TODO: {
++    local $TODO = 'PCL §59: a { first inside a map / grep / sort or dereference block is a Block';
++    for my $code ( 'my @c = map { { %$_, x => 1 } } @l;', 'my @c = map { { $_, 1 } } @l;',
++                   'my @g = grep { { $_, 1 } } @l;', 'my @c = map({ { %$_ } } @l);',
++                   'my $v = ${ { $k, 1 } }{a};' ) {
++        my @c = bracket_classes( $code, '{' );
++        is( $c[1], 'PPI::Structure::Constructor', "$code: the inner { is an anonymous hash" );
++    }
++}
++for my $code ( 'my @c = map {; { $_, 1 } } @l;', 'my @c = do { { $_, 1 } };' ) {
++    my @c = bracket_classes( $code, '{' );
++    is( $c[1], 'PPI::Structure::Block', "$code: a block where perl starts a statement (control)" );
++}
+-- 
+2.53.0
+

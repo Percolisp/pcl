@@ -109,3 +109,16 @@ an operator or a builtin list operator is a readline (`print <FH>`, `sort
 shared.  **AL** §43 a lexical sub named like a keyword (`my sub s`, `my sub
 y`, `my sub x`) is called by its bare name in its block (`PR-AL.md`).
 t/ppi_bugs_pcl.t: 295 -> 298 rows.
+
+## s531e (2026-11-01, resumed s532): the branch is now 105 commits, head a376a6d8
+
+`0001-*.patch` .. `0105-*.patch` and `pcl-branch.bundle` regenerated from the
+whole branch (`git format-patch origin/master..pcl`).  Three groups, each
+"TODO tests, then the fix", PPI's suite green after every commit, plain and
+AUTHOR_TESTING=1: **AO** §58 the `(` after a method named `if` / `elsif` /
+`unless` / `while` / `until` is its argument List (`PR-AO.md`); **AP** §59 a
+`{` first inside a map / grep / sort block or a dereference block is an
+anonymous hash (`PR-AP.md`); **AQ** §42 a here-doc introduced in the code of a
+quote-like (an `s///e` replacement, a `(?{ })` block) takes the lines after it
+-- the tokenizer half and the Document half together (`PR-AQ.md`).
+t/ppi_bugs_pcl.t: 304 -> 323 rows.

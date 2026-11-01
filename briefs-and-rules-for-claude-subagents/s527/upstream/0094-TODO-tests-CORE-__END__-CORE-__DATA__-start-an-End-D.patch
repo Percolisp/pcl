@@ -1,8 +1,8 @@
 From ac62cb8593b4e980b582d5e705e84108d5289840 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 09:56:52 +0200
-Subject: [PATCH 94/99] TODO tests: CORE::__END__ / CORE::__DATA__ start an End
- / Data statement
+Subject: [PATCH 094/105] TODO tests: CORE::__END__ / CORE::__DATA__ start an
+ End / Data statement
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

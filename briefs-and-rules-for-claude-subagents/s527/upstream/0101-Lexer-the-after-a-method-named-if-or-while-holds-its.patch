@@ -1,0 +1,68 @@
+From db20f1eb77e6809a04741e77cffec8fe5aa7f03c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 1 Nov 2026 03:59:11 +0200
+Subject: [PATCH 101/105] Lexer: the ( after a method named if or while holds
+ its arguments
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A word after -> is a method name: toke.c reads it where it expects an
+operator, never as a keyword, so its ( is the argument list:
+
+    perl -e 'sub F::if { "if$_[1]" } print F->if(1), "\n"'
+    # if1
+
+_round now skips its keyword table when the word follows a -> (the
+test _curly and _square make for ->{ and ->[), so $f->if(1),
+->elsif(, ->unless(, ->while( and ->until( build a
+PPI::Structure::List holding a Statement::Expression, exactly as
+$f->foo(1) does; ->for( and ->foreach( get the same List directly
+instead of through the ForLoop rebless.  if (...), elsif (...),
+while (...) and the statement modifiers are unchanged.
+
+Fixes PCL §58 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm | 9 +++++++--
+ t/ppi_bugs_pcl.t | 3 +--
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 83410c4a..ea1190be 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1169,8 +1169,13 @@ sub _round {
+ 	# Get the last significant element in the parent
+ 	my $Element = $Parent->schild(-1);
+ 	if ( _INSTANCE($Element, 'PPI::Token::Word') ) {
+-		# Can it be determined because it is a keyword?
+-		my $rclass = $ROUND{$Element->content};
++		# Can it be determined because it is a keyword?  Not after a ->:
++		# a word there is a method name (toke.c reads it where it expects
++		# an operator), so $obj->if(1) calls the method if, and the ( opens
++		# its arguments.
++		my $prior  = $Parent->schild(-2);
++		my $method = $prior && $prior->isa('PPI::Token::Operator') && $prior->content eq '->';
++		my $rclass = !$method && $ROUND{$Element->content};
+ 		return $rclass if $rclass;
+ 	}
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 47f976b3..111e6532 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1914,8 +1914,7 @@ for my $code ( 'my @t = map { $_ => 1 } @x;', 'my @u = map { lc($_) => 1 } @x;'
+ # method name (toke.c reads it where it expects an operator), so the ( after
+ # it holds the method's arguments, as after any other method name:
+ # `sub F::if { "if$_[1]" } print F->if(1)` prints if1.
+-TODO: {
+-    local $TODO = 'PCL §58: the ( after a method named if / elsif / unless / while / until is a Condition';
++{
+     for my $kw (qw(if elsif unless while until)) {
+         my @c = bracket_classes( "\$f->$kw(1);", '(' );
+         is( $c[0], 'PPI::Structure::List', "\$f->$kw(1): the ( after a method named $kw is a List" );
+-- 
+2.53.0
+
