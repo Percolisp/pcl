@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-02",
+   "description" : "FILED by the s532 Fable merge review (2026-11-02), probe ~/pcl-agent-scratch/s532/review/merge-review/probes/e1688-3.pl (needs PCL_REVIEW_PROBES=.../probes for its `use lib`).  PRE-EXISTING: base d47caabe and main b31345ca identical.  Found while probing #1688 (require answers the file's value) -- the bare spellings `my $again = require A;` and `eval \"require $m\"` are right on main.\n\n    use lib \"...\";\n    print \"v: \", (require A), \"\\n\";\n    # perl: \"v: 1\"\n    # PCL:  PCL: statement not supported at ... line 3: print \"v: \", (require A), \"\\n\"; -- Handle single node of unknown type. Dump: ...   exit 2\n\nMECHANISM (likely): the Statement::Include special-casing lives at statement level (Pl::Parser::_process_include_statement); a `require` Word inside a PPI::Structure::List reaches PExpr as a plain Word + a bareword argument, which the term walker declines (the \"single node of unknown type\" drop).  FIX SHAPE: PExpr lowers `require BAREWORD` / `require EXPR` in expression position the way the statement form does (ONE lowering, rule 11: the include statement's require arm becomes the expression form's caller), with #1688's value semantics; guard rows in Pl/t/use-require-01.t (`my @x = (1, (require A), 2)`, the print shape).  LOW: a rare spelling; no board row known behind it.\n",
+   "id" : 4364,
+   "status" : "pending",
+   "subject" : "A parenthesised `(require NAME)` inside a list -- `print \"v: \", (require A), \"\\n\";` -- is a statement drop (\"Handle single node of unknown type\"); `my $v = require A;` and `eval \"require $m\"` work"
+}
