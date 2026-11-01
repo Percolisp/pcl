@@ -979,6 +979,15 @@ does.  Example: `my $s = bless {}, "K"; my $t = [$s]; $s = 8; ref $t->[0]`
 is `K`.  (The s529a residue -- a re-bless of an ARRAY / CODE referent through
 one copy -- is closed by the re-bless stash above, s530a; #4061 is what is left.)
 
+**A `map` block's result is a COPY, a reference included (normative, s532a,
+#4084).**  `p-map` (and `p-map-flat`) copy every value the block returns
+(perl's `pp_mapwhile` copies every non-TEMP result): a plain value into a raw
+or fresh box, a REFERENCE into a fresh container by the same rule as above
+(`%p-ref-container-copy`: the referent, the class and the `is-ref` flag), so
+`map { $b = $src->{$_}; ($_ => $b) } KEYS` stores each iteration's reference,
+never the variable `$b`.  `grep` and `sort` return the elements THEMSELVES
+(aliases): `$_++ for grep { 1 } @a` writes `@a`.
+
 **A SCALAR'S OWN STASH IS NOT THE CLASS OF WHAT IT HOLDS (normative,
 s483b/#1619).**  `ref(R)` reports the blessing of R's *referent itself*,
 so a scalar that merely HOLDS a blessed reference is not blessed: with
@@ -1722,6 +1731,20 @@ may have put in between (`p-list-scalar` for a `($)` prototype, the context
 binds).  A backend may implement it as one vivifying slice reader.  A
 consumer this rule does not reach keeps the plain aliasing read, which is
 the status quo, never a wrong value.
+
+**An ELEMENT in an aliasing consumer is a one-slot slice (normative, s532a,
+#4086 / #3862).**  In a foreach list, a `map` / `grep` list and each term of
+`\(E1, E2, …)`, an element (`$a[i]`, `$h{k}`, `$r->[i]`, `$r->{k}`, and the
+`@_` element `$_[i]`) is ALIASED, never copied, and taken by the same box
+accessor the vivifying slice readers call (`p-aref-box` / `p-gethash-box` /
+`p-aref-deref-box` / `p-gethash-deref-box`): the runtime's one rewrite
+(`%p-aliasing-slice-form`) turns an element form into `(vector BOX-ACCESSOR)`,
+and `\(E1, E2)` references each term in lvalue context exactly as `\E` does.
+Example: `sub f { for ($_[0], "lit") { $_ .= "+" } } my $v = "x";
+eval { f($v) }; print $v` prints `x+` (then the literal's write dies).  An
+`@_` element in a foreach list is a WRITE of the caller's argument exactly
+when the body writes the loop variable (the callee's writes-through-`@_`
+fact, #189).
 
 **A slice that is a `map` block's VALUE reads values (normative, s501q,
 #2515).**  `p-map` copies every value its block returns (perl's
