@@ -2787,7 +2787,21 @@ sub parse {
   push @body, '(p-class-invocant-snapshot '
               . join(' ', map { qq{"$_"} } @$ci) . ')' if $ci && @$ci;
   push @body, "(p-run-compile-phase-blocks)", '';
-  for my $g (@run_groups) {
+  # #1688: a MODULE unit has a VALUE -- the value of its last run-time
+  # statement is what `require` returns, and a false one is perl's "did not
+  # return a true value" (the loader, p-load-module-cached, reads it).  The
+  # last run statement is wrapped `(p-unit-value …)`; one that is not a single
+  # form says so with `(p-unit-value-assumed)` (the loader then answers true,
+  # as before).  Under `module_true` (perl 5.37+, `use v5.38`) the value is 1
+  # whatever the file ends with: `(p-unit-module-true)`, FIRST in the run
+  # phase so a top-level `return` cannot skip it.
+  my $uv_at = $self->module_unit ? _unit_value_site(\@run_groups) : undef;
+  push @body, "(p-unit-module-true)", ''
+    if $self->module_unit
+    && Pl::Parser::feature_at(Pl::Parser::feature_regions_of($doc, 'module_true'),
+                              [9e8, 0]);
+  for my $gi (0 .. $#run_groups) {
+    my $g = $run_groups[$gi];
     my ($i, $pkg, $cl_pkg, $run) = @$g;
     next unless $i > 0 || grep { /\S/ } @$run;
     # READ-time: pass 1 left the reader in the last section's package.
@@ -2809,7 +2823,12 @@ sub parse {
     # ahead of its own run forms, so it keeps its byte-identical emission.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", ''
       if $i > 0 || @sections > 1;
-    push @body, map { ($_, '') } @$run;
+    for my $ei (0 .. $#$run) {
+      my $form = $run->[$ei];
+      $form = _unit_value_form($form)
+        if $uv_at && $uv_at->[0] == $gi && $uv_at->[1] == $ei;
+      push @body, $form, '';
+    }
   }
 
   my @out = ('(in-package :pcl)', '');
@@ -2871,6 +2890,84 @@ sub parse {
   # consumers of an emission read that line first.
   if (my $detect = $self->_detect_table_form) { splice @out, 1, 0, $detect }
   return join("\n", @out);
+}
+
+# #1688: the [group, entry] index of a module unit's LAST run-time statement
+# in the assembly's run groups, or undef when it runs none (an empty file, a
+# file of subs only -- perl's "did not return a true value").  An entry that
+# holds no form (blank, a comment) is not a statement.
+sub _unit_value_site {
+  my ($groups) = @_;
+  for my $gi (reverse 0 .. $#$groups) {
+    my $run = $groups->[$gi][3];
+    for my $ei (reverse 0 .. $#$run) {
+      return [$gi, $ei] if _cl_top_form_count($run->[$ei]) > 0;
+    }
+  }
+  return undef;
+}
+
+# The last run statement's text FORM, made the unit's value (#1688).  Only a
+# single form whose CL value IS perl's statement value is wrapped: a
+# statement-modifier `if` / `unless` (perl answers the CONDITION's value when
+# it does not fire, the CL form NIL), a bare block, a `do` block or a
+# multi-form `progn` (their CL value is NIL or not the last statement's) take
+# (p-unit-value-assumed) instead -- a false "did not return a true value"
+# would fail a module perl loads; a missed one only keeps PCL's old answer.
+my %UNIT_VALUE_OPAQUE = map { $_ => 1 } qw(let let* block progn tagbody p-if p-unless);
+sub _unit_value_form {
+  my ($form) = @_;
+  (my $head) = $form =~ /\A(?:\s|;[^\n]*\n)*\(\s*([^\s()]+)/;
+  return "$form\n(p-unit-value-assumed)"
+    if _cl_top_form_count($form) != 1
+    || (defined $head && $UNIT_VALUE_OPAQUE{lc $head});
+  return "(p-unit-value\n$form\n)";
+}
+
+# How many TOP-LEVEL forms the emitted CL text TEXT holds (#1688's single-form
+# test).  A reader-shaped scan: `;` comments, `#| |#` block comments,
+# "strings", |pipe symbols| and #\c characters are skipped as units; a quote
+# / backquote / comma / `#'` prefix belongs to the form after it.
+sub _cl_top_form_count {
+  my ($t) = @_;
+  my ($n, $depth, $i, $len) = (0, 0, 0, length($t // ''));
+  my $atom_end = sub {    # first index past the atom starting at $_[0]
+    my $j = shift;
+    while ($j < $len) {
+      my $c = substr($t, $j, 1);
+      last if $c =~ /[\s()";']/;
+      if ($c eq '|') { my $k = index($t, '|', $j + 1); $j = $k < 0 ? $len : $k + 1; next }
+      $j += $c eq '\\' ? 2 : 1;
+    }
+    return $j;
+  };
+  while ($i < $len) {
+    my $c = substr($t, $i, 1);
+    if ($c eq ';') { my $k = index($t, "\n", $i); $i = $k < 0 ? $len : $k + 1; next }
+    if ($c =~ /\s/ || $c eq "'" || $c eq '`' || $c eq ',' || $c eq '@') { $i++; next }
+    if ($c eq '(') { $n++ if $depth == 0; $depth++; $i++; next }
+    if ($c eq ')') { $depth-- if $depth > 0; $i++; next }
+    if ($c eq '"') {
+      $n++ if $depth == 0;
+      $i++;
+      while ($i < $len) {
+        my $d = substr($t, $i, 1);
+        if ($d eq '\\') { $i += 2; next }
+        $i++;
+        last if $d eq '"';
+      }
+      next;
+    }
+    if ($c eq '#') {
+      my $d = substr($t, $i + 1, 1);
+      if ($d eq '|') { my $k = index($t, '|#', $i + 2); $i = $k < 0 ? $len : $k + 2; next }
+      if ($d eq "'" || $d eq '(') { $i += $d eq '(' ? 1 : 2; next }
+      if ($d eq '\\') { $n++ if $depth == 0; $i = $atom_end->($i + 3); next }
+    }
+    $n++ if $depth == 0;
+    $i = $atom_end->($i);
+  }
+  return $n;
 }
 
 # #2610 (s513d): a FORWARD DECLARATION with a prototype (`sub zany ();`) gives

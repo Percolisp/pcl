@@ -391,6 +391,7 @@
    #:p-run-compile-phase-blocks
    ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
    #:p-sub-exists #:p-sub-defined #:p-undef-sub
+   #:p-unit-value #:p-unit-value-assumed #:p-unit-module-true
    #:p-coderef-exists-p #:p-coderef-defined-p
    ;; Tie/untie/tied
    #:p-tie-proxy #:make-p-tie-proxy #:p-tie-proxy-p
@@ -26556,7 +26557,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-9900"
+(defparameter *pcl-cache-generation* "v2-10100"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -27107,16 +27108,18 @@ would consume, so it dies naming the stream (rule 12)."
 (defun %p-inc-hook-load (rel-path hook)
   "Load the source an @INC hook supplied (HOOK from %P-REQUIRE-LOCATE) as
    the module REL-PATH, then give %INC its entry: the hook element itself,
-   unless the hook stored one (perlvar %INC)."
+   unless the hook stored one (perlvar %INC).  Returns the unit's value, or
+   dies when it is false (#1688)."
   (destructuring-bind (text elem preset) hook
-    (multiple-value-bind (path dir) (%p-inc-hook-spool rel-path text)
-      (unwind-protect (p-load-module-cached path t)
-        (ignore-errors
-          (sb-ext:delete-directory (concatenate 'string dir "/")
-                                   :recursive t))))
-    (unless preset
-      (setf (gethash rel-path *p-inc-table*) elem))
-    t))
+    (let ((v (multiple-value-bind (path dir) (%p-inc-hook-spool rel-path text)
+               (unwind-protect (p-load-module-cached path t)
+                 (ignore-errors
+                   (sb-ext:delete-directory (concatenate 'string dir "/")
+                                            :recursive t))))))
+      (%p-require-true-or-die rel-path v)
+      (unless preset
+        (setf (gethash rel-path *p-inc-table*) elem))
+      v)))
 
 ;;; --- Cache Management ---
 
@@ -28783,8 +28786,58 @@ would consume, so it dies naming the stream (rule 12)."
           (ignore-errors (delete-file lisp))
           (ignore-errors (delete-file path)))))))
 
+;;; THE MODULE UNIT'S VALUE (task #1688; ir-spec §9.0c).  perl's require
+;;; returns the value of the file's last run-time statement and dies "NAME did
+;;; not return a true value" when it is false -- unless the `module_true'
+;;; feature (perl 5.37+, `use v5.38') is in force at the end of the file, which
+;;; makes it 1.  The emitter states the value: the last run statement of a
+;;; module unit is wrapped (p-unit-value FORM), or followed by
+;;; (p-unit-value-assumed) when it is not a single form, and a module_true unit
+;;; starts its run phase with (p-unit-module-true).  A top-level `return EXPR`
+;;; ends the file with EXPR as its value (p-return's throw, caught by the
+;;; loader -- it used to leave the REQUIRE's caller).  The value rides the
+;;; emitted text, so the fasl-cached load answers exactly what the text run
+;;; does.
+(defvar *p-unit-value* :none
+  "The value the module unit being loaded stated (p-unit-value), :ASSUMED
+   (p-unit-value-assumed), or :NONE -- the file ran no run-time statement.")
+
+(defvar *p-unit-module-true* nil
+  "True when the module unit being loaded is under `module_true'.")
+
+(defmacro p-unit-value (form)
+  "A module unit's last run-time statement FORM: its value is the unit's."
+  `(setf *p-unit-value* ,form))
+
+(defun p-unit-value-assumed ()
+  "The unit's last run statement was not one form: its value is taken as
+   true (PCL's answer before #1688)."
+  (setf *p-unit-value* :assumed)
+  nil)
+
+(defun p-unit-module-true ()
+  "The unit is under the `module_true' feature: its value is 1."
+  (setf *p-unit-module-true* t)
+  nil)
+
+(defun %p-unit-result (returned)
+  "The value require answers for the unit just loaded, from RETURNED (a
+   top-level `return`'s value, or '%P-UNIT-NO-RETURN) and the unit's state."
+  (cond (*p-unit-module-true* 1)
+        ((not (eq returned '%p-unit-no-return)) returned)
+        ((eq *p-unit-value* :assumed) 1)
+        ((eq *p-unit-value* :none) *p-undef*)
+        (t *p-unit-value*)))
+
+(defun %p-require-true-or-die (name value)
+  "VALUE, require's answer for NAME, when true; else perl's die."
+  (if (p-true-p value)
+      value
+      (p-die (format nil "~A did not return a true value" name))))
+
 (defun p-load-module-cached (source-path &optional uncached)
-  "Load a Perl module with caching. Returns t on success.
+  "Load a Perl module with caching.  Returns the module unit's VALUE
+   (%P-UNIT-RESULT, task #1688) -- the caller checks it is true.
    UNCACHED loads it on the no-cache path whatever *PCL-SKIP-CACHE* says --
    an @INC hook's spooled source (%P-INC-HOOK-LOAD), which has no stable
    path a cache entry could key on.
@@ -28803,11 +28856,17 @@ would consume, so it dies naming the stream (rule 12)."
    the text run alike, so the bind is here and nowhere else.  `do FILE' is
    not a require and keeps the caller's context (p-do)."
   (let ((*wantarray* nil)
-        (*pcl-caller-wantarray* nil))
-    (p-loc-save (%p-load-unit (lambda ()
-                                (if uncached
-                                    (%p-load-module-uncached source-path)
-                                    (%p-load-module-cached-1 source-path)))))))
+        (*pcl-caller-wantarray* nil)
+        (*p-unit-value* :none)
+        (*p-unit-module-true* nil))
+    (%p-unit-result
+     (p-loc-save
+      (catch :p-return
+        (%p-load-unit (lambda ()
+                        (if uncached
+                            (%p-load-module-uncached source-path)
+                            (%p-load-module-cached-1 source-path))))
+        '%p-unit-no-return)))))
 
 (defun %p-load-module-cached-1 (source-path)
   "p-load-module-cached's body; see it for the contract."
@@ -29479,19 +29538,22 @@ would consume, so it dies naming the stream (rule 12)."
       ;; a load that succeeds never enters it, and the frame is established once
       ;; per module load, not per call into the module (#1917 — see the
       ;; p-xs-no-artifact note above *p-xs-unavailable-modules*).
-      (handler-case
-          (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
-            (if hook
-                (%p-inc-hook-load rel-path hook)
-                (p-load-module-cached abs-path)))
-        (p-xs-no-artifact () (%p-xs-not-installed rel-path)))
-      ;; Update %INC (a hook's entry is %p-inc-hook-load's)
-      (unless hook
-        (setf (gethash rel-path *p-inc-table*) abs-path))
-      ;; Import symbols from module (skipped for bare require)
-      (when do-import
-        (%p-do-import module-name caller-pkg import-args))
-      t)))
+      (let ((value
+             (handler-case
+                 (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
+                   (if hook
+                       (%p-inc-hook-load rel-path hook)
+                       (%p-require-true-or-die
+                        rel-path (p-load-module-cached abs-path))))
+               (p-xs-no-artifact () (%p-xs-not-installed rel-path)))))
+        ;; Update %INC (a hook's entry is %p-inc-hook-load's)
+        (unless hook
+          (setf (gethash rel-path *p-inc-table*) abs-path))
+        ;; Import symbols from module (skipped for bare require)
+        (when do-import
+          (%p-do-import module-name caller-pkg import-args))
+        ;; `require` answers the file's value the first time (#1688)
+        value))))
 
 (defun p-require (module-name)
   "Perl require - load module at runtime WITHOUT calling its ->import.
@@ -29596,8 +29658,9 @@ would consume, so it dies naming the stream (rule 12)."
                             (loop for ch across bare
                                   do (if (char= ch #\/)
                                          (write-string "::" s)
-                                         (write-char ch s))))))
-        (p-require module-name)
+                                         (write-char ch s)))))
+             ;; require's answer: the file's value the first time (#1688)
+             (value (p-require module-name)))
         ;; p-use already records the rel-path (= path-str for a .pm) in %INC;
         ;; note it too so the guard above fires on a literal repeat.  NOT a
         ;; plain (setf … path-str): that overwrote the ABSOLUTE path p-use had
@@ -29606,7 +29669,7 @@ would consume, so it dies naming the stream (rule 12)."
         ;; the file (task #511).  The guard needs the KEY; %INC's contract is
         ;; the VALUE.
         (%p-note-inc-path path-str)
-        (return-from p-require-file t)))
+        (return-from p-require-file value)))
     ;; Non-.pm: an explicit path (/x, ./test.pl, ../x) is loaded as given,
     ;; cwd-relative; any other name is searched in @INC ONLY -- the cwd is not
     ;; consulted, as in perl 5.26+ (task #2442).  An explicit path that does
@@ -29634,11 +29697,10 @@ would consume, so it dies naming the stream (rule 12)."
         (p-die (format nil "Can't locate ~A" path-str)))
       (if hook
           (%p-inc-hook-load path-str hook)
-          (progn
-            (p-load-module-cached abs-path)
+          (prog1 (%p-require-true-or-die path-str
+                                         (p-load-module-cached abs-path))
             (setf (gethash path-str *p-inc-table*)
-                  (sb-ext:native-namestring (pathname abs-path)))))
-      t)))
+                  (sb-ext:native-namestring (pathname abs-path))))))))
 
 ;;; ============================================================
 ;;; List Functions

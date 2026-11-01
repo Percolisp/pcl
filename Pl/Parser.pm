@@ -9553,7 +9553,7 @@ sub unicode_strings_regions_of { return feature_regions_of($_[0], "unicode_strin
 # features that ask.  SINCE is the lowest NUMBERED perl bundle holding the
 # feature, read off %feature::feature_bundle (5.40.3): unicode_strings 5.11,
 # current_sub 5.15.  A feature not in the table DIES (rule 12).
-our %FEATURE_SINCE = (unicode_strings => 11, current_sub => 15);
+our %FEATURE_SINCE = (unicode_strings => 11, current_sub => 15, module_true => 37);
 sub feature_regions_of {
   my ($doc, $feature) = @_;
   my $since = $FEATURE_SINCE{$feature}

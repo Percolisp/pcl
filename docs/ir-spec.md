@@ -4949,6 +4949,24 @@ Example, probed: `unshift @INC, sub { return unless $_[1] eq 'A.pm'; open
 my $fh, '<', \"package A; sub v {7} 1;"; $fh }; require A; print A::v(),
 ref $INC{'A.pm'}` prints `7CODE`.
 
+### 9.0c A required file has a VALUE (normative, s531a, task #1688)
+
+`require` answers the value of the file's last run-time statement the first
+time it loads the file (1 afterwards) and dies `NAME did not return a true
+value` when that value is false -- `%INC` then stays without the entry.  The
+emitter states the value: a module unit's last run statement is wrapped
+`(p-unit-value FORM)`; a statement whose CL value is not perl's (a
+statement-modifier `if`/`unless`, a bare or `do` block, a multi-form `progn`)
+is followed by `(p-unit-value-assumed)`, which the loader reads as true; a
+unit under `module_true` (perl 5.37+, `use v5.38`) starts its run phase with
+`(p-unit-module-true)` and answers 1.  A top-level `return EXPR` ends the
+file with EXPR as its value (`p-load-module-cached` catches `p-return`'s
+throw; it used to return from the require's CALLER).  The value rides the
+emitted text, so the fasl-cached load answers exactly what the text run
+does.  Example, probed: `M.pm` = `package M; sub f {} 0;` makes `eval {
+require M }` die `M.pm did not return a true value`; `package M; +{ k => 1
+};` makes `(require M)->{k}` 1.
+
 ### 9.1 The string-eval protocol (normative, s295)
 
 String eval must let the eval'd code *read and write* the enclosing
