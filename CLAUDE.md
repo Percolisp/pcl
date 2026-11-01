@@ -986,8 +986,8 @@ Not relevant now:
   `use YAML::PP` was found by the first red CI run of MAIN-READY-48.  Never edit `vendor/PPI/lib` by
   hand: `tools/vendor-ppi <clone> pcl` refreshes it and the stamp
   (`Pl/t/vendor-ppi-01.t` checks the tree id; run the canary at every refresh);
-  the branch's home on this box is the bare repo `~/pcl-agent-scratch/ppi/PPI.git`
-  (branches `master` = upstream, `pcl`) until the fork `Percolisp/PPI` exists.
+  the branch's PUBLIC home is the fork `https://github.com/Percolisp/PPI` (branch `pcl`, created and first pushed s532, 2026-11-02, `a376a6d8`; `gh` is logged in as Percolisp on this box), mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git` (remote `fork`, HTTPS) -- a PPI batch pushes fast-forward to BOTH at MERGE-READY
+  (branches `master` = upstream, `pcl`) -- the fork exists since s532 (2026-11-02): `https://github.com/Percolisp/PPI`, branch `pcl`.
   A PPI bug is FIXED on that branch in PPI's two-commit PR shape (the failing
   rows first as TODO, then the fix; PPI's own suite green after every commit;
   perl 5.8 code), the registry row gets `fixed_in => 'pcl'`, and PCL's repair
