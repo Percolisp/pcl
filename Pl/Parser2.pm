@@ -3181,6 +3181,7 @@ sub _lex_referenced_after {
 sub _set_cur_package {
   my ($self, $pkg) = @_;
   $self->environment->package_stack(['main']);
+  $self->environment->reader_package($pkg);   # the section's in-package (#4085)
   return if $pkg eq 'main';
   $self->environment->push_package($pkg);
   $self->environment->add_package($pkg);

@@ -5416,7 +5416,26 @@ sub _fh_sym {
   # note).  cl_unquote only unwraps a WHOLE `|…|`, so "a pipe survived it" is
   # exactly that case.
   return $name if $perl eq $name && index($name, '|') >= 0;
-  $perl = $self->environment->canon_filehandle_name($perl) if $self->environment;
+  # AFTER A RUN-TIME `package X;` the reader is still the section's package
+  # (#4085: `eval "package Foo; print OUT 'a'"`, `if (…) { package Foo; print
+  # OUT … }`), so an unqualified symbol would be interned in the READER's
+  # package -- main's OUT, not Foo::OUT.  Name the handle's perl package and
+  # spell it as the reader must read it; outside such a region the reader IS
+  # the current package and nothing below changes.
+  my $env = $self->environment;
+  my $here = $env ? ($env->current_package // 'main') : 'main';
+  my $reader = $env ? ($env->reader_package // $here) : $here;
+  if ($reader ne $here) {
+    my ($pkg, $short) = $perl =~ /\A(.+)::([^:]+)\z/ ? ($1, $2)
+                      : (Pl::Environment::fh_forced_main_name($perl) ? 'main' : $here,
+                         $perl);
+    return cl_sym($short) if $pkg eq $reader
+                          || ($pkg eq 'main' && Pl::Environment::fh_forced_main_name($short));
+    $perl = "${pkg}::${short}";
+  }
+  else {
+    $perl = $env->canon_filehandle_name($perl) if $env;
+  }
   if ($perl =~ /\A(.+)::([^:]+)\z/ && $1 ne 'main') {
     # `Foo::STDOUT` is NOT `STDOUT` (perl: it writes nothing and returns undef,
     # probed).  A CL symbol `|Foo|::|stdout|` would be, because %p-resolve-fh

@@ -400,6 +400,22 @@ has package_stack => (
     default => sub { ['main'] },
 );
 
+=head2 reader_package
+
+The package the CL READER reads the current section's emitted text in -- the
+section's `in-package` (Parser2 sets it per section; an eval string's root
+package in eval mode).  It differs from C<current_package> after a run-time
+`package X;` inside a block or an eval string's region: `in-package` is
+READ-time per top-level form, so a name the emitter writes UNQUALIFIED is
+interned in this package, not in X (task #4085: a bareword filehandle).
+Undef = the same as C<current_package>.
+
+=cut
+
+has reader_package => (
+    is => 'rw',
+);
+
 =head2 known_packages
 
 Hash reference of all declared package/class names.

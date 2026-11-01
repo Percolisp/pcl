@@ -495,6 +495,33 @@ my $o = eval 'package B7; sub mk { bless {} } mk()';
 print "10 ", ref($o), "\n";
 });
 
+# #4085 (s532a): a BAREWORD FILEHANDLE after a run-time `package X;` -- in an
+# eval string's region or inside a block -- is X's handle.  `in-package` is
+# READ-time, so the emitter must spell the name the way the section's READER
+# package reads it (Environment::reader_package): an unqualified `'OUT` was
+# interned in main.  Template's [% PERL %] blocks print to PERLOUT this way.
+# The controls: the file-level `package Foo;` statement, `main::OUT`, STDOUT.
+test_transpile("a bareword handle after a run-time package switch is that package's (#4085)", q{
+my $r = "";
+open(Foo::OUT, ">", \$r) or die;
+eval "package Foo; print OUT qq{a}; 1" or print "ERR $@";
+eval "package Foo; printf OUT qq{%s}, 'p'; 1" or print "ERR $@";
+eval "package Foo; eval q{print OUT qq{n}; 1} or die; 1" or print "ERR $@";
+eval "package Foo; sub w { print OUT 'w' } 1" or print "ERR $@"; Foo::w();
+my $q = 1; if ($q) { package Foo; print OUT "i"; print STDOUT "1 stdout\n" }
+eval "package Bar; open(IN2, '<', \\\\'line1') or die; 1" or print "ERR $@";
+my $l = <Bar::IN2>; print "2 [", $l // 'undef', "]\n";
+package Foo; print OUT "b";
+package main; close Foo::OUT;
+print "3 [$r]\n";
+my $res = '';
+{ package TS; sub TIEHANDLE { bless { r => $_[1] }, $_[0] }
+  sub PRINT { my $s = shift; ${ $s->{r} } .= join('', @_); 1 } }
+tie *Tz::H, 'TS', \$res;
+eval "package Tz; print H 'x'; 1" or print "ERR $@";
+print "4 [$res]\n";
+});
+
 # ── E4.1 M1 (s353): leading-`my` eval regions — the Sub::Quote shape ────────
 # 1 = the faithful write-through (capture value is \$lexical holding a ref;
 # the region writes through two levels — Moo installs every accessor this
