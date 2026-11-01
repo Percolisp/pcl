@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-02",
+   "description" : "FOUND by s531d (s532) while writing the #4361 guard row, NOT fixed (out of the batch).\n\nREPRODUCER (scratch/s531d/p/wait1.pl, worktree agent-a5284a29dfcfe8e48):\n  $? = 42; $! = 0; my $r = wait(); print \"r=$r status=$? errno=\", ($!+0), \"\\n\";\n  perl 5.40.3: r=-1 status=-1 errno=10      PCL (10cdc985 and the s531d tree): r=-1 status=42 errno=10\n\nperl's pp_wait stores the result in STATUS whatever it is: with no child, wait() returns -1 AND sets $? = -1 (STATUS_NATIVE_CHILD_SET(-1)).  PCL's wait answers -1 and ECHILD but leaves $? untouched.  Probe waitpid(-1, 0) and waitpid($not_a_child, 0) the same way (perl: $? = -1 for both) before fixing; the fix is one store in the no-child arm of the wait / waitpid runtime functions (cl/pcl-runtime.lisp, %p-set-status).\n",
+   "id" : "4224",
+   "status" : "pending",
+   "subject" : "wait() / waitpid with no child leaves $? unchanged; perl sets $? = -1 (`$? = 42; wait(); print $?` perl -1, PCL 42)"
+}
