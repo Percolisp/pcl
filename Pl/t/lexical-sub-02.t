@@ -41,7 +41,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 my $PREAMBLE = "use feature 'lexical_subs', 'state';\nno warnings;\n";
 
@@ -156,4 +156,20 @@ sub foo {3} my $i=2; my $j = $i++*foo; print "S $j $i\n";
 my $k=5; my $m = $k--*foo; print "T $m $k\n";
 my $n = 1; ++$n; print "U $n\n";
 my $o = 4; my $p = $o-- - --$o; print "V $p $o\n";
+PERL
+
+# #4202 (s532a): an `&NAME(...)` call is NEVER a keyword -- `&unless(5)` calls the
+# user's `sub unless` (the #374 guard "statement keyword used as a function"
+# refused it and dropped the statement).  The statement and the modifier
+# spellings are the controls: they stay keywords.
+test_lexsub('#4202: `&KEYWORD(...)` calls the package sub, every statement keyword', <<'PERL');
+sub unless { "U(@_)" }  sub while { "W(@_)" }  sub if { "I(@_)" }  sub for { "F(@_)" }
+sub foreach { "FE(@_)" } sub until { "UN(@_)" } sub elsif { "EI(@_)" } sub else { "E(@_)" }
+print &unless(5), " ", &while(6, 7), "\n";
+print main::unless(8), "\n";
+print &if(1), &for(2), &foreach(3), &until(4), &elsif(5), &else(6), "\n";
+my $x = &unless(9) . "!"; print "$x\n";
+unless (0) { print "stmt-unless\n" }
+print "mod\n" unless 0;
+my @l = (&while(1), &while(2)); print "@l\n";
 PERL

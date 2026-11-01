@@ -2570,7 +2570,11 @@ sub gen_funcall_form {
 
   if (@$kids >= 1) {
     my $fn = $self->expr_o->get_a_node($kids->[0]);
+    # An `&NAME(...)` call is NEVER a keyword (#4202: `&unless(5)` calls the
+    # user's sub `unless`); PExpr rebuilds it as a funcall Word marked
+    # force_user_sub, and that mark is what tells it from a bare keyword.
     if (ref($fn) eq 'PPI::Token::Word' && $fn->can('content')
+        && !$node->{force_user_sub}
         && $self->expr_o->statement_keywords->{ $fn->content // '' }) {
       # NOT a `PCL:`-prefixed message: that prefix is the ruled-refusal channel
       # (_shape_expr_error re-raises it, killing the file).  This is a DROP —
