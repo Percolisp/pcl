@@ -31800,8 +31800,22 @@ would consume, so it dies naming the stream (rule 12)."
        ;; ref, e.g. ${\vec %h,0,1}), fire its getter rather than returning the raw
        ;; cell struct. Through a variable the cell sits one box deeper and
        ;; box-set's magic-cell copy arm handles it.
+       ;; A REFERENCE held in the referent box -- a hash table, an array
+       ;; vector, a code object: a ref-shaped VALUE whose ref-ness and class
+       ;; live on the BOX -- answers the BOX, the symbolic arm's #3394 rule
+       ;; below.  Through a variable (`$$r`) the box is what this arm already
+       ;; returns, one level up; through a bare reference VALUE (`${ \$x }`,
+       ;; `${ f() }`, `${ scalar($r) }`, an overload handler's `${$_[0]}` on a
+       ;; returned object) the bare payload came back: a list spread it
+       ;; (`print ${\$x}` printed 78, #3827), a scalar store took a hash's
+       ;; KEY COUNT, and `is(Mojo::DOM58->new, '')` passed the object's raw
+       ;; hash as an invocant whose `my $s = shift` read 0 (task #3551).
        (let ((v (p-box-value inner)))
-         (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v)))
+         (cond ((p-magic-cell-p v) (funcall (p-magic-cell-getter v)))
+               ((or (hash-table-p v) (functionp v)
+                    (and (vectorp v) (not (stringp v))))
+                inner)
+               (t v))))
       ((stringp inner)
        ;; Symbolic reference: ${"varname"} — see the note above %p-symref-
        ;; scalar-value for why a NUMBER is not one here (task #505/#551).
