@@ -29869,13 +29869,22 @@ would consume, so it dies naming the stream (rule 12)."
    is parked raw by the element rule (%p-storable-raw) and only the kinds that
    carry identity on the container (undef, a dualvar, a magic or tied cell)
    still get a fresh box.  One allocation per element fewer: the
-   `map { ($_, $_ * 2) }' shape was +19 % slower after #2005 for that box."
-  (if (and (p-box-p r)
-           (not (p-box-class r))
-           (let ((v (p-box-value r)))
-             (not (or (hash-table-p v) (and (vectorp v) (not (stringp v))) (functionp v)
-                      (p-box-p v) (p-typeglob-p v)))))
-      (or (%p-storable-raw r) (make-p-box (unbox r)))
+   `map { ($_, $_ * 2) }' shape was +19 % slower after #2005 for that box.
+
+   A REFERENCE gets a fresh CONTAINER (task #4084, ir-spec §2.6): the same
+   referent with the box's class and is-ref flag, %p-ref-container-copy --
+   the rule a list assignment and an array / hash construction already copy
+   by (#3824).  Handing the box itself on made `map { $b = $src->{$_}; ($_ =>
+   $b) }' store the VARIABLE in every result, so every key read the last
+   reference (Template::Context's BLOCKS table)."
+  (if (p-box-p r)
+      (let ((v (p-box-value r)))
+        (cond ((or (hash-table-p v) (and (vectorp v) (not (stringp v)))
+                   (functionp v) (p-box-p v) (p-typeglob-p v)
+                   (p-regex-match-p v))
+               (%p-ref-container-copy r))
+              ((p-box-class r) r)
+              (t (or (%p-storable-raw r) (make-p-box (unbox r))))))
       r))
 
 (defun %p-grep-cells (src)
