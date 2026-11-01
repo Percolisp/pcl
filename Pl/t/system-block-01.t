@@ -54,7 +54,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 45;
+plan tests => 46;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -381,3 +381,18 @@ is run_cl('use Fcntl; pipe(R, W) or die; print((fcntl(R, F_GETFD, 0) & FD_CLOEXE
 is run_cl(q{my $pid = fork(); if (!$pid) { exec { "sh" } "n11", "-c", q{echo in; exit 4} or die } waitpid($pid, 0); print "rc ", $? >> 8, "\n";}),
    "in\nrc 4\n",
    '#2082: exec { PROG } LIST or die -- the argument list ends before the low-precedence or (was: or die inside argv)';
+
+# #3556 (s531d): every word of exec / system / a pipe open's LIST is the
+# STRING of the value, so an object's '""' overload runs (perl's SvPV); PCL
+# stringified the unboxed referent (ARRAY(0x1)) -- Path::Tiny's
+# `system($^X, $path)` ran a script named ARRAY(0x2).  Expected = perl 5.40.3.
+is run_cl(q{package Q; use overload '""' => sub { $_[0][0] }, fallback => 1;
+package main; $| = 1; my $a = bless [ "hello" ], 'Q';
+system("/bin/echo", "sys", $a);
+system { "/bin/echo" } "echo", "blk", $a;
+open my $p, '-|', "/bin/echo", "pipe", $a or die; print scalar <$p>; close $p;
+my $pid = fork; if (!$pid) { exec "/bin/echo", "exec", $a; exit 9 } waitpid($pid, 0);
+system(bless(["/bin/echo one"], 'Q'));
+system { bless(["/bin/echo"], 'Q') } "echo", "prog";}),
+   "sys hello\nblk hello\npipe hello\nexec hello\none\nprog\n",
+   '#3556: an overloaded object in exec / system / pipe-open LIST is stringified through its "" overload';

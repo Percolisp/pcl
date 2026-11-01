@@ -21228,9 +21228,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              ;; string is the no-shell exec, which is exactly what perl does.
              (let ((cmd (when (plusp (length file-str))
                           (cons file-str
-                                (mapcar (lambda (a)
-                                          (to-string (if (p-box-p a) (unbox a) a)))
-                                        more-args)))))
+                                ;; to-string of the BOX: an object's '""'
+                                ;; overload runs (task #3556, the exec rule)
+                                (mapcar #'to-string more-args)))))
                ;; An empty command in the THREE-argument form is perl's error,
                ;; not the bare fork (see this function's docstring, task #535).
                (when (and three-arg-p (null cmd))
@@ -26151,13 +26151,14 @@ would consume, so it dies naming the stream (rule 12)."
    The indirect-object form `exec { PROG } LIST` arrives as :PROGRAM PROG LIST
    and never uses the shell; its LIST[0] is perl's argv[0], which the spawn
    cannot override (run-program sets argv[0] to PROGRAM) — so it is dropped
-   and LIST[1..] are the arguments.  NIL PROGRAM = nothing to run (ENOENT)."
+   and LIST[1..] are the arguments.  NIL PROGRAM = nothing to run (ENOENT).
+   Each word is to-string of the BOX, never of its unboxed value: an
+   object's '\"\"' overload runs, as perl's SvPV does (task #3556:
+   `system($^X, $path_tiny)` ran a script named ARRAY(0x2))."
   (flet ((strs (xs)
-           (map 'list (lambda (a) (to-string (if (p-box-p a) (unbox a) a)))
-                (%p-flatten-list xs))))
+           (map 'list #'to-string (%p-flatten-list xs))))
     (if (eq (car args) :program)
-        (let ((prog (to-string (if (p-box-p (second args)) (unbox (second args))
-                                   (second args))))
+        (let ((prog (to-string (second args)))
               (argv (strs (cddr args))))
           (values (and (plusp (length prog)) prog) (cdr argv) nil))
         (let ((words (strs args)))
