@@ -4703,7 +4703,7 @@
    lookup was spelled out once per walk (%p-find-overload-mro,
    %p-class-overloaded-p, %p-overload-fallback-of) and the three must not
    drift — they answer three halves of the same dispatch question."
-  (let* ((pkg     (find-package (%pcl-invert-case cls)))
+  (let* ((pkg     (%pcl-find-package cls))
          (isa-sym (when pkg (%p-isa-symbol pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym))))
     (when (and isa-val (vectorp isa-val))
@@ -36756,7 +36756,7 @@ would consume, so it dies naming the stream (rule 12)."
    Returns (cons pkg-name-str fn) or NIL."
   (labels ((walk (cls visited)
              (when (member cls visited :test #'equal) (return-from walk nil))
-             (let* ((pkg (find-package (%pcl-invert-case cls)))
+             (let* ((pkg (%pcl-find-package cls))
                     (al (when pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
                (if (and al (eq (symbol-package al) pkg) (%p-live-sub-p al))
                    (cons cls al)
@@ -36771,7 +36771,7 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %pcl-set-autoload-var (pkg-name full-method-name)
   "Set $PKG::AUTOLOAD to FULL-METHOD-NAME in package PKG-NAME."
-  (let* ((pkg (find-package (%pcl-invert-case pkg-name)))
+  (let* ((pkg (%pcl-find-package pkg-name))
          (sym (when pkg (intern "$autoload" pkg))))
     (when sym
       (unless (boundp sym) (setf (symbol-value sym) (make-p-box nil)))
