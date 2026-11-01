@@ -21,3 +21,6 @@
 # file gets faster, DELETE its row.
 #
 Capture-Tiny-0.50-0/00-report-prereqs.t	300	s519 round-1 (2026-10-18): 70 s ALONE on the dev box at load 4 (the prereqs report requires every prereq module through PCL), rc=124 (no rows) under the 4-job board at load 5-10 with Fable's sweep beside it; 1/0 whenever it finishes (s518e one-file run, s519 re-run)
+URI-5.34-0/00-report-prereqs.t	300	s532 round (Fable, 2026-11-02): 48 s ALONE on the dev box at load 3 (the prereqs report requires every prereq module through PCL -- Capture-Tiny 00-report-prereqs.t has the same shape and the same allowance), rc=124 (no rows) under the 4-job board at load 5-7 beside two agents' sweeps on MAIN-READY-63; 1/0 when it finishes
+YAML-PP-v0.39.0-0/12.load-json.t	300	s532 round (Fable, 2026-11-02): 44 s ALONE at load 3 (284 rows, every JSON test-suite file loaded through PCL), rc=124 under the 4-job board at load 5-7 beside two agents' sweeps on MAIN-READY-63; 284/0 when it finishes
+YAML-Tiny-1.74/00-report-prereqs.t	300	s532 round (Fable, 2026-11-02): 1/0 ALONE in 111 s at load 5 (three heavy legs beside it; the prereqs report requires every prereq module through PCL -- the Capture-Tiny / URI shape), rc=124 under the 4-job board on MAIN-READY-63; in-tree dist cpan-tests/modules/YAML-Tiny-1.74
