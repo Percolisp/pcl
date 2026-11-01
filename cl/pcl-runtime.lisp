@@ -27277,6 +27277,12 @@ would consume, so it dies naming the stream (rule 12)."
   (finish-output)
   nil)
 
+(defvar *p-transpiler-perl* nil
+  "Truename of the `perl` every transpile spawns (pl2cl, the eval server and
+   the compiler stamp's perl half): %p-perl-on-path at PROCESS START, set at
+   load time and by an init hook beside %p-split-fields (task #3822) -- never
+   the PATH a running program has since assigned.")
+
 (defun %p-cache-info-toolchain ()
   "The two NON-PCL halves of the compiler fingerprint, named (task #1843).
    Printed because `why did my whole cache re-transpile` now has two more
@@ -27284,7 +27290,7 @@ would consume, so it dies naming the stream (rule 12)."
    which.  An input that was not found says so: the key records its ABSENCE,
    which is a different key from the one a run that found it computes."
   (format t "perl binary: ~A~%"
-          (or (%p-perl-on-path) "not found on $PATH -- recorded as absent"))
+          (or *p-transpiler-perl* "not found on $PATH -- recorded as absent"))
   (let ((ppi (%p-ppi-files)))
     (format t "PPI sources: ~A~%"
             (if ppi
@@ -27514,7 +27520,7 @@ would consume, so it dies naming the stream (rule 12)."
     (write-string (if root (namestring root) "no-compiler-root") acc)
     (when root
       (%p-stamp-files acc "pcl" (%p-compiler-files root)))
-    (%p-stamp-files acc "perl" (let ((p (%p-perl-on-path)))
+    (%p-stamp-files acc "perl" (let ((p *p-transpiler-perl*))
                                  (when p (list p))))
     (%p-stamp-files acc "ppi" (%p-ppi-files))
     ;; …and the environment that SELECTS an emission (task #1861): unset and
@@ -27717,6 +27723,27 @@ would consume, so it dies naming the stream (rule 12)."
           (incf count))
     (push (subseq line start) out)
     (nreverse out)))
+
+;;; THE TRANSPILER'S PERL IS RESOLVED ONCE, AT BOOT (task #3822).  A program
+;;; that sets $ENV{PATH} -- taint-style tests, daemons, `PATH=/bin:/usr/bin`
+;;; before a `require` -- changes the process environment (%ENV writes are
+;;; setenv), so a PATH search at TRANSPILE time ran whatever `perl` the
+;;; PROGRAM's PATH named: the system perl loading the perlbrew perl's
+;;; Config.pm ("Perl lib version doesn't match executable"), and every later
+;;; run-time module load died "Failed to transpile".  The perl PCL itself was
+;;; started under is the one PATH named when this PROCESS began; it is read
+;;; here at load time and again at every image boot (a saved core's defvar
+;;; would carry the BUILD machine's answer, #2689's lesson), never later.
+;;; NIL (no perl on the boot PATH) keeps the old `perl` + :search spawn.
+;;; (The defvar sits above the compiler stamp, which reads it.)
+(setf *p-transpiler-perl* (%p-perl-on-path))
+(push (lambda () (setf *p-transpiler-perl* (%p-perl-on-path))) sb-ext:*init-hooks*)
+
+(defun %p-run-transpiler-perl (args &rest keys)
+  "sb-ext:run-program of the boot-time perl (*p-transpiler-perl*) with ARGS,
+   or of `perl` searched on the current PATH when none was found at boot."
+  (apply #'sb-ext:run-program (or *p-transpiler-perl* "perl") args
+         :search (null *p-transpiler-perl*) keys))
 
 (defun %p-missing-resolves-p (entry)
   "True when a name the transpile could NOT resolve resolves NOW — which makes
@@ -28060,8 +28087,7 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((output (make-array 0 :element-type 'character
                             :adjustable t :fill-pointer 0)))
     (with-output-to-string (s output)
-      (let ((proc (sb-ext:run-program
-                   "perl"
+      (let ((proc (%p-run-transpiler-perl
                    (append
                     ;; -I BEFORE the script: perl's own switches must precede
                     ;; the program name, and they are the point of #1284.
@@ -28079,8 +28105,7 @@ would consume, so it dies naming the stream (rule 12)."
                               (namestring source-path))))
                    :output s
                    :error *error-output*
-                   :wait t
-                   :search t)))
+                   :wait t)))
         (unless (zerop (sb-ext:process-exit-code proc))
           (return-from p-transpile-file nil))))
     (when (> (length output) 0)
@@ -28132,14 +28157,12 @@ would consume, so it dies naming the stream (rule 12)."
     (when *p-transpiler-process*
       (ignore-errors (sb-ext:process-close *p-transpiler-process*)))
     (setf *p-transpiler-process*
-          (sb-ext:run-program
-           "perl"
+          (%p-run-transpiler-perl
            (list (namestring *pcl-pl2cl-path*) "--server")
            :input  :stream
            :output :stream
            :error  nil
            :wait   nil
-           :search t
            :external-format :utf-8)))
   *p-transpiler-process*)
 
