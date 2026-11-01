@@ -504,6 +504,26 @@ my $p = new Pt(3, 4);
 print $p->str, "\n";
 ', "3,4\n");
 
+# #4184: `new CLASS` followed by a COMMA (or `->`) takes NO arguments -- the
+# comma continues the ENCLOSING list (Text-CSV 10_base.t `ok (new Text::CSV,
+# "Indirect object notation")`); `new Foo->m` is `Foo->new->m`.  Bare args
+# (`new Foo 1, 2`) and the parenthesised List (`new Foo (1), 2`) stay new's.
+# Expected text probed against perl 5.40.3.
+test_transpile('new CLASS before a comma / arrow takes no arguments (#4184)', '
+package Foo; sub new { my $c = shift; print "n", scalar(@_), " "; bless {}, $c }
+sub m1 { "M" . ref($_[0]) . (@_ - 1) }
+package main;
+sub ok2 { print scalar(@_), ":", ($_[1] // "u"), "\n" }
+ok2 (new Foo, "named");
+my @l = (new Foo, 1, 2); print scalar(@l), "\n";
+sub r { return new Foo, 5 } my @r = r(); print scalar(@r), "\n";
+my $a = [ new Foo, new Foo ]; print scalar(@$a), "\n";
+my %h = (k => new Foo, j => 2); print join(",", sort keys %h), "\n";
+my $m = new Foo->m1(7); print "$m\n";
+my $o = new Foo 1, 2; my @y = (new Foo 1, 2); print scalar(@y), "\n";
+my @n = (new Foo (1), 2); print scalar(@n), "\n";
+', "n0 2:named\nn0 3\nn0 2\nn0 n0 2\nn0 j,k\nn0 MFoo1\nn2 n2 1\nn1 2\n");
+
 # ── grep/map {HASH}->{key} — block and paren form deref ──────────────────────
 # Fixes:
 #  1. Block-form: inner `my $deref_skip` shadowed outer, leaving -> in rest-list

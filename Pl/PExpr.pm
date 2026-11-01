@@ -3283,9 +3283,16 @@ sub handle_subcalls {
     # Explicit parens — `new Foo(ARGS)` — the args are exactly the single
     # Structure::List at i+2; do NOT grab trailing tokens (`new Foo(1), $x`).
     # Bare args — `new Foo 1, 2` — grab everything up to a low-priority operator.
+    # No args — `new Foo, "x"` / `new Foo->m` (#4184): a COMMA or an ARROW right
+    # after the class ends the indirect object (perl: `Foo->new`, and the comma
+    # continues the ENCLOSING list; `new Foo->m` is `Foo->new->m`).
     my $end_pars;
+    my $after_class = $self->is_token_operator($e->[$i+2] // '') // '';
     if (ref($e->[$i+2] // '') eq 'PPI::Structure::List') {
       $end_pars = $i + 2;
+    } elsif ($after_class eq ',' || $after_class eq '=>'
+             || $after_class eq '->') {
+      $end_pars = $i + 1;
     } else {
       $end_pars = scalar(@$e) - 1;
       for my $j ($i + 2 .. scalar(@$e) - 1) {
