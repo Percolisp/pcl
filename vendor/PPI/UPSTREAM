@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s532e
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> v61
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl-s532e
-branch-sha: 4637db29b9bd225150270c0ba4dd0d572ca2aae0
-lib-tree: 52f957b21e668d3462c9872e89b9a916371f05cf
+branch: v61
+branch-sha: a800b8cd66e0ece03a8da703b6666bb7207d6e85
+lib-tree: 6e62db1a6d39680551d8cd300015583a00554ff9
 date: 2026-11-03
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -65,6 +65,8 @@ fix: AO §58 db20f1eb Lexer: the ( after a method named if or while holds its ar
 fix: AP §59 0aae7704 Lexer: a { first inside a map block or a dereference block is a hash
 fix: AQ §42 a376a6d8 Tokenizer, Document: a here-doc in the code of a quote-like takes the lines after it
 fix: AR §48 4637db29 Lexer: the [ after the ) of a list or a qw() is a subscript
+fix: AS §60 c020b142 Unknown: the attributes of a lexical sub
+fix: AT §61 a800b8cd Tokenizer: a quote-like word naming a braced element is a word
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -172,3 +174,7 @@ commit: e876be8b TODO tests: a here-doc in the code of a quote-like takes the li
 commit: a376a6d8 Tokenizer, Document: a here-doc in the code of a quote-like takes the lines after it
 commit: 84281eff TODO tests: the [ after the ) of a list or a qw() is a subscript
 commit: 4637db29 Lexer: the [ after the ) of a list or a qw() is a subscript
+commit: 063c917a TODO tests: the attributes of a lexical sub
+commit: c020b142 Unknown: the attributes of a lexical sub
+commit: 791606a8 TODO tests: a quote-like word naming a braced element
+commit: a800b8cd Tokenizer: a quote-like word naming a braced element is a word

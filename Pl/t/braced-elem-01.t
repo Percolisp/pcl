@@ -61,9 +61,17 @@ print qq{r19 @{ l[1,2] } @{a[0..1]}\n};
 my $s = "x4 6y"; (my $t = "Z") =~ s/Z/@{l[2,0]}/; print "r20 ", ($s =~ /@{a[0,2]}/ ? "m" : "n"), " $t\n";
 sub nm { "CALLED" } our @nm = (1, 2); print "r21 @{nm[1,0]} @{[ nm() ]} ${\ nm()}\n";
 { local $" = "-"; print "r22 @{l[0,1,2]}\n"; }
+our %m = (q => 'r'); our %s = (x => 'sx'); print "r23 ", ${m{q}}, ${s{x}}, "\n";
+our @y = (5, 6, 7); our @q = (10, 20, 30); print "r24 ", ${y[1]}, " ", join(",", @{q[1,2]}), "\n";
+our %tr = (k => 'trk'); our %qq = (a => 'qqa'); print "r25 ", ${tr{k}}, ${ qq{a} }, "\n";
+sub g26 { my %m = (q => 'lex'); return ${m{q}} } $_ = "q"; print "r26 ", g26(), " ", (m{q} ? "match" : "no"), "\n";
 PERL
 
-my @labels = map { "r$_" } 1 .. 22;
+# r23-r26 (#4102, s532e): a quote-like operator's NAME as the name of the
+# element -- PCL's PPI lexes the word after `${` / `@{` as a Word when a
+# subscript follows (docs/ppi-upstream-bugs.md §61), and the collapse above
+# takes it; `m{q}` outside a deref block is still a match (r26).
+my @labels = map { "r$_" } 1 .. 26;
 plan tests => scalar(@labels);
 
 my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);

@@ -2770,6 +2770,59 @@ the pairs, not one hash per element).  For the dereference block
 
 ---
 
+## 60. The ATTRIBUTES of a LEXICAL sub (`my sub y :prototype() {...}`) are lexed as an Operator and a Word  [CONFIRMED 1.291 and PCL's branch a376a6d8]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `43`):
+
+```perl
+use feature "lexical_subs"; no warnings; { my $x = 43; my sub y :prototype() {$x} print y, "\n"; }
+```
+
+**PPI tokens**: `Word[my] Word[sub] Word[y] Operator[:] Word[prototype] Structure[(] Structure[)] Structure[{] ...`.
+**Expected**: `Attribute[prototype()]` -- perl reads the attribute list of a
+lexical sub (`my sub NAME`, `our sub NAME`, `state sub NAME`) as it reads a
+named sub's: toke.c `yyl_sub` takes the same path after the name.  PPI's
+`Token/Unknown.pm` `__TOKENIZER__is_an_attribute` accepted `sub NAME :` only
+when `sub` starts the statement (nothing, a Structure or an empty Whitespace
+before it), so after `my` / `our` / `state` the `:` became an Operator, the
+attribute's name a Word and its parameters a List -- and the prototype was
+lost (`Token/Whitespace.pm`'s prototype test already knew the lexical case).
+
+**PCL's workaround**: none -- the lexical sub was renamed `y__lexsub__N`, the
+`prototype` Word became a second sub, and `print y` printed 0 (a SILENT WRONG,
+found by s527d's wide emission-ab at t/op/lexsub.t:850).  Task #3983.
+
+**FIXED on PCL's PPI branch** (s532e: group AS, commit `c020b142` on branch `pcl`, vendored as vendor/PPI -- `__TOKENIZER__is_an_attribute` also accepts `sub NAME :` when the word before `sub` is `my`, `our` or `state`); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AS.md`).  PCL needed no change: the lexical sub takes its prototype as a named sub does (`print y` prints 43; `state sub z :prototype($)` takes one argument).  Guard `Pl/t/lexical-sub-02.t` (FAILS on the base).
+
+---
+
+## 61. A quote-like operator's name as the NAME of a braced element (`${m{q}}`, `${y[1]}`) is lexed as a quote-like  [CONFIRMED 1.291 and PCL's branch a376a6d8]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `r6`):
+
+```perl
+our %m = (q => "r"); our @y = (5, 6); print ${m{q}}, ${y[1]}, "\n";
+```
+
+**PPI tokens**: `Cast[$] Structure[{] Regexp::Match[m{q}] Structure[}]`, and for
+`${y[1]}` a `Regexp::Transliterate` whose body runs on past the closing brace
+(`${s{x}} . ${y[0]}` swallows the rest of the statement into a substitution).
+**Expected**: `Cast[$] Structure[{] Word[m] Structure[{] Word[q] Structure[}] Structure[}]`
+-- perl reads an identifier straight after the `{` of a sigil (toke.c
+`S_scan_ident`), and a `[` or `{` after it (white space allowed: `${ m{q} }`)
+makes the block that element, whatever the identifier is; only `sub` before
+a `{` is excluded.  PPI's Word saw `m` / `s` / `y` / `tr` / `q` / `qq` / `qw`
+followed by an opening bracket and started a quote-like token.
+
+**PCL's workaround**: none -- #3864's `_block_word_subscript` collapse makes
+`${name{KEY}}` / `${name[IDX]}` / `@{name[LIST]}` the element or slice, but
+it never saw a name here: `${m{q}}` matched `/q/` against `$_` (a SILENT
+WRONG).  Task #4102.
+
+**FIXED on PCL's PPI branch** (s532e: group AT, commit `a800b8cd` on branch `pcl`, vendored as vendor/PPI -- `__current_token_is_forced_word` forces the word after the `{` of a sigil cast (`$ @ % & * $#`) when a `[` or `{` follows it, beside its rule for a word before `}`; `sub` before `{` excluded, as in perl); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AT.md`).  PCL needed no change: #3864's collapse takes the Word + Block / Constructor.  Guard `Pl/t/braced-elem-01.t` r23-r26 (FAIL on the base).
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`

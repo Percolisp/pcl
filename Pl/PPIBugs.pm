@@ -878,6 +878,32 @@ not code
    },
    unblocks => [],
    tasks => [3962, 2085] },
+ { id => 60, kind => 'token', dump => 'tokens',
+   title => 'The ATTRIBUTES of a LEXICAL sub (`my sub y :prototype() {...}`) are lexed as an Operator and a Word, where perl reads them as a named sub\'s',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => undef, shape => 'after `my` / `our` / `state sub NAME` the `:` is an Operator (the checker sees the rest as word-after-sub-name)' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE: PCL never repaired it (a silent wrong); after the fix the lexical sub takes its prototype as a named sub does', commit => 'c020b142', group => 'AS', pr => undef },
+   repro => 'use feature "lexical_subs"; no warnings; { my $x = 43; my sub y :prototype() {$x} print y, "\\n"; }',
+   perl => "43\n",
+   tokens => {
+     got  => ['Word=use', 'Word=feature', 'Quote::Double="lexical_subs"', 'Structure=;', 'Word=no', 'Word=warnings', 'Structure=;', 'Structure={', 'Word=my', 'Symbol=$x', 'Operator==', 'Number=43', 'Structure=;', 'Word=my', 'Word=sub', 'Word=y', 'Operator=:', 'Word=prototype', 'Structure=(', 'Structure=)', 'Structure={', 'Symbol=$x', 'Structure=}', 'Word=print', 'Word=y', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;', 'Structure=}'],
+     want => ['Word=use', 'Word=feature', 'Quote::Double="lexical_subs"', 'Structure=;', 'Word=no', 'Word=warnings', 'Structure=;', 'Structure={', 'Word=my', 'Symbol=$x', 'Operator==', 'Number=43', 'Structure=;', 'Word=my', 'Word=sub', 'Word=y', 'Operator=:', 'Attribute=prototype()', 'Structure={', 'Symbol=$x', 'Structure=}', 'Word=print', 'Word=y', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;', 'Structure=}'],
+   },
+   unblocks => ['t/op/lexsub.t'],
+   tasks => [3983] },
+ { id => 61, kind => 'token', dump => 'tokens',
+   title => 'A quote-like operator\'s name as the NAME of a braced element (`${m{q}}`, `${y[1]}`) is lexed as a quote-like, where perl reads the element',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => undef, shape => 'a quote-like token first inside the { of a sigil cast, where perl reads an identifier (scan_ident)' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE: PCL never repaired it (a silent wrong); after the fix #3864\'s _block_word_subscript collapse takes Word + Block as for any other name', commit => 'a800b8cd', group => 'AT', pr => undef },
+   repro => 'our %m = (q => "r"); our @y = (5, 6); print ${m{q}}, ${y[1]}, "\\n";',
+   perl => "r6\n",
+   tokens => {
+     got  => ['Word=our', 'Symbol=%m', 'Operator==', 'Structure=(', 'Word=q', 'Operator==>', 'Quote::Double="r"', 'Structure=)', 'Structure=;', 'Word=our', 'Symbol=@y', 'Operator==', 'Structure=(', 'Number=5', 'Operator=,', 'Number=6', 'Structure=)', 'Structure=;', 'Word=print', 'Cast=$', 'Structure={', 'Regexp::Match=m{q}', 'Structure=}', 'Operator=,', 'Cast=$', 'Structure={', 'Regexp::Transliterate=y[1]}, "\\n";'],
+     want => ['Word=our', 'Symbol=%m', 'Operator==', 'Structure=(', 'Word=q', 'Operator==>', 'Quote::Double="r"', 'Structure=)', 'Structure=;', 'Word=our', 'Symbol=@y', 'Operator==', 'Structure=(', 'Number=5', 'Operator=,', 'Number=6', 'Structure=)', 'Structure=;', 'Word=print', 'Cast=$', 'Structure={', 'Word=m', 'Structure={', 'Word=q', 'Structure=}', 'Structure=}', 'Operator=,', 'Cast=$', 'Structure={', 'Word=y', 'Structure=[', 'Number=1', 'Structure=]', 'Structure=}', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [4102, 3864] },
 );
 
 # The one accessor.

@@ -41,7 +41,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 my $PREAMBLE = "use feature 'lexical_subs', 'state';\nno warnings;\n";
 
@@ -172,4 +172,20 @@ my $x = &unless(9) . "!"; print "$x\n";
 unless (0) { print "stmt-unless\n" }
 print "mod\n" unless 0;
 my @l = (&while(1), &while(2)); print "@l\n";
+PERL
+
+# #3983 (s532e): the attributes of a LEXICAL sub -- PCL's PPI lexes the
+# attribute after `my` / `our` / `state sub NAME` as after `sub NAME`
+# (docs/ppi-upstream-bugs.md §60), so the prototype applies.  It was an
+# Operator + Word: `print y` printed 0 (y__lexsub__N + a second sub).
+test_lexsub('#3983: `my sub y :prototype() {...}` / state / our: the attribute is the sub\'s', <<'PERL');
+{
+    my $x = 43;
+    my sub y :prototype() {$x}
+    print y, "\n";
+    state sub z :prototype($) { "z$_[0]" }
+    my @r = (z 1, 2); print "@r\n";
+    our sub w :prototype() { 7 }
+    print w + 1, "\n";
+}
 PERL
