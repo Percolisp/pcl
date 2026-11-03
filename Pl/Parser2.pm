@@ -12812,6 +12812,16 @@ sub _lower_bare_block {
 
 # (Pl::Stmt::is_no_name_my_decl -- moved there with its notes, s533a)
 
+# An embedded block's (map / grep / sort / eval / do / anon sub) TAIL declaration
+# the structural lowering takes: a convertible one, or a `local` statement --
+# lowered as trees since s533c, its value the localized target's (v1's text
+# machinery that the decline used to reach is deleted).  A string eval ending
+# in a `local` keeps its own refusal (_tail_decl_convertible alone).
+sub _tail_block_stmt_ok {
+  my ($self, $stmt) = @_;
+  return Pl::Stmt::is_local_stmt($stmt) || $self->_tail_decl_convertible($stmt);
+}
+
 sub _tail_decl_convertible {
   my ($self, $stmt) = @_;
   return 1 if _is_empty_my_decl($stmt);
@@ -12961,7 +12971,7 @@ sub _lower_embedded_body {
   my $tail = $stmts[-1];
   if (!$tail->isa('PPI::Statement')
       || ($tail->isa('PPI::Statement::Variable')
-          && !$self->_tail_decl_convertible($tail))
+          && !$self->_tail_block_stmt_ok($tail))
       || $tail->isa('PPI::Statement::Scheduled')
       || $tail->isa('PPI::Statement::Sub')
       || $tail->isa('PPI::Statement::Package')) {
@@ -13057,7 +13067,7 @@ sub _lower_embedded_anon {
     return undef;
   }
   if ($stmts[-1]->isa('PPI::Statement::Variable')
-      && !$self->_tail_decl_convertible($stmts[-1])) {
+      && !$self->_tail_block_stmt_ok($stmts[-1])) {
     warn "pcl-raw\tanon-decl:tail-decl\n" if $census;
     return undef;
   }
@@ -14599,6 +14609,10 @@ sub _lower_local {
   }
   $self->_seam_note_local($stmt, $rec) if _seam_census();
   my @rest_forms = $self->_lower_block($rest, $vi, $tail_ctx);
+  # The LAST statement of a block whose value is used: its value is the
+  # localized target's (perl: `sub f { local $x = 5 }` returns 5; task #4443).
+  push @rest_forms, $plan->{value}
+    if !@rest_forms && defined $tail_ctx && defined $plan->{value};
   return _local_nest($plan, \@rest_forms);
 }
 
@@ -14738,10 +14752,7 @@ sub _stmt_in_block_depth {
 # `local` wraps the REST OF THE FILE in one form, and inlining into a form
 # that large blew SBCL's constraint propagation up (R1, s268).
 sub _local_notinline_decl {
-  return ['declare', ['notinline', map { "pcl::$_" } qw(
-    p-+ p-- p-* p-/ p-% p-== p-!= p-< p-> p-<= p->= p-<=>
-    p-. p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge p-str-cmp
-    unbox to-number to-string p-true-p p-bool %pcl-nan-p)]];
+  return ['declare', ['notinline', Pl::Parser::notinline_ops()]];
 }
 
 # ---- the families ------------------------------------------------------------
@@ -14872,7 +14883,7 @@ sub _local_plan_elem {
   # A hash SLICE's key group that is not one literal key may name many keys
   # at run time (`@h{@k}`): p-local-hash-slice localizes each.
   my @macros = map { ($slice && $open eq '{' && !_local_literal_key($_)) ? 'p-local-hash-slice' : $macro } @kg;
-  my (@opens, @inner, $test);
+  my (@opens, @inner, $test, $value);
   if ($mod ne '') {
     $test = $self->_local_cond_form($mod, $rec->{cond}, $stmt);
     if (@keys > 1 || $slice) {
@@ -14890,6 +14901,7 @@ sub _local_plan_elem {
   if (defined $init && @keys == 1 && !$slice) {
     my $mi = $open eq '{' ? 'p-local-hash-elem-init' : 'p-local-array-elem-init';
     push @opens, _local_open([$mi, $cl, $keys[0], $init], $test);
+    $value = _local_elem_place($open, $cl, \@keys) if $mod eq '';
   } elsif (defined $init) {
     my $tmp = $self->_local_tmp('pcl-local-init-');
     my $ti = _local_list_ctx($init);
@@ -14903,7 +14915,7 @@ sub _local_plan_elem {
     $bind_base->() if @keys > 1;
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
   }
-  return { opens => \@opens, inner => \@inner };
+  return { opens => \@opens, inner => \@inner, value => $value };
 }
 
 # The container of an element target: a named one's storage (a stash's is
@@ -15055,7 +15067,12 @@ sub _local_plan_items {
   } elsif ($init_idx >= 0 && $solo && _local_sigil($v0) =~ /^[\@%]$/) {
     push @inner, $v0;   # `local @a = L` as a sub's last statement returns the list
   }
-  return { opens => \@opens, inner => \@inner };
+  # `local $x = V` as a block's last statement: its value is $x (#4443).
+  # (Not under a modifier: a false one makes the statement's value the
+  # condition's, which is the expression statement's rule, not this.)
+  my $value = ($init_idx >= 0 && $solo && $mod eq '' && ($items[0]{kind} // '') eq 'var'
+               && _local_sigil($v0) eq '$') ? $items[0]{place} : undef;
+  return { opens => \@opens, inner => \@inner, value => $value };
 }
 
 # Is this the SOLO-binding shape -- one variable (or element) target whose

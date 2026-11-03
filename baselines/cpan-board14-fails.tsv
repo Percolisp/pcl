@@ -973,7 +973,6 @@ IO-Compress-2.214-0	cz-03zlib-v1.t	231				NS:ns-error-location (the croak text i
 IO-Compress-2.214-0	cz-03zlib-v1.t	236				NS:ns-error-location (the croak text is right, the pattern requires \s+at) -- s522a: lines 815 818 821 824 / 840 (`ok $@ =~ /... at/`)
 IO-Compress-2.214-0	cz-03zlib-v1.t	0	*PLAN*	ran 400 of 472, rc 5	472 row(s)	#3619 (the file ends cleanly; 72 loop assertions are never emitted) [rc 0 -> 5: the TAP layer now exits with Test::Builder's status, #3651 s523c]
 Mojo-DOM58-3.002-0	collection.t	6	first			#3550 (a List::Util block sees the enclosing sub's @_ in perl; _Collection::first's `$_->$cb(@_)` gets none -- s521c, #1576/#3432 one-file run)
-Mojo-DOM58-3.002-0	collection.t	0	*PLAN*	ran 15 of no plan, rc 255	a plan	#4185 (_Collection.pm:101 `local (*{"${caller}::a"}, *{"${caller}::b"}) = ...` is refused, "Parser2 TODO: unsupported `local` target", and the file stops -- was #564, done (its silent half); one-file run s531b 14/1 rc 255; perl 20 rows)
 Mojo-DOM58-3.002-0	dom.t	3	Tap into method chain			UNREDUCED #4221 (a ->remove inside ->tap is not seen by the rendered document -- s531d one-file run after #3551)
 Mojo-DOM58-3.002-0	dom.t	8	Nodes			UNREDUCED #4221 (inner rows 36-39: cdata / comment node types and contents shifted by one -- s531d one-file run after #3551)
 Mojo-DOM58-3.002-0	dom.t	0	*PLAN*	ran 8 of no plan, rc 255	a plan	UNREDUCED #4221 (the file dies "Not an ARRAY reference" after row 8 -- s531d one-file run after #3551)

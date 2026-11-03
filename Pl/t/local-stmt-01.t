@@ -6,13 +6,13 @@
 
 # local-stmt-01.t -- the `local` STATEMENT lowered as trees (s533c, parser
 # program step 1d / C2 kind 1, task #3694), with the two fixes that rode
-# along: #4185 (a LIST local of globs) and #4441 (an array element localized
-# to a BOX value).
+# along: #4185 (a LIST local of globs), #4441 (an array element localized
+# to a BOX value) and #4443 (a block ending in a `local` takes its value).
 #
-# Every runtime expectation is perl 5.40.3's output, probed s533c.  Rows 1-6
-# (#4185) and 7 (#4441) FAIL on the 0f2db817 extraction (the statement was
-# refused / the element read SCALAR(0x1)), and so do the shape rows 13-14 (a
-# v1 source echo, the text layout); rows 8-12 and 15 pass on both trees and
+# Every runtime expectation is perl 5.40.3's output, probed s533c.  On the
+# 0f2db817 extraction TAP rows 1-6 (#4185: the statement was refused), 7
+# (#4441: SCALAR(0x1)), 13 (#4443: undef) and the shape rows 14-15 (a v1
+# source echo, the text layout) FAIL; rows 8-12 and 16 pass on both trees and
 # pin the families the structured lowering replaced (a second program, so
 # they do not depend on the #4185 rows).
 
@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 my $fixture = <<'PL';
 no strict 'refs';
@@ -65,6 +65,10 @@ eval { local $x = 'D'; local $h{k} = 'E'; die "z\n" }; print "8 ", show(), "\n";
 sub ret { local $x = 'R'; local @a[0, 1] = ('p', 'q'); return show() } print "9 ", ret(), " ", show(), "\n";
 for my $i (1 .. 2) { local $x = "L$i"; next if $i == 1; print "10 ", show(), "\n" }
 eval q{ local $x = 'S'; print "11 ", show(), "\n"; 1 }; print "12 ", show(), "\n";
+sub tf { local $x = 5 } sub tk { local $h{q} = 3 }
+my $tv = eval { local $x = 9 };
+my @tm = map { local $_ = $_ * 2 } (1, 2);
+print "16 ", scalar(tf()), " ", scalar(tk()), " $tv @tm $x\n";
 PL
 
 # Two programs, so the family rows (8-12) do not depend on the #4185 rows.
@@ -101,6 +105,7 @@ line_is(9, 'R|K|p q x0|K|1 2', 'a scalar and a slice restored at return');
 line_is(10, 'L2|K|1 2', 'restored per iteration through next');
 line_is(11, 'S|K|1 2', 'local in a string eval');
 line_is(12, 'x0|K|1 2', '...restored after it');
+line_is(16, '5 3 9 2 4 x0', '#4443: a block whose last statement is a local takes its value');
 
 # -- shape: the statement is a tree ---------------------------------------------
 my ($sfh, $shape_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
