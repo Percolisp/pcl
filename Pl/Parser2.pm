@@ -5342,21 +5342,22 @@ sub _captured_in_subs {
 # alist puts let-bound pairs first, so a cell nested inside the outer
 # lexical's scope could never win the by-name lookup; the caller then keeps
 # the eval refusals for this (rare) shape instead of registering a pair.
-# The BINDER answers (s533d, 1c port 2): the binding of `$bare` visible where
-# the extent opens, a `my` / `state` declared outside it -- perl's pad, so a
-# same-name `my` declared AFTER the extent (eval.t's `my $got`) or in a
-# sibling block does not count, and one an earlier pass already renamed
-# (`$x__file__0`) still does (the binder answers about the program as
-# written; the s295 "2 2" probe).  It replaced a scope walk over the
-# enclosing blocks' statement-level declarations.
+# The BINDER answers (s533d, 1c port 2; Pl::Binder::enclosing_decl): a `my` /
+# `state` of `$bare` declared outside the extent whose SCOPE encloses it --
+# wherever in that scope, BEFORE or AFTER the extent: a file `my $got`
+# declared after the block (eval.t:151, mro/basic.t:93) still has its
+# let-bound pair at the evals of the file scope, and the alias path would
+# also write the block cell into the global name (#4461).  A declaration in a
+# SIBLING block does not count; one an earlier pass already renamed
+# (`$x__file__0`) still does (the s295 "2 2" probe).  It replaced a scope
+# walk over the enclosing blocks' statement-level declarations.
 sub _enclosing_lex_decl {
   my ($self, $extent, $bare) = @_;
   return 0 unless $extent;
   my $b = Pl::Binder::for_captures($self, $extent);
   die "PCL internal: the binder holds no record of the block at line "
     . ($extent->line_number // '?') . " -- the eval-pair test for \$$bare cannot be answered\n" unless $b;
-  my $r = $b->resolve($extent, "\$$bare");
-  return ($r && $r->{kind} =~ /^(?:my|state)$/) ? 1 : 0;
+  return $b->enclosing_decl($extent, "\$$bare");
 }
 
 # M-F (s295 ALIAS rule, ir-spec §9.1): make a renamed (mangled) SCALAR cell

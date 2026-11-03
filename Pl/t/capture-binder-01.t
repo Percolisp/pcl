@@ -23,7 +23,8 @@
 # (inverse-verified: the unneeded cell, or the refusal); row 2 passes there
 # too (#3802 never changed a value, only the cell); rows 6-10 are the
 # string-eval shapes the old text scan got right and the binder must keep;
-# row 11 is rule 12.  Every expected text is perl 5.40.3's own output.
+# row 11 is the promoter's eval-pair test, which must keep the base's answer
+# too; row 12 is rule 12.  Every expected text is perl 5.40.3's own output.
 
 use v5.30;
 use strict;
@@ -42,7 +43,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 11;
+plan tests => 12;
 
 sub write_pl {
     my ($code) = @_;
@@ -140,7 +141,24 @@ is(run_cl(<<'PL'), "2\n", 'closure.t:548: an anon sub returned by a named sub ev
 }
 PL
 
-# ── 11. RULE 12: a block holding a token the binder has no record of (here:
+# ── 11. the promoter's eval-pair test (_enclosing_lex_decl): a same-name FILE
+#    `my` declared AFTER the block still encloses it -- the block cell takes
+#    the per-site pair, so the global name after the block is untouched (the
+#    alias path would leak the cell into it, #4461; eval.t:151's shape).
+is(run_cl(<<'PL'), "in=ok 3 ev=ok 3\nbetween=u\nafter=file ev=file show=file\n", 'a block cell under a LATER same-name file `my` keeps out of the global name');
+{
+    my $got;
+    sub rec { my $l = shift; if ($l < 3) { eval 'rec($l + 1)'; } else { $got = "ok $l" } }
+    rec(0);
+    print "in=$got ev=", eval('$got'), "\n";
+}
+print "between=", (defined $got ? $got : 'u'), "\n";
+my $got = "file";
+sub show { eval '$got' }
+print "after=$got ev=", eval('$got'), " show=", show(), "\n";
+PL
+
+# ── 12. RULE 12: a block holding a token the binder has no record of (here:
 #    one inserted after the build) DIES naming the question -- never a silent
 #    "not captured".  Built in-process from a real binder.
 {
