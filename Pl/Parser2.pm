@@ -14617,7 +14617,7 @@ my %LOCAL_PLAN = (
   globdyn => '_local_plan_globdyn', deref  => '_local_plan_deref',
   items   => '_local_plan_items',
   seam    => undef,                 # `my (…) = delete local …` + the odd delete
-  loopmod => undef,                 # `local $x for LIST` (no population has one)
+  loopmod => '_local_plan_loopmod',
 );
 
 # { opens => [FORM…], inner => [FORM…] }, or undef = this statement stays on
@@ -14813,11 +14813,27 @@ sub _local_glob_open {
 }
 
 # `local $#a = N`: perl changes the length and never restores it (RT #7411),
-# so it is the plain assignment.  Under a modifier: the v1 seam (none occurs).
+# so it is the plain assignment -- under an if/unless modifier, gated (the
+# p-if / p-unless an expression statement's modifier takes).
 sub _local_plan_arylen {
   my ($self, $stmt, $rec) = @_;
-  return undef if $rec->{mod} ne '';
-  return { opens => [], inner => [$self->_lower_expr($rec->{nonws}, $stmt)] };
+  my $form = $self->_lower_expr($rec->{nonws}, $stmt);
+  if ($rec->{mod} ne '') {
+    my @c = @{ $rec->{cond} };
+    @c = Pl::Stmt::flat_children($c[0]) if @c == 1 && ref($c[0]) eq 'PPI::Structure::Condition';
+    $form = ['p-' . $rec->{mod}, $self->_lower_expr(\@c, $stmt), $form];
+  }
+  return { opens => [], inner => [$form] };
+}
+
+# `local $x for LIST` / `while COND` never reaches the `local` lowering: the
+# statement-modifier desugar (#3375) has already made it a loop whose BODY is
+# the `local` statement (the localization restores per iteration, as perl's
+# does).  Rule 12: arriving here is a compiler self-inconsistency.
+sub _local_plan_loopmod {
+  my ($self, $stmt, $rec) = @_;
+  die "PCL internal: a loop-modified `local` statement reached the local lowering "
+    . "(the statement-modifier desugar owns it): " . $stmt->content . "\n";
 }
 
 # `local *{EXPR}` / `local *$x` / a punctuation glob: the glob named at run
