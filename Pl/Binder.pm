@@ -6,16 +6,17 @@
 package Pl::Binder;
 
 # Pl::Binder -- THE BINDING TABLE (perl's pad model, pad.c) built in ONE walk
-# over a PPI document, run in DUAL-RUN beside the three legacy resolvers of
-# Pl::Parser2 (s525q; parser-structure program step 0, member c2; design
+# over a PPI document (s525q dual-run; PRODUCTION since s533b; parser-structure program step 0, member c2; design
 # `docs/var-handling-review-s379.md` §3 Direction A and
 # `docs/parser-review-s525.md` §3 / §4 Option 1c; measurement
 # `docs/binder-dual-run-s525.md`).
 #
-# INERT BY DESIGN.  Nothing reads its answers to decide anything: Parser2
-# builds it only under PCL_BINDER_CHECK and its hooks compare the binder's
-# verdict with the legacy verdict, never replacing it.  With the variable
-# unset this module is not even loaded.
+# Parser2 builds it once per document, before every requalify / rename pass.
+# PRODUCTION CONSUMER (1c port 1, s533b): the block-package requalifier asks
+# requalify_home for every token it might rewrite (docs/binder-dual-run-s525.md
+# §6 item 1).  STILL IN DUAL-RUN (ports 2-4): the hooks on _ref_shadowed and
+# _block_captures_name compare its verdict with the legacy one under
+# PCL_BINDER_CHECK and return the legacy verdict unchanged.
 #
 #   PCL_BINDER_CHECK=die   a disagreement dies, one line, both verdicts
 #   PCL_BINDER_CHECK=log   a disagreement appends one TSV row to
@@ -23,7 +24,7 @@ package Pl::Binder;
 #                          a binder ERROR is logged too, never fatal
 #   PCL_BINDER_TRACE=1     print every reference with its binding (STDERR)
 #   PCL_BINDER_INJECT=R    self-test: invert the binder's answer for resolver
-#                          R (binding_at | ref_shadowed | block_captures) so
+#                          R (ref_shadowed | block_captures) so
 #                          the die path can be exercised (Pl/t/binder-01.t)
 #
 # THE TABLE (one record per binding, perl's PADNAME + COP_SEQ_RANGE):
@@ -75,9 +76,11 @@ package Pl::Binder;
 # API:  Pl::Binder->new($doc, parser => $p2, outer => [canons], pkg => 'X')
 #         ->bind                       returns the object
 #       ->binding_of($tok [, $canon])  the record or undef (not a variable)
+#       ->requalify_home($tok, $canon) the requalifier's home (s533b)
+#       Pl::Binder::for_node($p2, $n)   the binder answering about $n
 #       ->resolve($node, $canon)       the record visible at $node for $canon
 #       ->captures($block)             OUTER bindings read inside $block
-#       Pl::Binder::check(...)         the dual-run comparison (the hooks)
+#       Pl::Binder::check(...)         the dual-run comparison (the two hooks)
 
 use strict;
 use warnings;
@@ -839,7 +842,7 @@ sub _binder_for {
   my $caller = $pass // '?';
   my $nb = eval { Pl::Binder->new($top, %{ $main->{opt} })->bind };
   if (!$nb) {
-    _row('E', $main->{file}, 0, 0, '', $which, '', '', '', "rebuild: " . ($@ || '?'));
+    _row('E', $main->{file}, 0, 0, '', $which, '', '', '', "rebuild: " . ($@ || '?')) if $main->{mode};
     return undef;
   }
   $nb->{file} = $main->{file};
@@ -851,6 +854,16 @@ sub _binder_for {
   return $key == refaddr($main->{doc}) ? $main : $nb;
 }
 
+# The binder that answers about $node in PRODUCTION (the block-package
+# requalifier, s533b): the main one, or a rebuild when $node lives in a
+# document re-parsed after the build or is a token inserted since (the R row
+# in log mode; none fired in the four populations + the gate).
+sub for_node {
+  my ($parser, $node) = @_;
+  $parser->{_binder}{calls}{requalify}++ if $parser->{_binder};
+  return _binder_for($parser, $node, 'requalify', 'requalify');
+}
+
 sub _verdict_str { my $v = shift; return defined $v ? $v : 'undef' }
 
 sub _rec_str {
@@ -860,7 +873,8 @@ sub _rec_str {
   return "$b->{kind} $b->{name}" . ($d ? ' decl=' . ($d->line_number // '?') . ':' . ($d->column_number // '?') : '');
 }
 
-# THE COMPARISON.  $which: binding_at | ref_shadowed | block_captures.
+# THE COMPARISON.  $which: ref_shadowed | block_captures (binding_at was the
+# requalifier's; it asks the binder directly since s533b).
 sub check {
   my ($parser, $which, $legacy, @args) = @_;
   local ($!, $@);                           # inert: never leak errno / $@ to the parser
@@ -870,13 +884,11 @@ sub check {
   my $res = eval {
     my $b = _binder_for($parser, $node, $which, $pass) or return;
     $parser->{_binder}{calls}{$which}++;
-    my ($mine, $kind, $note) = $which eq 'binding_at'     ? $b->_q_binding_at(@args)
-                             : $which eq 'ref_shadowed'   ? $b->_q_ref_shadowed(@args)
+    my ($mine, $kind, $note) = $which eq 'ref_shadowed'   ? $b->_q_ref_shadowed(@args)
                              : $which eq 'block_captures' ? $b->_q_block_captures(@args)
                              : die "PCL binder: unknown resolver `$which`\n";
     $mine = _invert($which, $mine) if ($ENV{PCL_BINDER_INJECT} // '') eq $which;
-    my $same = _verdict_str($legacy) eq _verdict_str($mine)
-            || ($which ne 'binding_at' && !!$legacy == !!$mine);
+    my $same = !!$legacy == !!$mine;
     return [1] if $same;
     [0, $b, $mine, $kind, $note];
   };
@@ -902,22 +914,6 @@ sub check {
   _row(@row);
 }
 
-# s533b D0: compare the legacy requalifier's home with requalify_home's.
-sub check_requalify {
-  my ($parser, $tok, $canon, $pkg, $legacy) = @_;
-  local ($!, $@);
-  my $b = $parser->{_binder} or return;
-  $b->{calls}{requalify}++;
-  my ($mine, $why) = eval { $b->requalify_home($tok, $canon) };
-  ($mine, $why) = (undef, 'error: ' . ($@ =~ s/\n//r)) if $@;
-  $mine = 'NOREC' if $why =~ /^no-|^error/;
-  return if _verdict_str($legacy) eq _verdict_str($mine);
-  my $key = join "\0", $b->{file}, 'requalify', refaddr($tok), $canon;
-  return if $SEEN{$key}++;
-  _row('D', $b->{file}, _line($tok), _col($tok), _short($tok->content), 'requalify',
-       _verdict_str($legacy), _verdict_str($mine), $why, "asked=$canon pkg=$pkg", _pass_name());
-}
-
 # The first three NAMED frames above the resolver (closures and the shared
 # rewriter are skipped): which pass asked.
 sub _pass_name {
@@ -933,21 +929,11 @@ sub _pass_name {
 
 sub _invert {
   my ($which, $v) = @_;
-  return $which eq 'binding_at' ? (defined $v ? undef : 'lex') : ($v ? 0 : 1);
+  return $v ? 0 : 1;
 }
 
 sub _line { my $n = shift; my $t = $n->isa('PPI::Token') ? $n : $n->first_token; return $t ? ($t->line_number // 0) : 0 }
 sub _col  { my $n = shift; my $t = $n->isa('PPI::Token') ? $n : $n->first_token; return $t ? ($t->column_number // 0) : 0 }
-
-# _binding_at's question: 'lex' (a my/state/param in scope), the DECLARING
-# package of an `our` alias in scope, or undef (a global here).
-sub _q_binding_at {
-  my ($self, $node, $canon) = @_;
-  my $b = $self->_binding_cur($node, $canon);
-  my $v = !$b || $b->{kind} eq 'global' || $b->{kind} eq 'special' ? undef
-        : $b->{kind} eq 'our' ? $b->{perl_package} : 'lex';
-  return ($v, $b ? $b->{kind} : '-', _rec_str($b));
-}
 
 # _ref_shadowed's question: does this use resolve to a binding DECLARED
 # between the segment boundary and the use -- i.e. inside $seg_parent, at its

@@ -724,107 +724,60 @@ sub _requalify_region {
     # stays out, as it always was.
     next unless $bare =~ /^[^\W\d]\w*\z/;
     next if $PKG_SWITCH_IMMUNE_VARS{$canon};   # (b)
-    my %homes;                                 # (a) `our` homes seen, ne $pkg
-    my $binding = sub {
-      my ($tok) = @_;
-      # A my/state/our DECLARATOR names a new binding, not a use of the
-      # package global.  `local` is deliberately absent: it never re-binds
-      # the bare name lexically, so `local $v` in the region localizes the
-      # REQUALIFIED global and its symbol must be rewritten with the rest
-      # (the same rule the `our` trigger above states and probe-verified).
-      return 'lex' if $tok->isa('PPI::Token::Symbol')
-        && $self->_symbol_is_declarator($tok, qr/^(?:my|state|our)$/);
-      return $self->_binding_at($tok, $canon);
+    my %homes;                                 # homes seen, ne $pkg -> pass 2
+    # The rewriter offers EVERY ArrayIndex token of the region to $skip; one
+    # that does not spell this name (`$#b`, or the qualified `$#a::x` whose
+    # `$#a` prefix the rewriter's own `\b` would match) is not a use of it.
+    my $not_this = sub {
+      $_[0]->isa('PPI::Token::ArrayIndex')
+        && $_[0]->content !~ /^\$\#\Q$bare\E\b(?!::)/;
     };
     $self->_rewrite_var_uses($stmts, $canon, "${pkg}::${bare}", undef, sub {
-      my $b = $binding->($_[0]);
-      Pl::Binder::check_requalify($self, $_[0], $canon, $pkg,
-                                  !defined $b ? $pkg : $b eq 'lex' ? undef : $b)
-        if $self->{_binder} && $self->{_binder}{mode};   # s533b D0 (temporary)
-      return 0 if !defined $b;                 # (d) global of X → rewrite
-      return 1 if $b eq 'lex';                 # (a) my/state → leave alone
-      return 0 if $b eq $pkg;                  # (a) our alias already homed here
-      $homes{$b} = 1;                          # (a) our alias elsewhere → pass 2
-      return 1;
+      return 1 if $not_this->($_[0]);
+      my $h = $self->_requalify_home($_[0], $canon);
+      return 1 if !defined $h;                 # (a) a lexical / its declarator
+      return 0 if $h eq $pkg;                  # (d) a global of X, an `our` of X
+      $homes{$h} = 1;                          # an `our` / special / nested
+      return 1;                                #   `package Y { }` home: pass 2
     });
-    # Pass 2 — the `our` aliases, each to its OWN declaring package.  It runs
-    # second because pass 1's $skip is what discovers them: every token that
-    # could match this canon is offered to it exactly once.
+    # Pass 2 -- every other home, each to its own package.  It runs second
+    # because pass 1's $skip is what discovers them: every token that could
+    # match this canon is offered to it exactly once.
     for my $home (sort keys %homes) {
       $self->_rewrite_var_uses($stmts, $canon, "${home}::${bare}", undef, sub {
-        my $b = $binding->($_[0]);
-        return defined($b) && $b eq $home ? 0 : 1;
+        return 1 if $not_this->($_[0]);
+        my $h = $self->_requalify_home($_[0], $canon);
+        return defined($h) && $h eq $home ? 0 : 1;
       });
     }
   }
   return;
 }
 
-# What binds $canon at this token: 'lex' (a my/state in scope), a PACKAGE
-# NAME (an `our` alias in scope, whose home is the package in effect at the
-# DECLARATION), or undef (nothing — so it is a global of whatever package is
-# in effect here).  The walk is the ordinary Perl scope walk: at every
-# enclosing scope, the declarations that precede us in it, plus the scope's
-# own HEAD (`sub f($x)`, `sub ($x) {…}`, `foreach my $x (…)`,
-# `if (my $x = …)`, `for (my $i = 0; …)`) — which binds for the whole block.
-# Unlike _ref_shadowed (which answers a narrower, segment-local question for
-# the span gates and deliberately stops at the segment parent) this one must
-# climb all the way to the Document, because a FILE lexical declared outside
-# the block is in scope inside it.
-# The dual-run hook (s525q): the legacy verdict is returned unchanged.
-sub _binding_at {
-  my $self = shift;
-  my $v = $self->_binding_at_0(@_);
-  Pl::Binder::check($self, 'binding_at', $v, @_)
-    if $self->{_binder} && $self->{_binder}{mode};
-  return $v;
-}
-
-sub _binding_at_0 {
-  my ($self, $node, $canon) = @_;
-  # The token IS a signature parameter — the leading symbol of a top-level
-  # part of a `PPI::Structure::Signature` (`sub f ($x = 1, @r) {…}` when the
-  # feature is in force from an earlier LINE; on the pragma's own line PPI
-  # gives one Token::Prototype and no Symbol is ever offered).  That is the
-  # DECLARATION, bound 'lex' by definition; the scope walk below cannot see it
-  # because the signature is a sibling of the body, not its ancestor.  Without
-  # this the block-package requalifier rewrote the parameter itself to
-  # `$Pkg::x` — and every later reader of the head (the body's own
-  # `_head_binding`, the seam's arity) saw the rewritten text: `{ package S;
-  # use feature "signatures"; sub g ($x = 1) {…} }` came out as
-  # `sub g ($S::x = 1)`, arity 0/0, body reading the global (#497, found by
-  # the shapes corpus).  A symbol inside a DEFAULT is a USE — bound here only
-  # when a parameter to the LEFT of its part declares it (#485); otherwise it
-  # falls through to the scope walk, where it is an ordinary outer reference.
-  return 'lex' if _signature_binds($node, $canon);
-  my $child = $node;
-  for (my $p = $node->parent; $p; $child = $p, $p = $p->parent) {
-    next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
-    # LAST declaration before the use wins, not the first: a scope may
-    # re-declare the name (`our @v = (1,2); … our @v = (9);`) and Perl binds
-    # the most recent one.  Taking the first made a use after the second
-    # `our` read the FIRST one's package (probed live: gate row
-    # "our-alias re-declaration boundaries" printed M7a's value for main's).
-    my $found;
-    for my $sib ($p->schildren) {
-      last if $sib == $child;
-      my $b = $self->_stmt_binding($sib, $canon);
-      $found = $b if defined $b;
-    }
-    return $found if defined $found;
-    next unless $p->isa('PPI::Structure::Block');
-    my $b = $self->_head_binding($p, $canon);
-    return $b if defined $b;
-  }
-  # A STRING EVAL's outermost scope is the CALLER's: a name the capture alist
-  # carries is a lexical in scope at the eval site (the #296-B1 rule), so a
-  # `package X;` inside the eval text does not re-home it — perl's
-  # `eval 'sub { package main; &$c }'` calls the caller's `my $c`.  Without
-  # this the requalifier rewrote it to `$main::c`, an empty global, and core
-  # Benchmark's timing loop died "Undefined subroutine &main::" (#2285).
-  return 'lex' if $self->eval_mode
-               && grep { $_ eq $canon } @{ $self->eval_captures // [] };
-  return undef;
+# The package whose spelling the requalifier gives $canon at this token, or
+# undef to leave it as written -- the BINDER's answer (s533b, parser program
+# 1c port 1; docs/binder-dual-run-s525.md §6 item 1), perl's pad model:
+#   a my / state / param / lexsub, or the caller's lexical of a string eval
+#   (`outer`, ir-spec §2b), or the token's OWN declaration  -> undef (leave);
+#   an `our` alias -> the package in force at the DECLARATION (#475's rule);
+#   a global -> the POSITIONAL package at the use (a `package Y { }` block
+#   inside the region homes to Y); a forced-main name (gv.c S_gv_is_in_main:
+#   `$STDOUT`, `@ENV`) -> main.
+# `local` binds nothing, so `local $v` in the region localizes the
+# requalified global.  It replaced a private scope walk (`_binding_at` and
+# four helpers) that disagreed with perl in four shapes: #3800 (a `my` inside
+# an EARLIER sibling anon sub), #3801 (the second `my` of `my $S = my $F`),
+# #3804 (`tie my($x), CLASS`), #4423 (a C-style `for (my $i ...)`'s condition
+# and step) -- and two homes (#4424).  RULE 12: a token the binder holds no
+# record for DIES -- a guess here is a silently mis-homed value.
+sub _requalify_home {
+  my ($self, $tok, $canon) = @_;
+  my $b = Pl::Binder::for_node($self, $tok);
+  my ($home, $why) = $b ? $b->requalify_home($tok, $canon) : (undef, 'no-binder');
+  die "PCL internal: the binder holds no record of $canon in `" . $tok->content
+    . "` at line " . ($tok->line_number // '?') . " ($why) -- the block-package"
+    . " requalifier cannot home it\n" if $why =~ /^no-/;
+  return $home;
 }
 
 # True iff $tok is a PARAMETER of a PPI::Structure::Signature: a Symbol whose
@@ -845,7 +798,9 @@ sub _symbol_is_signature_param {
   return 0;
 }
 
-# The binding a STATEMENT at scope level contributes (see _binding_at).
+# The binding a STATEMENT at scope level contributes: 'lex' for a my/state, the
+# declaring package for an `our`, undef otherwise.  (Its one reader since the
+# requalifier moved to the binder, s533b, is _ref_shadowed -- port 3 retires it.)
 sub _stmt_binding {
   my ($self, $stmt, $canon) = @_;
   return 'lex' if $self->_stmt_declares_canon($stmt, $canon);
@@ -854,84 +809,6 @@ sub _stmt_binding {
   return undef unless $kw && $kw->isa('PPI::Token::Word') && $kw->content eq 'our';
   return undef unless grep { $_ eq $canon } $self->_declared_names($stmt);
   return _pkg_in_effect_at($stmt);
-}
-
-# The binding a block's HEAD contributes to the block: everything written
-# before the `{` inside the same construct.  A head declaration is scoped to
-# the construct, so it binds for the whole block and nothing after it.
-sub _head_binding {
-  my ($self, $blk, $canon) = @_;
-  my $par = $blk->parent or return undef;
-  my @head;
-  for my $sib ($par->schildren) {
-    last if $sib == $blk;
-    push @head, $sib;
-  }
-  return $self->_decl_binding_in(\@head, $canon);
-}
-
-# Scan a run of elements for a my/state/our declaration of $canon.  Used for
-# block heads only, where the declarators are loose TOKENS of the enclosing
-# statement (`foreach my $x (…) {…}`) as often as they are nested in a list
-# (`if (my $x = …) {…}`, `sub f($x) {…}`).
-sub _decl_binding_in {
-  my ($self, $elems, $canon) = @_;
-  my $found;                                   # last one wins, as in _binding_at
-  for my $e (@$elems) {
-    # A SIGNATURE (`sub f ($x, $y = 0) {…}`) binds its parameters for the
-    # whole block with no my/state/our keyword at all (s379 review probe:
-    # the body's $x was requalified to $X::x while the seam still bound the
-    # plain lexical — silent wrong value).  This PPI tokenizes prototypes
-    # AND signatures as Token::Prototype, so the named-params discriminator
-    # is the same textual one _is_pure_prototype uses, and the param NAMES
-    # come from the same splitter the v1 seam binds them with — a Symbol
-    # inside a DEFAULT expression is a use, not a parameter, and stays
-    # eligible for requalification.  A pure prototype binds nothing.
-    if ($e->isa('PPI::Token::Prototype') || $e->isa('PPI::Structure::Signature')) {
-      my $str = $e->content;
-      next if $str !~ /[\$\@\%]\w/;
-      $str =~ s/^\s*\(\s*//;                   # the splitter expects the parens
-      $str =~ s/\s*\)\s*$//;                   # already peeled, as its caller does
-      $found = 'lex' if grep { ($_->{name} // '') eq $canon }
-        @{ $self->fallback_parser->_signature_param_specs($str) };
-      next;
-    }
-    my @words = $e->isa('PPI::Token::Word') ? ($e)
-              : $e->isa('PPI::Node')
-                ? @{ $e->find(sub { $_[1]->isa('PPI::Token::Word') }) || [] }
-              : ();
-    for my $w (@words) {
-      next unless $w->content =~ /^(?:my|state|our)$/;
-      # Only a real DECLARATOR position counts.  The same three words are
-      # legal perl elsewhere and must neither bind nor die (s379 review
-      # probe: `if ($h{my}) { package P; … }` died "unclassifiable"):
-      #   - a method name (`$obj->my(...)`);
-      #   - a fat-comma key (`my => 1`) — always the string;
-      #   - a bare hash-subscript key (`$h{my}`) — no next sibling;
-      #   - a lexical sub (`my sub f {…}`) — declares no VARIABLE, and its
-      #     name can never collide with $canon's symbol space.
-      my $pv = $w->sprevious_sibling;
-      next if $pv && $pv->isa('PPI::Token::Operator') && $pv->content eq '->';
-      my $nx = $w->snext_sibling;
-      next if !$nx;
-      next if $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
-      next if $nx->isa('PPI::Token::Word') && $nx->content eq 'sub';
-      my @syms = $nx->isa('PPI::Token::Symbol')  ? ($nx)
-               : $nx->isa('PPI::Structure::List')
-                 ? @{ $nx->find('PPI::Token::Symbol') || [] }
-               : undef;
-      # RULE 12: a declarator whose declared names we cannot READ would make
-      # every use of $canon in the region a guess between "lexical, leave
-      # alone" and "global of X, requalify" — and the wrong guess is a
-      # silently mis-homed value, not a crash.  Say so instead.
-      die "PCL: unclassifiable `" . $w->content . "` declarator in a"
-        . " package-switched block (resolving $canon)\n"
-        if grep { !defined } @syms;
-      next unless grep { $_->symbol eq $canon } @syms;
-      $found = $w->content eq 'our' ? _pkg_in_effect_at($w) : 'lex';
-    }
-  }
-  return $found;
 }
 
 # The package a `package NAME;` statement has put in effect at this node:
@@ -3401,13 +3278,9 @@ sub _interp_canon {
 
 # Is this Symbol token the variable being DECLARED by an enclosing
 # my/state/our/local (the declarator), rather than a use of it?
-# $kw_rx narrows WHICH declarators count.  The default is all four; the
-# package-switch requalifier passes the my/state/our subset because `local`
-# is not a binder — `local $v` names the very global the caller is about to
-# requalify, so its symbol must be rewritten, not skipped.
 sub _symbol_is_declarator {
-  my ($self, $sym, $kw_rx) = @_;
-  $kw_rx //= qr/^(?:my|state|our|local)$/;
+  my ($self, $sym) = @_;
+  my $kw_rx = qr/^(?:my|state|our|local)$/;
   # Expression-embedded declaration (`open my $fh, …`, `func(my $x)`,
   # `foreach my $i`): the declarator keyword is the symbol's immediately
   # preceding significant sibling — there is no Statement::Variable wrapper
@@ -3472,7 +3345,7 @@ sub _ref_shadowed {
 sub _ref_shadowed_0 {
   my ($self, $sym, $canon, $stmts, $seg_parent) = @_;
   # The token IS a signature parameter: a declaration, its own shadow (#497,
-  # the same predicate `_binding_at` uses).  The sibling walk below cannot
+  # the predicate _signature_binds).  The sibling walk below cannot
   # see it — the parameter sits INSIDE the Structure::Signature, not before
   # it — so a spanning file lexical of the same name (`package A; my $x = …;
   # package B; sub f ($x) {…}`) used to rename the parameter itself to
@@ -3704,8 +3577,9 @@ sub _signature_left_params {
 # Is $tok's binding the SIGNATURE's own?  Either the token IS a parameter
 # (its declaration — #497) or it sits in a DEFAULT and $canon is declared by
 # a parameter to the LEFT of that default's part (#485).  The one predicate
-# `_binding_at` and `_ref_shadowed` share, so the resolver, the three
-# rewriters and the capture gates cannot disagree about a signature.
+# `_ref_shadowed` and the capture gates share, so the rewriters and the gates
+# cannot disagree about a signature.  (The requalifier asks the binder since
+# s533b; this retires with port 3.)
 sub _signature_binds {
   my ($tok, $canon) = @_;
   return 1 if _symbol_is_signature_param($tok);

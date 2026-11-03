@@ -73,10 +73,14 @@ ok(binds($out, '11:22', '$cap', 'my', '$cap', '11:4'), 'a named sub reads (captu
 
 # INVERSE: an injected wrong answer must DIE at the hook with both verdicts.
 my $inj = "$dir/inj.pl";
-open my $ifh, '>', $inj or die; print $ifh "sub r { my \$c = 1; package P; \$z = \$c; }\nr();\n"; close $ifh;
-my $err = `PCL_BINDER_CHECK=die PCL_BINDER_INJECT=binding_at $^X $root/pl2cl $inj 2>&1 >/dev/null`;
+# (s533b: the requalifier's binding_at hook is GONE -- the requalifier asks the
+# binder itself -- so the inverse row now inverts block_captures, the capture
+# scan's question: a named sub reading a file `my` IS a capture, legacy=1.)
+open my $ifh, '>', $inj or die;
+print $ifh "my \$c = 1; sub r { \$z = \$c; }\nr();\n"; close $ifh;
+my $err = `PCL_BINDER_CHECK=die PCL_BINDER_INJECT=block_captures $^X $root/pl2cl $inj 2>&1 >/dev/null`;
 my $irc = $? >> 8;
-ok($irc != 0 && $err =~ /PCL binder: binding_at disagrees at \S+ line 1 col \d+ `\$c` .*legacy=lex binder=undef/,
+ok($irc != 0 && $err =~ /PCL binder: block_captures disagrees at \S+ line 1 col \d+ `\{ \$z = \$c; \}` \(c\): legacy=1 binder=0 \[my\]/,
    'PCL_BINDER_INJECT: a disagreement DIES naming both verdicts') or diag "rc=$irc\n$err";
 
 done_testing();
