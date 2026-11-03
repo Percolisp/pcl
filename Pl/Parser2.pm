@@ -43,6 +43,63 @@ use Pl::Manifest ();   # needs_of_form -- the per-sub obligation classes (#1214)
 use Pl::ClassicSort ();   # registers the Kind-B pass `classic-sort' (task #996)
 use Pl::CLForm qw(raw raw_wrap cl_sym cl_pkg);
 use Pl::GlobalPartition qw(global_decl_form);
+use Pl::Stmt ();      # THE statement classifier (s533a, C1): statement SHAPE is read there
+
+# Statement-shape readers MOVED to Pl::Stmt (s533a); the old names stay for
+# their many callers outside the lowering (the pre-passes, VarAnnotator).
+BEGIN {
+  *_strip_semi               = \&Pl::Stmt::strip_semi;
+  *_split_modifier           = \&Pl::Stmt::split_modifier;
+  *_modifier_needs_fallback  = \&Pl::Stmt::modifier_needs_fallback;
+  *_lead_decl_with_expr_tail = \&Pl::Stmt::lead_decl_with_expr_tail;
+  *_is_empty_my_decl         = \&Pl::Stmt::is_empty_my_decl;
+  *_is_no_name_my_decl       = \&Pl::Stmt::is_no_name_my_decl;
+}
+sub _is_local_stmt      { Pl::Stmt::is_local_stmt($_[1]) }
+sub _single_scalar_decl { Pl::Stmt::single_scalar_decl($_[1]) }
+sub _multi_decl         { Pl::Stmt::multi_decl(@_[1 .. $#_]) }
+sub _proto_or_sig_str   { Pl::Stmt::proto_or_sig_str($_[1]) }
+
+# ---- s533a D2: the statement classifier's DUAL-RUN --------------------------
+# PCL_STMT_CHECK=die|log (unset = today's path; the classifier is not called):
+# each branch of the legacy statement dispatch names the kind it took, and the
+# classifier's answer for the same statement must be among them.  `die` dies
+# on a disagreement; `log` appends one TSV row to $PCL_STMT_LOG (file, line,
+# axis, legacy kinds, classifier kind, statement text).  Deleted when the
+# dispatch switches on Pl::Stmt (D3) -- its job is then done.
+our $STMT_CHECK = $ENV{PCL_STMT_CHECK} // '';
+our (%STMT_COUNT, $STMT_FILE);
+END {
+  if ($STMT_CHECK eq q{log} && defined $ENV{PCL_STMT_LOG} && %STMT_COUNT) {
+    if (open my $fh, q{>>:utf8}, $ENV{PCL_STMT_LOG}) {
+      print $fh join(qq{\t}, q{C}, $STMT_FILE // q{-},
+        map { "$_=$STMT_COUNT{$_}" } sort keys %STMT_COUNT), qq{\n};
+    }
+  }
+}
+sub _stmt_took {
+  my ($self, $stmt, $axis, @want) = @_;
+  my $got = eval {
+      $axis eq 'kind'     ? Pl::Stmt::classify($stmt)->{kind}
+    : $axis eq 'decl'     ? Pl::Stmt::decl_shape($stmt)->{decl}
+    : $axis eq 'compound' ? Pl::Stmt::compound_shape($stmt)->{ckind}
+    : die "unknown axis $axis\n";
+  } // do { (my $e = $@) =~ s/\s+/ /g; "DIED: $e" };
+  $STMT_COUNT{$axis}++;
+  $STMT_FILE = $self->filename // $STMT_FILE;
+  return if grep { $_ eq $got } @want;
+  (my $txt = $stmt->content) =~ s/\s+/ /g;
+  my $row = join "\t", 'S', ($self->filename // '-'), ($stmt->line_number // 0),
+    $axis, join('|', @want), $got, substr($txt, 0, 160);
+  die "PCL stmt-check: $row\n" if $STMT_CHECK eq 'die';
+  if (defined(my $log = $ENV{PCL_STMT_LOG})) {
+    open my $fh, '>>:utf8', $log or die "PCL_STMT_LOG $log: $!\n";
+    print $fh "$row\n";
+    close $fh;
+  } else {
+    print STDERR "PCL stmt-check: $row\n";
+  }
+}
 
 # The `use re` hints a string eval inherits from its site, bound by parse()
 # for one unit's compile (#4101; _eval_re_seed / re_pragma_at below).
@@ -3643,26 +3700,7 @@ sub _stmt_declares_canon {
 # ($canons->{bare}{'$x'} = 1) — the capture gates use this to test only the
 # DECLARED variables: a file `my @x` must not gate on a sub that touches only
 # the package global $x (bare-name text matching conflated them — my.t).
-# `my VAR <non-'=' trailing>;` — `my $aa, $bb, $cc;`, `my @raw, @up, @utf8;`,
-# `my $a . $foo;`.  Perl declares ONLY VAR here and evaluates the rest as an
-# ordinary expression, so the other names are PACKAGE variables (it warns
-# "Parenthesize").  Returns VAR, or undef when the statement is not that shape.
-#
-# ONE predicate, two consumers (CLAUDE.md 11): the lowering in _lower_block and
-# the lexical-name collector below.  They must not disagree about what a
-# statement declares — while the collector answered "all of them" (its
-# conservative unknown-shape branch), `my $a1, $b1; sub g { $b1 }` refused with
-# "file lexical 'b1' captured by sub g" even though $b1 is a package global
-# there and perl prints it happily (probed s393, #314).
-sub _lead_decl_with_expr_tail {
-  my ($stmt) = @_;
-  my @kd = _strip_semi($stmt->schildren);
-  return undef unless @kd >= 3
-    && $kd[0]->isa('PPI::Token::Word') && $kd[0]->content eq 'my'
-    && $kd[1]->isa('PPI::Token::Symbol') && $kd[1]->content =~ /^[\$\@\%]\w+$/
-    && $kd[2]->isa('PPI::Token::Operator') && $kd[2]->content ne '=';
-  return $kd[1]->content;
-}
+# (Pl::Stmt::lead_decl_with_expr_tail -- moved there with its notes, s533a)
 
 sub _collect_lexical_names {
   my ($self, $stmts, $live, $canons) = @_;
@@ -3697,19 +3735,7 @@ sub _collect_lexical_names {
 # are fine: they are lowered in place, inside the lets.)  Conservative text
 # scan: a sub that re-declares the same name with its own `my` also dies —
 # that only costs the v2 lowering, never correctness.
-# The prototype/signature string of a named sub, or undef if it is plain.
-# PPI represents an old-style prototype as a PPI::Token::Prototype (reachable
-# via ->prototype), but a real signature (when `use feature 'signatures'` is in
-# the document) as a PPI::Structure::Signature child — for which ->prototype is
-# undef.  Both must route the sub's DEFINITION through v1's _process_sub_statement
-# (imposed context / signature binding + arity checks).
-sub _proto_or_sig_str {
-  my ($self, $sub) = @_;
-  my $p = $sub->prototype;
-  return $p if defined $p;
-  my ($sig) = grep { $_->isa('PPI::Structure::Signature') } $sub->children;
-  return $sig ? $sig->content : undef;
-}
+# (Pl::Stmt::proto_or_sig_str -- moved there with its notes, s533a)
 
 # A PURE old-style prototype (`($;$)`, `(&@)`, `()`) never binds parameters —
 # the body is a plain @_-consuming body, identical to a prototype-less sub's
@@ -10515,6 +10541,7 @@ sub _lower_block_1 {
   # Standalone `delete local $h{k};` is a plain PPI::Statement with the same
   # scope-to-block-end behaviour — same route.
   if ($self->_is_local_stmt($first)) {
+    $self->_stmt_took($first, kind => 'local') if $STMT_CHECK;
     return $self->_lower_local($first, \@rest, $vi, $tail_ctx);
   }
 
@@ -10534,6 +10561,7 @@ sub _lower_block_1 {
   }
 
   # -- my $x [= INIT];  → (let (($x …)) rest...)
+  $self->_stmt_took($first, kind => 'decl') if $STMT_CHECK && $first->isa('PPI::Statement::Variable');
   if ($first->isa('PPI::Statement::Variable')) {
     # A declaration in TAIL position (last statement of a value-position
     # block: sub body, embedded map/grep/sort/eval block, do{}, eval-mode)
@@ -10550,6 +10578,7 @@ sub _lower_block_1 {
     #    (`sub { state $n }` returns undef via the nil box).
     my @sk = _strip_semi($first->schildren);
     if (@sk >= 2 && $sk[0]->isa('PPI::Token::Word') && $sk[0]->content eq 'state') {
+      $self->_stmt_took($first, decl => 'state') if $STMT_CHECK;
       my $name = $sk[1]->content;
       # The CL spelling of the state cell, once: a non-ASCII name is
       # pipe-quoted (#418) and the DECLARATION, the guarded init and every
@@ -10628,6 +10657,7 @@ sub _lower_block_1 {
     }
     my $our = $self->_lower_our_decl($first, $decl_tail ? $tail_ctx : undef);
     if ($our) {
+      $self->_stmt_took($first, decl => 'our') if $STMT_CHECK;
       # A no-init `our` in TAIL position still has a value in perl — the
       # declared variable, read in the tail's context (probed: `our $A` → 5,
       # `our ($C,$D)` → 2, `our @E` → 2, `our %H` → 1).  _lower_our_decl
@@ -10641,6 +10671,7 @@ sub _lower_block_1 {
       return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
     my ($name, $init, $declmod_cond) = $self->_single_scalar_decl($first);
+    $self->_stmt_took($first, decl => 'my-scalar') if $STMT_CHECK && $name;
     # Decl-level modifier (`my $x if @_;`): evaluate the condition for its
     # side effects, in void, BEFORE the let (the outer $x is what it sees).
     my @declmod_eval = $declmod_cond
@@ -10846,6 +10877,7 @@ sub _lower_block_1 {
     #    opbasic/cmp.t's whole file (12078 rows) in the companion suite.
     my @kd = _strip_semi($first->schildren);
     if (defined(my $lead = _lead_decl_with_expr_tail($first))) {
+      $self->_stmt_took($first, decl => 'my-lead') if $STMT_CHECK;
       my $sname = $lead;
       $self->_reg_lex($sname);
       my $vi2 = { %$vi, $sname => { unboxable => 0 } };
@@ -10870,6 +10902,7 @@ sub _lower_block_1 {
     # ARRAY ref; both were measured against perl before settling here.  Must
     # precede _multi_decl, which reports an empty name list as "unsupported".
     if (_is_empty_my_decl($first)) {
+      $self->_stmt_took($first, decl => 'my-empty') if $STMT_CHECK;
       return ($self->_lower_block(\@rest, $vi, $tail_ctx),
               ($decl_tail ? ('(progn)') : ()));
     }
@@ -10885,6 +10918,7 @@ sub _lower_block_1 {
     # this arm `_multi_decl` reports "no names" and the die below took the
     # WHOLE FILE (#610).
     if (_is_no_name_my_decl($first)) {
+      $self->_stmt_took($first, decl => 'my-noname') if $STMT_CHECK;
       my @kd = _strip_semi($first->schildren);
       return ($self->_lower_expr([@kd], $first),
               $self->_lower_block(\@rest, $vi, $tail_ctx));
@@ -10907,6 +10941,7 @@ sub _lower_block_1 {
     # evaluate the RHS at all, which is exactly what a fresh container plus a
     # `p-if` around the assignment gives.
     my @k = _strip_semi($first->schildren);
+    $self->_stmt_took($first, decl => 'my-list') if $STMT_CHECK;
     my ($kmod, $kcond, @loopmod);
     {
       my $kexpr;
@@ -11137,6 +11172,7 @@ sub _lower_block_1 {
   # position, so a BEGIN sees exactly the subs defined above it — perl-correct
   # by construction (sub-existence introspection: chdir.t).
   if ($first->isa('PPI::Statement::Scheduled')) {
+    $self->_stmt_took($first, kind => 'scheduled') if $STMT_CHECK;
     return ($self->_fallback_stmt($first, sched => 1),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
@@ -11150,12 +11186,14 @@ sub _lower_block_1 {
   # (Role-Tiny role-basic-basic.t) and violates the compile-stream invariant
   # of docs/declaration-ordering-fix-plan.md.
   if ($first->isa('PPI::Statement::Include')) {
+    $self->_stmt_took($first, kind => 'use') if $STMT_CHECK;
     return ($self->_fallback_stmt($first, sched => 1),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
   # -- __END__/__DATA__: whole-statement fallback (declarations hoisted).
   if ($first->isa('PPI::Statement::End')
       || $first->isa('PPI::Statement::Data')) {
+    $self->_stmt_took($first, kind => 'end') if $STMT_CHECK;
     return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
 
@@ -11164,6 +11202,7 @@ sub _lower_block_1 {
   # the definition into the section's decl/def buckets.  A bodyless forward
   # declaration (`sub foo;`) hoists only a p-declare-sub (no definition).
   if ($first->isa('PPI::Statement::Sub') && $first->name) {
+    $self->_stmt_took($first, kind => 'sub') if $STMT_CHECK;
     # Prototyped/signatured: v1 owns the whole definition, same as the
     # top-level route (s300c) — the native _lower_sub used to swallow these
     # and DROP the signature (params fell through to file globals; defaults
@@ -11223,6 +11262,7 @@ sub _lower_block_1 {
   # namespace in the document.  Unqualified GLOBALS after the switch keep the
   # section package — v1's exact (documented) divergence.
   if ($first->isa('PPI::Statement::Package')) {
+    $self->_stmt_took($first, kind => 'package') if $STMT_CHECK;
     my $pkg = $first->namespace // 'main';
     my $version = eval { $first->version };
     # PPI quirk (see $consume_pkg): ->version returns the BLOCK text for an
@@ -11321,6 +11361,7 @@ sub _lower_block_1 {
   # would strand the sub's reference (the statement's own enclosing sub does
   # not veto — its body IS the let's scope).
   if (ref($first) eq 'PPI::Statement' || ref($first) eq 'PPI::Statement::Expression') {
+    $self->_stmt_took($first, kind => 'expr') if $STMT_CHECK;
     # A PROMOTED embedded decl (#2534, _promote_captured's $emb_sym) binds no
     # `let`: it publishes its package cell exactly as the promoted
     # Statement::Variable branches do, and the statement then writes the cell.
@@ -11353,6 +11394,7 @@ sub _lower_block_1 {
   if ($first->isa('PPI::Statement::Compound')) {
     my @lk = $first->schildren;
     if (@lk == 1 && $lk[0]->isa('PPI::Token::Label')) {
+      $self->_stmt_took($first, kind => 'label') if $STMT_CHECK;
       (my $lbl = $lk[0]->content) =~ s/\s*:\s*$//;
       die "Parser2 TODO: standalone label\n" if $lbl !~ /^\w+$/;
       # Forward gotos handled by the #63 catch-wrap are marked; anything
@@ -11434,6 +11476,7 @@ sub _lower_block_1 {
   }
 
   # -- everything else appends a form and continues at the same depth.
+  $self->_stmt_took($first, kind => qw(expr compound return loopctl)) if $STMT_CHECK;
   return ($self->_lower_stmt($first, $vi, $first_tail), $self->_lower_block(\@rest, $vi, $tail_ctx));
 }
 
@@ -11662,10 +11705,12 @@ sub _lower_stmt {
   }
 
   if ($stmt->isa('PPI::Statement::Compound')) {
+    $self->_stmt_took($stmt, kind => qw(compound label)) if $STMT_CHECK;
     return $self->_lower_compound($stmt, $vi, $tail_ctx);
   }
 
   if ($stmt->isa('PPI::Statement::Break')) {
+    $self->_stmt_took($stmt, kind => qw(return loopctl)) if $STMT_CHECK;
     my @k = _strip_semi($stmt->schildren);
     my $kw = $k[0]->content;
     if ($kw eq 'return') {
@@ -11772,6 +11817,7 @@ sub _lower_stmt {
   # form v1 handles above its expression parse (Parser.pm), so the seam
   # cannot lower it.  Native mirror of v1's emission; also fixes the file-
   # level bare `...` (broken PARSE ERROR raw before task #78).
+  $self->_stmt_took($stmt, kind => qw(refused local decl use end sub expr)) if $STMT_CHECK;
   if (@k == 1 && $k[0]->isa('PPI::Token::Operator') && $k[0]->content eq '...') {
     my $line = $k[0]->line_number // 0;
     return ['p-die', '"Unimplemented"', ':loc',
@@ -12103,9 +12149,11 @@ sub _lower_compound {
     ($label = (shift @k)->content) =~ s/\s*:$//;
   }
   die "Parser2 TODO: standalone label\n" unless @k;
+  $self->_stmt_took($stmt, compound => 'empty') if $STMT_CHECK && !@k;
 
   # Bare block { … } = a loop-once: last/next/redo all work inside it.
   if ($k[0]->isa('PPI::Structure::Block')) {
+    $self->_stmt_took($stmt, compound => 'block') if $STMT_CHECK;
     # `{ … } continue { … }` (labelled or not) keeps the continue INSIDE the
     # compound (PPI §51, fixed on PCL's PPI branch).
     my $cont;
@@ -12136,6 +12184,7 @@ sub _lower_compound {
     if defined $label && $kw !~ /^(?:while|until|for|foreach)$/;
 
   if ($kw eq 'if' || $kw eq 'unless') {
+    $self->_stmt_took($stmt, compound => 'if') if $STMT_CHECK;
     # Collect (keyword, condition, block) clauses: if/unless, elsif*, else?.
     my (@clauses, $cur_kw, $cur_cond);
     for my $el (@k) {
@@ -12225,6 +12274,7 @@ sub _lower_compound {
   my @dyn = $self->_dyn_keys(\@k);
 
   if ($kw eq 'while' || $kw eq 'until') {
+    $self->_stmt_took($stmt, compound => 'while') if $STMT_CHECK;
     my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
     # The FIRST Structure::Block is the loop body; a second (after `continue`)
     # is the continue block, handled by _continue_keys.
@@ -12301,6 +12351,7 @@ sub _lower_compound {
     # empties are simply absent.  Empty init/step → no form; empty cond →
     # constant true (v1's _process_c_style_for defaults).
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
+    $self->_stmt_took($stmt, compound => 'for-c') if $STMT_CHECK;
     # p-for IGNORES :continue and C-style-for + continue is invalid Perl anyway
     # — gate defensively (never legitimately reached).
     die "Parser2 TODO: C-style for with continue block\n"
@@ -12444,6 +12495,7 @@ sub _lower_compound {
     # silent wrong, and a transpile-time die would cost the whole file, so
     # the STATEMENT is dropped the s433 way: announced, and a perl-shaped
     # run-time die at the site (Pl::Parser::_dropped_statement_cl).
+    $self->_stmt_took($stmt, compound => 'foreach') if $STMT_CHECK;
     if (grep { $_->isa('PPI::Token::Cast') } @k) {
       my $why = "foreach whose loop variable is a dereference (#1580)";
       my $fb  = $self->fallback_parser;
@@ -12692,6 +12744,7 @@ sub _lower_compound {
   # construct is in the p-try macro's docstring — this end only has to hand it
   # three lowered blocks and the catch variable's CL name.
   if ($kw eq 'try') {
+    $self->_stmt_took($stmt, compound => 'try') if $STMT_CHECK;
     my (@blocks, $clist, $has_catch, $after_finally, $fin_block);
     for my $el (@k[1 .. $#k]) {
       if ($el->isa('PPI::Structure::Block')) {
@@ -12731,6 +12784,7 @@ sub _lower_compound {
             (@fin ? (['progn', @fin]) : ())];
   }
 
+  $self->_stmt_took($stmt, compound => 'other') if $STMT_CHECK;
   die "Parser2 TODO: compound '$kw'";
 }
 
@@ -13030,31 +13084,9 @@ sub _lower_bare_block {
 # or a bare SINGLE container (appended).  NOT convertible: `our` (no-init
 # returns nil, should be the var) and bare multi decls (`my ($a,@b);` —
 # value would need list construction).  Pure token read, no side effects.
-# `my ();` — a declaration with an EMPTY name list.  Legal Perl, declares
-# nothing (perl #113554).
-sub _is_empty_my_decl {
-  my ($stmt) = @_;
-  my @k = _strip_semi($stmt->schildren);
-  return @k == 2
-      && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
-      && $k[1]->isa('PPI::Structure::List')
-      && !@{ $k[1]->find('PPI::Token::Symbol') || [] };
-}
+# (Pl::Stmt::is_empty_my_decl -- moved there with its notes, s533a)
 
-# `my (undef) = RHS` — the same "declares no name" list, but WITH an
-# initialiser, so it is NOT the `my ()` no-op: the RHS is a real list
-# assignment that runs (#610).  Sibling of _is_empty_my_decl and deliberately
-# disjoint from it (that one requires exactly two children, i.e. no `=`).
-# `find` returns 0, not undef, when nothing matches — hence the `|| []`.
-sub _is_no_name_my_decl {
-  my ($stmt) = @_;
-  my @k = _strip_semi($stmt->schildren);
-  return @k >= 3
-      && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
-      && $k[1]->isa('PPI::Structure::List')
-      && !@{ $k[1]->find('PPI::Token::Symbol') || [] }
-      && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '=';
-}
+# (Pl::Stmt::is_no_name_my_decl -- moved there with its notes, s533a)
 
 sub _tail_decl_convertible {
   my ($self, $stmt) = @_;
@@ -14248,9 +14280,6 @@ sub _scalar_rooted_root {
 
 # ---------------------------------------------------------------- small helpers
 
-sub _strip_semi {
-  return grep { !($_->isa('PPI::Token::Structure') && $_->content eq ';') } @_;
-}
 
 # B-regime write freeze (docs/raw-numeric-verdict.md): a raw slot licensed by
 # the USE-proof (coerce => 'num'/'str') stores every native write through the
@@ -14271,22 +14300,7 @@ sub _wrap_freeze {
   return $form;
 }
 
-# Split "EXPR if COND" style trailing statement modifiers at the top level.
-sub _split_modifier {
-  my ($parts) = @_;
-  for my $i (1 .. $#$parts) {
-    my $p = $parts->[$i];
-    if (Pl::PExpr::Config::is_statement_modifier_word($p)) {
-      return ([@$parts[0 .. $i - 1]], $p->content, [@$parts[$i + 1 .. $#$parts]]);
-    }
-  }
-  return ($parts, undef, undef);
-}
 
-sub _modifier_needs_fallback {
-  my ($mod) = @_;
-  return $mod && $mod !~ /^(?:if|unless)$/;
-}
 
 # A `my` DECLARATION WITH A LOOP MODIFIER (#3375): `my $x = EXPR for LIST;`,
 # `my ($a, $b) = EXPR while COND;`, `my @a = EXPR until COND;`.  Perl runs it
@@ -14491,30 +14505,7 @@ sub _lower_our_decl {
   return [ $form ];
 }
 
-# `my @a` / `my %h` / `my ($p, @q)` [= INIT] → (\@var_names, $has_init); else ().
-# $KTOKS (#620) lets a caller that has already split a trailing statement
-# modifier off the run pass the DECLARATION half in: `my @a = (1,2) if $c`
-# declares exactly what `my @a = (1,2)` declares, but the raw token run puts
-# `if` where this matcher wants `=`.  Callers that do not split are unchanged.
-sub _multi_decl {
-  my ($self, $stmt, $ktoks) = @_;
-  my @k = $ktoks ? @$ktoks : _strip_semi($stmt->schildren);
-  return () unless @k >= 2
-    && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my';
-  my @vars;
-  if ($k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/) {
-    @vars = ($k[1]->content);
-  } elsif ($k[1]->isa('PPI::Structure::List')) {
-    @vars = map  { $_->content }
-            grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
-    return () if !@vars || grep { !/^[\$\@\%]\w+$/ } @vars;
-  } else {
-    return ();
-  }
-  return (\@vars, 0) if @k == 2;
-  return () unless $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '=';
-  return (\@vars, 1);
-}
+# (Pl::Stmt::multi_decl -- moved there with its notes, s533a)
 
 # ── THE ONE DECLARATION PRINTER (task #1035, step 0) ──────────────────────────
 # Every perl `my` NAME that binds a fresh CL variable is spelled HERE, and only
@@ -14850,31 +14841,7 @@ sub _fallback_stmt {
   return raw($text);
 }
 
-# A statement v1's local machinery owns: `local …;` (Statement::Variable with
-# declarator `local`) or standalone `delete local …;` (plain Statement).
-sub _is_local_stmt {
-  my ($self, $stmt) = @_;
-  my @k = $stmt->schildren;
-  return 0 unless @k && $k[0]->isa('PPI::Token::Word');
-  return 1 if $stmt->isa('PPI::Statement::Variable') && $k[0]->content eq 'local';
-  return 1 if $k[0]->content eq 'delete'
-    && $k[1] && $k[1]->isa('PPI::Token::Word') && $k[1]->content eq 'local';
-  # `my (...) = delete local ...`: the INIT opens a local scope (the deleted
-  # element is restored at block end) — v2's plain `my` path would lower the
-  # init as a self-contained expression and drop the restore.  v1's statement
-  # machinery owns the open-scope bookkeeping (defvar'd my-vars +
-  # p-local-*-elem wrapping the block remainder), so route the whole
-  # statement through the local seam.  Top-level adjacent `delete local`
-  # tokens only: a delete-local nested deeper in the init expression (e.g.
-  # as a call argument) is not detected — same-shape residue as before.
-  if ($stmt->isa('PPI::Statement::Variable') && $k[0]->content =~ /^(?:my|our)$/) {
-    for my $i (0 .. $#k - 1) {
-      return 1 if $k[$i]->isa('PPI::Token::Word')   && $k[$i]->content eq 'delete'
-        && $k[$i + 1]->isa('PPI::Token::Word') && $k[$i + 1]->content eq 'local';
-    }
-  }
-  return 0;
-}
+# (Pl::Stmt::is_local_stmt -- moved there with its notes, s533a)
 
 # `local` scopes to the end of the enclosing block: v1 emits the save/restore
 # form(s) OPEN and counts them in _local_let_depth (closed at block end by
@@ -15045,30 +15012,6 @@ sub _goto_hoist_decls {
   return \@hoist;
 }
 
-sub _single_scalar_decl {
-  my ($self, $stmt) = @_;
-  my @k = _strip_semi($stmt->schildren);
-  return () unless @k >= 2
-    && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
-    && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^\$\w+$/;
-  my $name = $k[1]->content;
-  return ($name, undef) if @k == 2;
-  # `my $x if COND;` / `unless COND` (no init) — the legal non-constant-cond
-  # stale-var idiom (closure.t mosquito/staleval).  Perl declares $x
-  # unconditionally at COMPILE time; at runtime only COND is evaluated (with
-  # the OUTER $x still visible — my-visibility starts after the statement).
-  # The accidental cross-call value persistence when COND is false is
-  # perl-undefined behaviour and not emulated (a fresh per-entry binding is
-  # what the let gives; the tests only assert same-variable consistency).
-  # Return the condition tokens (3rd value) so the caller void-evaluates them
-  # BEFORE the let.  while/until/for stay unmatched → whole-file gate.
-  if (@k >= 4 && $k[2]->isa('PPI::Token::Word')
-      && $k[2]->content =~ /^(?:if|unless)$/) {
-    return ($name, undef, [@k[3 .. $#k]]);
-  }
-  return () unless $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '=';
-  return ($name, [@k[3 .. $#k]]);
-}
 
 sub _cond_parts {
   my ($cond) = @_;
