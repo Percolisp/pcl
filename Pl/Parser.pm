@@ -2470,11 +2470,9 @@ sub _process_expression_statement {
     return;
   }
 
-  # A standalone `delete local SYM SUBSCRIPT` / `delete local $r->SUBSCRIPT` is
-  # lowered by Pl::Parser2 (the structured `local`, s533c; Pl::Stmt
-  # local_delete_shape); v1's text branch for it is deleted.  Rule 12.
-  die "PCL internal: a `delete local` statement reached the v1 statement layer "
-    . "(Pl::Parser2 lowers it): $perl_code\n"
+  # A standalone `delete local SYM SUBSCRIPT` / `delete local $r->SUBSCRIPT`:
+  # the structured `local` lowering's text, through the bridge (s533c).
+  return $self->_local_via_v2($stmt)
     if @parts >= 4 && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'delete'
     && ref($parts[1]) eq 'PPI::Token::Word' && $parts[1]->content eq 'local'
     && ref($parts[2]) eq 'PPI::Token::Symbol'
@@ -2618,11 +2616,10 @@ sub _process_variable_statement {
     return;
   }
 
-  # A `local` statement is lowered by Pl::Parser2 (_lower_local, structured,
-  # s533c); v1's text machinery for it is deleted.  Rule 12: arriving here is
-  # a compiler self-inconsistency, never a silent fall-through to `my`'s path.
-  die "PCL internal: a `local` statement reached the v1 statement layer "
-    . "(Pl::Parser2 lowers it): $perl_code\n" if $declarator eq 'local';
+  # A `local` statement: v1's text machinery for it was deleted (s533c).  The
+  # blocks this layer still compiles itself (a BEGIN / END body) take the
+  # structured lowering's TEXT through the bridge.
+  return $self->_local_via_v2($stmt) if $declarator eq 'local';
 
   # Handle top-level 'my' declarations - need eval-when+defvar for BEGIN block visibility
   # Inside subs, my uses regular let bindings (handled elsewhere)
@@ -3843,6 +3840,24 @@ sub _wrap_statement_modifier {
 # helpers, 1,300 lines of TEXT emission -- was DELETED in s533c: a `local`
 # statement is lowered by Pl::Parser2::_lower_local as TREES, from
 # Pl::Stmt::local_shape (parser program step 1d / C2 kind 1, task #3694).)
+#
+# What remains here is the BRIDGE for the blocks this layer still compiles
+# statement by statement (a BEGIN / END / CHECK / INIT body, a declined
+# embedded block): the owner's plan as text -- its opens left open and counted
+# in _local_let_depth, closed at the block's end as before.
+sub _local_via_v2 {
+  my ($self, $stmt) = @_;
+  my $owner = $self->{_v2_owner}
+    or die "PCL internal: a `local` statement outside Pl::Parser2: " . $stmt->content . "\n";
+  my ($lines, $opens) = $owner->local_stmt_text_for_v1($stmt);
+  for my $l (@$lines) {
+    $self->_emit($l);
+  }
+  $self->indent_level($self->indent_level + $opens);
+  $self->{_local_let_depth} = ($self->{_local_let_depth} // 0) + $opens;
+  $self->_emit("");
+  return;
+}
 
 # Process state variable declaration with init guard
 sub _process_state_declaration {

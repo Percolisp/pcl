@@ -372,6 +372,11 @@ sub to_string {
   }
   my $flat = _flat($f);
   return $flat if defined $flat && length($flat) + 2 * $depth <= ONE_LINE_MAX;
+  # A `(declare (notinline OP…))` -- a top-level `local`'s inlining guard,
+  # 26 operator names -- is one line, as v1's text printed it: a declaration
+  # is read as one unit, never as 26 lines of names.
+  return $flat if defined $flat && $f->[0] eq 'declare'
+    && ref $f->[1] eq 'ARRAY' && ($f->[1][0] // '') eq 'notinline';
 
   my ($head, @args) = @$f;
   my $ind1 = '  ' x ($depth + 1);

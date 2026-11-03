@@ -1190,6 +1190,18 @@ Two consequences a consumer must know:
   new value, STORE the saved value back at exit — as perl localizes a tied
   scalar.  Example: `lib/English.pm` ties `$LIST_SEPARATOR` to `$"`, so
   `{ local $LIST_SEPARATOR = "-"; "@l" }` joins with `-`.
+- **The `local` statement is a nest of OPEN forms (normative, s533c).**  Each
+  localizer (`p-local-cell`, `p-local-hash-elem(-init)`, `p-local-glob`, a
+  `let` of the right side's temporaries, …) is a complete form whose `&body` is
+  the REST OF THE ENCLOSING BLOCK, so the restore runs at the block's exit by
+  any route (fall-through, `die`, `return`, `last` / `next`).  A list
+  `local (TARGETS) = LIST` computes LIST first into a temporary, opens every
+  target, then assigns through the targets' places; a GLOB in the list is
+  localized by its own glob open, whose value is LIST's element at the glob's
+  position (`(p-aref-deref TMP i)`; #4185).  When the statement is the LAST of a
+  block whose value is used, that value is the localized target's (#4443).
+  Example: `sub f { local $x = 5 }` lowers to
+  `(p-local-cell $x (p-box-for-local 5) $x)` and returns 5.
 
 **Exception set** — names that keep `defvar` and the dynamic `let`, decided
 by name alone (`Pl::GlobalPartition`, the one authority both emitters ask):

@@ -272,6 +272,13 @@ sub _note_special {
   elsif ($h eq 'p-sub')     { $acc->{SUBS}++; _note_sub_facts($args->[2], $acc) }
   elsif ($h eq 'setf')      { $acc->{SETF_ELEM}++  if _is_elem_place($args->[0]) }
   elsif ($h eq 'p-setf')    { $acc->{PSETF_ELEM}++ if _is_elem_place($args->[0]) }
+  # THE `local` SITE CORRECTION (see _scan_text) for the TREE spelling: since
+  # s533c the `local` statement is a tree, `(p-local-cell $g (p-box-for-local
+  # 2) …)` -- the same two heads for one site, the same shape test.
+  $acc->{LOCAL_VALUE_WRAPS}++
+    if $h =~ /\Ap-local-/ && @$args >= 2 && !ref $args->[0]
+    && ref $args->[1] eq 'ARRAY' && !ref $args->[1][0]
+    && _canon($args->[1][0]) eq 'p-box-for-local';
   # THE REGEX TIER (task #1211): a regex literal carries `:tier :native` /
   # `:pcre` / `:refused` / `:dynamic` in its keyword form (ir-spec §10 regex
   # row), so the histogram is a read of the emitted tree — this is what makes

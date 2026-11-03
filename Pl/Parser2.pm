@@ -6491,8 +6491,8 @@ sub _split_literal_list_decls {
 }
 
 # A `local` TERM that is not the first term of its statement (#3370, RULED
-# s518; docs/ir-spec.md "local").  The local machinery (_lower_local -> v1's
-# _process_local_declaration) only sees a statement that STARTS with `local`;
+# s518; docs/ir-spec.md "local").  The local machinery (_lower_local, the
+# structured `local` since s533c) only sees a statement that STARTS with `local`;
 # a `local` anywhere else used to be stripped by the expression compiler as a
 # plain read -- the localisation silently never happened.  This pass rewrites
 # the two shapes whose meaning is a sequence of statements the machinery
@@ -13426,7 +13426,7 @@ sub _lower_expr {
              : "$ctx" eq 'inherit'  ? 3
              : "$ctx" eq ':void'    ? 2
              :                        0;
-  $self->_gate_seam_my_shadow(@parts);
+  $self->_gate_seam_my_shadow(@parts) unless $self->{_lower_expr_plain};
   # ONE parse, ONE generator, no capture: nothing emits v1 text during an
   # expression lowering any more — an embedded block the structural route
   # declines is compiled by v1 INSIDE the hook (lower_embedded_block →
@@ -13446,10 +13446,15 @@ sub _lower_expr {
     # E2.final root flip: the form entry (gen_node_form) — the tree's raw
     # residue is only the genuinely-declining subtrees.  The two facts are
     # what the Kind-A rules in ExprToCL read.
+    # _lower_expr_plain: a lowering asked FOR the v1 statement layer (its
+    # `local` bridge, local_stmt_text_for_v1) takes no facts -- v1's own
+    # expression entry never passed them, and the facts belong to the
+    # structural context, not to the block v1 is compiling.
     $p->_parse_expression_form(\@parts, $stmt, $fb_ctx,
-      sub_info   => $self->_cur_sub_info,
-      lexicals   => $self->{_let_bound_vars} // {},
-      var_facts  => $self->{_cur_vi} // {},
+      ($self->{_lower_expr_plain} ? () : (
+        sub_info   => $self->_cur_sub_info,
+        lexicals   => $self->{_let_bound_vars} // {},
+        var_facts  => $self->{_cur_vi} // {})),
       ($opt{as_key} ? (as_key => 1) : ()));
   };
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
@@ -14616,6 +14621,28 @@ sub _lower_local {
   return _local_nest($plan, \@rest_forms);
 }
 
+# THE v1 BRIDGE: a `local` statement inside a block the v1 statement layer
+# still compiles itself -- a BEGIN / END / CHECK / INIT body
+# (`_process_scheduled_block`), a declined embedded block -- is lowered by the
+# SAME plan and handed back as v1 TEXT: each open printed without its closing
+# paren (v1 closes it at the block's end, counted in its _local_let_depth),
+# then the inner forms.  Returns (\@lines, $opens).  The expressions take no
+# facts (_lower_expr_plain: v1's expression entry never had them).  Rule 12:
+# a statement the plan does not lower here DIES naming itself.
+sub local_stmt_text_for_v1 {
+  my ($self, $stmt) = @_;
+  my $rec = Pl::Stmt::classify($stmt);
+  local $self->{_lower_expr_plain} = 1;
+  my $plan = ($rec->{kind} eq 'local') ? $self->_local_plan($stmt, $rec) : undef;
+  die "PCL internal: no structured lowering for this `local` statement in a v1-compiled block: "
+    . $stmt->content . "\n" unless $plan;
+  my @lines = map { my $t = Pl::CLForm::to_flat($_); $t =~ s/\)\z// or die
+                      "PCL internal: a `local` open is not a list form: $t\n"; $t }
+              @{ $plan->{opens} };
+  push @lines, map { Pl::CLForm::to_flat($_) } @{ $plan->{inner} };
+  return (\@lines, scalar @{ $plan->{opens} });
+}
+
 # The plan's opens, innermost last, each wrapping the next; the inner forms
 # and then the block remainder are the innermost body.
 sub _local_nest {
@@ -14647,7 +14674,7 @@ sub _local_plan {
 }
 
 # A statement the structured lowering also drops: the announced, perl-shaped
-# drop form, as v1's _drop_this_statement printed it.
+# drop form (v1's _drop_this_statement printed the same; deleted s533c).
 sub _local_drop {
   my ($self, $parts, $stmt, $reason) = @_;
   my $p = $self->fallback_parser;
