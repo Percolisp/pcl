@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 365;
+use Test::More tests => 368;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1630,6 +1630,16 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
 for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 'sub format { 1 }' ) {
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq 'Word=format', @t ) && !grep( /^Format=/, @t ), "$code: format is a word here (control)" ) or diag "got: @t";
+}
+# ... and after the format's . a statement starts, as after a ; (perl's
+# t/comp/form_scope.t: `*STDOUT = *STDOUT7{FORMAT};` right after a format).
+{
+    for my $case ( [ '*STDOUT = *A{FORMAT};', 'Symbol=*STDOUT' ], [ '*{"x"} = 1;', 'Cast=*' ],
+                   [ '/x/ and print;', 'Regexp::Match=/x/' ] ) {
+        my ( $rest, $want ) = @$case;
+        my @t = map { short_class($_) } toks("format A =\nx\n.\n$rest\n");
+        ok( grep( $_ eq $want, @t ), "after a format: $rest -- a statement starts" ) or diag "got: @t";
+    }
 }
 
 # §41 -- an empty package segment is part of the name (toke.c scan_word6):

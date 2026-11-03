@@ -55,7 +55,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 8;
+plan tests => 9;
 
 # A format block must not eat the statement that follows it.
 my $with_format = <<'END';
@@ -99,3 +99,6 @@ is run_cl(qq{my \$s = <<'E';\nformat X =\nab\n.\nE\nprint \$s;\nprint "end\\n";\
 is run_cl(qq{{\n    format 'one =\nab\n.\n}\nformat ::two =\n\@<<\n\$x\n.\nformat A=\n.\nprint __LINE__, "\\n";\n}),
     "12\n",
     'three formats (a quoted name in a block, a ::name, no space): the code after them runs, line numbers kept';
+is run_cl(qq{\$_ = "x";\nformat A =\nab\n.\n/x/ and print "m\\n";\nformat B =\ncd\n.\n*G = *B{FORMAT};\nprint "g\\n";\n}),
+    "m\ng\n",
+    'after a format body a statement starts: a /PATTERN/ is a match, a *glob a glob (t/comp/form_scope.t)';

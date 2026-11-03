@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s532e
-branch-sha: 1ff6ccd86c76fc5fe8cc299b510f099fc2cfc001
-lib-tree: f6e504ba47163f08b37df32d47e515bb63bf79b6
+branch-sha: 87166cf8e457669666fd92acf27ce68d32dad8e4
+lib-tree: 9eef072acb95e58379260202496f5292256e34fa
 date: 2026-11-03
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -68,6 +68,7 @@ fix: AR §48 4637db29 Lexer: the [ after the ) of a list or a qw() is a subscrip
 fix: AS §60 c020b142 Unknown: the attributes of a lexical sub
 fix: AT §61 a800b8cd Tokenizer: a quote-like word naming a braced element is a word
 fix: AU §40 1ff6ccd8 Tokenizer, Lexer: a format body is one token, and the statement ends with it
+fix: AU §40 87166cf8 Tokenizer, Unknown, Whitespace: after a format body a statement starts
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -181,3 +182,5 @@ commit: 791606a8 TODO tests: a quote-like word naming a braced element
 commit: a800b8cd Tokenizer: a quote-like word naming a braced element is a word
 commit: db021031 TODO tests: a format body is picture text, and the statement ends with it
 commit: 1ff6ccd8 Tokenizer, Lexer: a format body is one token, and the statement ends with it
+commit: f19956ec TODO tests: after a format body a statement starts
+commit: 87166cf8 Tokenizer, Unknown, Whitespace: after a format body a statement starts
