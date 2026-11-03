@@ -1,0 +1,68 @@
+From db02103144634a38ebdf19e4fda93559b22e5da5 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:33:19 +0200
+Subject: [PATCH 112/119] TODO tests: a format body is picture text, and the
+ statement ends with it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads the lines after `format NAME =` as the format's picture and
+argument lines, never as code, up to and including the line that holds
+a lone . (perlform; toke.c scan_formline):
+
+    printf 'our ($a, $b) = ("x", "y");\nformat STDOUT =\n@<< @>>\n$a, $b\n.\nwrite;\nprint "after\\n";\n' | perl
+    # x    y
+    # after
+
+PPI has no format support: it lexes the picture and argument lines as
+code, and the statement it builds runs on past the . into the next
+statement (write; above), or past a closing } of the block holding it.
+
+Six rows inside the PCL §40 TODO block (the format, write and print are
+three statements and write is the second; format = for STDOUT; a format
+with an old-style 'one name inside a block; two formats in a row) and
+four controls where format is a plain word (a hash key on either side,
+a method name, a sub name).  Plan 356 -> 365.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index e13bb0e7..112317c5 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 356 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 365 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1633,6 +1633,19 @@ TODO: {
+     local $TODO = 'PCL §40: a format body is tokenized as code';
+     my @t = map { short_class($_) } toks("format STDOUT =\nhello world\n.\nwrite;\n");
+     ok( !grep( $_ eq 'Word=hello', @t ), 'the picture line of a format is not code' ) or diag "got: @t";
++    my @s = stmts("format STDOUT =\n\@<< \@>>\n\$a, \$b\n.\nwrite;\nprint \"after\\n\";\n");
++    is( scalar(@s), 3, 'a format, write and print are three statements' ) or diag join ' | ', @s;
++    is( $s[1], 'Statement: write;', 'the statement after the . is its own' );
++    @t = map { short_class($_) } toks("format =\n\@<<\n\$x\n.\nprint 1;\n");
++    ok( grep( $_ eq "Format=\@<<\n\$x\n.\n", @t ), 'format = (STDOUT): the body is one token' ) or diag "got: @t";
++    @s = stmts("{\n    format 'one =\nab\n.\n}\nmy \$y = 2;\n");
++    is( scalar(@s), 2, "format 'one = in a block: the block and the my are two statements" ) or diag join ' | ', @s;
++    @s = stmts("format A =\nx\n.\nformat B =\ny\n.\n1;\n");
++    is( scalar(@s), 3, 'two formats in a row and a statement: three statements' ) or diag join ' | ', @s;
++}
++for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 'sub format { 1 }' ) {
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq 'Word=format', @t ) && !grep( /^Format=/, @t ), "$code: format is a word here (control)" ) or diag "got: @t";
+ }
+ 
+ # §41 -- an empty package segment is part of the name (toke.c scan_word6):
+-- 
+2.53.0
+

@@ -1,0 +1,309 @@
+From 1ff6ccd86c76fc5fe8cc299b510f099fc2cfc001 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:34:00 +0200
+Subject: [PATCH 113/119] Tokenizer, Lexer: a format body is one token, and the
+ statement ends with it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads the lines after `format NAME =` as the format's picture and
+argument lines, never as code, up to and including the line that holds
+a lone . (perlform; toke.c scan_formline):
+
+    printf 'our ($a, $b) = ("x", "y");\nformat STDOUT =\n@<< @>>\n$a, $b\n.\nwrite;\nprint "after\\n";\n' | perl
+    # x    y
+    # after
+
+A new PPI::Token::Format holds those lines, the . line included, like a
+Pod token holds its section.  When the word format starts a statement and
+the rest of its line is `[NAME] =`, the new Tokenizer::_format_declaration
+makes the tokens of that line itself (Word format, the name as one Word --
+perl takes 'one and ::two there -- Operator =) and the next line starts
+the Format token; Token::Format adds lines up to the . line.  The Lexer
+ends the statement after the Format token, as after a ;, and after it a
+statement starts (_label_position, _after_statement_block, _opcontext's
+table).  The text of the document is unchanged; format as a hash key, a
+method name or a sub name stays a Word.
+
+Removes the PCL §40 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI.pm                  |   1 +
+ lib/PPI/Lexer.pm            |   7 +++
+ lib/PPI/Token.pm            |   1 +
+ lib/PPI/Token/Format.pm     | 101 ++++++++++++++++++++++++++++++++++++
+ lib/PPI/Token/Whitespace.pm |   7 +++
+ lib/PPI/Token/Word.pm       |   6 +++
+ lib/PPI/Tokenizer.pm        |  33 +++++++++++-
+ t/ppi_bugs_pcl.t            |   3 +-
+ 8 files changed, 155 insertions(+), 4 deletions(-)
+ create mode 100644 lib/PPI/Token/Format.pm
+
+diff --git a/lib/PPI.pm b/lib/PPI.pm
+index b072080e..89705599 100644
+--- a/lib/PPI.pm
++++ b/lib/PPI.pm
+@@ -410,6 +410,7 @@ based on inheritance.
+          PPI::Token::Whitespace
+          PPI::Token::Comment
+          PPI::Token::Pod
++         PPI::Token::Format
+          PPI::Token::Number
+             PPI::Token::Number::Binary
+             PPI::Token::Number::Octal
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index d4a6bbc3..8da173e1 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -695,6 +695,13 @@ sub _lex_statement {
+ 			}
+ 		}
+ 
++		# The body of a format ends its declaration, as a ; ends a statement
++		if ( $Token->isa('PPI::Token::Format') ) {
++			$self->_add_element( $Statement, $Token );
++			$self->_update_features( $Statement );
++			return 1;
++		}
++
+ 		# Any normal character just gets added
+ 		unless ( $Token->isa('PPI::Token::Structure') ) {
+ 			$self->_add_element( $Statement, $Token );
+diff --git a/lib/PPI/Token.pm b/lib/PPI/Token.pm
+index e64d9e50..64353ff4 100644
+--- a/lib/PPI/Token.pm
++++ b/lib/PPI/Token.pm
+@@ -37,6 +37,7 @@ use PPI::Token::BOM                   ();
+ use PPI::Token::Whitespace            ();
+ use PPI::Token::Comment               ();
+ use PPI::Token::Pod                   ();
++use PPI::Token::Format                ();
+ use PPI::Token::Number                ();
+ use PPI::Token::Number::Binary        ();
+ use PPI::Token::Number::Octal         ();
+diff --git a/lib/PPI/Token/Format.pm b/lib/PPI/Token/Format.pm
+new file mode 100644
+index 00000000..f90c18b7
+--- /dev/null
++++ b/lib/PPI/Token/Format.pm
+@@ -0,0 +1,101 @@
++package PPI::Token::Format;
++
++=pod
++
++=head1 NAME
++
++PPI::Token::Format - The body of a format declaration
++
++=head1 INHERITANCE
++
++  PPI::Token::Format
++  isa PPI::Token
++      isa PPI::Element
++
++=head1 SYNOPSIS
++
++  format STDOUT =
++  @<<<<<<<<<< @>>>>>
++  $name,      $value
++  .
++
++=head1 DESCRIPTION
++
++perl reads the lines after the C<=> of a C<format NAME => declaration as
++picture and argument lines, never as code, up to and including the line
++that holds a lone C<.> (L<perlform>; toke.c C<scan_formline>).  A single
++C<PPI::Token::Format> object holds those lines, terminator included, so
++the declaration ends with it and what follows the C<.> is lexed as the
++next statement.
++
++=head1 METHODS
++
++This class provides one method beyond those provided by its
++L<PPI::Token> and L<PPI::Element> parent classes.
++
++=cut
++
++use strict;
++use PPI::Token ();
++
++our $VERSION = '1.292';
++
++our @ISA = "PPI::Token";
++
++=pod
++
++=head2 lines
++
++The C<lines> method returns the picture and argument lines of the format,
++without the terminating C<.> line, each without its newline.
++
++=cut
++
++sub lines {
++	my @lines = split /\n/, $_[0]->{content}, -1;
++	pop @lines if @lines and $lines[-1] eq '';
++	pop @lines if @lines and $lines[-1] =~ /^\.\s*$/;
++	return @lines;
++}
++
++
++
++
++
++#####################################################################
++# Tokenizer Methods
++
++# A format body is line oriented: every line joins the token, and the line
++# holding a lone . ends it.
++sub __TOKENIZER__on_line_start {
++	my $t = $_[1];
++
++	$t->{token}->{content} .= $t->{line};
++	$t->_finalize_token if $t->{line} =~ /^\.\s*$/;
++
++	0;
++}
++
++1;
++
++=pod
++
++=head1 SUPPORT
++
++See the L<support section|PPI/SUPPORT> in the main module.
++
++=head1 AUTHOR
++
++Adam Kennedy E<lt>adamk@cpan.orgE<gt>
++
++=head1 COPYRIGHT
++
++Copyright 2001 - 2011 Adam Kennedy.
++
++This program is free software; you can redistribute
++it and/or modify it under the same terms as Perl itself.
++
++The full text of the license can be found in the
++LICENSE file included with this module.
++
++=cut
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index a11042e8..1e9c00ed 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -146,6 +146,13 @@ sub __TOKENIZER__on_line_start {
+ 	my $t    = $_[1];
+ 	my $line = $t->{line};
+ 
++	# The body of a format starts on the line after its header
++	# (PPI::Tokenizer::_format_declaration), whatever the line holds
++	if ( delete $t->{format_pending} ) {
++		$t->_new_token( 'Format', '' );
++		return PPI::Token::Format->__TOKENIZER__on_line_start( $t );
++	}
++
+ 	# Can we classify the entire line in one go
+ 	if ( $line =~ /^\s*$/ ) {
+ 		# A whitespace line
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 46d6beee..7be4b10a 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -322,6 +322,12 @@ sub __TOKENIZER__commit {
+ 		}
+ 	}
+ 
++	# A format declaration: the tokens of its header line, then its body
++	if ( $token_class eq 'Word' and $word eq 'format' ) {
++		my $rv = $t->_format_declaration;
++		return $rv if defined $rv;
++	}
++
+ 	# A lexical sub's declaration names it for the rest of its block
+ 	$t->_lexical_sub_word($word)
+ 		if $token_class eq 'Word' and ( $word eq 'sub' or defined $t->{lexical_sub_pending} );
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 55c90c52..7c03d6b5 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -754,6 +754,7 @@ my %OBVIOUS_CLASS = (
+ 	'PPI::Token::Regexp::Substitute'  => 'operator',
+ 	'PPI::Token::Regexp::Transliterate' => 'operator',
+ 	'PPI::Token::HereDoc'             => 'operator',
++	'PPI::Token::Format'              => 'operand',   # a statement starts after it
+ );
+ 
+ my %OBVIOUS_CONTENT = (
+@@ -947,7 +948,8 @@ sub _after_statement_block {
+ 	my $kind = $self->_curly_kind($cursor);
+ 	return '' if !$kind or $kind ne 'block';
+ 	my ( $prev ) = $self->_significant_before( $self->_matching_curly($cursor) );
+-	return 1 if !$prev or $prev->isa('PPI::Token::Label');
++	return 1 if !$prev or $prev->isa('PPI::Token::Label')
++		or $prev->isa('PPI::Token::Format');
+ 	my $content = $prev->content;
+ 	return 1 if $prev->isa('PPI::Token::Structure') and ( $content eq ';' or $content eq '}' );
+ 	return $prev->isa('PPI::Token::Word') && $content ne 'sub' && $content ne 'return';
+@@ -1050,7 +1052,8 @@ sub _after_declared_variables {
+ # an operator.
+ sub _label_position {
+ 	my ( $self, $prev ) = @_;
+-	return 1 if !$prev or $prev->isa('PPI::Token::Label');
++	return 1 if !$prev or $prev->isa('PPI::Token::Label')
++		or $prev->isa('PPI::Token::Format');
+ 	return '' if !$prev->isa('PPI::Token::Structure');
+ 	my $c = $prev->content;
+ 	return 1 if $c eq ';' or $c eq '{';
+@@ -1061,6 +1064,32 @@ sub _label_position {
+ 	return !$kind || $kind eq 'block';
+ }
+ 
++# A format declaration, format NAME = alone on its line where a statement
++# starts: perl reads the lines after it as the format's picture and
++# argument lines, up to a line holding a lone . (toke.c scan_formline).
++# Called by PPI::Token::Word with the cursor after the word format.  When
++# the rest of the line is such a header, it makes the tokens of the line
++# itself -- the name may be spelled in ways a word cannot, 'one or ::two --
++# and the next line starts the PPI::Token::Format body; it returns 0, the
++# line is done.  Otherwise it returns undef and touches nothing.
++sub _format_declaration {
++	my $t = shift;
++	my ( $prev ) = $t->_previous_significant_tokens(1);
++	return undef unless $t->_label_position($prev);
++	my $rest = substr $t->{line}, $t->{line_cursor};
++	return undef unless $rest =~ /^(?:(\s+)([^\s=][^=\n]*?))?([ \t]*)=([ \t]*\r?\n?)\z/;
++	my @parts = ( [ Whitespace => $1 ], [ Word => $2 ], [ Whitespace => $3 ],
++	              [ Operator => '=' ], [ Whitespace => $4 ] );
++	$t->_new_token( 'Word', 'format' );
++	for my $part ( @parts ) {
++		$t->_new_token( @$part ) if defined $part->[1] and length $part->[1];
++	}
++	$t->_finalize_token;
++	$t->{line_cursor} = $t->{line_length};
++	$t->{format_pending} = 1;
++	return 0;
++}
++
+ # True when the token before the current one ends a term (_ends_term_at),
+ # except in the scalar-filehandle slot of print $fh LIST, where the next
+ # token starts the list (_after_scalar_filehandle).
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 112317c5..8a19d746 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1629,8 +1629,7 @@ is_deeply( [ stmts("use feature 'try';\ntry { a() } catch (\$e) { b() }\nd();\n"
+ # §40 -- a format body is picture text up to the line holding a lone `.`
+ # (toke.c scan_formline), never code:
+ # `format STDOUT =\nhello world\n.\nwrite;` prints hello world.
+-TODO: {
+-    local $TODO = 'PCL §40: a format body is tokenized as code';
++{
+     my @t = map { short_class($_) } toks("format STDOUT =\nhello world\n.\nwrite;\n");
+     ok( !grep( $_ eq 'Word=hello', @t ), 'the picture line of a format is not code' ) or diag "got: @t";
+     my @s = stmts("format STDOUT =\n\@<< \@>>\n\$a, \$b\n.\nwrite;\nprint \"after\\n\";\n");
+-- 
+2.53.0
+

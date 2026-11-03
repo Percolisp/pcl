@@ -1,0 +1,60 @@
+From f19956ec3cfc806d2e54012f334e81389fbe3cb5 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 22:41:12 +0200
+Subject: [PATCH 114/119] TODO tests: after a format body a statement starts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the . line of a format perl reads a new statement, as after a ;
+(perl's own t/comp/form_scope.t has `*STDOUT = *STDOUT7{FORMAT};` on the
+line after a format):
+
+    printf 'format A =\nx\n.\n*STDOUT = *A{FORMAT};\nprint "ok\\n";\n' | perl
+    # ok
+
+The Format token is new, and three of the tokenizer's context tests still
+read it as the end of a term: a glob after it is a multiplication, a *{
+cast is an operator and a /PATTERN/ a division.
+
+Three rows inside a second PCL §40 TODO block.  Plan 365 -> 368.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 8a19d746..99b9f3a2 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 365 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 368 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1646,6 +1646,17 @@ for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 's
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq 'Word=format', @t ) && !grep( /^Format=/, @t ), "$code: format is a word here (control)" ) or diag "got: @t";
+ }
++# ... and after the format's . a statement starts, as after a ; (perl's
++# t/comp/form_scope.t: `*STDOUT = *STDOUT7{FORMAT};` right after a format).
++TODO: {
++    local $TODO = 'PCL §40: after a format body the next token is read as following a term';
++    for my $case ( [ '*STDOUT = *A{FORMAT};', 'Symbol=*STDOUT' ], [ '*{"x"} = 1;', 'Cast=*' ],
++                   [ '/x/ and print;', 'Regexp::Match=/x/' ] ) {
++        my ( $rest, $want ) = @$case;
++        my @t = map { short_class($_) } toks("format A =\nx\n.\n$rest\n");
++        ok( grep( $_ eq $want, @t ), "after a format: $rest -- a statement starts" ) or diag "got: @t";
++    }
++}
+ 
+ # §41 -- an empty package segment is part of the name (toke.c scan_word6):
+ # `sub foo::::bar { 7 } print foo::::bar()` prints 7.
+-- 
+2.53.0
+

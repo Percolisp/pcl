@@ -1,0 +1,71 @@
+From 84281eff47730e711bab5064efcad2560813ae2a Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:15:41 +0200
+Subject: [PATCH 106/119] TODO tests: the [ after the ) of a list or a qw() is
+ a subscript
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the ) of a list (or a qw() word list) perl's lexer expects an
+operator: toke.c yyl_rightparen returns a term, and yyl_leftsquare under
+XOPERATOR makes the [ a subscript, so (LIST)[i] is a list slice:
+
+    perl -e 'print +(10, 20)[1], " ", qw(a b c)[2], "\n"'
+    # 20 c
+
+PPI's _square decides the [ by the element before it and knows no list,
+so the slice comes out as an anonymous-array Constructor -- and a { after
+its ] then comes out as a Block.
+
+Nine more spellings inside the PCL §48 TODO block (the print argument, a
+named unary in the list, a negative index, a qw slice of two, a hash key,
+statement start, a statement modifier's condition, a code call with the
+arrow left out, a slice inside an anonymous array), one row for the {
+after the slice, and three more anonymous-array controls (after print,
+after return, the outer [ around a slice).  Plan 323 -> 336.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index f1223994..968f4aa8 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 323 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 336 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1805,14 +1805,19 @@ sub bracket_classes {
+ TODO: {
+     local $TODO = 'PCL §48: the [ of a list slice is a Constructor';
+     for my $code ( 'my @x = (1, 2, 3)[1];', 'print qw(a b c)[1];',
+-                   'my ($p) = (sort { $b <=> $a } @a)[0];' ) {
++                   'my ($p) = (sort { $b <=> $a } @a)[0];',
++                   'print +(10, 20)[1];', 'my $s = (stat $f)[7];', 'my $l = (@a)[-1];',
++                   'my @w = qw(a b c)[1, 2];', '$h{ (1, 2)[0] } = 1;', '(1, 2)[0] or die;',
++                   'print "x" if (0, 1)[1];', 'my $e = $code->()[1];', 'my $r = [ (1, 2)[0] ];' ) {
+         my @c = bracket_classes( $code, '[' );
+         is( $c[-1], 'PPI::Structure::Subscript', "$code: the [ of the list slice is a Subscript" );
+     }
++    my @c = bracket_classes( 'my $v = (f())[0]{k};', '{' );
++    is( $c[0], 'PPI::Structure::Subscript', 'my $v = (f())[0]{k};: the { after the slice subscripts it' );
+ }
+-for my $code ( 'my $r = [1];', 'foo([1, 2]);' ) {
++for my $code ( 'my $r = [1];', 'foo([1, 2]);', 'print [1];', 'return [1];', 'my $r = [ (1, 2)[0] ];' ) {
+     my @c = bracket_classes( $code, '[' );
+-    is( $c[-1], 'PPI::Structure::Constructor', "$code: an anonymous array (control)" );
++    is( $c[0], 'PPI::Structure::Constructor', "$code: an anonymous array (control)" );
+ }
+ 
+ # §49 §57 -- a GLOB SLOT: *NAME is a complete term, so the { after it
+-- 
+2.53.0
+

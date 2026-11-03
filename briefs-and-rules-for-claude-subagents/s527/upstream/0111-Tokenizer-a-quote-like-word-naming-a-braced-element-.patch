@@ -1,0 +1,69 @@
+From a800b8cd66e0ece03a8da703b6666bb7207d6e85 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:24:13 +0200
+Subject: [PATCH 111/119] Tokenizer: a quote-like word naming a braced element
+ is a word
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads an identifier straight after the { of a sigil (toke.c
+scan_ident), and a [ or { after it makes the block that element,
+whatever the identifier is:
+
+    perl -e 'our %m = (q => "r"); our @y = (5, 6); print ${m{q}}, ${y[1]}, "\n"'
+    # r6
+
+__current_token_is_forced_word now forces the word when it follows the {
+of a sigil cast ($ @ % & * $#) and a [ or { follows it, beside the
+existing rule for a word before }.  As in perl, sub followed by { is
+left alone (${sub{...}} is not an element), and a quote-like that does
+not come first in the block (${\ m{q}}) stays a quote-like.
+
+Removes the PCL §61 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Tokenizer.pm | 11 +++++++++++
+ t/ppi_bugs_pcl.t     |  3 +--
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 1bb6e76f..55c90c52 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -1143,6 +1143,17 @@ sub __current_token_is_forced_word {
+ 		pos $t->{line} = $t->{line_cursor};
+ 		return 1 if $content eq '{' and $t->{line} =~ /\G\s*\}/gc;
+ 
++		# The name of an element in a dereference block, ${name[0]} or
++		# @{name{a, b}}: perl reads an identifier straight after the { of a
++		# sigil (toke.c scan_ident), and a [ or { after it makes the block
++		# that element, keyword or not -- ${m{q}} is $m{q}, ${y[1]} is $y[1]
++		# (but ${sub{...}} is not, as in perl).
++		return 1 if $content eq '{' and $prevprev
++			and $prevprev->isa('PPI::Token::Cast')
++			and $prevprev->{content} =~ /^(?:\$|\@|%|&|\*|\$#)$/
++			and ( $t->{line} =~ /\G\s*\[/gc
++				or ( ( !defined $word or $word ne 'sub' ) and $t->{line} =~ /\G\s*\{/gc ) );
++
+ 		# sub, package, use, and no all indicate that what immediately follows
+ 		# is a word not an operator or (in the case of sub and package) a
+ 		# version string.  However, we don't want to be fooled by 'package
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index f58afade..e13bb0e7 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2002,8 +2002,7 @@ for my $case ( [ 'sub n :prototype($) { 1 }', 'Attribute=prototype($)' ],
+ # sigil (toke.c scan_ident), and a [ or { after it makes the block that
+ # element, keyword or not:
+ # `our %m = (q => 'r'); print ${m{q}}` prints r; `our @y = (5, 6); print ${y[1]}` prints 6.
+-TODO: {
+-    local $TODO = 'PCL §61: a quote-like word naming a braced element is lexed as a quote';
++{
+     for my $case ( [ '${m{q}}', 'Word=m' ], [ '${ m{q} }', 'Word=m' ], [ '${s{x}}', 'Word=s' ],
+                    [ '${y[1]}', 'Word=y' ], [ '@{q[1, 2]}', 'Word=q' ], [ '${tr{k}}', 'Word=tr' ],
+                    [ '${qw[1]}', 'Word=qw' ], [ '%{qq{a}}', 'Word=qq' ] ) {
+-- 
+2.53.0
+

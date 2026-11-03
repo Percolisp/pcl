@@ -1,0 +1,70 @@
+From 4637db29b9bd225150270c0ba4dd0d572ca2aae0 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:16:26 +0200
+Subject: [PATCH 107/119] Lexer: the [ after the ) of a list or a qw() is a
+ subscript
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the ) of a list, of a statement modifier's condition or of a qw()
+word list perl's lexer expects an operator (toke.c yyl_rightparen returns
+a term; yyl_leftsquare under XOPERATOR is a subscript), so the [ slices
+the list:
+
+    perl -e 'print +(10, 20)[1], " ", qw(a b c)[2], "\n"'
+    # 20 c
+
+_square now returns a Subscript when the element before the [ is a
+Structure::List, a Structure::Condition or a QuoteLike::Words.  In
+valid perl nothing else can follow such a ) with a [: f(1)[0] and
+$o->m()[0] are syntax errors, and $code->()[0] is the same subscript
+with the arrow left out.  A { after the slice's ] is then a Subscript
+by _curly's existing rule.  The anonymous array after print, return,
+an operator or an opening ( is unchanged.
+
+Removes the PCL §48 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm | 9 +++++++++
+ t/ppi_bugs_pcl.t | 3 +--
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 9f1cfe82..d4a6bbc3 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1303,6 +1303,15 @@ sub _square {
+ 			# ${$aref}[0], ${name}[0], @{$aref}[0, 1], %{$aref}[0, 1]
+ 			return 'PPI::Structure::Subscript';
+ 		}
++		if ( $Element->isa('PPI::Structure::List')
++		  or $Element->isa('PPI::Structure::Condition')
++		  or $Element->isa('PPI::Token::QuoteLike::Words') ) {
++			# (1, 2, 3)[1], (stat $f)[7], qw(a b c)[1], EXPR if (0, 1)[1]:
++			# after the ) of a list perl expects an operator (toke.c
++			# yyl_rightparen returns a term), so the [ slices the list.
++			# $code->()[0] is the same subscript with the arrow left out.
++			return 'PPI::Structure::Subscript';
++		}
+ 		# FIXME - More cases to catch
+ 	}
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 968f4aa8..4f2e09ea 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1802,8 +1802,7 @@ sub bracket_classes {
+ # §48 -- a LIST SLICE: after the ) of a list or a qw() the lexer expects an
+ # operator (toke.c yyl_rightparen TERM), so the [ subscripts the list:
+ # `print +(10, 20)[1]` prints 20.
+-TODO: {
+-    local $TODO = 'PCL §48: the [ of a list slice is a Constructor';
++{
+     for my $code ( 'my @x = (1, 2, 3)[1];', 'print qw(a b c)[1];',
+                    'my ($p) = (sort { $b <=> $a } @a)[0];',
+                    'print +(10, 20)[1];', 'my $s = (stat $f)[7];', 'my $l = (@a)[-1];',
+-- 
+2.53.0
+

@@ -1,0 +1,74 @@
+From 791606a86ca16b809888fb5ef215ab56bc035971 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:23:40 +0200
+Subject: [PATCH 110/119] TODO tests: a quote-like word naming a braced element
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads an identifier straight after the { of a sigil (toke.c
+scan_ident), and a [ or { after it makes the block that element,
+whatever the identifier is -- also the name of a quote-like operator:
+
+    perl -e 'our %m = (q => "r"); our @y = (5, 6); print ${m{q}}, ${y[1]}, "\n"'
+    # r6
+
+PPI's Word sees m, s, y, tr, q, qq, qw ... followed by an opening bracket
+and starts a quote-like token, so ${m{q}} holds a match, ${y[1]} a
+transliteration whose body runs on, and ${s{x}} . ${y[0]} swallows the
+rest of the statement into a substitution.
+
+Nine rows inside a new PCL §61 TODO block and four controls (a quote-like
+after a \ inside the block, m{} and s{}{} as statements, a quote-like
+word as a hash key).  Plan 343 -> 356.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 31dd3ee4..f58afade 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 343 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 356 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -1996,3 +1996,28 @@ for my $case ( [ 'sub n :prototype($) { 1 }', 'Attribute=prototype($)' ],
+     my @t = map { short_class($_) } toks('my $r = $c ? sub { 1 } : 2;');
+     ok( !grep( /^Attribute/, @t ), 'a ternary : after sub { } is an Operator (control)' ) or diag "got: @t";
+ }
++
++# §61 -- a quote-like operator's name as the NAME of an element in a
++# dereference block: perl reads an identifier straight after the { of a
++# sigil (toke.c scan_ident), and a [ or { after it makes the block that
++# element, keyword or not:
++# `our %m = (q => 'r'); print ${m{q}}` prints r; `our @y = (5, 6); print ${y[1]}` prints 6.
++TODO: {
++    local $TODO = 'PCL §61: a quote-like word naming a braced element is lexed as a quote';
++    for my $case ( [ '${m{q}}', 'Word=m' ], [ '${ m{q} }', 'Word=m' ], [ '${s{x}}', 'Word=s' ],
++                   [ '${y[1]}', 'Word=y' ], [ '@{q[1, 2]}', 'Word=q' ], [ '${tr{k}}', 'Word=tr' ],
++                   [ '${qw[1]}', 'Word=qw' ], [ '%{qq{a}}', 'Word=qq' ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: the name is a Word" ) or diag "got: @t";
++    }
++    my @t = map { short_class($_) } toks('my $v = ${s{x}} . ${y[0]};');
++    ok( grep( $_ eq 'Symbol=$v', @t ) && 3 == grep( /^Structure=\}$/, @t ),
++        'my $v = ${s{x}} . ${y[0]};: the statement is not swallowed by an s{}{}' ) or diag "got: @t";
++}
++for my $case ( [ '${\ m{q}}', 'Regexp::Match=m{q}' ], [ 'm{q};', 'Regexp::Match=m{q}' ],
++               [ 's{x}{y};', 'Regexp::Substitute=s{x}{y}' ], [ '$h{s} = 1;', 'Word=s' ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: unchanged (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+

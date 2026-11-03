@@ -1,0 +1,96 @@
+From 800aedcb4d2de8f0e5882c28f8162595cc32cf7f Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 23:09:43 +0200
+Subject: [PATCH 117/119] Format: a format's argument block may hold a nested
+ format
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perlform: the line after a picture line with a field supplies its values,
+and it may spread over more lines when it starts with a {; the block is
+code, so a lone . inside it does not end the format (perl's t/op/write.t
+'nested formats').
+
+Token::Format's line handler now notes a picture line with a field (an @
+or ^, not a comment line), and when the next line starts with a { it
+counts braces until they balance; a . line while they are open is part of
+the block.  The state lives on the tokenizer and is reset when a format
+body starts.  A { opening a PICTURE line stays text (control).
+
+Removes the third PCL §40 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Format.pm     | 26 +++++++++++++++++++++-----
+ lib/PPI/Token/Whitespace.pm |  1 +
+ t/ppi_bugs_pcl.t            |  3 +--
+ 3 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/lib/PPI/Token/Format.pm b/lib/PPI/Token/Format.pm
+index f90c18b7..b6d71a4c 100644
+--- a/lib/PPI/Token/Format.pm
++++ b/lib/PPI/Token/Format.pm
+@@ -66,12 +66,28 @@ sub lines {
+ # Tokenizer Methods
+ 
+ # A format body is line oriented: every line joins the token, and the line
+-# holding a lone . ends it.
++# holding a lone . ends it -- except inside the braces of an argument line
++# (perlform: the line after a picture line with a field supplies its
++# values, and spreads over more lines when it starts with a {; the block is
++# code, where a lone . may close a nested format).
+ sub __TOKENIZER__on_line_start {
+-	my $t = $_[1];
+-
+-	$t->{token}->{content} .= $t->{line};
+-	$t->_finalize_token if $t->{line} =~ /^\.\s*$/;
++	my $t    = $_[1];
++	my $line = $t->{line};
++	$t->{token}->{content} .= $line;
++
++	my $args = delete $t->{format_args};
++	if ( $t->{format_braces} or ( $args and $line =~ /^\s*\{/ ) ) {
++		my $depth = ( $t->{format_braces} || 0 )
++			+ ( () = $line =~ /\{/g ) - ( () = $line =~ /\}/g );
++		$t->{format_braces} = $depth > 0 ? $depth : 0;
++		return 0;
++	}
++	if ( $line =~ /^\.\s*$/ ) {
++		$t->_finalize_token;
++		return 0;
++	}
++	# A picture line with a field: the next line holds its arguments
++	$t->{format_args} = 1 if !$args and $line !~ /^\s*#/ and $line =~ /[\@^]/;
+ 
+ 	0;
+ }
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 6c1cfba0..9c40b8c6 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -149,6 +149,7 @@ sub __TOKENIZER__on_line_start {
+ 	# The body of a format starts on the line after its header
+ 	# (PPI::Tokenizer::_format_declaration), whatever the line holds
+ 	if ( delete $t->{format_pending} ) {
++		delete @$t{qw( format_args format_braces )};
+ 		$t->_new_token( 'Format', '' );
+ 		return PPI::Token::Format->__TOKENIZER__on_line_start( $t );
+ 	}
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 276b0a35..aa029c5b 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1659,8 +1659,7 @@ for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 's
+ # ... and an argument line that opens a { runs to its matching } -- the block
+ # is code, where a lone . may close a NESTED format (perlform; perl's
+ # t/op/write.t 'nested formats').
+-TODO: {
+-    local $TODO = 'PCL §40: a lone . inside the braces of an argument line ends the format';
++{
+     my @s = stmts("format NEST =\n\@<<<\n{\n    format BIRDS =\n\@<<<<<\n\$b;\n.\n    \"nest\"\n}\n.\nwrite NEST;\n");
+     is( scalar(@s), 2, 'a nested format inside an argument block: the format and write are two statements' ) or diag join ' | ', @s;
+ }
+-- 
+2.53.0
+

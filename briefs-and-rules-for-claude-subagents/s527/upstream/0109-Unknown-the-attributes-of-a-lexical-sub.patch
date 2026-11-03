@@ -1,0 +1,63 @@
+From c020b14232837aa08ac2fd15de61a6f0b00d5cfc Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 21:22:03 +0200
+Subject: [PATCH 109/119] Unknown: the attributes of a lexical sub
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads the attribute list of a lexical sub (my sub NAME, our sub
+NAME, state sub NAME) as it reads a named sub's -- toke.c yyl_sub takes
+the same path after the name:
+
+    perl -e 'use feature "lexical_subs"; no warnings; my $x = 43; my sub y :prototype() {$x} print y, "\n"'
+    # 43
+
+__TOKENIZER__is_an_attribute now also accepts `sub NAME :` when the
+word before sub is my, our or state (Token/Whitespace.pm's prototype
+test already knows the lexical case).  A named sub, a variable
+declaration's attributes and the ternary : after an anonymous sub are
+unchanged.
+
+Removes the PCL §60 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm | 6 ++++++
+ t/ppi_bugs_pcl.t         | 3 +--
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index eea464b3..f7bc1f42 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -517,6 +517,12 @@ sub __TOKENIZER__is_an_attribute {
+ 				and
+ 				$p2->content eq ''
+ 			)
++			or (
++				# A lexical sub: my sub NAME :attr, our sub, state sub
++				$p2->isa('PPI::Token::Word')
++				and
++				$p2->content =~ /^(?:my|our|state)$/
++			)
+ 		)
+ 	) {
+ 		return 1;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 67dc7dcc..31dd3ee4 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1976,8 +1976,7 @@ for my $code ( 'my @c = map {; { $_, 1 } } @l;', 'my @c = do { { $_, 1 } };' ) {
+ # `state`) a `:` starts the attribute list as after `sub NAME` (toke.c
+ # yyl_sub, the same path for both):
+ # `my $x = 43; my sub y :prototype() {$x} print y, "\n"` prints 43.
+-TODO: {
+-    local $TODO = 'PCL §60: the attribute after my sub NAME is an Operator and a Word';
++{
+     for my $case ( [ 'my sub y :prototype() {$x}', 'Attribute=prototype()' ],
+                    [ 'state sub z :prototype($) { 1 }', 'Attribute=prototype($)' ],
+                    [ 'our sub w :lvalue { $v }', 'Attribute=lvalue' ],
+-- 
+2.53.0
+

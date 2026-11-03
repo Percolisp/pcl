@@ -1,0 +1,95 @@
+From 87166cf8e457669666fd92acf27ce68d32dad8e4 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 22:41:43 +0200
+Subject: [PATCH 115/119] Tokenizer, Unknown, Whitespace: after a format body a
+ statement starts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the . line of a format perl reads a new statement, as after a ;:
+
+    printf 'format A =\nx\n.\n*STDOUT = *A{FORMAT};\nprint "ok\\n";\n' | perl
+    # ok
+
+The Format token now answers as a ; does in the three context tests that
+did not know it: _opcontext says an operand follows (it no longer sits in
+%OBVIOUS_CLASS, whose entries _ends_term_at reads as term ends), the * of a
+cast after it is a Cast (_cast_or_op, beside a Label), and a / after it
+starts a match (Whitespace's / rule).
+
+Removes the second PCL §40 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm    | 3 ++-
+ lib/PPI/Token/Whitespace.pm | 3 +++
+ lib/PPI/Tokenizer.pm        | 2 +-
+ t/ppi_bugs_pcl.t            | 3 +--
+ 4 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index f7bc1f42..455f9fe5 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -465,7 +465,8 @@ sub _cast_or_op {
+ 	  if $token->isa( 'PPI::Token::Structure' ) and $list_start_or_term_end{ $token->content }
+ 	  or $token->isa( 'PPI::Token::Cast' )
+ 	  or $token->isa( 'PPI::Token::Operator' )
+-	  or $token->isa( 'PPI::Token::Label' );
++	  or $token->isa( 'PPI::Token::Label' )
++	  or $token->isa( 'PPI::Token::Format' );
+ 
+ 	return 'Operator' if !$token->isa( 'PPI::Token::Word' );
+ 
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 1e9c00ed..6c1cfba0 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -404,6 +404,9 @@ sub __TOKENIZER__on_char {
+ 			return 'Regexp::Match';
+ 		}
+ 
++		# After the body of a format a statement starts
++		return 'Regexp::Match' if $prev->isa('PPI::Token::Format');
++
+ 		# After the } of a block that opens a statement or follows a word
+ 		# (BEGIN { } /x/, grep { } /x/), a term starts
+ 		return 'Regexp::Match' if $t->_after_statement_block;
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 7c03d6b5..528c3689 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -754,7 +754,6 @@ my %OBVIOUS_CLASS = (
+ 	'PPI::Token::Regexp::Substitute'  => 'operator',
+ 	'PPI::Token::Regexp::Transliterate' => 'operator',
+ 	'PPI::Token::HereDoc'             => 'operator',
+-	'PPI::Token::Format'              => 'operand',   # a statement starts after it
+ );
+ 
+ my %OBVIOUS_CONTENT = (
+@@ -782,6 +781,7 @@ sub _opcontext {
+ 
+ 	# Map the obvious cases
+ 	return $OBVIOUS_CLASS{$c0}   if defined $OBVIOUS_CLASS{$c0};
++	return 'operand' if $p0->isa('PPI::Token::Format');   # a statement starts after it
+ 	return 'operator' if $p0->isa('PPI::Token::Number');   # Float, Exp, Hex, Octal, Binary too
+ 	return $OBVIOUS_CONTENT{$p0} if defined $OBVIOUS_CONTENT{$p0};
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 99b9f3a2..9ef3e57c 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1648,8 +1648,7 @@ for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 's
+ }
+ # ... and after the format's . a statement starts, as after a ; (perl's
+ # t/comp/form_scope.t: `*STDOUT = *STDOUT7{FORMAT};` right after a format).
+-TODO: {
+-    local $TODO = 'PCL §40: after a format body the next token is read as following a term';
++{
+     for my $case ( [ '*STDOUT = *A{FORMAT};', 'Symbol=*STDOUT' ], [ '*{"x"} = 1;', 'Cast=*' ],
+                    [ '/x/ and print;', 'Regexp::Match=/x/' ] ) {
+         my ( $rest, $want ) = @$case;
+-- 
+2.53.0
+

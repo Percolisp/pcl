@@ -128,3 +128,18 @@ t/ppi_bugs_pcl.t: 304 -> 323 rows.
 The USER created `https://github.com/Percolisp/PPI` and logged `gh` in as Percolisp; `pcl` (`a376a6d8`, 105 commits) is pushed there.  The series shares one test file, so the PRs are STACKED in branch order, each branch `pr-<letter>` = the group's fix commit (the series is linear, so a stacked PR is just a ref at the group's last commit): **#457** = `pr-A` (`a737c524`: 0001 the test file + group A) https://github.com/Perl-Critic/PPI/pull/457; **#458** = `pr-B` (`1cff9293`, stacked on #457) https://github.com/Perl-Critic/PPI/pull/458.  Body = a series preamble + `PR-<letter>.md` without its heading.  The remaining 42 groups (C .. AQ) wait for the USER's word on cadence (all at once vs after a maintainer response); upstream had 30 open PRs at the time (the newest human ones from 2026-09 / 2026-10).
 
 **s532, 02:5x -- ONE pull request for the whole series (the USER's call):** **#459** https://github.com/Perl-Critic/PPI/pull/459 = branch `pcl` (`a376a6d8`, 105 commits over master 455bfa73), body = the series preamble + a 56-row table built from `vendor/PPI/UPSTREAM`'s `fix:` lines (group, §, fix commit, title) + links to this directory's `PR-<letter>.md` texts and PCL's catalogue.  #457 and #458 CLOSED as superseded (comment on each).  If the maintainers want pieces, re-open per group: each group's branch is a ref at its fix commit (`pr-A` = a737c524, `pr-B` = 1cff9293 are still on the fork).
+
+## s532e (2026-11-03 .. 11-04): the branch is now 119 commits, head 86623347
+
+`0001-*.patch` .. `0119-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); pushed fast-forward to
+the BARE repo only (`a376a6d8` -> `86623347`) -- the fork's `pcl`, which heads
+#459, is moved by the reviewing session.  Four groups, each "TODO tests, then
+the fix", PPI's suite green after every commit, plain and AUTHOR_TESTING=1:
+**AR** §48 the `[` after the `)` of a list or a qw() is a subscript
+(`PR-AR.md`); **AS** §60 the attributes of a lexical sub (`PR-AS.md`); **AT**
+§61 a quote-like word naming a braced element (`${m{q}}`) is a word
+(`PR-AT.md`); **AU** §40 a format body is one new `PPI::Token::Format` and ends
+its statement, in four pairs -- the token, a statement after it, a nested
+format in an argument block, a sub declared after it (`PR-AU.md`).
+t/ppi_bugs_pcl.t: 323 -> 372 rows.

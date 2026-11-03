@@ -1,0 +1,66 @@
+From 86623347061a8e99211e7a6cdaee014f2ad72b97 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 3 Nov 2026 23:55:43 +0200
+Subject: [PATCH 119/119] Whitespace, Unknown: a sub declared after a format
+ body keeps its prototype
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl's t/op/write.t declares `sub has_format ($)` right after three
+formats; the prototype test (Token/Whitespace.pm) and the attribute test
+(Token/Unknown.pm) now also take `sub NAME` as a declaration when the
+token before `sub` is a Format body, as after a ; or a }.
+
+Removes the fourth PCL §40 TODO marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm    | 2 ++
+ lib/PPI/Token/Whitespace.pm | 2 ++
+ t/ppi_bugs_pcl.t            | 3 +--
+ 3 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 455f9fe5..5dd156a8 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -513,6 +513,8 @@ sub __TOKENIZER__is_an_attribute {
+ 			not $p2
+ 			or
+ 			$p2->isa('PPI::Token::Structure')
++			or
++			$p2->isa('PPI::Token::Format')   # a statement starts after a format body
+ 			or (
+ 				$p2->isa('PPI::Token::Whitespace')
+ 				and
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 9c40b8c6..5da5aad1 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -260,6 +260,8 @@ sub __TOKENIZER__on_char {
+ 				not $p2
+ 				or
+ 				$p2->isa('PPI::Token::Structure')
++				or
++				$p2->isa('PPI::Token::Format')   # a statement starts after a format body
+ 				or (
+ 					$p2->isa('PPI::Token::Whitespace')
+ 					and
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 85bb2b7a..50ad5a16 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -1670,8 +1670,7 @@ for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 's
+ # ... and a named sub declared right after a format takes its prototype and
+ # its attributes as anywhere else (perl's t/op/write.t: `sub has_format ($)`
+ # after three formats).
+-TODO: {
+-    local $TODO = 'PCL §40: a sub declared after a format body loses its prototype';
++{
+     for my $case ( [ 'sub hf ($) { 1 }', 'Prototype=($)' ], [ 'sub hf :lvalue { $v }', 'Attribute=lvalue' ] ) {
+         my ( $rest, $want ) = @$case;
+         my @t = map { short_class($_) } toks("format A =\nx\n.\n$rest\n");
+-- 
+2.53.0
+
