@@ -12139,30 +12139,21 @@ sub _stmt_has_global_match {
 
 sub _lower_compound {
   my ($self, $stmt, $vi, $tail_ctx) = @_;
-  my @k = $stmt->schildren;
+  my $c = Pl::Stmt::compound_shape($stmt);
+  my @k = @{ $c->{k} };
 
   # Optional leading `LABEL:` — rides along on loops (`OUTER: while …`) and
   # bare blocks (`SKIP: { … }`).  Standalone labels (goto targets) and
   # labeled if/unless stay TODO → v1.
-  my $label;
-  if (@k && $k[0]->isa('PPI::Token::Label')) {
-    ($label = (shift @k)->content) =~ s/\s*:$//;
-  }
-  die "Parser2 TODO: standalone label\n" unless @k;
-  $self->_stmt_took($stmt, compound => 'empty') if $STMT_CHECK && !@k;
+  my $label = $c->{label};
+  die "Parser2 TODO: standalone label\n" if $c->{ckind} eq 'empty';
 
   # Bare block { … } = a loop-once: last/next/redo all work inside it.
-  if ($k[0]->isa('PPI::Structure::Block')) {
-    $self->_stmt_took($stmt, compound => 'block') if $STMT_CHECK;
+  if ($c->{ckind} eq 'block') {
     # `{ … } continue { … }` (labelled or not) keeps the continue INSIDE the
     # compound (PPI §51, fixed on PCL's PPI branch).
-    my $cont;
-    my ($ci) = grep { $k[$_]->isa('PPI::Token::Word')
-                      && $k[$_]->content eq 'continue' } 0 .. $#k;
-    if (defined $ci) {
-      ($cont) = grep { $_->isa('PPI::Structure::Block') } @k[$ci + 1 .. $#k];
-      die "Parser2 TODO: continue without a block\n" unless $cont;
-    }
+    my $cont = $c->{cont};
+    die "Parser2 TODO: continue without a block\n" if $c->{cont_missing};
     # The dynamic-loop-exit licence (task #1022 half (b)): a bare block is a
     # loop-once, so a `last` from a sub it calls exits it — perl-tests
     # loopctl.t's `dynamically scoped` row and t/op/rt119311.t's six
@@ -12174,158 +12165,22 @@ sub _lower_compound {
     # calls can exit the block (`{ } continue { f() }` with `sub f { last }` —
     # probed vs perl).  The compound-loop path already scans its whole
     # statement for the same reason (see _dyn_keys).
-    my $dyn = $self->_dyn_keys([$k[0]->schildren,
+    my $dyn = $self->_dyn_keys([$c->{block}->schildren,
                                 defined $cont ? $cont->schildren : ()]) ? 1 : 0;
-    return $self->_lower_bare_block($k[0], $label, $vi, $cont, $tail_ctx, $dyn);
+    return $self->_lower_bare_block($c->{block}, $label, $vi, $cont, $tail_ctx, $dyn);
   }
 
-  my $kw = $k[0]->content;
+  my $kw = $c->{kw};
   die "Parser2 TODO: label on non-loop compound '$kw'\n"
-    if defined $label && $kw !~ /^(?:while|until|for|foreach)$/;
+    if defined $label && !$c->{loop};
 
-  if ($kw eq 'if' || $kw eq 'unless') {
-    $self->_stmt_took($stmt, compound => 'if') if $STMT_CHECK;
-    # Collect (keyword, condition, block) clauses: if/unless, elsif*, else?.
-    my (@clauses, $cur_kw, $cur_cond);
-    for my $el (@k) {
-      if    ($el->isa('PPI::Token::Word'))            { $cur_kw = $el->content }
-      elsif ($el->isa('PPI::Structure::Condition'))   { $cur_cond = $el }
-      elsif ($el->isa('PPI::Structure::Block')) {
-        push @clauses, { kw => $cur_kw, cond => $cur_cond, block => $el };
-        $cur_cond = undef;
-      }
-    }
-    # #1747: a clause block on a nested goto's path (_goto_nested_fire) --
-    # with the entry flag F set, every earlier test is skipped and this
-    # clause's test is taken: `(p-if F nil TEST)` / `(p-if F 1 TEST)`.
-    if (my $br = $self->{_goto_disp} && $self->{_goto_disp}{branch}) {
-      my ($t) = grep { $br->{ refaddr $clauses[$_]{block} } } 0 .. $#clauses;
-      if (defined $t) {
-        my $F = $br->{ refaddr $clauses[$t]{block} };
-        $clauses[$_]{steer} = [$F, $_ == $t ? '1' : 'nil'] for 0 .. $t;
-      }
-    }
-    my $steer = sub {
-      my ($c, $test) = @_;
-      return $c->{steer} ? ['p-if', @{ $c->{steer} }, $test] : $test;
-    };
-    # A `my` declared in any condition head scopes to the whole construct —
-    # register the names as let-bound around cond+body lowering, then wrap the
-    # result in a fresh boxed let (lexical shadow of any outer same-named var).
-    my @cond_mys = $self->_cond_my_names(map { $_->{cond} } @clauses);
-    my (%sv_live, %sv_lb);
-    if (@cond_mys) {
-      %sv_live = %{ $self->{_live_lex} // {} };
-      %sv_lb   = %{ $self->{_let_bound_vars} // {} };
-      $self->_reg_lex(@cond_mys);
-    }
-    my $result;
-    # A bare if/unless (no else) whose value is the enclosing sub's return
-    # ($tail_ctx defined) returns, in Perl, the CONDITION value when false
-    # (`sub f { if(0){5} }` → 0) and the body value when true.  Replicate v1's
-    # `--pcl-if-ret--` ret-var transform natively: each cond is captured into
-    # RET *and* used as the test (so a false chain leaves RET = the last cond),
-    # each taken branch overwrites RET with its body value, and the whole form
-    # yields RET.  (An empty true branch → RET = nil = undef, matching perl; v1
-    # wrongly keeps the cond there — the documented not-supported corner.)
-    if (defined $tail_ctx && (!@clauses || $clauses[-1]{kw} ne 'else')) {
-      my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
-      my $chain = 'nil';
-      for my $c (reverse @clauses) {
-        my $test = ['setf', $ret, $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1)];
-        $test = ['p-!', $test] if $c->{kw} eq 'unless';
-        $test = $steer->($c, $test);
-        $chain = ['p-if', $test,
-                  ['setf', $ret, ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)]],
-                  $chain];
-      }
-      $result = ['let', ['list', ['list', $ret, 'nil']], $chain, $ret];
-    }
-    else {
-      # Build nested p-if forms from the tail (else innermost) outward.
-      # A tail if/unless is the enclosing block's VALUE — its branch blocks
-      # inherit $tail_ctx (loop/plain compounds don't propagate values).
-      my $form;
-      if (@clauses && $clauses[-1]{kw} eq 'else') {
-        my $c = pop @clauses;
-        $form = ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)];
-      }
-      while (my $c = pop @clauses) {
-        my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1);
-        $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
-        $cond = $steer->($c, $cond);
-        $form = ['p-if', $cond,
-                 ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
-                 (defined $form ? ($form) : ())];
-      }
-      $result = $form;
-    }
-    if (@cond_mys) {
-      $self->{_live_lex} = \%sv_live;
-      $self->{_let_bound_vars} = \%sv_lb;
-      $result = $self->_wrap_cond_mys(
-                  $self->_fh_late_store($stmt, $result, @cond_mys), @cond_mys);
-    }
-    return $result;
-  }
+  return $self->_lower_if_stmt($c, $stmt, $vi, $tail_ctx) if $c->{ckind} eq 'if';
 
   # The dynamic-loop-exit licence is read from the UNTOUCHED tokens, before
   # any lowering: PExpr's cleanup mutates them destructively.
   my @dyn = $self->_dyn_keys(\@k);
 
-  if ($kw eq 'while' || $kw eq 'until') {
-    $self->_stmt_took($stmt, compound => 'while') if $STMT_CHECK;
-    my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
-    # The FIRST Structure::Block is the loop body; a second (after `continue`)
-    # is the continue block, handled by _continue_keys.
-    my ($block)  = grep { $_->isa('PPI::Structure::Block') } @k;
-    # `my` in the loop condition scopes to the loop — register + wrap (as for if).
-    my @cond_mys = $self->_cond_my_names($cond_s);
-    my (%sv_live, %sv_lb);
-    if (@cond_mys) {
-      %sv_live = %{ $self->{_live_lex} // {} };
-      %sv_lb   = %{ $self->{_let_bound_vars} // {} };
-      $self->_reg_lex(@cond_mys);
-    }
-    # `while ()` is perl's infinite loop — the empty condition is constant
-    # TRUE, exactly as an empty COND section of a C-style `for` is (the arm
-    # below spells that as `['list','t']`; `p-while`'s cond is a bare form, so
-    # it is plain `t` here).  Without this the empty parts list reached
-    # _lower_expr and died "Parser2: empty expression", taking the whole FILE
-    # with it: HTTP::Tiny's `_do_timeout` writer loop is one such statement and
-    # cost the dist 31 of its 32 test files (#1607's measurement, s481b).
-    my @cond_parts = _cond_parts($cond_s);
-    my $cond = @cond_parts ? $self->_lower_expr(\@cond_parts, $stmt, undef, 1) : 't';
-    # Perl loop conditions whose value comes from each/readline/readdir/glob
-    # terminate on *undef*, not false-but-defined ("0" line, each's index 0),
-    # and a bare `<FH>` implicitly assigns to $_ — v1's _auto_defined_cond,
-    # applied at the raw seam (native conds can't contain these calls).
-    # v1 skips the rewrite for `until`, matching perl.
-    $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
-    $cond = ['p-!', $cond] if $kw eq 'until';
-    # #3374: a condition `my` a closure in the loop captures is a FRESH
-    # variable each iteration in perl -- each test starts a new box, and the
-    # body rebinds the name to it, so a closure keeps its own iteration's.
-    my @fresh = $self->_cond_mys_closure_captured(\@cond_mys, \@k);
-    $cond = ['progn', (map { ['setf', cl_sym($_), ['make-p-box', 'nil']] } @fresh), $cond]
-      if @fresh;
-    my @body = $self->_lower_scope([$block->schildren], $vi);
-    @body = (_decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], @body))
-      if @fresh;
-    my @cont = $self->_continue_keys(\@k, $vi);
-    $cont[1] = _decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], $cont[1])
-      if @fresh && @cont;
-    my $result = ['p-while', $cond, _label_keys($label), @dyn,
-                  @body,
-                  @cont];
-    if (@cond_mys) {
-      $self->{_live_lex} = \%sv_live;
-      $self->{_let_bound_vars} = \%sv_lb;
-      $result = $self->_wrap_cond_mys(
-                  $self->_fh_late_store($stmt, $result, @cond_mys), @cond_mys);
-    }
-    return $result;
-  }
+  return $self->_lower_while_stmt($c, $stmt, $vi, $tail_ctx, \@dyn) if $c->{ckind} eq 'while';
 
   # PPI 1.291 sometimes hands a foreach's parenthesised LIST a
   # PPI::Structure::For instead of a Structure::List — measured on
@@ -12336,456 +12191,574 @@ sub _lower_compound {
   # here, before either branch reads @k, so the whole foreach path (range
   # split, aliasing, loop-var scoping) sees the list it would have seen.
   # Same lexer, same class of failure as #253 — see docs/ppi-upstream-bugs.md.
-  if (($kw eq 'for' || $kw eq 'foreach')
-      && (my ($mis) = grep { $_->isa('PPI::Structure::For') } @k)) {
-    my $has_var  = grep { $_->isa('PPI::Token::Symbol') } @k;
-    my $has_semi = grep { $_->isa('PPI::Token::Structure') && $_->content eq ';' }
-                   $mis->tokens;
-    bless $mis, 'PPI::Structure::List' if $has_var || !$has_semi;
-  }
 
-  if (($kw eq 'for' || $kw eq 'foreach')
-      && (my ($for_s) = grep { $_->isa('PPI::Structure::For') } @k)) {
-    # C-style for (INIT; COND; STEP) BLOCK.  Sections are POSITIONAL: an
-    # empty one is a PPI::Statement::Null (`;`) placeholder, and trailing
-    # empties are simply absent.  Empty init/step → no form; empty cond →
-    # constant true (v1's _process_c_style_for defaults).
-    my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
-    $self->_stmt_took($stmt, compound => 'for-c') if $STMT_CHECK;
-    # p-for IGNORES :continue and C-style-for + continue is invalid Perl anyway
-    # — gate defensively (never legitimately reached).
-    die "Parser2 TODO: C-style for with continue block\n"
-      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
-    my @sect = grep { $_->isa('PPI::Statement') } $for_s->children;
-    die "Parser2 TODO: for(;;) with extra sections" if @sect > 3;
-    my ($init_s, $cond_s, $step_s) =
-      map { $_ && !$_->isa('PPI::Statement::Null') ? $_ : undef } @sect[0 .. 2];
+  bless $c->{rebless}, 'PPI::Structure::List' if $c->{rebless};
+  return $self->_lower_cfor_stmt($c, $stmt, $vi, $tail_ctx, \@dyn) if $c->{ckind} eq 'for-c';
 
-    # The whole C-for HEAD is one lexical scope, and every `my` in it scopes to
-    # the loop — exactly like `while (my $x = …)`.  Save the lexical registries
-    # before ANY of it registers and restore at every exit: a leak puts the
-    # (unbound-after-the-let) name into a later sibling's string-eval capture
-    # alist (bop.t %res section abort).
-    my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
-    my %saved_lex = %{ $self->{_live_lex} // {} };
-
-    # Multiple `my` decls in the init (`for (my $i = 0, my $j = 10; …)`) are the
-    # comma operator: `(my $i = 0), (my $j = 10)`.  _single_scalar_decl would
-    # misparse the whole comma-list as $i's RHS, so bind ALL declared counters in
-    # a boxed let and lower the init as one expression (a progn of assignments,
-    # matching v1) — no unboxing carve-out for the multi-counter case.
-    my @init_mys = $init_s ? $self->_cond_my_names($init_s) : ();
-    if (@init_mys >= 2) {
-      my @head_mys = $self->_cond_my_names($cond_s, $step_s);
-      $self->_reg_lex(@head_mys, @init_mys);
-      my $initform = ['list', $self->_lower_expr([_strip_semi($init_s->schildren)], $stmt)];
-      my $cond = $cond_s
-        ? ['list', $self->_auto_defined_raw(
-                     $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt, undef, 1))]
-        : ['list', 't'];
-      my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
-      my @body = $self->_lower_scope([$block->schildren], $vi);
-      my $form = _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @init_mys],
-                  ['p-for', $initform, $cond, $step, _label_keys($label), @dyn, @body]);
-      $self->{_let_bound_vars} = \%saved_lb;
-      $self->{_live_lex} = \%saved_lex;
-      return $self->_wrap_cond_mys($form, @head_mys);
-    }
-
-    # A `my $i = INIT` init binds the counter in a let AROUND the p-for —
-    # register the name BEFORE lowering cond/step/body so fallback expressions
-    # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
-    # else boxed (a `$i++` step keeps VarAnnotator conservative).
-    # The counter is scoped to the loop (head + body), like the foreach branch
-    # below — see the registry save above.
-    my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
-
-    # #297: every OTHER `my` in the head — one in the CONDITION or the STEP, and
-    # an init `_single_scalar_decl` declined (`my ($x) = …`, `my @a = …`) — gets
-    # ONE fresh boxed/container let around the whole construct (_wrap_cond_mys),
-    # exactly as a `while`/`if` condition-my does; the section itself lowers to
-    # the per-iteration assignment into it.  Without the let the declaration was
-    # a bare write into the package cell, so the name stayed defined (and shared
-    # with the global) after the loop.  $name is excluded: its own let is below,
-    # and it may take a raw/unboxed slot a `(make-p-box nil)` wrap would defeat.
-    my @head_mys = grep { !defined $name || $_ ne $name }
-                   $self->_cond_my_names($cond_s, $step_s, $init_s);
-    $self->_reg_lex(@head_mys) if @head_mys;
-    $self->_reg_lex($name) if $name;
-    # #138: a SINGLE `my` with a comma tail (`for (my $i = 0, $j = 9; …)`) —
-    # the tail is not part of $i's init (perl: `(my $i = 0), ($j = 9)`), and
-    # folding it made $i start at 9, so the loop ran zero times.  The >= 2
-    # branch above already documents the shape; this is its one-`my` sibling.
-    # As in the `my` statement branch, hand the whole `$i = …` run to the
-    # expression machinery instead of re-deciding the parenless list-operator
-    # ambiguity here, and pin the counter BOXED (a comma write is not a
-    # native-root arithmetic event, so no raw-slot verdict is applicable).
-    my $lowprec_run;
-    if ($name && defined $init && defined _lowprec_idx($init, 0)) {
-      my @ik = _strip_semi($init_s->schildren);
-      $lowprec_run = [@ik[1 .. $#ik]];
-      $vi = { %$vi, $name => { unboxable => 0 } };
-    }
-
-    # (The s286b ++-step carve-out — re-analyze WITHOUT the step, emit
-    # `(setf $i (p-± $i 1))` — is gone: the A-num root-incdec regime (task
-    # #62) approves the same counters in the VarAnnotator pass itself, and
-    # its numeric-write-family gate also fixes the carve-out's latent bug:
-    # a string-seeded counter (`my $i = "aa"; …; $i++`) now stays boxed so
-    # perl's MAGICAL string increment still runs — the carve-out numified
-    # it, hanging `for (my $i = "aa"; $i ne "ad"; $i++)`.)
-    #
-    # RENAMED counters (an `$x__file__N` promotion, say) are
-    # invisible to the block-level $vi (keyed by ORIGINAL names), so re-run
-    # the annotator over just this loop's statements — init/cond/STEP/body,
-    # step INCLUDED (A-num classifies it; the old carve-out had to exclude
-    # it) — and adopt an approving verdict.  The loop var is loop-scoped
-    # (let around p-for), so the loop region is the whole visibility span.
-    if ($name && !$lowprec_run && !($vi->{$name} && $vi->{$name}{unboxable})) {
-      my $vi2 = Pl::VarAnnotator->analyze(
-        [(grep { defined } $init_s, $cond_s, $step_s), $block->schildren],
-        undef, $self->_cur_sub_info, $self);
-      if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
-        # adopt the WHOLE entry: a B-verdict (coerce => num/str) must keep
-        # its strict-wrap marker or the writes would store unfrozen values
-        $vi = { %$vi, $name => $vi2->{$name} };
-      }
-    }
-    my $cond = $cond_s
-      ? ['list', $self->_auto_defined_raw(
-                   $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt, undef, 1))]
-      : ['list', 't'];
-    my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
-    my @body = $self->_lower_scope([$block->schildren], $vi);
-
-    my $form;
-    if ($name) {
-      my $initval = defined $init && !$lowprec_run
-        ? $self->_lower_expr($init, $stmt) : '(p-undef)';
-      if ($lowprec_run) {
-        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
-                 ['p-for', ['list', $self->_lower_expr($lowprec_run, $stmt, ':void')],
-                  $cond, $step, _label_keys($label), @dyn, @body]);
-      } elsif ($vi->{$name} && $vi->{$name}{unboxable}) {
-        # a B-verdict/str-buffer counter must freeze/bufferize its init too
-        $form = _decl_let([_decl_entry($name, _slot_class($vi->{$name}),
-                                       _wrap_freeze($vi->{$name}, $name, $initval), $vi)],
-                 ['p-for', ['list'], $cond, $step, _label_keys($label), @dyn, @body]);
-      } else {
-        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
-                 ['p-for', ['list', ['p-my-=', cl_sym($name), $initval]], $cond, $step,
-                  _label_keys($label), @dyn, @body]);
-      }
-    } else {
-      $form = ['p-for',
-               ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
-               $cond, $step, _label_keys($label), @dyn, @body];
-    }
-    $self->{_let_bound_vars} = \%saved_lb;
-    $self->{_live_lex} = \%saved_lex;
-    return $self->_wrap_cond_mys($form, @head_mys);
-  }
-
-  if ($kw eq 'for' || $kw eq 'foreach') {
-    # A DEREFERENCE as the loop variable (`for $$f (LIST)`, `for ${*$f}
-    # (LIST)`, docs/ppi-upstream-bugs.md §6 §29) aliases whatever the
-    # reference names; it has no lowering yet (task #1580).  PCL's PPI now
-    # lexes it, so it reaches here.  Taking the first Block for the body
-    # (it is the dereference's) or the Symbol for the variable would be a
-    # silent wrong, and a transpile-time die would cost the whole file, so
-    # the STATEMENT is dropped the s433 way: announced, and a perl-shaped
-    # run-time die at the site (Pl::Parser::_dropped_statement_cl).
-    $self->_stmt_took($stmt, compound => 'foreach') if $STMT_CHECK;
-    if (grep { $_->isa('PPI::Token::Cast') } @k) {
-      my $why = "foreach whose loop variable is a dereference (#1580)";
-      my $fb  = $self->fallback_parser;
-      # The compound can be lowered twice (a speculative lowering first);
-      # the announcement names the statement once.
-      $fb->_announce_dropped_statement([$stmt], $stmt, $why)
-        if !$self->{_drop_announced}{ Scalar::Util::refaddr($stmt) }++;
-      return Pl::CLForm::raw($fb->_dropped_statement_cl([$stmt], $stmt, $why));
-    }
-    my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
-    my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
-    my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
-    die "Parser2 TODO: foreach without list" unless $list && $block;
-    my $name = $var ? $var->content : '$_';
-    # `foreach MY $x` declares a fresh lexical, so the loop must bind one — no
-    # matter what a package variable of the same name is doing.  The loop macro
-    # cannot see the declaration (the name is not bound in its macroexpansion
-    # environment yet), so say it: `:my t` overrides %p-cell-loop-var-p, which
-    # would otherwise localize the global's cell and leak the loop value into
-    # every sub the body calls (#294).  `foreach our $x` / `foreach $x` carry no
-    # key — there the macro's environment reading IS the right answer.
-    my $loop_my = $var && do {
-      my $p = $var->sprevious_sibling;
-      $p && $p->isa('PPI::Token::Word') && $p->content eq 'my' ? 1 : 0;
-    };
-    # `for $Pkg::x (...)`: the BINDING must be the CL-ordered global
-    # (Pkg::$x) — the raw perl order is unreadable ($MAIN package error) —
-    # while $name stays the perl name for $vi/_reg_lex bookkeeping.
-    my $cl_name = Pl::ExprToCL::qualified_var_to_cl($name, $self->environment);
-    # The LIST is evaluated in the OUTER scope (the loop var is not yet bound).
-    my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
-    # A single aliasable lvalue ELEMENT (`for ($a[i])`, `for ($h{k})`) must bind
-    # the loop var to a box that WRITES THROUGH to the live container.
-    # _foreach_alias_rewrite gives (FROM-HEAD, TO-HEAD), AST-guarded on the
-    # sole-element shape; swap the lowered element's call head to its box-
-    # returning form (v1's mechanism, docs/foreach-aliasing.md).  The container
-    # (%h/@a) is already a box, so no extra VarAnnotator work is needed.
-    #
-    # The MAGIC-lvalue shape (`for (substr($s,..))` / pos / vec) additionally
-    # needs the scalar arg force-boxed and is used only by substr.t — which also
-    # over-taxes the compiler's default heap through the per-statement void-wrap
-    # (a v2-wide issue, CLAUDE.md #8 / s285).  Keep it gated to v1 until both are
-    # addressed (E2 void-wrap hoist).
-    my @alias_hd = Pl::Parser::_foreach_alias_rewrite(\@list_parts);
-    # A list that is EXACTLY one range (`for $v (A..B)`) lowers to the
-    # counting-loop macro p-foreach-range: endpoints evaluated once, numeric
-    # ranges never materialize the vector (perl's own foreach-range
-    # optimization; docs/bench-exec-investigation.md).  Detection is AST-level
-    # (_foreach_range_split over the top-level PPI tokens) and must run
-    # BEFORE whole-list lowering — PExpr's cleanup mutates the shared tokens
-    # destructively, so each token list is lowered exactly once.  The
-    # numeric-vs-magical-string decision happens at RUNTIME inside the macro
-    # (%p-range-classify), so 'a'..'e' takes the same route and falls back
-    # internally.  Shapes the guard rejects (`reverse 1..9`, `1..3, 7`,
-    # `1..$x ? 3 : 5`) and endpoints the native lowerer can't do (eval-guard)
-    # keep the p-foreach path — a skip is a missed optimization, never a
-    # miscompile.  (Postfix `EXPR for A..B` is a different lowering site,
-    # not covered here.)
-    my ($from_form, $to_form, $range_raw, $topic_fact);
-    # Kind-A gate (Pl::Passes, PCL_OPT): off, the range materializes through
-    # the general p-foreach path — a skip is a missed optimization, never a
-    # miscompile (the same contract as the guard-rejected shapes above).
-    # THE FACT (the list IS a bare range) is computed before the switch, so
-    # `--facts` prints the licence on the general p-foreach form with the
-    # emission off (task #1213).  The SPLIT is a pure shape test over the
-    # untouched tokens; only the lowering below is destructive, and that stays
-    # behind the gate.
-    my @range = @alias_hd ? () : _foreach_range_split(\@list_parts);
-    my $range_fact = @range ? 1 : 0;
-    @range = () unless Pl::Passes::enabled('foreach-range');
-    if (@range) {
-      ($from_form, $to_form) = eval {
-        ($self->_lower_expr($range[0], $stmt), $self->_lower_expr($range[1], $stmt));
-      };
-      # RAW loop var (no per-iteration box) when the segment VarAnnotator
-      # proved the name unboxable — the same name-keyed verdict every other
-      # raw-slot decision consults ($vi is conservative: a capture/\$i/local
-      # of the name ANYWHERE in the segment vetoes it).  Never for $_: the
-      # global must stay a box (s///, chomp write through it).
-      $range_raw = 1
-        if defined $to_form && $var && $vi->{$name} && $vi->{$name}{unboxable};
-      # #761 (Kind-A `raw-topic`): the TOPIC loop `for (A..B) {…}` has no
-      # declaration, so it never had a $vi verdict to consult and always took
-      # the boxed arm — a fresh `make-p-box` per iteration.  MEASURED (the §9
-      # variant recipe, 5M iterations against the runtime core): the box
-      # ALLOCATION is essentially the whole tax — special-bind + fresh box
-      # 0.168 s, special-bind + RAW value 0.016 s, plain lexical + raw
-      # 0.015 s.  So `$_` keeps its NAME and its dynamic binding (a callee
-      # that reaches the global still sees the current element) and only the
-      # VALUE goes raw; no rename, no new macro — %expand-foreach-range's raw
-      # arm already applies, because `%p-cell-loop-var-p` answers NIL for the
-      # exception-set specials.  Reading a raw value is always safe (every
-      # p-op coerces), so the gate only has to prove nothing WRITES THROUGH
-      # the box, aliases it, or hands it to code this compiler cannot see.
-      $topic_fact = (defined $to_form && !$var && _topic_raw_ok($block)) ? 1 : 0;
-      $range_raw = 1 if $topic_fact && Pl::Passes::enabled('raw-topic');
-    }
-    my $list_form;
-    unless (defined $to_form) {
-      # A list whose every DEPTH-0 element is a single SCALAR operand has a
-      # statically known length, so it must not go through the run-time
-      # flattener: at runtime a box wrapping a vector is indistinguishable
-      # from an @array box, so %p-flatten-for-list spread the referent
-      # (`for ($r)` ran once per element of @$r).  The sigil is compile-time
-      # knowledge — emit the `(vector …)` shape instead, which keeps each
-      # box as one element (so `for ($x) { $_ = 1 }` writes through).  Same
-      # rule at k=1 and k>1; resolver + rationale:
-      # Pl::Parser::_foreach_scalar_elements.
-      my @el = Pl::Parser::_foreach_scalar_elements(\@list_parts);
-      if (@el > 1) {
-        # Each element's token run is lowered EXACTLY ONCE and the whole
-        # list never is — PExpr's cleanup mutates the shared tokens
-        # destructively (same discipline as the range split above).  The
-        # alias VERDICTS are therefore taken over the untouched tokens,
-        # BEFORE any lowering runs; the head swap then maps onto the lowered
-        # elements BY POSITION.  This is the sole-element rewrite applied per
-        # element — one verdict function, one head-swapper, k of them.
-        my @hd = map { [ Pl::Parser::_foreach_alias_rewrite($_) ] } @el;
-        my @forms;
-        for my $i (0 .. $#el) {
-          my $f = $self->_lower_expr($el[$i], $stmt, 1);
-          $f = _alias_box_form($f, @{ $hd[$i] })
-            // die "Parser2 TODO: foreach over an aliasable lvalue element\n"
-            if @{ $hd[$i] };
-          push @forms, $f;
-        }
-        $list_form = ['vector', @forms];
-      }
-      else {
-        $list_form = $self->_lower_expr(\@list_parts, $stmt, 1);
-        if (@alias_hd) {
-          $list_form = _alias_box_form($list_form, @alias_hd)
-            // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
-        }
-        $list_form = ['vector', $list_form] if @el;
-      }
-    }
-    # The loop variable is scoped to the BODY only: register it, lower the
-    # body (and a continue block, which sees the loop var), then restore
-    # _let_bound_vars/_live_lex so it does not leak into sibling statements.
-    # Without this, a later sibling's string-eval capture alist would list the
-    # (now-unbound) loop var → unbound-variable at load (W3 regression seen in
-    # cmpchain.t).  _seg_lex keeps it (forward-decl).
-    my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
-    my %saved_lex = %{ $self->{_live_lex} // {} };
-    # The TOPIC loop binds the GLOBAL `$_` dynamically — it is not a lexical,
-    # and registering it put `(cons "$_" $_)` into every string eval's capture
-    # alist in the body, so the eval's OWN inner `for (7) { … $_ … }` read the
-    # captured outer box instead of its loop value (`for (1,2) { eval 'for (7)
-    # { print $_ }' }` printed 1 2, perl 7 7).  v1 always excluded it for the
-    # same reason (Pl::Parser's foreach: `$cl_loop_var ne '$_'`); s494p found
-    # the difference when the modifier spelling started taking this arm.
-    $self->_reg_lex($name) if $name ne '$_';
-    my @body = $self->_lower_scope([$block->schildren], $vi);
-    my @cont = $self->_continue_keys(\@k, $vi);
-    $self->{_let_bound_vars} = \%saved_lb;
-    $self->{_live_lex} = \%saved_lex;
-    my @my_keys = $loop_my ? (':my', 't') : ();
-    # #862 ARM A (Kind-A `foreach-raw`, gated inside the verdict): a `my` loop
-    # variable the annotator proved READ-ONLY needs no element identity, so
-    # p-foreach-raw binds the slot as it stands instead of promoting every
-    # element to a box (which, promotion being monotone, taxes every LATER
-    # read of that array too).  The verdict is name-keyed like every other one
-    # and already requires the my-spelling; `$loop_my` is re-asserted here
-    # because it is what makes `:my t` present, and p-foreach-raw refuses the
-    # package-cell arm.
-    my $ro = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro};
-    # The same conjuncts over the UNGATED verdict, for `--facts` (task #1213):
-    # `foreach_ro` is suppressed by PCL_OPT=-foreach-raw, `foreach_ro_fact` is
-    # not, so the licence can still be printed on the general form.
-    my $ro_fact = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro_fact};
-    # #1140: the read-only verdict is about the LOOP VARIABLE, and that is not
-    # the whole question.  `for my $x (@fa) { $fa[0] = 99; print $x }` printed
-    # 1 where perl prints 99 — the slot's VALUE was bound before another path
-    # wrote the slot.  When the list is a bare `my @a` of THIS region, the
-    # array facts answer it: `escapes` covers a write through a reference, a
-    # callee or a closure, `written_in` a direct write in this loop's own
-    # body.  The conjunct is applied HERE, not folded into `foreach_ro`,
-    # because the verdict is name-keyed and two loops can share `$x` while
-    # iterating different arrays.  An array with no entry — a package array,
-    # `@_`, a lexical declared in an enclosing region — keeps the pre-#1140
-    # verdict; that boundary is the family's, stated in VarAnnotator.
-    #
-    # THIS IS ALSO WHAT MAKES `classic-sort`'s FOREACH LICENCE EXACT.  That
-    # pass counts a `p-foreach-raw` list as a copying consumer by consulting
-    # this very verdict, so `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99 }`
-    # stops taking the value-sorting fast path for the same reason the plain
-    # loop stops taking the raw arm — hence "every array named in the list",
-    # not just a bare `@a`.
-    if ($ro || $ro_fact) {
-      for my $la (_list_array_names(\@list_parts)) {
-        my $af = $vi->{$la} or next;
-        next unless $af->{escapes} || $af->{written_in}{ refaddr $block };
-        $ro = 0;
-        $ro_fact = 0;
-        last;
-      }
-    }
-    # #1184 (Kind-A `foreach-arrays`): when the list is nothing but BARE named
-    # arrays and the loop already qualifies for the read-only arm, iterate them
-    # IN TURN instead of flattening them into a temporary first — the
-    # flattening is 88 % of the `feread2` bench row.  The licence needs no new
-    # fact: `$ro` above is exactly the two conjuncts (the loop variable is
-    # read-only, and every array named in the list neither escapes nor is
-    # written in this body), and `_foreach_bare_arrays` adds only the SHAPE
-    # test.  Emitted as `(vector @a @b)` plus `:arrays t`, so the run's sources
-    # are evaluated once at loop entry.
-    my (@arrays, $arrays_fact);
-    if ($ro_fact && !defined $to_form) {
-      my @bare = Pl::Parser::_foreach_bare_arrays(\@list_parts);
-      # Only arrays this segment DECLARED have facts; the conjunct above
-      # skipped any name with no entry, so re-assert it here rather than
-      # licensing the run on an unmeasured array.
-      @bare = () if grep { !$vi->{$_} } @bare;
-      $arrays_fact = @bare ? 1 : 0;
-      @arrays = @bare if $ro && Pl::Passes::enabled('foreach-arrays');
-    }
-    my @array_keys = @arrays ? (':arrays', 't') : ();
-    $list_form = ['vector', map { cl_sym($_) } @arrays] if @arrays;
-    # A foreach's `continue` block used to make the loop DECLINE the
-    # dynamic-exit licence (it reads the loop variable, so it lives inside the
-    # per-iteration binding, where a caught `next` cannot re-enter it) — and a
-    # dynamic exit into such a loop then died.  It now travels with the frame:
-    # the runtime moves it to a driver POST-FORM and carries the element in a
-    # temporary, so it sees the same box the body saw (%p-foreach-continue-post,
-    # task #1161).
-    my $loop = defined $to_form
-      ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
-         ['list', $cl_name, $from_form, $to_form],
-         _label_keys($label), @dyn, @my_keys, @body, @cont]
-      : [($ro ? 'p-foreach-raw' : 'p-foreach'), ['list', $cl_name, $list_form],
-         _label_keys($label), @dyn, @array_keys, @my_keys, @body, @cont];
-    # THE FOUR LOOP LICENCES, printed on whichever form was chosen (#1213).
-    # One wrap point for all four: the facts were computed above, ungated, so
-    # the same names appear under `PCL_OPT=none --facts`.
-    $loop = Pl::Passes::fact('foreach-range',  $range_fact,  $loop);
-    $loop = Pl::Passes::fact('raw-topic',      $topic_fact,  $loop);
-    $loop = Pl::Passes::fact('foreach-arrays', $arrays_fact, $loop);
-    $loop = Pl::Passes::fact('foreach-raw',    $ro_fact,     $loop);
-    return $loop;
-  }
+  return $self->_lower_foreach_stmt($c, $stmt, $vi, $tail_ctx, \@dyn) if $c->{ckind} eq 'foreach';
 
   # `try BLOCK catch (VAR) BLOCK [finally BLOCK]` — perl 5.34's feature 'try'.
   # The finally block is the one after the `finally` word (PCL's PPI keeps it
   # in the Compound, docs/ppi-upstream-bugs.md §18).  Everything else about the
   # construct is in the p-try macro's docstring — this end only has to hand it
   # three lowered blocks and the catch variable's CL name.
-  if ($kw eq 'try') {
-    $self->_stmt_took($stmt, compound => 'try') if $STMT_CHECK;
-    my (@blocks, $clist, $has_catch, $after_finally, $fin_block);
-    for my $el (@k[1 .. $#k]) {
-      if ($el->isa('PPI::Structure::Block')) {
-        if ($after_finally) { $fin_block = $el } else { push @blocks, $el }
-      }
-      elsif ($el->isa('PPI::Structure::List'))  { $clist = $el }
-      elsif ($el->isa('PPI::Token::Word')) {
-        $has_catch = 1 if $el->content eq 'catch';
-        $after_finally = 1 if $el->content eq 'finally';
-      }
+  return $self->_lower_try_stmt($c, $stmt, $vi, $tail_ctx) if $c->{ckind} eq 'try';
+
+  die "Parser2 TODO: compound '$kw'";
+}
+
+sub _lower_if_stmt {
+  my ($self, $cs, $stmt, $vi, $tail_ctx) = @_;
+  # Collect (keyword, condition, block) clauses: if/unless, elsif*, else?.
+  my @clauses = @{ $cs->{clauses} };
+  # #1747: a clause block on a nested goto's path (_goto_nested_fire) --
+  # with the entry flag F set, every earlier test is skipped and this
+  # clause's test is taken: `(p-if F nil TEST)` / `(p-if F 1 TEST)`.
+  if (my $br = $self->{_goto_disp} && $self->{_goto_disp}{branch}) {
+    my ($t) = grep { $br->{ refaddr $clauses[$_]{block} } } 0 .. $#clauses;
+    if (defined $t) {
+      my $F = $br->{ refaddr $clauses[$t]{block} };
+      $clauses[$_]{steer} = [$F, $_ == $t ? '1' : 'nil'] for 0 .. $t;
     }
-    # A missing/odd shape DIES naming itself rather than lowering half a
-    # construct: perl requires the catch block, and a `try` whose catch we
-    # cannot see would silently swallow every exception.
-    die "Parser2 TODO: try without a catch (VAR) BLOCK\n"
-      unless $has_catch && @blocks == 2 && $clist;
-    my @vs = @{ $clist->find('PPI::Token::Symbol') || [] };
-    die "Parser2 TODO: catch variable is not a single scalar\n"
-      unless @vs == 1 && $vs[0]->content =~ /^\$\w+\z/;
-    my $name   = $vs[0]->content;
-    my $cl_var = Pl::ExprToCL::qualified_var_to_cl($name, $self->environment);
-    # Both blocks are VALUE positions (`do { try {…} catch ($e) {…} }` yields
-    # the executed one's last value), so both inherit $tail_ctx.  The finally
-    # block never yields a value — perl discards it.
-    my @try = $self->_lower_scope([$blocks[0]->schildren], $vi, $tail_ctx);
-    # The catch variable is scoped to the catch block only — register, lower,
-    # restore, as the foreach loop variable does.
-    my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
-    my %saved_lex = %{ $self->{_live_lex} // {} };
-    $self->_reg_lex($name);
-    my @catch = $self->_lower_scope([$blocks[1]->schildren], $vi, $tail_ctx);
+  }
+  my $steer = sub {
+    my ($c, $test) = @_;
+    return $c->{steer} ? ['p-if', @{ $c->{steer} }, $test] : $test;
+  };
+  # A `my` declared in any condition head scopes to the whole construct —
+  # register the names as let-bound around cond+body lowering, then wrap the
+  # result in a fresh boxed let (lexical shadow of any outer same-named var).
+  my @cond_mys = $self->_cond_my_names(map { $_->{cond} } @clauses);
+  my (%sv_live, %sv_lb);
+  if (@cond_mys) {
+    %sv_live = %{ $self->{_live_lex} // {} };
+    %sv_lb   = %{ $self->{_let_bound_vars} // {} };
+    $self->_reg_lex(@cond_mys);
+  }
+  my $result;
+  # A bare if/unless (no else) whose value is the enclosing sub's return
+  # ($tail_ctx defined) returns, in Perl, the CONDITION value when false
+  # (`sub f { if(0){5} }` → 0) and the body value when true.  Replicate v1's
+  # `--pcl-if-ret--` ret-var transform natively: each cond is captured into
+  # RET *and* used as the test (so a false chain leaves RET = the last cond),
+  # each taken branch overwrites RET with its body value, and the whole form
+  # yields RET.  (An empty true branch → RET = nil = undef, matching perl; v1
+  # wrongly keeps the cond there — the documented not-supported corner.)
+  if (defined $tail_ctx && (!@clauses || $clauses[-1]{kw} ne 'else')) {
+    my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
+    my $chain = 'nil';
+    for my $c (reverse @clauses) {
+      my $test = ['setf', $ret, $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1)];
+      $test = ['p-!', $test] if $c->{kw} eq 'unless';
+      $test = $steer->($c, $test);
+      $chain = ['p-if', $test,
+                ['setf', $ret, ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)]],
+                $chain];
+    }
+    $result = ['let', ['list', ['list', $ret, 'nil']], $chain, $ret];
+  }
+  else {
+    # Build nested p-if forms from the tail (else innermost) outward.
+    # A tail if/unless is the enclosing block's VALUE — its branch blocks
+    # inherit $tail_ctx (loop/plain compounds don't propagate values).
+    my $form;
+    if (@clauses && $clauses[-1]{kw} eq 'else') {
+      my $c = pop @clauses;
+      $form = ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)];
+    }
+    while (my $c = pop @clauses) {
+      my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1);
+      $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
+      $cond = $steer->($c, $cond);
+      $form = ['p-if', $cond,
+               ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
+               (defined $form ? ($form) : ())];
+    }
+    $result = $form;
+  }
+  if (@cond_mys) {
+    $self->{_live_lex} = \%sv_live;
+    $self->{_let_bound_vars} = \%sv_lb;
+    $result = $self->_wrap_cond_mys(
+                $self->_fh_late_store($stmt, $result, @cond_mys), @cond_mys);
+  }
+  return $result;
+}
+
+sub _lower_while_stmt {
+  my ($self, $c, $stmt, $vi, $tail_ctx, $dyn) = @_;
+  my ($label, $kw, @k, @dyn) = ($c->{label}, $c->{kw}, @{ $c->{k} });
+  @dyn = @$dyn;
+  my $cond_s = $c->{cond};
+  # The FIRST Structure::Block is the loop body; a second (after `continue`)
+  # is the continue block, handled by _continue_keys.
+  my $block  = $c->{block};
+  # `my` in the loop condition scopes to the loop — register + wrap (as for if).
+  my @cond_mys = $self->_cond_my_names($cond_s);
+  my (%sv_live, %sv_lb);
+  if (@cond_mys) {
+    %sv_live = %{ $self->{_live_lex} // {} };
+    %sv_lb   = %{ $self->{_let_bound_vars} // {} };
+    $self->_reg_lex(@cond_mys);
+  }
+  # `while ()` is perl's infinite loop — the empty condition is constant
+  # TRUE, exactly as an empty COND section of a C-style `for` is (the arm
+  # below spells that as `['list','t']`; `p-while`'s cond is a bare form, so
+  # it is plain `t` here).  Without this the empty parts list reached
+  # _lower_expr and died "Parser2: empty expression", taking the whole FILE
+  # with it: HTTP::Tiny's `_do_timeout` writer loop is one such statement and
+  # cost the dist 31 of its 32 test files (#1607's measurement, s481b).
+  my @cond_parts = _cond_parts($cond_s);
+  my $cond = @cond_parts ? $self->_lower_expr(\@cond_parts, $stmt, undef, 1) : 't';
+  # Perl loop conditions whose value comes from each/readline/readdir/glob
+  # terminate on *undef*, not false-but-defined ("0" line, each's index 0),
+  # and a bare `<FH>` implicitly assigns to $_ — v1's _auto_defined_cond,
+  # applied at the raw seam (native conds can't contain these calls).
+  # v1 skips the rewrite for `until`, matching perl.
+  $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
+  $cond = ['p-!', $cond] if $kw eq 'until';
+  # #3374: a condition `my` a closure in the loop captures is a FRESH
+  # variable each iteration in perl -- each test starts a new box, and the
+  # body rebinds the name to it, so a closure keeps its own iteration's.
+  my @fresh = $self->_cond_mys_closure_captured(\@cond_mys, \@k);
+  $cond = ['progn', (map { ['setf', cl_sym($_), ['make-p-box', 'nil']] } @fresh), $cond]
+    if @fresh;
+  my @body = $self->_lower_scope([$block->schildren], $vi);
+  @body = (_decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], @body))
+    if @fresh;
+  my @cont = $self->_continue_keys(\@k, $vi);
+  $cont[1] = _decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], $cont[1])
+    if @fresh && @cont;
+  my $result = ['p-while', $cond, _label_keys($label), @dyn,
+                @body,
+                @cont];
+  if (@cond_mys) {
+    $self->{_live_lex} = \%sv_live;
+    $self->{_let_bound_vars} = \%sv_lb;
+    $result = $self->_wrap_cond_mys(
+                $self->_fh_late_store($stmt, $result, @cond_mys), @cond_mys);
+  }
+  return $result;
+}
+
+sub _lower_cfor_stmt {
+  my ($self, $c, $stmt, $vi, $tail_ctx, $dyn) = @_;
+  my ($label, @dyn) = ($c->{label}, @$dyn);
+  # C-style for (INIT; COND; STEP) BLOCK.  Sections are POSITIONAL: an
+  # empty one is a PPI::Statement::Null (`;`) placeholder, and trailing
+  # empties are simply absent.  Empty init/step → no form; empty cond →
+  # constant true (v1's _process_c_style_for defaults).
+  my $block = $c->{block};
+  # p-for IGNORES :continue and C-style-for + continue is invalid Perl anyway
+  # — gate defensively (never legitimately reached).
+  die "Parser2 TODO: C-style for with continue block\n"
+    if $c->{has_continue};
+  die "Parser2 TODO: for(;;) with extra sections" if $c->{nsections} > 3;
+  my ($init_s, $cond_s, $step_s) = @$c{qw(init cond step)};
+
+  # The whole C-for HEAD is one lexical scope, and every `my` in it scopes to
+  # the loop — exactly like `while (my $x = …)`.  Save the lexical registries
+  # before ANY of it registers and restore at every exit: a leak puts the
+  # (unbound-after-the-let) name into a later sibling's string-eval capture
+  # alist (bop.t %res section abort).
+  my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
+  my %saved_lex = %{ $self->{_live_lex} // {} };
+
+  # Multiple `my` decls in the init (`for (my $i = 0, my $j = 10; …)`) are the
+  # comma operator: `(my $i = 0), (my $j = 10)`.  _single_scalar_decl would
+  # misparse the whole comma-list as $i's RHS, so bind ALL declared counters in
+  # a boxed let and lower the init as one expression (a progn of assignments,
+  # matching v1) — no unboxing carve-out for the multi-counter case.
+  my @init_mys = $init_s ? $self->_cond_my_names($init_s) : ();
+  if (@init_mys >= 2) {
+    my @head_mys = $self->_cond_my_names($cond_s, $step_s);
+    $self->_reg_lex(@head_mys, @init_mys);
+    my $initform = ['list', $self->_lower_expr([_strip_semi($init_s->schildren)], $stmt)];
+    my $cond = $cond_s
+      ? ['list', $self->_auto_defined_raw(
+                   $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt, undef, 1))]
+      : ['list', 't'];
+    my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
+    my @body = $self->_lower_scope([$block->schildren], $vi);
+    my $form = _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @init_mys],
+                ['p-for', $initform, $cond, $step, _label_keys($label), @dyn, @body]);
     $self->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
-    my @fin = defined $fin_block
-      ? $self->_lower_scope([$fin_block->schildren], $vi) : ();
-    return ['p-try', ['progn', @try], ['list', $cl_var, ['progn', @catch]],
-            (@fin ? (['progn', @fin]) : ())];
+    return $self->_wrap_cond_mys($form, @head_mys);
   }
 
-  $self->_stmt_took($stmt, compound => 'other') if $STMT_CHECK;
-  die "Parser2 TODO: compound '$kw'";
+  # A `my $i = INIT` init binds the counter in a let AROUND the p-for —
+  # register the name BEFORE lowering cond/step/body so fallback expressions
+  # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
+  # else boxed (a `$i++` step keeps VarAnnotator conservative).
+  # The counter is scoped to the loop (head + body), like the foreach branch
+  # below — see the registry save above.
+  my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
+
+  # #297: every OTHER `my` in the head — one in the CONDITION or the STEP, and
+  # an init `_single_scalar_decl` declined (`my ($x) = …`, `my @a = …`) — gets
+  # ONE fresh boxed/container let around the whole construct (_wrap_cond_mys),
+  # exactly as a `while`/`if` condition-my does; the section itself lowers to
+  # the per-iteration assignment into it.  Without the let the declaration was
+  # a bare write into the package cell, so the name stayed defined (and shared
+  # with the global) after the loop.  $name is excluded: its own let is below,
+  # and it may take a raw/unboxed slot a `(make-p-box nil)` wrap would defeat.
+  my @head_mys = grep { !defined $name || $_ ne $name }
+                 $self->_cond_my_names($cond_s, $step_s, $init_s);
+  $self->_reg_lex(@head_mys) if @head_mys;
+  $self->_reg_lex($name) if $name;
+  # #138: a SINGLE `my` with a comma tail (`for (my $i = 0, $j = 9; …)`) —
+  # the tail is not part of $i's init (perl: `(my $i = 0), ($j = 9)`), and
+  # folding it made $i start at 9, so the loop ran zero times.  The >= 2
+  # branch above already documents the shape; this is its one-`my` sibling.
+  # As in the `my` statement branch, hand the whole `$i = …` run to the
+  # expression machinery instead of re-deciding the parenless list-operator
+  # ambiguity here, and pin the counter BOXED (a comma write is not a
+  # native-root arithmetic event, so no raw-slot verdict is applicable).
+  my $lowprec_run;
+  if ($name && defined $init && defined _lowprec_idx($init, 0)) {
+    my @ik = _strip_semi($init_s->schildren);
+    $lowprec_run = [@ik[1 .. $#ik]];
+    $vi = { %$vi, $name => { unboxable => 0 } };
+  }
+
+  # (The s286b ++-step carve-out — re-analyze WITHOUT the step, emit
+  # `(setf $i (p-± $i 1))` — is gone: the A-num root-incdec regime (task
+  # #62) approves the same counters in the VarAnnotator pass itself, and
+  # its numeric-write-family gate also fixes the carve-out's latent bug:
+  # a string-seeded counter (`my $i = "aa"; …; $i++`) now stays boxed so
+  # perl's MAGICAL string increment still runs — the carve-out numified
+  # it, hanging `for (my $i = "aa"; $i ne "ad"; $i++)`.)
+  #
+  # RENAMED counters (an `$x__file__N` promotion, say) are
+  # invisible to the block-level $vi (keyed by ORIGINAL names), so re-run
+  # the annotator over just this loop's statements — init/cond/STEP/body,
+  # step INCLUDED (A-num classifies it; the old carve-out had to exclude
+  # it) — and adopt an approving verdict.  The loop var is loop-scoped
+  # (let around p-for), so the loop region is the whole visibility span.
+  if ($name && !$lowprec_run && !($vi->{$name} && $vi->{$name}{unboxable})) {
+    my $vi2 = Pl::VarAnnotator->analyze(
+      [(grep { defined } $init_s, $cond_s, $step_s), $block->schildren],
+      undef, $self->_cur_sub_info, $self);
+    if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
+      # adopt the WHOLE entry: a B-verdict (coerce => num/str) must keep
+      # its strict-wrap marker or the writes would store unfrozen values
+      $vi = { %$vi, $name => $vi2->{$name} };
+    }
+  }
+  my $cond = $cond_s
+    ? ['list', $self->_auto_defined_raw(
+                 $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt, undef, 1))]
+    : ['list', 't'];
+  my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
+  my @body = $self->_lower_scope([$block->schildren], $vi);
+
+  my $form;
+  if ($name) {
+    my $initval = defined $init && !$lowprec_run
+      ? $self->_lower_expr($init, $stmt) : '(p-undef)';
+    if ($lowprec_run) {
+      $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
+               ['p-for', ['list', $self->_lower_expr($lowprec_run, $stmt, ':void')],
+                $cond, $step, _label_keys($label), @dyn, @body]);
+    } elsif ($vi->{$name} && $vi->{$name}{unboxable}) {
+      # a B-verdict/str-buffer counter must freeze/bufferize its init too
+      $form = _decl_let([_decl_entry($name, _slot_class($vi->{$name}),
+                                     _wrap_freeze($vi->{$name}, $name, $initval), $vi)],
+               ['p-for', ['list'], $cond, $step, _label_keys($label), @dyn, @body]);
+    } else {
+      $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
+               ['p-for', ['list', ['p-my-=', cl_sym($name), $initval]], $cond, $step,
+                _label_keys($label), @dyn, @body]);
+    }
+  } else {
+    $form = ['p-for',
+             ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
+             $cond, $step, _label_keys($label), @dyn, @body];
+  }
+  $self->{_let_bound_vars} = \%saved_lb;
+  $self->{_live_lex} = \%saved_lex;
+  return $self->_wrap_cond_mys($form, @head_mys);
+}
+
+sub _lower_foreach_stmt {
+  my ($self, $c, $stmt, $vi, $tail_ctx, $dyn) = @_;
+  my ($label, @k, @dyn) = ($c->{label}, @{ $c->{k} });
+  @dyn = @$dyn;
+  # A DEREFERENCE as the loop variable (`for $$f (LIST)`, `for ${*$f}
+  # (LIST)`, docs/ppi-upstream-bugs.md §6 §29) aliases whatever the
+  # reference names; it has no lowering yet (task #1580).  PCL's PPI now
+  # lexes it, so it reaches here.  Taking the first Block for the body
+  # (it is the dereference's) or the Symbol for the variable would be a
+  # silent wrong, and a transpile-time die would cost the whole file, so
+  # the STATEMENT is dropped the s433 way: announced, and a perl-shaped
+  # run-time die at the site (Pl::Parser::_dropped_statement_cl).
+  if ($c->{cast}) {
+    my $why = "foreach whose loop variable is a dereference (#1580)";
+    my $fb  = $self->fallback_parser;
+    # The compound can be lowered twice (a speculative lowering first);
+    # the announcement names the statement once.
+    $fb->_announce_dropped_statement([$stmt], $stmt, $why)
+      if !$self->{_drop_announced}{ Scalar::Util::refaddr($stmt) }++;
+    return Pl::CLForm::raw($fb->_dropped_statement_cl([$stmt], $stmt, $why));
+  }
+  my ($list, $block, $var) = @$c{qw(list block var)};
+  die "Parser2 TODO: foreach without list" unless $list && $block;
+  my $name = $c->{name};
+  # `foreach MY $x` declares a fresh lexical, so the loop must bind one — no
+  # matter what a package variable of the same name is doing.  The loop macro
+  # cannot see the declaration (the name is not bound in its macroexpansion
+  # environment yet), so say it: `:my t` overrides %p-cell-loop-var-p, which
+  # would otherwise localize the global's cell and leak the loop value into
+  # every sub the body calls (#294).  `foreach our $x` / `foreach $x` carry no
+  # key — there the macro's environment reading IS the right answer.
+  my $loop_my = $c->{loop_my};
+  # `for $Pkg::x (...)`: the BINDING must be the CL-ordered global
+  # (Pkg::$x) — the raw perl order is unreadable ($MAIN package error) —
+  # while $name stays the perl name for $vi/_reg_lex bookkeeping.
+  my $cl_name = Pl::ExprToCL::qualified_var_to_cl($name, $self->environment);
+  # The LIST is evaluated in the OUTER scope (the loop var is not yet bound).
+  my @list_parts = @{ $c->{list_parts} };
+  # A single aliasable lvalue ELEMENT (`for ($a[i])`, `for ($h{k})`) must bind
+  # the loop var to a box that WRITES THROUGH to the live container.
+  # _foreach_alias_rewrite gives (FROM-HEAD, TO-HEAD), AST-guarded on the
+  # sole-element shape; swap the lowered element's call head to its box-
+  # returning form (v1's mechanism, docs/foreach-aliasing.md).  The container
+  # (%h/@a) is already a box, so no extra VarAnnotator work is needed.
+  #
+  # The MAGIC-lvalue shape (`for (substr($s,..))` / pos / vec) additionally
+  # needs the scalar arg force-boxed and is used only by substr.t — which also
+  # over-taxes the compiler's default heap through the per-statement void-wrap
+  # (a v2-wide issue, CLAUDE.md #8 / s285).  Keep it gated to v1 until both are
+  # addressed (E2 void-wrap hoist).
+  my @alias_hd = Pl::Parser::_foreach_alias_rewrite(\@list_parts);
+  # A list that is EXACTLY one range (`for $v (A..B)`) lowers to the
+  # counting-loop macro p-foreach-range: endpoints evaluated once, numeric
+  # ranges never materialize the vector (perl's own foreach-range
+  # optimization; docs/bench-exec-investigation.md).  Detection is AST-level
+  # (_foreach_range_split over the top-level PPI tokens) and must run
+  # BEFORE whole-list lowering — PExpr's cleanup mutates the shared tokens
+  # destructively, so each token list is lowered exactly once.  The
+  # numeric-vs-magical-string decision happens at RUNTIME inside the macro
+  # (%p-range-classify), so 'a'..'e' takes the same route and falls back
+  # internally.  Shapes the guard rejects (`reverse 1..9`, `1..3, 7`,
+  # `1..$x ? 3 : 5`) and endpoints the native lowerer can't do (eval-guard)
+  # keep the p-foreach path — a skip is a missed optimization, never a
+  # miscompile.  (Postfix `EXPR for A..B` is a different lowering site,
+  # not covered here.)
+  my ($from_form, $to_form, $range_raw, $topic_fact);
+  # Kind-A gate (Pl::Passes, PCL_OPT): off, the range materializes through
+  # the general p-foreach path — a skip is a missed optimization, never a
+  # miscompile (the same contract as the guard-rejected shapes above).
+  # THE FACT (the list IS a bare range) is computed before the switch, so
+  # `--facts` prints the licence on the general p-foreach form with the
+  # emission off (task #1213).  The SPLIT is a pure shape test over the
+  # untouched tokens; only the lowering below is destructive, and that stays
+  # behind the gate.
+  my @range = @alias_hd ? () : _foreach_range_split(\@list_parts);
+  my $range_fact = @range ? 1 : 0;
+  @range = () unless Pl::Passes::enabled('foreach-range');
+  if (@range) {
+    ($from_form, $to_form) = eval {
+      ($self->_lower_expr($range[0], $stmt), $self->_lower_expr($range[1], $stmt));
+    };
+    # RAW loop var (no per-iteration box) when the segment VarAnnotator
+    # proved the name unboxable — the same name-keyed verdict every other
+    # raw-slot decision consults ($vi is conservative: a capture/\$i/local
+    # of the name ANYWHERE in the segment vetoes it).  Never for $_: the
+    # global must stay a box (s///, chomp write through it).
+    $range_raw = 1
+      if defined $to_form && $var && $vi->{$name} && $vi->{$name}{unboxable};
+    # #761 (Kind-A `raw-topic`): the TOPIC loop `for (A..B) {…}` has no
+    # declaration, so it never had a $vi verdict to consult and always took
+    # the boxed arm — a fresh `make-p-box` per iteration.  MEASURED (the §9
+    # variant recipe, 5M iterations against the runtime core): the box
+    # ALLOCATION is essentially the whole tax — special-bind + fresh box
+    # 0.168 s, special-bind + RAW value 0.016 s, plain lexical + raw
+    # 0.015 s.  So `$_` keeps its NAME and its dynamic binding (a callee
+    # that reaches the global still sees the current element) and only the
+    # VALUE goes raw; no rename, no new macro — %expand-foreach-range's raw
+    # arm already applies, because `%p-cell-loop-var-p` answers NIL for the
+    # exception-set specials.  Reading a raw value is always safe (every
+    # p-op coerces), so the gate only has to prove nothing WRITES THROUGH
+    # the box, aliases it, or hands it to code this compiler cannot see.
+    $topic_fact = (defined $to_form && !$var && _topic_raw_ok($block)) ? 1 : 0;
+    $range_raw = 1 if $topic_fact && Pl::Passes::enabled('raw-topic');
+  }
+  my $list_form;
+  unless (defined $to_form) {
+    # A list whose every DEPTH-0 element is a single SCALAR operand has a
+    # statically known length, so it must not go through the run-time
+    # flattener: at runtime a box wrapping a vector is indistinguishable
+    # from an @array box, so %p-flatten-for-list spread the referent
+    # (`for ($r)` ran once per element of @$r).  The sigil is compile-time
+    # knowledge — emit the `(vector …)` shape instead, which keeps each
+    # box as one element (so `for ($x) { $_ = 1 }` writes through).  Same
+    # rule at k=1 and k>1; resolver + rationale:
+    # Pl::Parser::_foreach_scalar_elements.
+    my @el = Pl::Parser::_foreach_scalar_elements(\@list_parts);
+    if (@el > 1) {
+      # Each element's token run is lowered EXACTLY ONCE and the whole
+      # list never is — PExpr's cleanup mutates the shared tokens
+      # destructively (same discipline as the range split above).  The
+      # alias VERDICTS are therefore taken over the untouched tokens,
+      # BEFORE any lowering runs; the head swap then maps onto the lowered
+      # elements BY POSITION.  This is the sole-element rewrite applied per
+      # element — one verdict function, one head-swapper, k of them.
+      my @hd = map { [ Pl::Parser::_foreach_alias_rewrite($_) ] } @el;
+      my @forms;
+      for my $i (0 .. $#el) {
+        my $f = $self->_lower_expr($el[$i], $stmt, 1);
+        $f = _alias_box_form($f, @{ $hd[$i] })
+          // die "Parser2 TODO: foreach over an aliasable lvalue element\n"
+          if @{ $hd[$i] };
+        push @forms, $f;
+      }
+      $list_form = ['vector', @forms];
+    }
+    else {
+      $list_form = $self->_lower_expr(\@list_parts, $stmt, 1);
+      if (@alias_hd) {
+        $list_form = _alias_box_form($list_form, @alias_hd)
+          // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
+      }
+      $list_form = ['vector', $list_form] if @el;
+    }
+  }
+  # The loop variable is scoped to the BODY only: register it, lower the
+  # body (and a continue block, which sees the loop var), then restore
+  # _let_bound_vars/_live_lex so it does not leak into sibling statements.
+  # Without this, a later sibling's string-eval capture alist would list the
+  # (now-unbound) loop var → unbound-variable at load (W3 regression seen in
+  # cmpchain.t).  _seg_lex keeps it (forward-decl).
+  my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
+  my %saved_lex = %{ $self->{_live_lex} // {} };
+  # The TOPIC loop binds the GLOBAL `$_` dynamically — it is not a lexical,
+  # and registering it put `(cons "$_" $_)` into every string eval's capture
+  # alist in the body, so the eval's OWN inner `for (7) { … $_ … }` read the
+  # captured outer box instead of its loop value (`for (1,2) { eval 'for (7)
+  # { print $_ }' }` printed 1 2, perl 7 7).  v1 always excluded it for the
+  # same reason (Pl::Parser's foreach: `$cl_loop_var ne '$_'`); s494p found
+  # the difference when the modifier spelling started taking this arm.
+  $self->_reg_lex($name) if $name ne '$_';
+  my @body = $self->_lower_scope([$block->schildren], $vi);
+  my @cont = $self->_continue_keys(\@k, $vi);
+  $self->{_let_bound_vars} = \%saved_lb;
+  $self->{_live_lex} = \%saved_lex;
+  my @my_keys = $loop_my ? (':my', 't') : ();
+  # #862 ARM A (Kind-A `foreach-raw`, gated inside the verdict): a `my` loop
+  # variable the annotator proved READ-ONLY needs no element identity, so
+  # p-foreach-raw binds the slot as it stands instead of promoting every
+  # element to a box (which, promotion being monotone, taxes every LATER
+  # read of that array too).  The verdict is name-keyed like every other one
+  # and already requires the my-spelling; `$loop_my` is re-asserted here
+  # because it is what makes `:my t` present, and p-foreach-raw refuses the
+  # package-cell arm.
+  my $ro = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro};
+  # The same conjuncts over the UNGATED verdict, for `--facts` (task #1213):
+  # `foreach_ro` is suppressed by PCL_OPT=-foreach-raw, `foreach_ro_fact` is
+  # not, so the licence can still be printed on the general form.
+  my $ro_fact = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro_fact};
+  # #1140: the read-only verdict is about the LOOP VARIABLE, and that is not
+  # the whole question.  `for my $x (@fa) { $fa[0] = 99; print $x }` printed
+  # 1 where perl prints 99 — the slot's VALUE was bound before another path
+  # wrote the slot.  When the list is a bare `my @a` of THIS region, the
+  # array facts answer it: `escapes` covers a write through a reference, a
+  # callee or a closure, `written_in` a direct write in this loop's own
+  # body.  The conjunct is applied HERE, not folded into `foreach_ro`,
+  # because the verdict is name-keyed and two loops can share `$x` while
+  # iterating different arrays.  An array with no entry — a package array,
+  # `@_`, a lexical declared in an enclosing region — keeps the pre-#1140
+  # verdict; that boundary is the family's, stated in VarAnnotator.
+  #
+  # THIS IS ALSO WHAT MAKES `classic-sort`'s FOREACH LICENCE EXACT.  That
+  # pass counts a `p-foreach-raw` list as a copying consumer by consulting
+  # this very verdict, so `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99 }`
+  # stops taking the value-sorting fast path for the same reason the plain
+  # loop stops taking the raw arm — hence "every array named in the list",
+  # not just a bare `@a`.
+  if ($ro || $ro_fact) {
+    for my $la (_list_array_names(\@list_parts)) {
+      my $af = $vi->{$la} or next;
+      next unless $af->{escapes} || $af->{written_in}{ refaddr $block };
+      $ro = 0;
+      $ro_fact = 0;
+      last;
+    }
+  }
+  # #1184 (Kind-A `foreach-arrays`): when the list is nothing but BARE named
+  # arrays and the loop already qualifies for the read-only arm, iterate them
+  # IN TURN instead of flattening them into a temporary first — the
+  # flattening is 88 % of the `feread2` bench row.  The licence needs no new
+  # fact: `$ro` above is exactly the two conjuncts (the loop variable is
+  # read-only, and every array named in the list neither escapes nor is
+  # written in this body), and `_foreach_bare_arrays` adds only the SHAPE
+  # test.  Emitted as `(vector @a @b)` plus `:arrays t`, so the run's sources
+  # are evaluated once at loop entry.
+  my (@arrays, $arrays_fact);
+  if ($ro_fact && !defined $to_form) {
+    my @bare = Pl::Parser::_foreach_bare_arrays(\@list_parts);
+    # Only arrays this segment DECLARED have facts; the conjunct above
+    # skipped any name with no entry, so re-assert it here rather than
+    # licensing the run on an unmeasured array.
+    @bare = () if grep { !$vi->{$_} } @bare;
+    $arrays_fact = @bare ? 1 : 0;
+    @arrays = @bare if $ro && Pl::Passes::enabled('foreach-arrays');
+  }
+  my @array_keys = @arrays ? (':arrays', 't') : ();
+  $list_form = ['vector', map { cl_sym($_) } @arrays] if @arrays;
+  # A foreach's `continue` block used to make the loop DECLINE the
+  # dynamic-exit licence (it reads the loop variable, so it lives inside the
+  # per-iteration binding, where a caught `next` cannot re-enter it) — and a
+  # dynamic exit into such a loop then died.  It now travels with the frame:
+  # the runtime moves it to a driver POST-FORM and carries the element in a
+  # temporary, so it sees the same box the body saw (%p-foreach-continue-post,
+  # task #1161).
+  my $loop = defined $to_form
+    ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
+       ['list', $cl_name, $from_form, $to_form],
+       _label_keys($label), @dyn, @my_keys, @body, @cont]
+    : [($ro ? 'p-foreach-raw' : 'p-foreach'), ['list', $cl_name, $list_form],
+       _label_keys($label), @dyn, @array_keys, @my_keys, @body, @cont];
+  # THE FOUR LOOP LICENCES, printed on whichever form was chosen (#1213).
+  # One wrap point for all four: the facts were computed above, ungated, so
+  # the same names appear under `PCL_OPT=none --facts`.
+  $loop = Pl::Passes::fact('foreach-range',  $range_fact,  $loop);
+  $loop = Pl::Passes::fact('raw-topic',      $topic_fact,  $loop);
+  $loop = Pl::Passes::fact('foreach-arrays', $arrays_fact, $loop);
+  $loop = Pl::Passes::fact('foreach-raw',    $ro_fact,     $loop);
+  return $loop;
+}
+
+sub _lower_try_stmt {
+  my ($self, $c, $stmt, $vi, $tail_ctx) = @_;
+  my @blocks = @{ $c->{blocks} };
+  my ($clist, $has_catch, $fin_block) = @$c{qw(clist has_catch fin_block)};
+  # A missing/odd shape DIES naming itself rather than lowering half a
+  # construct: perl requires the catch block, and a `try` whose catch we
+  # cannot see would silently swallow every exception.
+  die "Parser2 TODO: try without a catch (VAR) BLOCK\n"
+    unless $has_catch && @blocks == 2 && $clist;
+  die "Parser2 TODO: catch variable is not a single scalar\n"
+    unless defined $c->{catch_var};
+  my $name   = $c->{catch_var};
+  my $cl_var = Pl::ExprToCL::qualified_var_to_cl($name, $self->environment);
+  # Both blocks are VALUE positions (`do { try {…} catch ($e) {…} }` yields
+  # the executed one's last value), so both inherit $tail_ctx.  The finally
+  # block never yields a value — perl discards it.
+  my @try = $self->_lower_scope([$blocks[0]->schildren], $vi, $tail_ctx);
+  # The catch variable is scoped to the catch block only — register, lower,
+  # restore, as the foreach loop variable does.
+  my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
+  my %saved_lex = %{ $self->{_live_lex} // {} };
+  $self->_reg_lex($name);
+  my @catch = $self->_lower_scope([$blocks[1]->schildren], $vi, $tail_ctx);
+  $self->{_let_bound_vars} = \%saved_lb;
+  $self->{_live_lex} = \%saved_lex;
+  my @fin = defined $fin_block
+    ? $self->_lower_scope([$fin_block->schildren], $vi) : ();
+  return ['p-try', ['progn', @try], ['list', $cl_var, ['progn', @catch]],
+          (@fin ? (['progn', @fin]) : ())];
 }
 
 # Sole-range foreach-list detection lives in Pl::VarAnnotator
