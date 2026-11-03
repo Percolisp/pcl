@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s532e
-branch-sha: 800aedcb4d2de8f0e5882c28f8162595cc32cf7f
-lib-tree: a76256559e1edfbb38d938f7c3d4d36f83e4a217
+branch-sha: 86623347061a8e99211e7a6cdaee014f2ad72b97
+lib-tree: aa9dc74f42e244e0b2a5f0a7becafbe5ee6312ce
 date: 2026-11-03
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -70,6 +70,7 @@ fix: AT §61 a800b8cd Tokenizer: a quote-like word naming a braced element is a 
 fix: AU §40 1ff6ccd8 Tokenizer, Lexer: a format body is one token, and the statement ends with it
 fix: AU §40 87166cf8 Tokenizer, Unknown, Whitespace: after a format body a statement starts
 fix: AU §40 800aedcb Format: a format's argument block may hold a nested format
+fix: AU §40 86623347 Whitespace, Unknown: a sub declared after a format body keeps its prototype
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -187,3 +188,5 @@ commit: f19956ec TODO tests: after a format body a statement starts
 commit: 87166cf8 Tokenizer, Unknown, Whitespace: after a format body a statement starts
 commit: 10d805e3 TODO tests: a format's argument block may hold a nested format
 commit: 800aedcb Format: a format's argument block may hold a nested format
+commit: a9b7a1ac TODO tests: a sub declared after a format body keeps its prototype
+commit: 86623347 Whitespace, Unknown: a sub declared after a format body keeps its prototype

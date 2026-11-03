@@ -55,7 +55,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 10;
+plan tests => 11;
 
 # A format block must not eat the statement that follows it.
 my $with_format = <<'END';
@@ -105,3 +105,6 @@ is run_cl(qq{\$_ = "x";\nformat A =\nab\n.\n/x/ and print "m\\n";\nformat B =\nc
 is run_cl(qq{format NEST =\n\@<<<\n{\n    my \$birds = "birds";\n    format BIRDS =\n\@<<<<<\n\$birds;\n.\n    "nest"\n}\n.\nprint "after ", __LINE__, "\\n";\n}),
     "after 12\n",
     'a format nested in an argument block: the outer format ends at its own . (t/op/write.t "nested formats")';
+is run_cl(qq{format A =\nx\n.\nsub hf (\$) { "p\$_[0]" }\nmy \@r = (hf 1, 2); print "\@r\\n";\n}),
+    "p1 2\n",
+    'a sub declared right after a format keeps its prototype (t/op/write.t sub has_format ($))';
