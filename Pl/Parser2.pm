@@ -14634,6 +14634,7 @@ sub local_stmt_text_for_v1 {
   my $rec = Pl::Stmt::classify($stmt);
   local $self->{_lower_expr_plain} = 1;
   my $plan = ($rec->{kind} eq 'local') ? $self->_local_plan($stmt, $rec) : undef;
+  $self->{_seam_local}{"v1-bridge:$rec->{lk}"}++ if _seam_census();
   die "PCL internal: no structured lowering for this `local` statement in a v1-compiled block: "
     . $stmt->content . "\n" unless $plan;
   my @lines = map { my $t = Pl::CLForm::to_flat($_); $t =~ s/\)\z// or die
