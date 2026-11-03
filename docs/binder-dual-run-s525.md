@@ -146,6 +146,17 @@ mentions.  Information 1c needs: "this CV contains a string eval" as a fact
 on the CV, which turns every visible outer lexical into a potential capture
 (perl's own rule: an eval sees what its CV can see at run time, closure.t:548's
 point is exactly that an anon sub has only what it captured).
+**RESOLVED (s533d, 1c port 2).**  The binder records every string eval
+(`eval EXPR`, `CORE::eval EXPR`, `s///ee`) with its CV (`has_string_eval($cv)`)
+and reads, on demand, the names a literal text mentions (`text_refs`: a quote's
+raw body, a heredoc, qw -- through `Pl::Parser::fragment_doc`, no new
+scanner).  `captures_name(..., eval => 1)` counts such a text use of a lexical
+L exactly when a string eval runs inside L's visible range (`eval_sees`):
+that eval can see L and the text can reach it (an argument, a return value, a
+variable -- the text in one sub, the eval in another).  Keyed on the CV alone
+(the first D0 cut) the text-in-one-sub / eval-in-another shape would have
+lost its cell; keyed on L's range it keeps it.  With the rule the 9 sites
+AGREE (the D0 re-run, s533d scratch `d0-pop.tsv` / `d0-gate.tsv`).
 
 ## 5. The cost
 

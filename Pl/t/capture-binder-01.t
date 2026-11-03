@@ -20,8 +20,9 @@
 # the STRING-EVAL fact: a literal text naming a lexical that some string eval
 # can see counts as a read (`eval '$x'`, `my $c = '$q'; eval $c`, the text in
 # one sub and the eval in another).  Rows 1 and 3-5 FAIL on the base 0f2db817
-# (inverse-verified: the unneeded cell, or the refusal); row 2 passes there
-# too (#3802 never changed a value, only the cell); rows 6-10 are the
+# (inverse-verified: the unneeded cell, or the refusal), and so does row 5b
+# (#4462, the empty interpolation); row 2 passes there too (#3802 never
+# changed a value, only the cell); rows 6-10 are the
 # string-eval shapes the old text scan got right and the binder must keep;
 # row 11 is the promoter's eval-pair test, which must keep the base's answer
 # too; row 12 is rule 12.  Every expected text is perl 5.40.3's own output.
@@ -43,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 12;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -108,6 +109,20 @@ sub g { print "g:", (defined $x ? $x : 'u'), "\n" }
 print "pre=$x\n";
 my $x = 5; g();
 print "x=$x\n";
+PL
+
+# ── 5b. #4462: a file lexical interpolated in a sub's REGEX as `${x}[...]` /
+#    `$x[...]` where perl reads the SCALAR and a character class (toke.c
+#    intuit_more, Pl::InterpScan) IS a capture.  The old scan's own text
+#    pattern took it for an element of @x, the cell was not promoted and the
+#    interpolation was EMPTY (core Pod::Simple::RTF, File::Spec::Win32).
+is(run_cl(<<'PL'), "see <foo\@bar> and x\n20\n", '#4462: a file lexical as `${x}[...]` / `$x[...]` in a sub\'s regex is captured');
+my $id_re = qr/[a-z]+/;
+sub m1 { my $s = shift; $s =~ s/(${id_re}[\$\@:]\S+)/<$1>/g; $s }
+print m1("see foo\@bar and x"), "\n";
+my $d = '[a-zA-Z]:';
+sub abs1 { my $f = shift; $f =~ m{^$d[\\/]} ? 2 : 0 }
+print abs1('C:\\x'), abs1('zz'), "\n";
 PL
 
 # ── 6-10. THE STRING-EVAL FACT: a lexical that a string eval can see is read

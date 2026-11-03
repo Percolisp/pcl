@@ -1462,6 +1462,20 @@ conditions exist as hard *gates* (`_check_sub_captures`,
 refused with an error naming the condition. (Pre-E4.1 these routed the
 file through v1's defvar model; that fallback no longer exists.)
 
+**What "a sub captures a lexical" means (normative, s533d, 1c port 2).**
+The capture gate, the promoter and the nested-sub hoist ask ONE question
+(`Pl::Binder::captures_name`): does a use inside the sub -- body and
+signature, positional like perl's pad -- resolve to a lexical declared
+outside it?  A `my` is visible from the statement after its own, so a sub
+written BEFORE a file `my $x` reads the global `$x` (no capture, no
+refusal), and a `my` nested in a call's argument list shadows for the rest
+of the sub.  The one conservative extension is the STRING-EVAL rule: a
+literal text (a quote, a heredoc, qw) inside the sub that names a lexical L
+counts as a use of L exactly when some string eval (`eval EXPR`, `s///ee`)
+runs inside L's visible range -- the text may reach that eval, which can
+see L.  Example: `my $w = 2; sub src { '$w + 1' } sub run { eval $_[0] }`
+promotes `$w` (src mentions it, run's eval sees it), so `run(src())` is 3.
+
 ## 3. Coercion — the heart of Perl semantics
 
 Every op coerces its operands itself. The three canonical functions:
