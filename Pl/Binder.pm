@@ -347,12 +347,17 @@ sub _token {
 # can see (pp_entereval: the eval's CvOUTSIDE is the running CV), so a name
 # that occurs only inside TEXT -- `eval '$x'`, `my $c = '$x'; eval $c` --
 # can read a visible outer lexical that the compile-time pad never records.
-# The binder records the fact per CV (`eval EXPR` / `CORE::eval EXPR` /
-# `s///ee`; never `eval BLOCK`, a method `->eval` or a key `eval =>`) and
-# reads, on demand, the names every literal TEXT inside such a CV mentions
-# (see text_refs); captures_name(..., eval => 1) counts those as uses.  This
-# is the conservative eval rule of ir-spec §2b, read through the fragment
-# path (Pl::Parser::fragment_doc -- no new scanner).
+# The binder records every string eval with its CV (`eval EXPR` /
+# `CORE::eval EXPR` / `s///ee`; never `eval BLOCK`, a method `->eval` or a
+# key `eval =>`): has_string_eval($cv) is the CV fact.  A literal TEXT
+# (text_refs: a quote, a heredoc, qw) that names a lexical L counts as a use
+# of L exactly when a string eval runs INSIDE L's visible range
+# (eval_sees): that eval can see L, and the text can reach it -- passed as an
+# argument, returned, stored (`my $c = '$x'; eval $c`; text in one sub,
+# the eval in another).  No string eval in L's range: no text can read L.
+# captures_name(..., eval => 1) applies it.  This is the conservative eval
+# rule of ir-spec §2b, read through the fragment path
+# (Pl::Parser::fragment_doc -- no new scanner).
 sub _is_string_eval {
   my ($w) = @_;
   my $pv = $w->sprevious_sibling;
@@ -366,24 +371,21 @@ sub _is_string_eval {
 sub _note_string_eval {
   my ($self, $t, $cv) = @_;
   push @{ $self->{evals} }, $self->{ord}{ refaddr $t };
+  $self->{cv_eval}{ refaddr $cv }++ if $cv;
   $self->{stats}{string_eval}++;
 }
 
-# Does a string eval run inside $node's range?  For a block that is not a
-# CV body (a `do { }`, a map block), the CV it runs in counts too: its pad
-# is the one an eval anywhere in that CV sees.
+# THE CV FACT: does a string eval run in $cv's own body (a sub body block, an
+# anonymous sub's block, or the document; nested CVs are their own)?
 sub has_string_eval {
-  my ($self, $node) = @_;
-  my @ev = @{ $self->{evals} || [] } or return 0;
-  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
-  return 0 unless defined $a && defined $z;
-  return 1 if grep { $_ >= $a && $_ <= $z } @ev;
-  return 0 if $node->isa('PPI::Statement::Sub') || ($node->isa('PPI::Structure::Block') && _is_cv_block($node));
-  for (my $p = $node->parent; $p; $p = $p->parent) {
-    next unless $p->isa('PPI::Document') || ($p->isa('PPI::Structure::Block') && _is_cv_block($p));
-    my ($ca, $cz) = ($self->_first_ord($p), $self->_last_ord($p));
-    return (defined $ca && grep { $_ >= $ca && $_ <= $cz } @ev) ? 1 : 0;
-  }
+  my ($self, $cv) = @_;
+  return $self->{cv_eval}{ refaddr $cv } ? 1 : 0;
+}
+
+# Can a string eval see binding $b -- does one run inside its visible range?
+sub eval_sees {
+  my ($self, $b) = @_;
+  for my $e (@{ $self->{evals} || [] }) { return 1 if $e >= $b->{from} && $e <= $b->{to} }
   return 0;
 }
 
@@ -1108,9 +1110,9 @@ sub _q_block_captures {
 # Statement::Sub -- its signature included -- or any block) read the bare
 # name $bare (restricted to the canons in $canons when given) through a
 # lexical declared OUTSIDE $node?  pad_findlex's OUTER entries, asked about
-# the CURRENT names (a rename pass may have run).  eval => 1: a node that
-# runs a string eval (has_string_eval) also counts the names its literal
-# texts mention (text_refs) -- the string-eval CV fact.  Returns
+# the CURRENT names (a rename pass may have run).  eval => 1: the names the
+# node's literal texts mention (text_refs) count too, for a lexical some
+# string eval can see (eval_sees) -- the string-eval rule.  Returns
 # (VERDICT, KIND, NOTE).
 sub captures_name {
   my ($self, $block, $bare, $canons, %opt) = @_;
@@ -1119,7 +1121,7 @@ sub captures_name {
   my (@why, %done);
   my @toks = grep { !$done{ refaddr $_ }++ } map { $_->{tok} } $self->_refs_in($a, $z);
   my $ntok = @toks;
-  push @toks, $self->_text_toks($a, $z) if $opt{eval} && $self->has_string_eval($block);
+  push @toks, $self->_text_toks($a, $z) if $opt{eval} && @{ $self->{evals} || [] };
   for my $i (0 .. $#toks) {
     next if $i >= $ntok && index(_tok_sig($toks[$i]), $bare) < 0;       # the text never spells it
     my $refs = $i < $ntok ? $self->_cur_refs($toks[$i]) : $self->text_refs($toks[$i]);
@@ -1129,7 +1131,8 @@ sub captures_name {
       next unless substr($c, 1) eq $bare;
       next if $canons && !$canons->{$c};
       my $b = $self->_resolve_cur($r->{ord}, $c, $r->{pkg});
-      my $outer = _is_lexical($b) && !($b->{decl_ord} >= $a && $b->{decl_ord} <= $z);
+      my $outer = _is_lexical($b) && !($b->{decl_ord} >= $a && $b->{decl_ord} <= $z)
+                && ($i < $ntok || $self->eval_sees($b));
       return (1, $b->{kind}, sprintf('%s@%s:%s %s', $c, _line($r->{tok}), $r->{via}, _rec_str($b)))
         if $outer;
       push @why, sprintf('%s@%s:%s=%s', $c, _line($r->{tok}), $r->{via}, $b->{kind});
