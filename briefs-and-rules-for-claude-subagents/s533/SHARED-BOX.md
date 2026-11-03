@@ -17,3 +17,10 @@ RULES FOR THIS ROUND (s530-s532's stand; added):
 13. **Merge order**: whichever is MERGE-READY first; the later ones renumber their generation ABOVE main's and regenerate the artifacts; s533a (identical emission) re-proves IDENTICAL against the NEW main's code sha after its rebase (a sibling's emission change is not its diff).
 
 MERGE (the reviewing session): as `s532/SHARED-BOX.md` says; s532e additionally `prove tools/t/install-pcl.t` + `prove tools/t/install-container.t`, bare repo `pcl` = `vendor/PPI/UPSTREAM`.  Running notes: `s533/PAUSE-s533.md`.
+
+## ADDENDUM 00:3x (2026-11-04): s533c + s533d replace the merged s533a / s533b in the three slots
+Main = **`63282ccb`** = MAIN-READY-68 (s533b merged as -67 `7a4cbf67`: the binder in PRODUCTION, the requalifier on it; s533a merged as -68 `3730f293`: `Pl/Stmt.pm`, the lowering dispatches on `kind`).  Main's CODE sha = **`0f2db817`**; generation **v2-10900**.  Still running: **s532e** (renumbers to v2-11000 at its rebase).
+* **s533c** -- C2 kind 1: `local` leaves the v1 text seam (`s533/s533c-prompt.md`; + #4185, MOVED here from `s532b`).  IDs **4441-4459**, generation **v2-11100**.  REGION: the `local` arm (`_blk_local`, `_lower_local`, `_fallback_stmt_capture` for `local` only), `Pl/Stmt.pm`'s `local` record, v1's `_process_local_declaration` + its helpers in `Pl/Parser.pm`, any new `p-local*` runtime form.
+* **s533d** -- 1c port 2: the capture gate + the promoter on the binder, with the string-eval CV fact (`s533/s533d-prompt.md`; #3802 #3806).  IDs **4461-4479**, generation **v2-11200**.  REGION: `Pl/Binder.pm`, Parser2's `_check_sub_captures`, `_captured_in_subs`, `_sub_captures_name`, `_block_captures_name*`, `_promote_captured`, `_hoist_nested_sub`, `_enclosing_lex_decl`.
+* `s532b`'s member #4185 now belongs to s533c; s532b keeps the rest.
+* Merge order as rule 13 (whichever is first; the later ones renumber ABOVE main's).
