@@ -754,9 +754,9 @@ not code
    tasks => [357, 3755] },
  { id => 48, kind => 'structure', dump => 'structure',
    title => 'A LIST SLICE `(LIST)[i]` / `qw(..)[i]`: the `[` is built as an anonymous-array CONSTRUCTOR, where perl subscripts the list',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'list-slice-as-constructor', shape => 'the `[` after the `)` of a list or after a qw() built as Constructor' },
-   fix => { kind => 'handler', handler => 'Pl::PExpr::_retag_list_slice_subscripts' },
+   fix => { kind => 'handler', handler => 'Pl::PExpr::_retag_list_slice_subscripts', changed => 'PPI subscripts the list (group AR); PExpr reads the Subscript: _mark_list_slice_runs + the list-slice builder of the arrow loop; _retag_list_slice_subscripts, the qw / Constructor-after-node builders, the W4 arm of _term_extent and the Constructor arm of _is_elided_call_prev are DELETED (s532e)', commit => '4637db29', group => 'AR', pr => undef },
    repro => 'my @x = (1, 2, 3)[1]; print "@x\\n";
 ',
    perl => "2\\n",

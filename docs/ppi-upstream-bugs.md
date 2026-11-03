@@ -2558,6 +2558,8 @@ over the four populations (s527e M0), the largest single kind.
 `[` Constructor as a list slice -- `_retag_list_slice_subscripts`,
 `_is_elided_call_prev`, `$is_qw_subscript`, `_term_extent`'s W4.  Task #3740.
 
+**FIXED on PCL's PPI branch** (s532e: group AR, commit `4637db29` on branch `pcl`, vendored as vendor/PPI -- `_square` returns a Subscript when the element before the `[` is a `Structure::List`, a `Structure::Condition` or a `QuoteLike::Words`; a `{` after the slice's `]` is then a Subscript by `_curly`'s existing rule); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AR.md`).  PCL reads the Subscript: `Pl::PExpr::_mark_list_slice_runs` marks the arrow-less `[` groups after a List / Condition / qw (not after `->(...)`, the elided-arrow call) at parse() entry, and the arrow loop builds each as the list-context `a_ref_acc`.  DELETED, each instrumented to die first and never fired over the corpus, perl's t/ + core lib, lib/ and the board's 402 files: `_retag_list_slice_subscripts`, the qw-slice and Constructor-after-node builders of the arrow loop, `_term_extent`'s W4 and the Constructor arm of `_is_elided_call_prev` (and the Constructor half of the `$cr->()[i]` retag).  Emission: `EXPR if (LIST)[i]` lowers (it was a "Missing case" drop -- the Condition spelling), and a hash key after a slice (`({foo => 1})[0]{foo}`) is no longer asked the prototype table as a call (one detector-table row in perl-tests/ref.t).  Guard `Pl/t/list-slice-01.t` row 18 (FAILS on the base).
+
 ---
 
 ## 49. A GLOB SLOT `*NAME{THING}` (`*STDOUT{IO}`, `*x{HASH}`): the `{THING}` is built as a BLOCK  [CONFIRMED 1.291]

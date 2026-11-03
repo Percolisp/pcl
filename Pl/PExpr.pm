@@ -701,7 +701,7 @@ sub parse {
   # as its argument (e.g. `defined *{$g}{CODE}` in Sub::Override) instead of just
   # the Cast '*'.  Without parens, handle_subcalls would otherwise orphan the
   # trailing {EXPR}{SLOT} blocks and the parse would fall through.
-  $self->_retag_list_slice_subscripts($e);
+  $self->_mark_list_slice_runs($e);
   $self->_insert_elided_call_arrows($e);
   $self->_precollapse_dyn_glob_slots($e);
   $self->handle_subcalls($e);
@@ -1225,6 +1225,7 @@ sub parse {
     # Case 0: A noop, just syntactic sugar?
     if ($i > 0
         && $self->is_arr_or_hash_braces($e->[$i-1])
+        && !$e->[$i-1]{_pcl_list_slice}   # (LIST)[0]->{k}: see _mark_list_slice_runs
         && $self->is_arr_or_hash_braces($e->[$i+1])) {
       splice @$e, $i, 1;
       # $i--; Not needed, we know the skipped one is [] or {}.
@@ -1236,11 +1237,12 @@ sub parse {
     # Check if term is something we need to process in this loop:
     # - arrow operator (->)
     # - array/hash subscript ([] or {})
-    # - Constructor [ ] following an internal node (subscript after method call)
-    my $is_constructor_subscript = ref($term) eq 'PPI::Structure::Constructor'
-        && $term->start() eq '['
-        && $i > 0
-        && $self->is_internal_node_type($e->[$i-1]);
+    # LIST SLICE `(LIST)[i]` / `qw(a b c)[i]` and the arrow-less `[j]` groups
+    # after it: _mark_list_slice_runs marked them at parse() entry, while the
+    # list they slice was still a raw List / Condition / qw token.
+    my $is_list_slice = ref($term) eq 'PPI::Structure::Subscript'
+        && $term->{_pcl_list_slice}
+        && $i > 0;
     # KV slice: %hash{keys} - Symbol '%h' + Subscript '{keys}'
     my $is_kv_slice_block = ref($term) eq 'PPI::Structure::Subscript'
         && $term->start() eq '{'
@@ -1271,11 +1273,6 @@ sub parse {
         && $e->[$i-1]->start() eq '{'
         && ref($e->[$i-2]) eq 'PPI::Token::Cast'
         && $e->[$i-2]->content() eq '%';
-    # qw[...][idx] — subscript on a qw word list literal
-    my $is_qw_subscript = ref($term) eq 'PPI::Structure::Constructor'
-        && $term->start() eq '['
-        && $i > 0
-        && ref($e->[$i-1]) eq 'PPI::Token::QuoteLike::Words';
     # Typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Subscript
     # '{SLOT}' (PCL's PPI branch, docs/ppi-upstream-bugs.md §49: a { after a glob
     # subscripts it).  The glob slot is not a hash element: it is caught before
@@ -1300,12 +1297,11 @@ sub parse {
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
-        && !$is_constructor_subscript
         && !$is_kv_slice_block
         && !$is_kv_arr_constructor
         && !$is_kv_arr_deref_constructor
         && !$is_kv_hash_deref_block
-        && !$is_qw_subscript
+        && !$is_list_slice
         && !$is_typeglob_slot
         && !$is_dyn_typeglob_slot;
 
@@ -1368,18 +1364,19 @@ sub parse {
         my $np = $cast_s;        # the new node's position in @$e
         $i = $cast_s;
         # Implicit arrow after a call: $cr->(){k} / $cr->()[i] mean
-        # $cr->()->{k} / $cr->()->[i].  PPI cannot tell these braces are
-        # subscripts (they follow ')'), so it tags {k} as a Block and [i] as
-        # a Constructor; left alone they match no case and the parse falls
-        # through to the "Missing case" die.  Re-tag each DIRECTLY following
-        # brace as a Subscript so the X[]/X{} machinery below chains them
-        # exactly like the Subscripts in $x->[0]{k}.
+        # $cr->()->{k} / $cr->()->[i].  PPI cannot tell a {k} after the ')'
+        # is a subscript and tags it a Block; left alone it matches no case
+        # and the parse falls through to the "Missing case" die.  Re-tag each
+        # DIRECTLY following one as a Subscript so the X{} machinery below
+        # chains it exactly like the Subscripts in $x->[0]{k}.  (A [i] there
+        # is a Subscript already: PCL's PPI subscripts after any ')', §48.)
         for (my $j = $np + 1; $j < scalar(@$e); $j++) {
           my $t = $e->[$j];
-          if ((ref($t) eq 'PPI::Structure::Block'
-               || ref($t) eq 'PPI::Structure::Constructor')
-              && $t->start && $t->start->content =~ /^[\[{]$/) {
+          if (ref($t) eq 'PPI::Structure::Block'
+              && $t->start && $t->start->content eq '{') {
             bless $t, 'PPI::Structure::Subscript';
+          } elsif (ref($t) eq 'PPI::Structure::Subscript') {
+            next;
           } else {
             last;
           }
@@ -1540,7 +1537,7 @@ sub parse {
     if ($self->is_arr_or_hash_braces($term)
         && !$is_kv_slice_block && !$is_kv_arr_constructor
         && !$is_kv_arr_deref_constructor && !$is_kv_hash_deref_block
-        && !$is_typeglob_slot) {
+        && !$is_typeglob_slot && !$is_list_slice) {
       # X[] or X{}
       # #211: with a REAL arrow ($is_reference), a leading scalar-deref cast
       # binds WITH the ref target — `$$rr->{k}` == `(${$rr})->{k}`, deref
@@ -1752,49 +1749,22 @@ sub parse {
       next;
     }
 
-    # Handle Constructor [ ] after funcall/methodcall - PPI uses Constructor
-    # Handle qw[...][idx] — subscript on a qw word list literal
-    # qw[void scalar list][1] → (p-aref-deref (vector "void" "scalar" "list") 1)
-    if ($is_qw_subscript) {
-      my $pre_id = $self->parse([$pre]);
-      my($node, $id) = $self->make_node_insert('a_ref_acc');
-      # `qw(a b c)[2]` IS the list slice `(LIST)[i]`, not a deref of a scalar
-      # base — the same marker the paren spelling sets below, and the one
-      # ExprToCL's gen_array_ref_access_form reads to keep the base a LIST.
-      # It used to be left unset and the shape got by on the base "happening"
-      # to be a multi-child node; the moment #527 taught
-      # _is_paren_scalar_base that a multi-element paren group IS a scalar
-      # base, all four qw-slice sites in the corpus (array.t, context.t,
-      # flip.t, list.t) started dereferencing the LAST WORD instead.
-      $self->node_tree->set_metadata($id, 'list_ctx_subscript', 1);
-      my @ix = $term->children();
-      my $ix_id = $self->parse(\@ix);
-      $self->add_child_to_node($id, $pre_id);
-      $self->add_child_to_node($id, $ix_id);
-      _reduce_pre($e, \$i, $node, 1);
-      next;
-    }
-
-    # instead of Subscript when subscript follows a method call
-    # e.g., $obj->method()[$i] has [$i] as Constructor, not Subscript
-    if (ref($term) eq 'PPI::Structure::Constructor'
-        && $term->start() eq '['
-        && $self->is_internal_node_type($pre)) {
-      # Treat as array subscript on the result of the previous expression.
-      # Mark as list-context subscript: (EXPR)[N] / method()[N] forces list
-      # context on the expression, unlike $arr->[N] which is a scalar deref.
-      my $pre_id = $pre->{id};
+    # The LIST SLICE (see $is_list_slice): an a_ref_acc marked
+    # list_ctx_subscript, which ExprToCL's gen_array_ref_access_form reads to
+    # evaluate the base in LIST context and index the list, never to
+    # dereference a scalar.  `qw(a b c)[2]` is the same slice as `(…)[2]`:
+    # #527 taught _is_paren_scalar_base that a multi-element paren group IS a
+    # scalar base, so an unmarked qw slice dereferenced the LAST WORD.
+    if ($is_list_slice) {
+      my $pre_id = $self->is_internal_node_type($pre) ? $pre->{id}
+                                                      : $self->parse([$pre]);
       my($node, $id) = $self->make_node_insert('a_ref_acc');
       $self->node_tree->set_metadata($id, 'list_ctx_subscript', 1);
-
       my @ix    = $term->children();
       my $ix_id = $self->parse(\@ix);
-
       $self->add_child_to_node($id, $pre_id);
       $self->add_child_to_node($id, $ix_id);
-
       _reduce_pre($e, \$i, $node, 1);
-
       next;
     }
   }
@@ -2395,33 +2365,6 @@ sub _term_extent {
     return undef;                    # operator, regex-op, anything else
   }
 
-  # LIST SLICE: a `[..]` group directly after a parenthesised List or a qw()
-  # word list is a slice of that list — `(f())[0]`, `(1,2,3)[1]`, `qw(a b)[1]`.
-  # PPI hands it over as a Constructor (it classifies `[..]` by predecessor),
-  # so the postfix walker below, which knows only Subscripts, would stop
-  # before it.  One group, then the ordinary chain continues (`(…)[0]->{k}`).
-  # (#153 chunk 3, W4 — CtorSub firings over four populations were all this
-  # shape; perl rejects `f()[0]` and `$o->m()[0]`, so a Constructor after a
-  # funcall/methodcall node is deliberately NOT taken.)
-  if ($end == $i && ($r eq 'PPI::Structure::List'
-                    || $r eq 'PPI::Structure::Condition'
-                    || $r eq 'PPI::Token::QuoteLike::Words')
-      && $end + 1 <= $limit
-      && ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
-      && $e->[$end + 1]->start() eq '[') {
-    $end++;
-    # …and any further ARROW-LESS `[j]` groups on the slice, which PPI also
-    # labels Constructor by predecessor — `([…])[0][1]` (W9; the ref.t
-    # list-slice deref rows).  A `{k}` after the `]` arrives as a Block and is
-    # re-labelled a Subscript by _retag_list_slice_subscripts before the
-    # walker runs, so the ordinary chain below takes it.
-    while ($end + 1 <= $limit
-           && ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
-           && $e->[$end + 1]->start() eq '[') {
-      $end++;
-    }
-  }
-
   # GLOB SLOT: *name{SLOT} arrives as Symbol(*name) + Block({SLOT}) — PPI does
   # not attach the group as a Subscript after a glob sigil.  One postfix group,
   # and the chain CONTINUES: a slot yields a value (`*STDOUT{IO}->autoflush`).
@@ -2664,35 +2607,37 @@ sub _fold_terms {
 # lets a preceding named unary (`defined *{$g}{CODE}` in Sub::Override) grab the
 # whole glob-slot as one argument.  The in-loop handler (~line 1234) still covers
 # the Block/Block form reached via later recursion.
-# The SAME PPI habit one group further along: after a LIST SLICE `(…)[i]` /
-# `qw(…)[i]` — where the `[i]` is itself a Constructor by predecessor (see
-# W4 in _term_extent) — a following arrow-less `{k}` arrives as a Structure::
-# BLOCK, again only because a `]` precedes it.  It is a hash SUBSCRIPT on the
-# slice (`({foo=>"bar"})[0]{foo}`, `(f())[0]{k}`), and left as a Block it
-# matched no case: the statement fell through to the "Missing case" die and
-# became a PARSE ERROR comment (a #138-family silent drop, s398).  Re-tag it
-# a Subscript so the ordinary `<node>{k}` chain machinery (the path
-# `$h{a}{b}` takes) handles it, and the term walker sees a plain chain.  A
-# following `[j]` Constructor is left alone: CtorSub already reduces
-# `<node>[j]` and it works today (`([qw/a b/])[0][1]`); the walk continues
-# past it so `(…)[0][1]{k}` is caught too.
-sub _retag_list_slice_subscripts {
+
+# THE LIST SLICE (§48, task #3740).  PCL's PPI builds the `[` after the `)` of
+# a list, of a statement modifier's condition or of a qw() as a Subscript
+# (toke.c yyl_rightparen returns a term; docs/ppi-upstream-bugs.md §48), and
+# the `[j]` / `{k}` groups after it as Subscripts too.  The arrow loop turns
+# each arrow-less `[` group of that run into an a_ref_acc marked
+# list_ctx_subscript (the base evaluated in LIST context and indexed), and a
+# `{k}` into the ordinary hash access; an explicit `->` between two groups of
+# the run stays (Case 0 leaves it).  By the time the arrow loop sees a group,
+# the List before it is a tree_val node like any other and the groups after it
+# follow reduced nodes, so the run is MARKED here, while the list is still a
+# raw List / Condition / qw token.  (Until s532e PPI built the groups as
+# Constructors and Blocks: `_retag_list_slice_subscripts`, a qw builder and a
+# Constructor-after-node builder, `_term_extent`'s W4 and a Constructor arm of
+# `_is_elided_call_prev` read that shape; they were measured inert over the
+# corpus, perl's t/ + core lib, lib/ and the board, and deleted.)
+sub _mark_list_slice_runs {
   my ($self, $e) = @_;
   for (my $i = 1; $i < scalar(@$e); $i++) {
-    next unless ref($e->[$i]) eq 'PPI::Structure::Constructor'
+    next unless ref($e->[$i]) eq 'PPI::Structure::Subscript'
              && $e->[$i]->start() eq '[';
     my $r = ref($e->[$i-1]);
     next unless $r eq 'PPI::Structure::List'
              || $r eq 'PPI::Structure::Condition'
              || $r eq 'PPI::Token::QuoteLike::Words';
-    my $j = $i + 1;
-    while ($j < scalar(@$e)) {
-      my $g = $e->[$j];
-      if (ref($g) eq 'PPI::Structure::Block' && $g->start() eq '{') {
-        bless $g, 'PPI::Structure::Subscript';
-      } elsif (!(ref($g) eq 'PPI::Structure::Constructor' && $g->start() eq '[')) {
-        last;
-      }
+    # `$code->(ARGS)[0]` is the element of the reference the call returns
+    # (the arrow left out between the two groups), not a slice of ARGS.
+    next if $i >= 2 && $self->is_arrow_op($e->[$i-2]);
+    my $j = $i;
+    while ($j < scalar(@$e) && ref($e->[$j]) eq 'PPI::Structure::Subscript') {
+      $e->[$j]{_pcl_list_slice} = 1 if $e->[$j]->start() eq '[';
       $j++;
     }
     $i = $j - 1;
@@ -2712,10 +2657,9 @@ sub _retag_list_slice_subscripts {
 #
 # A List is an elided call iff its predecessor is a COMPLETED postfix element
 # that yields a value, never the bare primary: a Subscript (`$a[0]`, `$h{k}`,
-# `$x->{m}`), a `-> ( )` call result (a List whose own predecessor is `->`), or
-# a list-slice (a Constructor `[` preceded by a List/Condition/qw primary — the
-# same discriminator _retag_list_slice_subscripts and _term_extent W4 use).  A
-# List after a bare Symbol (`$foo(1)` — not a call in perl), a Word (`func(1)` —
+# `$x->{m}`, and a list slice `(sub{})[0]` -- PCL's PPI subscripts the list,
+# docs/ppi-upstream-bugs.md §48) or a `-> ( )` call result (a List whose own
+# predecessor is `->`).  A List after a bare Symbol (`$foo(1)` — not a call in perl), a Word (`func(1)` —
 # the word's own args), an arrow (`$x->(1)` — already explicit) or a Cast is
 # left alone.  Building a fresh list makes the insertion cascade: `$a[0]()(0)`
 # becomes `$a[0]->()->(0)` because the `->` inserted before the first call is
@@ -2740,16 +2684,9 @@ sub _is_elided_call_prev {
   my $prev  = $out->[-1];
   my $prev2 = @$out >= 2 ? $out->[-2] : undef;
   my $rp = ref($prev);
-  return 1 if $rp eq 'PPI::Structure::Subscript';                 # $a[0](  $h{k}(  $x->{m}(
-  return 1 if $rp eq 'PPI::Structure::List'                       # $s2->()(
+  return 1 if $rp eq 'PPI::Structure::Subscript';  # $a[0](  $h{k}(  $x->{m}(  (sub{})[0](
+  return 1 if $rp eq 'PPI::Structure::List'        # $s2->()(
            && $prev2 && $self->is_arrow_op($prev2);
-  if ($rp eq 'PPI::Structure::Constructor' && $prev->start        # (sub{})[0](
-      && $prev->start->content eq '[' && $prev2) {                #   a list-slice
-    my $r2 = ref($prev2);
-    return 1 if $r2 eq 'PPI::Structure::List'
-             || $r2 eq 'PPI::Structure::Condition'
-             || $r2 eq 'PPI::Token::QuoteLike::Words';
-  }
   return 0;
 }
 

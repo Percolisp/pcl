@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -212,3 +212,19 @@ test_perl_oracle("#3412 a failed stat / lstat / caller / getpwnam passes no argu
         n(caller(5)), n(getpwnam("nosuchuser-pcl-3412")), n(getgrnam("nosuchgrp-pcl-3412")),
         (defined(pop_(CORE::stat $f)) ? "def" : "undef"), scalar(my @e = (stat($f), "x"))), "\n";
       sub m2 { n(caller(9)) } print m2(), " ", n(stat("/")), "\n";});
+# §48 / #3740 (s532e): PCL's PPI builds the `[` after the `)` of a list or a
+# qw() as a SUBSCRIPT (toke.c yyl_rightparen returns a term), and PExpr reads
+# the Subscript.  The statement-modifier spelling -- `EXPR if (LIST)[i]`,
+# where PPI makes the `(...)` a Condition -- was a "Missing case" drop before.
+test_perl_oracle("#3740 a list slice in a statement modifier's condition",
+    q{print "a\n" if (0, 1)[1]; print "b\n" if (0, 1)[0]; print "c\n" unless (0, 1)[0];
+      my @x; push @x, $_ for (5, 6, 7)[2, 0]; print "@x\n";});
+test_perl_oracle("#3740 the groups after a list slice: [j], {k}, -> and a qw slice",
+    q{sub f { (3, 4, {k => 'kv'}, [8, 9]) }
+      print join(" ", (f())[2]{k}, (f())[2]->{k}, (f())[3][1], (f())[3]->[0],
+                 ([1, [2, 3]])[0][1][0], qw(a b c)[1, 2], (qw(d e))[-1]), "\n";
+      my @l = (sub { "c@_" })[0](9); print "@l\n";});
+test_perl_oracle("#3740 a list slice after return, in a hash key and in an anonymous array",
+    q{sub r { return (4, 5, 6)[1] } my %h; $h{ (1, 2)[0] } = 1;
+      my $r = [ (7, 8)[1], (sort { $b <=> $a } 3, 9, 1)[0] ];
+      print r(), " ", join(",", keys %h), " @$r ", scalar((4, 5, 6)[1, 2]), "\n";});
