@@ -738,6 +738,9 @@ sub _requalify_region {
     };
     $self->_rewrite_var_uses($stmts, $canon, "${pkg}::${bare}", undef, sub {
       my $b = $binding->($_[0]);
+      Pl::Binder::check_requalify($self, $_[0], $canon, $pkg,
+                                  !defined $b ? $pkg : $b eq 'lex' ? undef : $b)
+        if $self->{_binder};                   # s533b D0 measurement (temporary)
       return 0 if !defined $b;                 # (d) global of X → rewrite
       return 1 if $b eq 'lex';                 # (a) my/state → leave alone
       return 0 if $b eq $pkg;                  # (a) our alias already homed here

@@ -657,6 +657,31 @@ sub _resolve_ord {
   };
 }
 
+# THE REQUALIFIER'S QUESTION (s533b, 1c port 1): which package's spelling the
+# block-package requalifier gives this token's $canon.  Returns (HOME, WHY):
+# HOME undef = leave the token as written, else the package whose qualified
+# spelling it takes; WHY = the binding kind, `decl` for the token's own
+# declaration, `no-token` / `no-ref` when the table holds no record (the
+# caller dies, rule 12).
+#   my | state | param | lexsub | outer  -> leave (a lexical: pad_findmy)
+#   our                                  -> the DECLARING package (SvOURSTASH)
+#   global                               -> the positional package at the use
+#                                           (toke.c S_pending_ident)
+#   special                              -> main (gv.c S_gv_is_in_main)
+sub requalify_home {
+  my ($self, $tok, $canon) = @_;
+  my $list = $self->{refs}{ refaddr $tok } or return (undef, 'no-token');
+  my ($r) = grep { $_->{canon} eq $canon } @$list;
+  return (undef, 'no-ref') unless $r;
+  return (undef, 'decl') if $r->{via} eq 'decl';
+  my $b = $r->{binding};
+  my $k = $b->{kind};
+  return (undef, $k) if $k =~ /^(?:my|state|param|lexsub|outer)$/;
+  return ($b->{perl_package}, $k) if $k eq 'our' || $k eq 'global';
+  return ('main', $k) if $k eq 'special';
+  die "PCL binder: unknown binding kind `$k` for $canon\n";
+}
+
 sub binding_of {
   my ($self, $tok, $canon) = @_;
   my $list = $self->{refs}{ refaddr $tok } or return undef;
@@ -875,6 +900,22 @@ sub check {
                 $row[6], $row[7], $kind, $note);
   }
   _row(@row);
+}
+
+# s533b D0: compare the legacy requalifier's home with requalify_home's.
+sub check_requalify {
+  my ($parser, $tok, $canon, $pkg, $legacy) = @_;
+  local ($!, $@);
+  my $b = $parser->{_binder} or return;
+  $b->{calls}{requalify}++;
+  my ($mine, $why) = eval { $b->requalify_home($tok, $canon) };
+  ($mine, $why) = (undef, 'error: ' . ($@ =~ s/\n//r)) if $@;
+  $mine = 'NOREC' if $why =~ /^no-|^error/;
+  return if _verdict_str($legacy) eq _verdict_str($mine);
+  my $key = join "\0", $b->{file}, 'requalify', refaddr($tok), $canon;
+  return if $SEEN{$key}++;
+  _row('D', $b->{file}, _line($tok), _col($tok), _short($tok->content), 'requalify',
+       _verdict_str($legacy), _verdict_str($mine), $why, "asked=$canon pkg=$pkg", _pass_name());
 }
 
 # The first three NAMED frames above the resolver (closures and the shared
