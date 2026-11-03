@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-03T23:40:00Z",
+   "description" : "FILED by the s533 review (Opus 5.5, 2026-11-03) while probing s533b (the requalifier on the binder).  PRE-EXISTING: main 1aa5d0e5 (= code 4fb60297) and the s533b tree 7a4cbf67 print the same wrong answer, so the binder port neither caused nor fixed it.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    sub f { package Z; for our $o (7) { print \"o=$o\\n\" } } f();\n    sub g { package Y; for our $p (8) { print \"p=\", $p, \"\\n\" } } g();\n    { package X; for our $q (9) { print \"q=$q\\n\" } }\n\nperl:            o=7 / p=8 / q=9\nmain and s533b:  o=  / p=  / q=9   -- SILENT WRONG (the loop variable reads empty).\n\nControls that are RIGHT today: the same loops with no `package` statement before them; the file-level bare-block form (q=9); `for our` at file level after `package Z;`.\n\nSHAPE: a `foreach our VAR` loop inside a SUB BODY after an in-sub `package NAME;` statement.  The loop aliases `$Z::o` (perl: `our` is the declaring package, Z, at the loop head); the body reads a different variable.  Suspects: the requalifier now asks the binder (s533b) -- check what `requalify_home` answers for the loop-head declarator vs the body use (both should be `our` of Z -> the same spelling); or the foreach lowering binds the loop var under one spelling and the body reads another.  First measurement: `./pl2cl` of the one-liner, grep the emitted loop head vs the body read.\n\nFound by probe m1/m4 in the s533 review scratchpad.\n",
+   "id" : "4440",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `for our $o (LIST) { ... $o ... }` inside a sub after an in-sub `package NAME;` statement reads an EMPTY loop variable (perl: the alias of $NAME::o) -- pre-existing, found by the s533 review of s533b"
+}

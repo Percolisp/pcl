@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-03",
+   "description" : "FILED s533b (Opus 5.5, 2026-11-03) from a requalifier-port neighbour probe (`local our $x` in a switched region); PRE-EXISTING on the base 4fb60297, identical after the port (the requalifier leaves the declarator token as written in both -- a decl is not a use; the wrong package comes from the `local our` LOWERING).\n\nREPRODUCER (probed vs perl 5.40.3; scratch/s533b/pr/K2.pl in the s533b worktree):\n\n    sub r { package S; local our $lo = \"L\"; print \"$lo|\", $S::lo // \"u\", \"|\", $main::lo // \"u\", \"\\n\" } r();\n    { package S2; local our $lo2 = \"L\"; print \"$lo2|\", $S2::lo2 // \"u\", \"\\n\" }\n    package S3; local our $lo3 = \"L\"; print \"$lo3|\", $S3::lo3 // \"u\", \"\\n\";\n\nperl:  L|L|u / L|L / L|L\nPCL:   |u|L  / |u  / L|L     -- SILENT WRONG in both block forms: the local is applied to $main::lo, every use reads $S::lo.\n\nWHY (read, not yet confirmed by a trace): `local our $v` lowers through the v1 `local` seam (Pl/Parser.pm, the \"Detect 'local our $var'\" branch, #3240's sibling), which builds the cell from the package the SEAM's environment holds -- the section's package (main), not the block-level `package S;` region's.  A plain `our $v` in the same region is right (N1.pl).  The file-level statement form (third line) is right because there the section IS S3.\n\nFIX SHAPE: the `local our` branch homes its cell the way the plain `our` lowering does inside a region (the requalifier's region package, or the binder's `our` binding's perl_package for the declarator token).  C2 (closing the text seam, `local` first) would carry it.\n",
+   "id" : "4422",
+   "status" : "pending",
+   "subject" : "`local our $v` after a BLOCK-level `package S;` (sub body or bare block) localizes $main::v while every use reads $S::v -- silent wrong, pre-existing (the v1 `local our` seam homes the cell in the section package)"
+}
