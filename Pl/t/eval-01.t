@@ -462,13 +462,16 @@ SKIP: {
     # is about drops-in-eval, not about one statement.  The original repro
     # (`f ref $u, "m" or g "fb";`) was CLOSED by the #343 ceiling fix (s418),
     # which made these three rows fail as stale guards; the current shape is
-    # #335's list-slice-of-call condition.  When #335 closes too, swap in
-    # another shape from baselines/parse-error-drop-census-s399.tsv — and expect
-    # exactly this failure mode as the tell.
+    # #335's list-slice-of-call condition, closed by s532e (PCL's PPI subscripts a
+    # list slice, §48); the current shape is the indirect-object method call
+    # with a string argument (perl-tests/method.t's census drop, #399).  When
+    # that closes too, swap in another shape from
+    # baselines/parse-error-drop-census-s399.tsv — and expect exactly this
+    # failure mode as the tell.
     my $out = run_pl(q{
         no warnings;
-        sub f { return (0,1,2) }
-        my $r = eval q{ print "a\n" if (f())[1]; 7 };
+        sub M::meth { "m@_" } my $obj = bless {}, "M";
+        my $r = eval q{ my @x = (meth $obj "a"); 7 };
         print "r=[", (defined $r ? $r : ""), "] err=[", ($@ ? "set" : "EMPTY"), "]\n";
         print "msg=[$@]\n";
     });
@@ -481,8 +484,8 @@ SKIP: {
     # FILE mode is deliberately unchanged: the same statement outside an eval
     # is still a drop the program survives (announced on stderr, rc 0).
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh qq{no warnings;\nsub f { return (0,1,2) }\n}
-            . qq{print "a\\n" if (f())[1];\nprint "after\\n";\n};
+    print $fh qq{no warnings;\nsub M::meth { 1 } my \$obj = bless {}, "M";\n}
+            . qq{my \@x = (meth \$obj "a");\nprint "after\\n";\n};
     close $fh;
     my (undef, $err, $rc) = PCLCore::transpile_raw(qq{$pl2cl --no-cache $pl_file});
     like($err, qr/PCL: statement dropped at \S+ line \d+/,

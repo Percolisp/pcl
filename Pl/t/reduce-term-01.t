@@ -172,16 +172,23 @@ extent_is('$code->(1) + 1;',        0, 2, 'W2: coderef call stops before op');
 # W3: `-> $#*` postfix last-index.
 extent_is('$ar->$#*;',              0, 2, 'W3: postfix $#*');
 extent_is('$ar->$#* + 1;',          0, 2, 'W3: postfix $#* stops before op');
-# W4: a `[..]` Constructor directly after a List / qw() primary is a LIST
-# SLICE group; the chain continues after it.
+# W4: a `[..]` directly after a List / qw() primary is a LIST SLICE group;
+# the chain continues after it.  (Since s532e PCL's PPI builds it as a
+# Subscript -- docs/ppi-upstream-bugs.md §48 -- and the walker's W4 arm,
+# which took a Constructor there, is gone: the ordinary postfix chain takes
+# the Subscript.)
 extent_is('(1,2,3)[1];',            0, 1, 'W4: list slice');
 extent_is('(f())[0]->{k};',         0, 3, 'W4: list slice then chain');
 extent_is('qw(a b)[1];',            0, 1, 'W4: qw list slice');
 extent_is('(1,2)[0] + 1;',          0, 1, 'W4: list slice stops before op');
-# INVERSE: perl rejects `f()[0]` and `$o->m()[0]` — a Constructor after a
-# call/method-call is NOT taken (the walker stops before it).
-extent_is('foo()[0];',              0, 1, 'W4 inverse: no slice group after a call');
-extent_is('$o->m()[0];',            0, 3, 'W4 inverse: no slice group after a method call');
+# The two rows that stood here asserted that a CONSTRUCTOR after a call's
+# `)` (`foo()[0]`, `$o->m()[0]` -- both syntax errors in perl) is not taken;
+# PCL's PPI builds no Constructor after a `)` any more, so they asserted a
+# shape that cannot occur.  The valid spelling of a `[..]` after a call's
+# `)` is the elided arrow, `$c->()[0]`, the element of the reference the
+# call returns: one term.
+extent_is('$c->()[0];',             0, 3, 'W4: an elided-arrow subscript after a code call is part of the term');
+extent_is('$c->()[0] + 1;',         0, 3, 'W4: ... and stops before op');
 extent_is('(1,2){0};',              0, 0, 'W4 inverse: only [..] is a list slice');
 # W5: a WORD directly followed by an arrow is a self-bounded primary.
 extent_is('Foo->new;',              0, 2, 'W5: class method call');

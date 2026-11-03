@@ -215,9 +215,12 @@ test_perl_oracle("#3412 a failed stat / lstat / caller / getpwnam passes no argu
 # §48 / #3740 (s532e): PCL's PPI builds the `[` after the `)` of a list or a
 # qw() as a SUBSCRIPT (toke.c yyl_rightparen returns a term), and PExpr reads
 # the Subscript.  The statement-modifier spelling -- `EXPR if (LIST)[i]`,
-# where PPI makes the `(...)` a Condition -- was a "Missing case" drop before.
+# where PPI makes the `(...)` a Condition -- was a "Missing case" drop before
+# (a silent FALSE condition, #335).
 test_perl_oracle("#3740 a list slice in a statement modifier's condition",
     q{print "a\n" if (0, 1)[1]; print "b\n" if (0, 1)[0]; print "c\n" unless (0, 1)[0];
+      sub f { return (0, 1, 2) } my $x = 1;
+      print "d\n" if (f())[1]; print "e\n" if (1, 2)[1] == 2 && $x; print "g\n" unless (f())[2] != 2;
       my @x; push @x, $_ for (5, 6, 7)[2, 0]; print "@x\n";});
 test_perl_oracle("#3740 the groups after a list slice: [j], {k}, -> and a qw slice",
     q{sub f { (3, 4, {k => 'kv'}, [8, 9]) }
