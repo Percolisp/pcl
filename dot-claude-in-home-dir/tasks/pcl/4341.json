@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-03",
+   "description" : "FILED s532e (Opus agent, 2026-11-03), found by the §48 list-slice probes (scratch/s532e/p/pre.pl).  PRE-EXISTING: main 4fb60297 and the s532e tree print the same.  A SILENT WRONG.\n\nA list slice whose list holds a nested parenthesised group or an aggregate does not flatten it before indexing -- the slice indexes a list of sub-lists / references:\n\n    my %hh = (a => 1); print \"1 \", (%hh)[0], \"\\n\";      # perl: 1 a        PCL: 1 a1\n    print \"2 \", ((1, 2), (3, 4))[2], \"\\n\";              # perl: 2 3        PCL: 2 (empty)\n    print \"3 \", ((1, 2), 3)[1], \"\\n\";                   # perl: 3 2        PCL: 3 3\n    my @r = ((1, 2), 3)[0, 1]; print \"5 @r\\n\";          # perl: 5 1 2      PCL: 5 ARRAY(0x1) 3\n    my @s = (%hh)[0, 1]; print \"6 @s\\n\";                # perl: 6 a 1      PCL: 6 HASH(0x2)\n\nControls that are right: `(1, 2, 3)[1]`, `(@a)[-1]`, `(@a, 7)[2]`, `(f())[0]`, `qw(a b c)[1, 2]`.  The list-slice node is an a_ref_acc marked list_ctx_subscript (Pl::PExpr arrow loop; ExprToCL gen_array_ref_access_form): its base must be the FLATTENED list in list context, as perl's lslice does (pp_lslice takes the list as pushed on the stack).\n\nAlso seen, probably a different mechanism: `print scalar(@{[ (1, 2, 3)[0, 1] ]})` -- perl 2, PCL 1 (while `my $t = [ (1, 2, 3)[0, 1] ]; scalar(@$t)` is 2).\n",
+   "id" : "4341",
+   "status" : "pending",
+   "subject" : "A list slice of a list holding a nested paren group or a hash/array does not flatten it: ((1,2),3)[1] is 3, (%h)[0] is \"a1\" -- silent wrong, pre-existing"
+}

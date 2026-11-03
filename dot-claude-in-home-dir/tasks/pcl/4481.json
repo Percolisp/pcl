@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-04",
+   "description" : "FILED s533 (review session, eval-in-cl plan measurement).  PRE-EXISTING on main 0f2db817.\n\nREPRODUCER (perl 5.40.3):\n\n    package P; sub cls { \"Q\" } package Q; sub new { bless {v => $_[1]}, $_[0] } package main;\n    my $o = bless {}, \"P\"; my $m = \"cls\";\n    my $s = $o->$m(1)->new(7); print ref($s), \" \", $s->{v}, \"\\n\";\n\nperl: Q 7.   PCL: `PCL: statement dropped at ... line 3: my $s = $o->$m(1)->new(7); -- Bug. Fell through. Missing case: [bless( {id => 7, type => methodcall}, PPIreference ), bless( {id => 0, type => methodcall}, PPIreference )]` and the run dies at the site.\n\nThe postfix `->` after a DYNAMIC-name method call is not handled where the static-name chain `$o->cls(1)->new(7)` is (probe that control).  Layer: Pl/PExpr.pm's postfix method-call chain (the methodcall node whose method is a variable).  Unblocks PPI under PCL (docs/eval-in-cl-plan.md P1): with the line split by hand PPI's output equals perl's on Calc.pm.  Probe also: `$o->$m->new`, `$o->$m()->[0]`, `$o->$m(1)->{k}`, `Class->$m(1)->new`, `$o->$cref(1)->new` (a code ref in the variable).\n",
+   "id" : "4481",
+   "status" : "pending",
+   "subject" : "PCL compiler: a method call by a NAME IN A VARIABLE followed by `->` -- `$o->$m(1)->new(7)` -- is a DROPPED statement (\"Bug. Fell through. Missing case: [methodcall, methodcall]\"); PPI::Lexer.pm:715 (`$self->$method($Statement)->new($Token)`) is the instance that stops PPI running under PCL"
+}

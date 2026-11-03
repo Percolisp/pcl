@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-04",
+   "description" : "FILED s533c (Opus, 2026-11-04), found while lowering #4185 (scratch/s533c/p/g1.pl), PRE-EXISTING (main 0f2db817).\n\nREPRODUCER:\n  no strict 'refs';\n  my $caller = \"main\";\n  our ($x, $y) = (\"x0\", \"y0\");\n  (*{\"${caller}::x\"}, *{\"${caller}::y\"}) = (\\\"x1\", \\\"y1\");\n  print \"$x $y\\n\";\n  (*x, *y) = (\\\"x2\", \\\"y2\");\n  print \"$x $y\\n\";\nperl 5.40.3: x1 y1 / x2 y2\nPCL: x0 y0 / x0 y0   (SILENT WRONG: nothing is assigned)\n\nThe SCALAR spelling works: `*{\"${caller}::x\"} = \\\"x1\"` emits (p-glob-assign-dynamic NAME VAL), `*y = \\\"y1\"` (p-glob-assign \"main\" \"y\" VAL).\n\nMECHANISM: the list emits (p-list-= (vector (p-dynamic-typeglob NAME) (p-make-typeglob \"main\" \"y\")) RHS); p-list-='s generic arm stores each element through (p-setf PLACE VAL), and p-setf (cl/pcl-runtime.lisp) has no arm for a typeglob place -- its default `(box-set PLACE VAL)` writes into the freshly made glob object, which nothing reads.\n\nFIX SHAPE (not done here -- s533c's #4185 lowers the LOCAL list through the glob-local family instead, per element): two p-setf arms, `p-make-typeglob` -> (p-glob-assign PKG NAME VAL) and `p-dynamic-typeglob` -> (p-glob-assign-dynamic NAME VAL), the scalar spelling's own forms (rule 11).  Probe: the reproducer, `(*x) = \\*y` (whole-glob alias), `($s, *g) = (1, \\\"g\")`, list-context value of the assignment.\n",
+   "id" : "4442",
+   "status" : "pending",
+   "subject" : "A plain list assignment to typeglobs `(*x, *y) = (\\\"a\", \\\"b\")` / `(*{\"P::x\"}, …) = LIST` does NOTHING -- p-list-='s element arm reaches p-setf, which has no typeglob place and falls to box-set (silent wrong)"
+}

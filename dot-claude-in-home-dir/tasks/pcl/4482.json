@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-04",
+   "description" : "FILED s533 (review session, eval-in-cl plan measurement).  A PPI tokenizer bug for the PCL PPI program (#3697; catalogue + registry + ppi-bug-report.t row when it is taken).\n\nREPRODUCER:\n\n    our %K = (\n      __FILE__ => 1,\n      __DATA__ => 2,\n      __END__  => 3,\n    );\n    print join(\",\", sort keys %K), \"\\n\";\n\nperl 5.40.3: __DATA__,__END__,__FILE__ .  PPI 1.292 (vendor/PPI, branch pcl a376a6d8): ONE PPI::Statement::Data at line 3 (`__DATA__ => 2,\\n  __END__ => 3,\\n);\\nprint ...`) -- the rest of the file is data.  On ONE line (`my %h = (__DATA__ => 2, x => 1);`) PPI is right.\n\nperl: a following `=>` makes `__DATA__` / `__END__` a bareword string anywhere (toke.c checks the fat comma before the keyword).  PPI: the line-start `__DATA__` / `__END__` test in the tokenizer does not look ahead for `=>`.\n\nImpact: PCL transpiling Pl/PPIExpect.pm (self-hosting, docs/eval-in-cl-plan.md P1/P2) drops the statement; any CPAN file with this layout loses its tail.\n",
+   "id" : "4482",
+   "status" : "pending",
+   "subject" : "PPI (even PCL's branch, 1.292): `__DATA__ =>` at the START of a line inside a list is lexed as a DATA SECTION and swallows the rest of the file -- perl reads an autoquoted hash key; Pl/PPIExpect.pm:106 (our %KEYWORD) is the instance"
+}

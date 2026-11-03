@@ -2,7 +2,7 @@
 
 Main at launch: **`fa81280b`** = MAIN-READY-66 (s532a merged) + records, pushed.  Main's last CODE sha (`git log -1 --format=%h -- Pl cl lib vendor`) = **`4fb60297`** -- the corpus-diff / emission-ab / inverse-guard reference for every s533 batch, never `main`.  Generation on main **v2-10300**.  `vendor/PPI` = branch `pcl` **`a376a6d8`** = the bare repo `~/pcl-agent-scratch/ppi/PPI.git`'s `pcl` = the fork `Percolisp/PPI`'s `pcl`.  Box: uptime 17 min at 21:06 (rebooted; `/tmp` empty), load 1.5, 12 GB.  Nothing running.
 
-THE USER'S WORD TODAY: **"Run 3 tasks in parallel.  If there are changes for PPI/parser in the todo, please prioritize them today."**  So all three slots go to the parser program (#3694 Option 1 + its PPI half #3697), Opus 5.5 at effort high:
+THE USER'S WORD TODAY: **three batches in parallel; PPI / parser work first.**  So all three slots go to the parser program (#3694 Option 1 + its PPI half #3697), Opus 5.5 at effort high:
 * **s532e** -- PCL's PPI batch 7 (`s532/s532e-prompt.md`, unchanged; FILLED below): §48 #3740 list slice, §40 #3745 `format`, #3983 lexsub attribute, #4102 `${m{q}}`.  IDs **4341-4359**.  **Generation v2-10700.**
 * **s533a** -- parser program step 1d / C1: THE STATEMENT CLASSIFIER `Pl/Stmt.pm` (`s533/s533a-prompt.md`).  IDENTICAL emission.  IDs **4401-4419**.  Generation **v2-10800** only if emission changes (it must not).
 * **s533b** -- parser program step 1c, port 1: THE REQUALIFIER ON THE BINDER (`s533/s533b-prompt.md`); fixes #3800 #3801 #3804 by construction.  IDs **4421-4439**.  **Generation v2-10900.**
