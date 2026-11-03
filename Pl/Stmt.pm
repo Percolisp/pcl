@@ -34,9 +34,12 @@ package Pl::Stmt;
 #   refused    any statement the caller's REFUSAL fact  raw refused-statement
 #              names (`feature_statement_refusal`:      form (perl-shaped die at
 #              `defer`, class syntax, `format NAME =`   run time); field: why
-#              ... rule 11 s533 -- today a format block
-#              is stripped from the source before PPI,
-#              so the refusal is how one arrives; #3370
+#              ... rule 11 s533 -- a format declaration
+#              PCL's PPI reads as one (§40, s532e) is
+#              taken out of the document before lowering
+#              (Pl::Parser::_elide_format_declarations),
+#              so the refusal is how any OTHER `format`
+#              statement arrives; #3370
 #              local-term refusals)
 #   local      `local …;`, `delete local …;`,           _lower_local (v1 seam)
 #              `my (…) = delete local …;`
