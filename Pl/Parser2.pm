@@ -60,6 +60,18 @@ sub _single_scalar_decl { Pl::Stmt::single_scalar_decl($_[1]) }
 sub _multi_decl         { Pl::Stmt::multi_decl(@_[1 .. $#_]) }
 sub _proto_or_sig_str   { Pl::Stmt::proto_or_sig_str($_[1]) }
 
+# The REFUSAL fact Pl::Stmt::classify takes (kind `refused`): a statement PPI
+# builds only under a feature PCL does not lower (Pl::Parser::
+# feature_statement_refusal: `defer`, the class syntax, `format NAME =`), else
+# a statement holding a `local` term no lowering reaches (#3370).  The why
+# text, or undef.
+sub _stmt_refusal {
+  my ($self, $stmt) = @_;
+  if (my $r = $self->fallback_parser->feature_statement_refusal($stmt)) { return $r }
+  my $t = $self->{_local_term_refusal}{ refaddr $stmt };
+  return $t ? $t->[1] : undef;
+}
+
 # ---- s533a D2: the statement classifier's DUAL-RUN --------------------------
 # PCL_STMT_CHECK=die|log (unset = today's path; the classifier is not called):
 # each branch of the legacy statement dispatch names the kind it took, and the
@@ -11697,134 +11709,126 @@ sub _lower_stmt {
   # other statement of the file still compiles and runs.  ONE builder for both
   # refusal routes — Pl::Parser::refused_statement_form (which keeps the
   # eval-string transpile die, #363).
-  if (my $refusal = $self->fallback_parser->feature_statement_refusal($stmt)) {
-    return raw($self->fallback_parser->refused_statement_form($stmt, $refusal));
-  }
-  if (my $r = $self->{_local_term_refusal}{ refaddr $stmt }) {      # #3370
-    return raw($self->fallback_parser->refused_statement_form($stmt, $r->[1]));
-  }
+  # (#3370 is the second refusal fact: a statement holding a `local` term no
+  # lowering reaches -- _stmt_refusal reads both.)
+  my $rec  = Pl::Stmt::classify($stmt, refusal => $self->_stmt_refusal($stmt));
+  my $kind = $rec->{kind};
+  return raw($self->fallback_parser->refused_statement_form($stmt, $rec->{why}))
+    if $kind eq 'refused';
+  return $self->_lower_compound($stmt, $vi, $tail_ctx)
+    if $kind eq 'compound' || $kind eq 'label';
+  return $self->_lower_break_stmt($stmt, $vi, $tail_ctx)
+    if $kind eq 'return' || $kind eq 'loopctl';
+  die "Parser2 TODO: " . ref($stmt) if $kind eq 'scheduled' || $kind eq 'package';
+  return $self->_lower_expr_stmt($stmt, $vi, $tail_ctx);
+}
 
-  if ($stmt->isa('PPI::Statement::Compound')) {
-    $self->_stmt_took($stmt, kind => qw(compound label)) if $STMT_CHECK;
-    return $self->_lower_compound($stmt, $vi, $tail_ctx);
-  }
-
-  if ($stmt->isa('PPI::Statement::Break')) {
-    $self->_stmt_took($stmt, kind => qw(return loopctl)) if $STMT_CHECK;
-    my @k = _strip_semi($stmt->schildren);
-    my $kw = $k[0]->content;
-    if ($kw eq 'return') {
-      shift @k;
-      # `return if COND` / `return unless COND`: after shifting `return` the
-      # modifier keyword is at index 0, which _split_modifier (scans from 1)
-      # would miss — mis-lowering to (p-return (p-if COND)).  Detect a leading
-      # modifier here; the value expr is then empty (return undef/()).
-      my ($expr, $mod, $cond);
-      if (@k && Pl::PExpr::Config::is_statement_modifier_word($k[0])) {
-        ($expr, $mod, $cond) = ([], $k[0]->content, [@k[1 .. $#k]]);
-      } else {
-        ($expr, $mod, $cond) = _split_modifier(\@k);
-      }
-      return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
-      # A multi-element return list gates to v1, whose expression machinery
-      # knows list-operator arity and spreads true top-level commas as
-      # separate p-return args.  v2's native lowering gets both variants
-      # wrong: a LIST-VALUED element makes the native list construction emit
-      # (vector … (p-flatten @a) …), which p-return does NOT splice
-      # (`return (0,@a)` leaked the marker); an all-scalar comma list emits
-      # one (if *wantarray* (vector …) (progn …)) arg, which wrongly treats
-      # a :void caller context — toplevel, sort comparator — as list where
-      # the macro's spread dispatch is (eq *wantarray* t) (sort.t "Ret: blk
-      # ret", s308).  Detection is STRUCTURAL — a comma among the statement's
-      # own tokens (`return $a, $b` and `return bless \$x, "C"` both gate;
-      # only the expression parser could tell them apart) or inside a lone
-      # parenthesized list (`return ($a, $b)`).  Commas nested in call
-      # parens (`return f($a, $b)`) stay native.  Whole-stmt gate, so a
-      # trailing if/unless modifier rides along.  Single list-valued returns
-      # (`return @a` / `return map …`) are NOT wrapped in a vector and work.
-      my $is_comma = sub { $_[0]->isa('PPI::Token::Operator')
-                           && ($_[0]->content eq ',' || $_[0]->content eq '=>') };
-      my $top_comma = grep { $is_comma->($_) } @$expr;
-      if (!$top_comma && @$expr == 1 && $expr->[0]->isa('PPI::Structure::List')) {
-        my ($inner) = grep { $_->isa('PPI::Statement') } $expr->[0]->schildren;
-        $top_comma = $inner && grep { $is_comma->($_) } $inner->schildren;
-      }
-      return $self->_fallback_stmt($stmt) if $top_comma;
-      # ── TAIL POSITION (task #994, Kind-A gate `tail-return`) ─────────────
-      # This `return` IS the sub body's last statement, so its value is the
-      # frame's value and reaches the caller through the very same
-      # `(p-sub-frame …)` exit an implicit tail does.  The throw to :p-return
-      # is then pure overhead.  `p-return-value` is NOT: two of its arms fire
-      # on a value the frame exit does not touch (an ARRAY in scalar context
-      # is its element COUNT, raw nil in list context is the empty list), and
-      # dropping them made `(return @a) . ""` print ARRAY(0x1) where perl
-      # prints 3 (probed, scratch/arrctx.pl).  `p-tail-value` is that call
-      # with its IDENTITY fast path inlined -- two type tests for the
-      # ordinary scalar return.  What is saved is the throw, the catch, the
-      # *wantarray* rebind and the out-of-line call: ~10 % of fib(27).
-      #
-      # The CONTEXT is the one thing that must be re-supplied: `p-return`
-      # evaluates its value under *pcl-caller-wantarray*, and under the
-      # sub-body :void regime the ambient *wantarray* is :void.  Wrap in
-      # p-caller-ctx exactly when that regime is active — when it is not, no
-      # bind was ever emitted and *wantarray* still IS the caller's.
-      # A statement MODIFIER is excluded (the value is then conditional; that
-      # is _modifier_ret_form's business), and a comma list has already gated
-      # to v1 above.
-      # THE FACT before the switch (task #1213): `--facts` prints the licence
-      # on the general `p-return` form when PCL_OPT has the emission off.
-      my $tail_ok = (!$mod
-                     && defined $self->{_body_tail_stmt}
-                     && $self->{_body_tail_stmt} == refaddr($stmt)) ? 1 : 0;
-      if ($tail_ok && Pl::Passes::enabled('tail-return')) {
-        my $tform = @$expr
-          ? ['p-tail-value', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
-          : ['p-return-empty'];
-        return Pl::Passes::fact('tail-return', 1,
-          $self->environment->wa_void_active
-            ? Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', $tform)
-            : $tform);
-      }
-      # A returned call must see the CALLER's context (no *wantarray* bind).
-      # Bare `return;` must be a ZERO-arg (p-return): in list context it
-      # contributes 0 elements (`()`), scalar/void → undef.  `(p-return
-      # (p-undef))` would wrongly yield a 1-element list in list context
-      # (v1 emits the bare `(p-return)` — sub.t check_ret(-1) list).
-      my $form = @$expr
-        ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
-        : ['p-return'];
-      $form = Pl::Passes::fact('tail-return', $tail_ok, $form);
-      return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
-    }
-    # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
-    # machinery lower the whole thing (goto &sub tail-calls with the LIVE @_;
-    # the $body_uses_args gate in _lower_sub has already kept the @_ binding
-    # for any sub whose body mentions goto, so the forwarded @_ exists).
-    my ($expr, $mod, $cond) = _split_modifier(\@k);
+# A `return` / `next` / `last` / `redo` / `goto` statement (Pl::Stmt kinds
+# return, loopctl); the spans come from Pl::Stmt::break_shape.
+sub _lower_break_stmt {
+  my ($self, $stmt, $vi, $tail_ctx) = @_;
+  my $bs = Pl::Stmt::break_shape($stmt);
+  my $kw = $bs->{kw};
+  if ($kw eq 'return') {
+    # `return if COND` / `return unless COND`: after shifting `return` the
+    # modifier keyword is at index 0, which _split_modifier (scans from 1)
+    # would miss — mis-lowering to (p-return (p-if COND)).  Detect a leading
+    # modifier here; the value expr is then empty (return undef/()).
+    my ($expr, $mod, $cond) = @$bs{qw(expr mod cond)};
     return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
-    my $form = $self->_lower_expr($expr, $stmt);
+    # A multi-element return list gates to v1, whose expression machinery
+    # knows list-operator arity and spreads true top-level commas as
+    # separate p-return args.  v2's native lowering gets both variants
+    # wrong: a LIST-VALUED element makes the native list construction emit
+    # (vector … (p-flatten @a) …), which p-return does NOT splice
+    # (`return (0,@a)` leaked the marker); an all-scalar comma list emits
+    # one (if *wantarray* (vector …) (progn …)) arg, which wrongly treats
+    # a :void caller context — toplevel, sort comparator — as list where
+    # the macro's spread dispatch is (eq *wantarray* t) (sort.t "Ret: blk
+    # ret", s308).  Detection is STRUCTURAL — a comma among the statement's
+    # own tokens (`return $a, $b` and `return bless \$x, "C"` both gate;
+    # only the expression parser could tell them apart) or inside a lone
+    # parenthesized list (`return ($a, $b)`).  Commas nested in call
+    # parens (`return f($a, $b)`) stay native.  Whole-stmt gate, so a
+    # trailing if/unless modifier rides along.  Single list-valued returns
+    # (`return @a` / `return map …`) are NOT wrapped in a vector and work.
+    return $self->_fallback_stmt($stmt) if $bs->{top_comma};
+    # ── TAIL POSITION (task #994, Kind-A gate `tail-return`) ─────────────
+    # This `return` IS the sub body's last statement, so its value is the
+    # frame's value and reaches the caller through the very same
+    # `(p-sub-frame …)` exit an implicit tail does.  The throw to :p-return
+    # is then pure overhead.  `p-return-value` is NOT: two of its arms fire
+    # on a value the frame exit does not touch (an ARRAY in scalar context
+    # is its element COUNT, raw nil in list context is the empty list), and
+    # dropping them made `(return @a) . ""` print ARRAY(0x1) where perl
+    # prints 3 (probed, scratch/arrctx.pl).  `p-tail-value` is that call
+    # with its IDENTITY fast path inlined -- two type tests for the
+    # ordinary scalar return.  What is saved is the throw, the catch, the
+    # *wantarray* rebind and the out-of-line call: ~10 % of fib(27).
+    #
+    # The CONTEXT is the one thing that must be re-supplied: `p-return`
+    # evaluates its value under *pcl-caller-wantarray*, and under the
+    # sub-body :void regime the ambient *wantarray* is :void.  Wrap in
+    # p-caller-ctx exactly when that regime is active — when it is not, no
+    # bind was ever emitted and *wantarray* still IS the caller's.
+    # A statement MODIFIER is excluded (the value is then conditional; that
+    # is _modifier_ret_form's business), and a comma list has already gated
+    # to v1 above.
+    # THE FACT before the switch (task #1213): `--facts` prints the licence
+    # on the general `p-return` form when PCL_OPT has the emission off.
+    my $tail_ok = (!$mod
+                   && defined $self->{_body_tail_stmt}
+                   && $self->{_body_tail_stmt} == refaddr($stmt)) ? 1 : 0;
+    if ($tail_ok && Pl::Passes::enabled('tail-return')) {
+      my $tform = @$expr
+        ? ['p-tail-value', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
+        : ['p-return-empty'];
+      return Pl::Passes::fact('tail-return', 1,
+        $self->environment->wa_void_active
+          ? Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', $tform)
+          : $tform);
+    }
+    # A returned call must see the CALLER's context (no *wantarray* bind).
+    # Bare `return;` must be a ZERO-arg (p-return): in list context it
+    # contributes 0 elements (`()`), scalar/void → undef.  `(p-return
+    # (p-undef))` would wrongly yield a 1-element list in list context
+    # (v1 emits the bare `(p-return)` — sub.t check_ret(-1) list).
+    my $form = @$expr
+      ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
+      : ['p-return'];
+    $form = Pl::Passes::fact('tail-return', $tail_ok, $form);
     return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
   }
+  # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
+  # machinery lower the whole thing (goto &sub tail-calls with the LIVE @_;
+  # the $body_uses_args gate in _lower_sub has already kept the @_ binding
+  # for any sub whose body mentions goto, so the forwarded @_ exists).
+  my ($expr, $mod, $cond) = @$bs{qw(expr mod cond)};
+  return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
+  my $form = $self->_lower_expr($expr, $stmt);
+  return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
+}
 
-  if ($stmt->isa('PPI::Statement::Scheduled') || $stmt->isa('PPI::Statement::Package')) {
-    die "Parser2 TODO: " . ref($stmt);
-  }
+# The expression statement (Pl::Stmt kind expr, and every kind _lower_stmt
+# lowers as an expression); the spans come from Pl::Stmt::expr_shape.
+sub _lower_expr_stmt {
+  my ($self, $stmt, $vi, $tail_ctx) = @_;
+
 
   # -- plain expression statement
-  my @k = _strip_semi($stmt->schildren);
+  my $x = Pl::Stmt::expr_shape($stmt);
 
   # Bare `...` (yada yada): dies "Unimplemented at $0 line N." — a STATEMENT
   # form v1 handles above its expression parse (Parser.pm), so the seam
   # cannot lower it.  Native mirror of v1's emission; also fixes the file-
   # level bare `...` (broken PARSE ERROR raw before task #78).
-  $self->_stmt_took($stmt, kind => qw(refused local decl use end sub expr)) if $STMT_CHECK;
-  if (@k == 1 && $k[0]->isa('PPI::Token::Operator') && $k[0]->content eq '...') {
-    my $line = $k[0]->line_number // 0;
+  if ($x->{yada}) {
+    my $line = $x->{line};
     return ['p-die', '"Unimplemented"', ':loc',
             ['format', 'nil', '"~A line ~D"', ['to-string', ['unbox', '$0']], $line]];
   }
 
-  my ($expr, $mod, $cond) = _split_modifier(\@k);
+  my ($expr, $mod, $cond) = @$x{qw(expr mod cond)};
   # while/until/for/foreach statement modifiers (and do{}while, which splits
   # the same way) are outside the native subset — whole-statement fallback
   # through v1, which owns their loop/do-while semantics.
@@ -11857,12 +11861,9 @@ sub _lower_stmt {
   # (unboxed) slot — RHS proven arithmetic by VarAnnotator, so the stored
   # value is a raw number — else `p-my-=` (box-set; never the special-
   # proclaiming p-scalar-=).
-  if (!$mod && @$expr >= 3
-      && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
-      && !$self->{_file_lex_renamed}{ $expr->[0]->content }
-      && $expr->[1]->isa('PPI::Token::Operator') && $expr->[1]->content eq '='
-      && !_tail_below_assign_prec($expr)) {
-    my $name = $expr->[0]->content;
+  my $as = $x->{assign};
+  if ($as && $as->{op} eq '=' && !$self->{_file_lex_renamed}{ $as->{name} }) {
+    my $name = $as->{name};
     # `$s = $s . REST` on a str-buffer slot IS the append — the same
     # predicate VarAnnotator counted as the slot's `.=` write (s494p, #2098).
     if ($vi->{$name} && $vi->{$name}{strbuf}) {
@@ -11870,7 +11871,7 @@ sub _lower_stmt {
       return ['%pcl-str-append', $name, $self->_lower_expr(\@rest, $stmt)]
         if @rest;
     }
-    my $rhs = [@$expr[2 .. $#$expr]];
+    my $rhs = $as->{rhs};
     if ($vi->{$name} && $vi->{$name}{unboxable}) {
       return ['setf', $name,
               _wrap_freeze($vi->{$name}, $name, $self->_lower_expr($rhs, $stmt, undef, 1))];
@@ -11886,26 +11887,22 @@ sub _lower_stmt {
   # coercing op at native statement root (its %RAW_COMPOUND regime), so this
   # branch and the verdict key on the same shape; a boxed $x falls through to
   # the generic path (p-incf … = box-set), unchanged from before task #62.
-  if (!$mod && @$expr >= 3
-      && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
-      && !$self->{_file_lex_renamed}{ $expr->[0]->content }
-      && $expr->[1]->isa('PPI::Token::Operator')
-      && !_tail_below_assign_prec($expr)) {
-    my $name   = $expr->[0]->content;
-    my $rawmac = Pl::VarAnnotator::raw_compound_macro($expr->[1]->content);
+  if ($as && !$self->{_file_lex_renamed}{ $as->{name} }) {
+    my $name   = $as->{name};
+    my $rawmac = Pl::VarAnnotator::raw_compound_macro($as->{op});
     if ($rawmac && $vi->{$name} && $vi->{$name}{unboxable}) {
       # S1 str-buffer slot: `.=` appends in place (fill-pointer extend)
       # instead of the allocate-a-fresh-concatenation -raw twin.
       return ['%pcl-str-append', $name,
               $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt)]
-        if $vi->{$name}{strbuf} && $expr->[1]->content eq '.=';
+        if $vi->{$name}{strbuf} && $as->{op} eq '.=';
       # Kind-A `numeric-slot' (task #1183): a slot VarAnnotator proved can
       # only ever hold a plain number needs no overload guard, and the guard's
       # cost is its BRANCH, not its tests (-62.5 % on the 4e6 `*=`/`%=` loop;
       # see %compound-arith-form).  Only the ops whose runtime template reads
       # the marker are given it.
       my $numfact = ($vi->{$name}{numonly}
-                     && Pl::VarAnnotator::numeric_marker_op($expr->[1]->content))
+                     && Pl::VarAnnotator::numeric_marker_op($as->{op}))
                     ? 1 : 0;
       my @marker = ($numfact && Pl::Passes::enabled('numeric-slot'))
                    ? (':numeric') : ();
@@ -11920,16 +11917,9 @@ sub _lower_stmt {
   # write is numeric-valued, so the numeric -raw twin matches perl (magical
   # string increment is unreachable).  A postfix incdec in TAIL position
   # returns the OLD value — prog1.
-  if (!$mod && @$expr == 2) {
-    my ($a, $b) = @$expr;
-    my ($name, $opc, $post);
-    if ($a->isa('PPI::Token::Symbol') && $b->isa('PPI::Token::Operator')) {
-      ($name, $opc, $post) = ($a->content, $b->content, 1);
-    } elsif ($a->isa('PPI::Token::Operator') && $b->isa('PPI::Token::Symbol')) {
-      ($name, $opc, $post) = ($b->content, $a->content, 0);
-    }
-    if (defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--')
-        && !$self->{_file_lex_renamed}{$name}
+  if (my $id = $x->{incdec}) {
+    my ($name, $opc, $post) = @$id{qw(name op post)};
+    if (!$self->{_file_lex_renamed}{$name}
         && $vi->{$name} && $vi->{$name}{unboxable}) {
       my $numfact = $vi->{$name}{numonly} ? 1 : 0;
       my $form = [$opc eq '++' ? 'p-incf-raw' : 'p-decf-raw', $name,
@@ -11947,8 +11937,8 @@ sub _lower_stmt {
   # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
   # (task #1249(7)) — rewritten IN the lowered form, so every context wrap the
   # ordinary lowering put around the call is preserved exactly.
-  if (!$mod && @$expr == 1 && $expr->[0]->isa('PPI::Token::Word')) {
-    $form = $self->_rewrite_bareword_stmt($expr->[0], $form);
+  if ($x->{bareword}) {
+    $form = $self->_rewrite_bareword_stmt($x->{bareword}, $form);
   }
   # A void FALLBACK `m//g` match must bind *wantarray* :void explicitly: v1 adds
   # this wrap at the statement level, but _parse_expression(VOID_CTX) does not, so
