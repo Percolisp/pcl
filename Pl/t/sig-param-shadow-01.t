@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 35;
+plan tests => 37;
 
 sub write_pl {
     my ($code) = @_;
@@ -119,21 +119,35 @@ sub k ($x) { "k($x)" }
 print k(1), " x=$x\n";
 PL
 
-# ---- the narrowing must not go further: a REAL capture still refuses ------
+# ---- the narrowing must not go further: a DIFFERENT sigil is a different name --
 #
-# `($x)` declares `$x` and nothing else, so the body's `@x` is the file's
-# `my @x` — a genuine capture, and the refusal is still the honest answer.
+# `($x)` declares `$x` and nothing else, so the body's `@x` is NOT the
+# parameter.  Which `@x` it is, perl decides by POSITION (intro_my: a `my` is
+# visible from the next statement on, and a named sub's body is compiled
+# where it is written): a `my @x` declared AFTER the sub is not visible in it,
+# so the body reads the GLOBAL @main::x -- perl 5.40.3 prints `g(1)[]`.  This
+# row asserted a refusal ("file lexical 'x' captured by sub g") until s533d:
+# the old capture scan counted the later `my @x` (#3806, a LOUD refusal of
+# valid perl); the capture gate asks the binder since 1c port 2 and answers
+# perl's way.  The second row is the genuine capture -- `my @x` BEFORE the
+# sub -- which the body reads as the file lexical.
 {
-    my $pl = write_pl(<<'PL');
+    my $code = <<'PL';
 use feature "signatures";
 sub g ($x) { "g($x)[@x]" }
 my @x = (7, 8);
 print g(1), "\n";
 PL
-    my $err = `$pl2cl $pl 2>&1 >/dev/null`;
-    like($err, qr/file lexical 'x' captured by sub g/,
-         'a DIFFERENT-sigil use of the same bare name is still a capture');
+    is(run_cl($code), "g(1)[]\n",
+       'a DIFFERENT-sigil name declared AFTER the sub is the GLOBAL in it (#3806; probed: g(1)[])');
+    both_agree($code, '... and agrees with the perl on this box');
 }
+is(run_cl(<<'PL'), "g(1)[7 8]\n", 'a DIFFERENT-sigil file lexical declared BEFORE the sub is a genuine capture (probed: g(1)[7 8])');
+use feature "signatures";
+my @x = (7, 8);
+sub g ($x) { "g($x)[@x]" }
+print g(1), "\n";
+PL
 
 # ---- task #455: the pragma's OWN LINE is inside the feature's region ------
 #

@@ -14,9 +14,10 @@ package Pl::Binder;
 # Parser2 builds it once per document, before every requalify / rename pass.
 # PRODUCTION CONSUMER (1c port 1, s533b): the block-package requalifier asks
 # requalify_home for every token it might rewrite (docs/binder-dual-run-s525.md
-# §6 item 1).  STILL IN DUAL-RUN (ports 2-4): the hooks on _ref_shadowed and
-# _block_captures_name compare its verdict with the legacy one under
-# PCL_BINDER_CHECK and return the legacy verdict unchanged.
+# §6 item 1); the capture gate, the promoter and the nested-sub hoist ask
+# captures_name (1c port 2, s533d, §6 item 2).  STILL IN DUAL-RUN (ports 3-4):
+# the hook on _ref_shadowed compares its verdict with the legacy one under
+# PCL_BINDER_CHECK and returns the legacy verdict unchanged.
 #
 #   PCL_BINDER_CHECK=die   a disagreement dies, one line, both verdicts
 #   PCL_BINDER_CHECK=log   a disagreement appends one TSV row to
@@ -24,7 +25,7 @@ package Pl::Binder;
 #                          a binder ERROR is logged too, never fatal
 #   PCL_BINDER_TRACE=1     print every reference with its binding (STDERR)
 #   PCL_BINDER_INJECT=R    self-test: invert the binder's answer for resolver
-#                          R (ref_shadowed | block_captures) so
+#                          R (ref_shadowed) so
 #                          the die path can be exercised (Pl/t/binder-01.t)
 #
 # THE TABLE (one record per binding, perl's PADNAME + COP_SEQ_RANGE):
@@ -80,7 +81,10 @@ package Pl::Binder;
 #       Pl::Binder::for_node($p2, $n)   the binder answering about $n
 #       ->resolve($node, $canon)       the record visible at $node for $canon
 #       ->captures($block)             OUTER bindings read inside $block
-#       Pl::Binder::check(...)         the dual-run comparison (the two hooks)
+#       ->captures_name($n, $bare, $canons, eval => 1)  the capture question (s533d)
+#       ->has_string_eval($cv), ->eval_sees($b)  the string-eval CV fact (s533d)
+#       Pl::Binder::for_captures($p2, $n)  the binder answering the capture question
+#       Pl::Binder::check(...)         the dual-run comparison (the ref_shadowed hook)
 
 use strict;
 use warnings;
@@ -1013,8 +1017,9 @@ sub _rec_str {
   return "$b->{kind} $b->{name}" . ($d ? ' decl=' . ($d->line_number // '?') . ':' . ($d->column_number // '?') : '');
 }
 
-# THE COMPARISON.  $which: ref_shadowed | block_captures (binding_at was the
-# requalifier's; it asks the binder directly since s533b).
+# THE COMPARISON.  $which: ref_shadowed (binding_at was the requalifier's,
+# block_captures the capture gate's; they ask the binder directly since s533b /
+# s533d).
 sub check {
   my ($parser, $which, $legacy, @args) = @_;
   local ($!, $@);                           # inert: never leak errno / $@ to the parser
@@ -1024,8 +1029,7 @@ sub check {
   my $res = eval {
     my $b = _binder_for($parser, $node, $which, $pass) or return;
     $parser->{_binder}{calls}{$which}++;
-    my ($mine, $kind, $note) = $which eq 'ref_shadowed'   ? $b->_q_ref_shadowed(@args)
-                             : $which eq 'block_captures' ? $b->_q_block_captures(@args)
+    my ($mine, $kind, $note) = $which eq 'ref_shadowed' ? $b->_q_ref_shadowed(@args)
                              : die "PCL binder: unknown resolver `$which`\n";
     $mine = _invert($which, $mine) if ($ENV{PCL_BINDER_INJECT} // '') eq $which;
     my $same = !!$legacy == !!$mine;
@@ -1041,7 +1045,7 @@ sub check {
   }
   return if $res->[0];
   my (undef, $b, $mine, $kind, $note) = @$res;
-  my $extra = $which eq 'block_captures' ? $args[1] : $args[1] // '';
+  my $extra = $args[1] // '';
   my $key = join "\0", $b->{file}, $which, refaddr($node), $extra, _verdict_str($legacy), _verdict_str($mine);
   return if $SEEN{$key}++;
   my @row = ('D', $b->{file}, _line($node), _col($node), _short($node->content), $which,
@@ -1099,13 +1103,6 @@ sub _q_ref_shadowed {
   return (0, $b->{kind}, _rec_str($b) . ' (another segment)');
 }
 
-# _block_captures_name's question: does $block read bare name $bare (one of
-# $canons when given) through a lexical declared OUTSIDE it?
-sub _q_block_captures {
-  my ($self, $block, $bare, $canons) = @_;
-  return $self->captures_name($block, $bare, $canons, eval => 1);
-}
-
 # THE CAPTURE QUESTION (1c port 2): does $node (a sub body, a whole
 # Statement::Sub -- its signature included -- or any block) read the bare
 # name $bare (restricted to the canons in $canons when given) through a
@@ -1118,6 +1115,12 @@ sub captures_name {
   my ($self, $block, $bare, $canons, %opt) = @_;
   my ($a, $z) = ($self->_first_ord($block), $self->_last_ord($block));
   return (0, 'no-range', 'block not in the table') unless defined $a && defined $z;
+  # Every token of the node must be one the table holds: a token inserted
+  # since the build carries no record, and a use it spells would go uncounted
+  # (rule 12: the caller dies on `no-record`).  Checked once per node.
+  my $n = $self->{held}{ refaddr $block } //= do { my @t = $block->isa('PPI::Token') ? ($block) : $block->tokens; scalar @t };
+  return (0, 'no-record', ($n - ($z - $a + 1)) . ' token(s) the table does not hold')
+    if $n != $z - $a + 1;
   my (@why, %done);
   my @toks = grep { !$done{ refaddr $_ }++ } map { $_->{tok} } $self->_refs_in($a, $z);
   my $ntok = @toks;

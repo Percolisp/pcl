@@ -1759,9 +1759,10 @@ sub parse {
   $self->_classify_nested_gotos($doc);       # #1747
   # THE BINDER (s525q dual-run; PRODUCTION since s533b): built ONCE here,
   # before any requalify / rename pass, so it sees the names the source wrote.
-  # The block-package requalifier asks it (_requalify_home).  Under
-  # PCL_BINDER_CHECK the remaining dual-run hooks (_ref_shadowed,
-  # _block_captures_name) also assert against it (docs/binder-dual-run-s525.md).
+  # The block-package requalifier asks it (_requalify_home), and so do the
+  # capture gate, the promoter and the nested-sub hoist (_binder_captures_name,
+  # s533d).  Under PCL_BINDER_CHECK the remaining dual-run hook (_ref_shadowed)
+  # also asserts against it (docs/binder-dual-run-s525.md).
   require Pl::Binder;
   $self->{_binder} = Pl::Binder::build_for($self, $doc);
 
@@ -2395,7 +2396,7 @@ sub parse {
   # ---- Lower each segment into a section record.
   my @sections;
   for my $seg (@segments) {
-    $self->_cap_dual("gate", $seg->{stmts}[0], sub { $self->_check_sub_captures($seg->{stmts}); "ok" });
+    $self->_check_sub_captures($seg->{stmts});
     $self->cur_pkg($seg->{pkg});
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
@@ -3361,15 +3362,6 @@ sub _symbol_is_declarator {
 # its own (`my $y = 7; sub nm {$y} { our $y; $y = 3 }` wrote the LEXICAL),
 # which is the same one-cell-for-two-variables confusion #470 is about,
 # spelled with a declaration instead of a qualified name.
-sub _cap_dual_row {
-  my ($self, $consumer, $node, $ls, $bs) = @_;
-  s/\s+/ /g for $ls, $bs;
-  my $t = $node && ($node->isa("PPI::Token") ? $node : $node->first_token);
-  Pl::Binder::_row("F", $self->{_binder}{file}, $t ? $t->line_number // 0 : 0,
-                   $t ? $t->column_number // 0 : 0,
-                   Pl::Binder::_short($node ? $node->content : ""), $consumer, $ls, $bs);
-}
-
 # The dual-run hook (s525q): the legacy verdict is returned unchanged.
 sub _ref_shadowed {
   my $self = shift;
@@ -3624,22 +3616,6 @@ sub _signature_binds {
   return scalar grep { $_ eq $canon } _signature_left_params($tok);
 }
 
-# The signature of a Statement::Sub, in EITHER of the two shapes PPI produces
-# for the same source — and it produces both in one document.  With
-# `use feature "signatures"` in force on an earlier LINE, PPI lexes `($x)` as a
-# `PPI::Structure::Signature`; on the pragma's own line (and in a file that
-# never enables the feature) the same text is a `PPI::Token::Prototype`.  Every
-# other reader of this here — `_sub_signature_text`, `_is_pure_prototype` —
-# already accepts both, so this one does too rather than becoming the copy that
-# knows only half.  (That LINE dependence is itself task #455.)
-sub _sub_signature_canons {
-  my ($sub) = @_;
-  return () unless ref $sub && $sub->isa('PPI::Statement::Sub');
-  my ($sig) = grep { _is_signature_node($_) } $sub->schildren;
-  return () unless $sig;
-  return _signature_param_canons($sig->content);
-}
-
 sub _is_signature_node {
   my ($n) = @_;
   return ref($n) && ($n->isa('PPI::Structure::Signature')
@@ -3744,73 +3720,20 @@ sub _is_pure_prototype {
 # interpolation is now implemented in Pl/PExpr/StringInterpolation.pm —
 # lexically feature-scoped, shared by both pipelines.)
 
-# DOES THIS SUB CAPTURE THE OUTER BARE NAME $bare?  The one resolver the
-# three capture questions share — the file-lexical GATE
-# (`_check_sub_captures`), the PROMOTER's test (`_captured_in_subs`) and the
-# nested-sub hoist gate (`_hoist_nested_sub`).  A sub is its BLOCK *and* its
-# SIGNATURE, and until #485 every one of them looked at the block alone:
-#
-#     my $y = 5;  sub f ($x = $y) { $x }   print f();   # perl 5, PCL empty
-#
-# A signature DEFAULT is an expression evaluated inside the sub, so `$y` there
-# is a genuine capture of the file lexical — it just is not in the block, of
-# which the signature is a SIBLING.  Nobody saw it, so the lexical was never
-# promoted to a package cell and the default read an unbound name.
+# DOES THIS SUB CAPTURE THE OUTER BARE NAME $bare?  The one question the
+# capture consumers share -- the file-lexical GATE (`_check_sub_captures`),
+# the PROMOTER's test (`_captured_in_subs`) and the nested-sub hoist gate
+# (`_hoist_nested_sub`) -- asked of the WHOLE Statement::Sub, so its
+# SIGNATURE is in range: a DEFAULT is an expression evaluated inside the sub
+# (`my $y = 5; sub f ($x = $y) { $x }` captures $y, #485) and a PARAMETER is
+# the sub's own declaration (a body `$x` is the parameter, #454) -- both are
+# the binder's records, positional like perl's pad (a default sees the
+# parameters to its LEFT only).  Since s533d (1c port 2) the binder answers
+# (`_binder_captures_name`); the textual signature scan and its per-canon
+# patterns are gone.
 sub _sub_captures_name {
   my ($self, $sub, $bare, $canons) = @_;
-  return $self->_binder_captures_name($sub, $bare, $canons) if $self->{_cap_binder};
-  return 1 if $self->_signature_captures_name($sub, $bare, $canons);
-  # A SIGNATURE parameter is the sub's own declaration, so a BODY use of that
-  # canon is the parameter and never the outer lexical (#454).  Only the
-  # canons the signature declares are discounted: a file `my @x` with a `($x)`
-  # parameter still gates on the sub's `@x`.
-  my %sig = map { $_ => 1 } _sub_signature_canons($sub);
-  my $cs  = $canons;
-  if (%sig && $cs) {
-    my %left = map { $_ => $cs->{$_} } grep { !$sig{$_} } keys %$cs;
-    # Every canon of this bare name is a parameter: the block can only be
-    # talking about the parameters.
-    return 0 unless %left;
-    $cs = \%left;
-  }
-  # (%sig && !$cs: no canon information — the mention is unattributable and
-  # stays conservatively a capture, as before #454.)
-  return $self->_block_captures_name($sub->block, $bare, $cs);
-}
-
-# The DEFAULT half of `_sub_captures_name`.  Textual, because PPI hands the
-# same source over as a Structure::Signature or as one Token::Prototype
-# depending on where the feature pragma sits (#455) and only the text is
-# common to both.  Shadowing inside a signature is the left-parameter rule
-# `_signature_left_params` states, applied part by part; the patterns that
-# decide what a mention of the name LOOKS like are the shared
-# `_canon_text_patterns`, so this scan and the block scan cannot drift.
-sub _signature_captures_name {
-  my ($self, $sub, $bare, $canons) = @_;
-  return 0 unless ref $sub && $sub->can('schildren');
-  my ($sig) = grep { _is_signature_node($_) } $sub->schildren;
-  return 0 unless $sig;
-  return $self->_binder_captures_name($sig, $bare, $canons) if $self->{_cap_binder};
-  my $text = $sig->content;
-  return 0 unless Pl::Parser::proto_text_has_named_params($text);
-  return 0 unless $text =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;    # cheap early-out
-  my @left;
-  for my $part (_signature_part_defaults($text)) {
-    my ($canon, $default) = @$part;
-    if (defined $default && $default =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/) {
-      return 1 unless $canons;             # unattributable → conservatively a capture
-      my %shadow = map { $_ => 1 } @left;
-      my %live   = map { $_ => 1 } grep { !$shadow{$_} } keys %$canons;
-      if (%live) {
-        my $pat = _canon_text_patterns($bare, \%live);
-        for my $c (sort keys %$pat) {
-          return 1 if $default =~ $pat->{$c};
-        }
-      }
-    }
-    push @left, $canon if defined $canon;
-  }
-  return 0;
+  return $self->_binder_captures_name($sub, $bare, $canons);
 }
 
 sub _check_sub_captures {
@@ -3848,65 +3771,6 @@ sub _check_sub_captures {
   }
 }
 
-# Shadow-aware capture test — the precise replacement for the raw text scan
-# both capture gates used (`sub f { my $a = …; $a }` must NOT gate on an outer
-# $a: the sub's $a is its own shadow, not a capture).  True iff $block contains
-# a use of bare name $bare that resolves OUTSIDE the block:
-#   - a Symbol/ArrayIndex use is DISCOUNTED when a my/state declaration of the
-#     SAME canonical symbol inside the block strictly precedes it and the
-#     declaring statement's parent scope contains the use (Perl's shadowing
-#     rule; the RHS of the shadowing decl itself still sees the OUTER variable,
-#     so `my $a = $a + 1` inside the sub still counts as a capture);
-#   - declaration targets themselves are not uses;
-#   - any occurrence inside quoted/regex/heredoc text counts —
-#     interpolation and string eval reach names invisibly to token analysis
-#     (this includes non-interpolating quotes, which can feed `eval`);
-#   - `foreach my $x` loop-var decls are NOT recognized as shadows (they are
-#     Compound-statement tokens, not Statement::Variable) — over-fires → gate
-#     stays → v1; conservative, never a miscompile.
-# $canons (optional hashref of '$x'/'@x'/'%x'): restrict token uses to those
-# canonical symbols — a use of @a matters only when the live lexical IS @a.
-# Text matches are restricted by SIGIL SHAPE per canon (a text `$x->` can only
-# denote scalar $x; `$x[` an @x element; `$x{`/`@x{` the hash %x), so a
-# single-quoted '$x…' no longer gates a file whose only lexical is @x (my.t).
-# Whitespace is allowed before the subscript bracket: interpolation never has
-# it, but eval-fed single-quoted code can — over-fire keeps the gate (safe).
-# THE per-CANON text patterns for a bare name — the one copy, so the block
-# scan and the SIGNATURE scan (_signature_captures_name, #485) agree on what
-# a mention of `$x` / `@x` / `%x` looks like in text.  A mention can then be
-# attributed to one canonical variable and shadow-checked like a Symbol use
-# (M-F: `eval('$zzz')` under the sub's own preceding `my $zzz` refers to the
-# shadow — the eval capture alist binds it let-bound-first — not a capture of
-# the file lexical).  Without canon info the mention stays unattributable and
-# is conservatively a capture, as before.
-sub _canon_text_patterns {
-  my ($bare, $canons) = @_;
-  my %canon_pat;
-  if ($canons) {
-    if ($canons->{"\$$bare"}) {
-      my $u = join '|', qr/\$\Q$bare\E\b(?!\s*[\[\{])/, qr/\$\{\s*\Q$bare\E\s*\}(?![\[\{])/;
-      $canon_pat{"\$$bare"} = qr/$u/;
-    }
-    if ($canons->{"\@$bare"}) {
-      my $u = join '|',
-        qr/\@\Q$bare\E\b(?!\s*\{)/, qr/\$\Q$bare\E\s*\[/, qr/\$\#\Q$bare\E\b/,
-        qr/[\$\@]\{\s*\Q$bare\E\s*\}\s*\[/, qr/\@\{\s*\Q$bare\E\s*\}(?!\s*\{)/,
-        qr/\$\#\{\s*\Q$bare\E\s*\}/;
-      $canon_pat{"\@$bare"} = qr/$u/;
-    }
-    if ($canons->{"\%$bare"}) {
-      my $u = join '|',
-        qr/\%\Q$bare\E\b/, qr/[\$\@]\Q$bare\E\s*\{/,
-        qr/[\$\@]\{\s*\Q$bare\E\s*\}\s*\{/, qr/\%\{\s*\Q$bare\E\s*\}/;
-      $canon_pat{"\%$bare"} = qr/$u/;
-    }
-  } else {
-    # canon unknown → unattributable, never discounted
-    $canon_pat{''} = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
-  }
-  return \%canon_pat;
-}
-
 # THE CAPTURE QUESTION ON THE BINDER (s533d, 1c port 2): does $node (a sub
 # body, a whole Statement::Sub with its signature, a Token::Prototype, any
 # block) read $bare (one of the canons in $canons when given) through a
@@ -3921,196 +3785,21 @@ sub _binder_captures_name {
   my ($v, $kind) = $b ? $b->captures_name($node, $bare, $canons, eval => 1) : (0, 'no-binder');
   die "PCL internal: the binder holds no record of the block at line "
     . (eval { $node->line_number } // '?') . " ($kind) -- the capture question about"
-    . " '$bare' cannot be answered\n" if $kind =~ /^no-(?:range|binder)$/;
+    . " '$bare' cannot be answered\n" if $kind =~ /^no-(?:range|binder|record)$/;
   return $v;
 }
 
-# D0 (s533d) -- TEMPORARY: under PCL_BINDER_CHECK=log each capture CONSUMER
-# computes its final answer twice, legacy and binder, and logs an F row when
-# they differ.  The legacy answer is returned.  Deleted with the legacy chain.
-sub _cap_dual {
-  my ($self, $consumer, $node, $code) = @_;
-  my $mode = ($self->{_binder} && $self->{_binder}{mode}) // '';
-  return $code->() if $mode ne 'log' || $self->{_cap_binder};
-  my @legacy = eval { $code->() };
-  my $lerr = $@;
-  my @bind = do { local $self->{_cap_binder} = 1; local $@; my @r = eval { $code->() }; $@ ? ("DIE:$@") : @r };
-  my $ls = $lerr ? "DIE:$lerr" : join(',', map { $_ // 'u' } @legacy);
-  my $bs = join(',', map { $_ // 'u' } @bind);
-  s/\s+/ /g for $ls, $bs;
-  $self->_cap_dual_row($consumer, $node, $ls, $bs) if $ls ne $bs;
-  die $lerr if $lerr;
-  return wantarray ? @legacy : $legacy[0];
-}
-
-# The dual-run hook (s525q): the legacy verdict is returned unchanged.
+# THE BLOCK FORM of the capture question: a sub BODY, an anonymous sub's
+# block, a block inside an initializer (`_init_reads_scalar`,
+# `_cond_mys_closure_captured`).  The same binder query as `_sub_captures_name`
+# over the block's range.  (s533d: this replaced `_block_captures_name_0`, a
+# private scope walk with two loops and per-canon TEXT patterns that missed a
+# `my` nested in a call's argument list (#3802) and counted a later `my` as
+# visible in an earlier sub (#3806).)
 sub _block_captures_name {
-  my $self = shift;
-  return $self->_binder_captures_name(@_) if $self->{_cap_binder};
-  my $v = $self->_block_captures_name_0(@_);
-  Pl::Binder::check($self, 'block_captures', $v, @_)
-    if $self->{_binder} && $self->{_binder}{mode};
-  return $v;
-}
-
-sub _block_captures_name_0 {
   my ($self, $block, $bare, $canons) = @_;
-  # `(?:\{\s*)?`: the braced spelling `${x}` / `@{x}` / `$#{x}`, in code or in a
-  # string, is a mention too -- without it the early-out answered "no capture"
-  # and the sub silently read the package variable (task #2645).
-  my $re = qr/(?:[\$\@\%]|\$\#)(?:\{\s*)?\Q$bare\E\b/;
-  my %canon_pat = %{ _canon_text_patterns($bare, $canons) };
-  my @heredocs = @{ $block->find('PPI::Token::HereDoc') || [] };
-  # Cheap early-out: the bare name appears nowhere in the text (common case).
-  return 0 unless $block->content =~ $re
-    || grep { join('', $_->heredoc) =~ $re } @heredocs;
-
-  # my/state declarations of the bare name inside the block:
-  # canon → [shadowing scope, ord of the decl's last token]; plus the
-  # declaring Symbol tokens themselves (declaration targets, not uses).
-  my (%decl, %decl_tok, %ord);
-  my $i = 0;
-  $ord{ refaddr $_ } = $i++ for $block->tokens;
-  for my $d (@{ $block->find('PPI::Statement::Variable') || [] }) {
-    my @k = _strip_semi($d->schildren);
-    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
-      && $k[0]->content =~ /^(?:my|state)$/;
-    my @tgt = $k[1]->isa('PPI::Token::Symbol')   ? ($k[1])
-            : $k[1]->isa('PPI::Structure::List')
-              ? (grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
-            : ();
-    my $last = $ord{ refaddr( ($d->tokens)[-1] ) };
-    for my $t (@tgt) {
-      next unless substr($t->content, 1) eq $bare;
-      $decl_tok{ refaddr $t } = 1;
-      push @{ $decl{ $t->content } }, [$d->parent, $last];
-    }
-  }
-  # `for/foreach my $x (LIST) BLOCK` — the loop-head `my $x` shadows for the
-  # BLOCK only (the LIST still sees the outer variable, so a use there stays
-  # a capture).  E4.1 M6, s353: without this the head decl was invisible
-  # (it is Compound tokens, not a Statement::Variable) and a sub whose loop
-  # var merely shares a file lexical's name gated the whole file to v1.
-  for my $c (@{ $block->find('PPI::Statement::Compound') || [] }) {
-    my @k = $c->schildren;
-    for my $j (0 .. $#k - 2) {
-      next unless $k[$j]->isa('PPI::Token::Word')
-        && $k[$j]->content =~ /^(?:for|foreach)$/
-        && $k[$j+1]->isa('PPI::Token::Word') && $k[$j+1]->content eq 'my'
-        && $k[$j+2]->isa('PPI::Token::Symbol');
-      my $t = $k[$j+2];
-      last unless substr($t->content, 1) eq $bare;
-      my ($blk) = grep { $_->isa('PPI::Structure::Block') } @k[$j+3 .. $#k];
-      last unless $blk;
-      $decl_tok{ refaddr $t } = 1;
-      push @{ $decl{ $t->content } }, [$blk, $ord{ refaddr $t }];
-      last;
-    }
-  }
-
-  # A `my`/`state` declaration EMBEDDED in some other statement.  Perl allows
-  # one anywhere an expression goes, and two spellings matter here:
-  #   `die "…" unless my ($how, $first) = /…/;`  — a statement MODIFIER: the
-  #      names live from the end of that STATEMENT to the end of the block;
-  #   `if (my $x = f()) { … }` / `while (my $l = <$fh>) { … }` — the names
-  #      live in the compound statement (its blocks), not after it.
-  # Neither is a PPI::Statement::Variable, so the scan above was blind to
-  # both, and a sub's OWN lexical then read as a capture of a same-named file
-  # lexical — op/getppid.t gated its whole file on exactly that (#254 A-i).
-  # Same class of blind spot M6 closed for the `for my $x (…)` loop head, and
-  # the same rule as everywhere else: the pass that DETECTS a capture and the
-  # scoping the program actually has must agree.
-  for my $w (@{ $block->find('PPI::Token::Word') || [] }) {
-    next unless $w->content =~ /^(?:my|state)$/;
-    my $pv = $w->sprevious_sibling;
-    # `for my $x (…)` — handled above, with the narrower block-only scope.
-    next if $pv && $pv->isa('PPI::Token::Word')
-      && $pv->content =~ /^(?:for|foreach)$/;
-    my $nx = $w->snext_sibling or next;
-    my @tgt = $nx->isa('PPI::Token::Symbol') ? ($nx)
-            : $nx->isa('PPI::Structure::List')
-              ? (grep { $_->isa('PPI::Token::Symbol') } $nx->tokens)
-            : ();
-    next unless grep { substr($_->content, 1) eq $bare } @tgt;
-    # The statement the declaration sits in, innermost-first.
-    my $stmt;
-    for (my $p = $w->parent; $p; $p = $p->parent) {
-      if ($p->isa('PPI::Statement')) { $stmt = $p; last }
-      last if refaddr($p) == refaddr($block);
-    }
-    next unless $stmt;
-    next if $stmt->isa('PPI::Statement::Variable');   # already scanned above
-    # In a compound statement's HEAD the names scope to that statement (its
-    # blocks); anywhere else they scope to the rest of the enclosing block.
-    my $head = $stmt->parent;
-    my ($scope, $last) =
-      ($head && ($head->isa('PPI::Structure::Condition')
-                 || $head->isa('PPI::Structure::For')) && $head->parent)
-        ? ($head->parent,  $ord{ refaddr( ($head->tokens)[-1] ) })
-        : ($stmt->parent,  $ord{ refaddr( ($stmt->tokens)[-1] ) });
-    next unless $scope && defined $last;
-    for my $t (@tgt) {
-      next unless substr($t->content, 1) eq $bare;
-      $decl_tok{ refaddr $t } = 1;
-      push @{ $decl{ $t->content } }, [$scope, $last];
-    }
-  }
-
-  my $shadowed = sub {
-    my ($tok, $canon) = @_;
-    my $u = $ord{ refaddr $tok };
-    return 0 unless defined $u;
-    for my $dd (@{ $decl{$canon} || [] }) {
-      my ($scope, $dlast) = @$dd;
-      next unless $dlast < $u;                    # decl strictly precedes use
-      next unless $scope;                         # decl's enclosing scope
-      for (my $p = $tok->parent; $p; $p = $p->parent) {
-        return 1 if refaddr($p) == refaddr($scope);
-        last if refaddr($p) == refaddr($block);
-      }
-    }
-    return 0;
-  };
-
-  # A CODE-level `${x}` / `@{x}` / `%{x}` / `$#{x}`: a Word in a Cast's Block,
-  # no Symbol token -- the ONE helper the span pass and the rewriter read
-  # (task #2645).
-  for my $p (@{ _brace_name_refs($block) }) {
-    my ($w, $canon) = @$p;
-    next unless $canon =~ /^[\$\@\%]\Q$bare\E$/;
-    next if $canons && !$canons->{$canon};
-    return 1 unless $shadowed->($w, $canon);
-  }
-
-  for my $t ($block->tokens) {
-    if ($t->isa('PPI::Token::Symbol')) {
-      next if $decl_tok{ refaddr $t };
-      my $canon = $t->symbol;
-      next unless $canon =~ /^[\$\@\%]\Q$bare\E$/;
-      next if $canons && !$canons->{$canon};
-      return 1 unless $shadowed->($t, $canon);
-    } elsif ($t->isa('PPI::Token::ArrayIndex')) {
-      next unless $t->content eq "\$#$bare";
-      next if $canons && !$canons->{"\@$bare"};
-      return 1 unless $shadowed->($t, "\@$bare");
-    } elsif ($t->isa('PPI::Token::HereDoc')) {
-      my $txt = join('', $t->heredoc);
-      for my $c (sort keys %canon_pat) {
-        next unless $txt =~ $canon_pat{$c};
-        return 1 if !length($c) || !$shadowed->($t, $c);
-      }
-    } elsif ($t->isa('PPI::Token::Quote')
-          || $t->isa('PPI::Token::QuoteLike')
-          || $t->isa('PPI::Token::Regexp')) {
-      for my $c (sort keys %canon_pat) {
-        next unless $t->content =~ $canon_pat{$c};
-        return 1 if !length($c) || !$shadowed->($t, $c);
-      }
-    }
-  }
-  return 0;
+  return $self->_binder_captures_name($block, $bare, $canons);
 }
-
 
 # Shared fact scan for the W5/W10 lexical-rename passes.  Accumulates into
 # $f (so callers can scan one segment or the whole file):
@@ -5463,9 +5152,10 @@ sub _promote_captured {
   # for both PPI spellings (the program has already taken it; a non-program
   # unit falls back to it here).
   for my $psub (@psubs) {
-    next unless grep { $_->isa('PPI::Token::Prototype') } $psub->schildren;
+    my ($proto) = grep { $_->isa('PPI::Token::Prototype') } $psub->schildren;
+    next unless $proto;
     return $refuse->('signature default in an unrewritable Token::Prototype')
-      if $self->_cap_dual("protosig:$canon", $psub, sub { $self->_signature_captures_name($psub, $bare, { $canon => 1 }) ? 1 : 0 });
+      if $self->_binder_captures_name($proto, $bare, { $canon => 1 });
   }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
@@ -5620,21 +5310,6 @@ sub _reg_captures {
 # cell it is about to mint.  Absent -> the ordinary first-hit answer, unchanged.
 sub _captured_in_subs {
   my ($self, $subs, $canon, $extent, $found) = @_;
-  my $fmt = sub { my ($v, $l) = @_; join(" ", $v, map { ($_->name // "?") . "@" . ($_->line_number // 0) } @$l) };
-  my @lf;
-  my $lv = $self->_captured_in_subs_0($subs, $canon, $extent, \@lf);
-  if ((($self->{_binder} && $self->{_binder}{mode}) // "") eq "log" && !$self->{_cap_binder}) {
-    my @bf;
-    my $bv = do { local $self->{_cap_binder} = 1; eval { $self->_captured_in_subs_0($subs, $canon, $extent, \@bf) } // "DIE:$@" };
-    my ($ls, $bs) = ($fmt->($lv, \@lf), $fmt->($bv, \@bf));
-    $self->_cap_dual_row("promote:$canon", $subs->[0] // $extent, $ls, $bs) if $ls ne $bs;
-  }
-  push @$found, @lf if $found;
-  return $lv;
-}
-
-sub _captured_in_subs_0 {
-  my ($self, $subs, $canon, $extent, $found) = @_;
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   for my $sub (@$subs) {
     next if $extent && !_elem_within($sub, $extent);
@@ -5667,45 +5342,21 @@ sub _captured_in_subs_0 {
 # alist puts let-bound pairs first, so a cell nested inside the outer
 # lexical's scope could never win the by-name lookup; the caller then keeps
 # the eval refusals for this (rare) shape instead of registering a pair.
-# Only DIRECT children of enclosing blocks/document count (same-level decls);
-# a decl inside a sibling block is a different, non-overlapping scope.
-# An enclosing decl ALREADY RENAMED by an earlier pass instance (its content
-# is now `$x__file__0`/`$x__lex__2`/…) still counts: it declares the same
-# bare name in an enclosing scope, and the outer/inner precedence problem is
-# identical.  Without the suffix-strip, promotion order decides whether the
-# refusal fires (outer-promotes-first hid the decl from this scan — the encl
-# probe's silent "2 2" miscompile, s295).
+# The BINDER answers (s533d, 1c port 2): the binding of `$bare` visible where
+# the extent opens, a `my` / `state` declared outside it -- perl's pad, so a
+# same-name `my` declared AFTER the extent (eval.t's `my $got`) or in a
+# sibling block does not count, and one an earlier pass already renamed
+# (`$x__file__0`) still does (the binder answers about the program as
+# written; the s295 "2 2" probe).  It replaced a scope walk over the
+# enclosing blocks' statement-level declarations.
 sub _enclosing_lex_decl {
   my ($self, $extent, $bare) = @_;
-  return $self->_cap_dual("enclosing:\$$bare", $extent, sub { $self->_enclosing_lex_decl_0($extent, $bare) }) ? 1 : 0;
-}
-
-sub _enclosing_lex_decl_0 {
-  my ($self, $extent, $bare) = @_;
-  if ($self->{_cap_binder}) {
-    return 0 unless $extent;
-    my $b = Pl::Binder::for_captures($self, $extent);
-    my $r = $b && $b->resolve($extent, "\$$bare");
-    return ($r && $r->{kind} =~ /^(?:my|state)$/) ? 1 : 0;
-  }
   return 0 unless $extent;
-  for (my $p = $extent->parent; $p; $p = $p->parent) {
-    next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
-    for my $st (grep { $_->isa('PPI::Statement::Variable') } $p->schildren) {
-      my @k = _strip_semi($st->schildren);
-      next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
-        && $k[0]->content =~ /^(?:my|state)$/;
-      my @syms = $k[1]->isa('PPI::Token::Symbol') ? ($k[1])
-               : $k[1]->isa('PPI::Structure::List')
-                 ? (grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
-               : ();
-      return 1 if grep {
-        (my $n = $_->content) =~ s/__(?:file|lex|shadow|cond)__\d+$//;
-        $n eq "\$$bare"
-      } @syms;
-    }
-  }
-  return 0;
+  my $b = Pl::Binder::for_captures($self, $extent);
+  die "PCL internal: the binder holds no record of the block at line "
+    . ($extent->line_number // '?') . " -- the eval-pair test for \$$bare cannot be answered\n" unless $b;
+  my $r = $b->resolve($extent, "\$$bare");
+  return ($r && $r->{kind} =~ /^(?:my|state)$/) ? 1 : 0;
 }
 
 # M-F (s295 ALIAS rule, ir-spec §9.1): make a renamed (mangled) SCALAR cell
@@ -10138,7 +9789,6 @@ sub _hoist_nested_sub {
     (my $bare = $var) =~ s/^[\$\@\%]//;
     $by_bare{$bare}{$var} = 1;
   }
-  $self->_cap_dual("hoist", $sub, sub {
   for my $bare (sort keys %by_bare) {
     # W5's exemption, which this sibling scan was missing (task #347): a name
     # already PROMOTED to a package-level cell is legitimately captured — the
@@ -10152,7 +9802,6 @@ sub _hoist_nested_sub {
     die "Parser2 TODO: lexical '$bare' possibly captured by nested sub " . $sub->name . "\n"
       if $self->_sub_captures_name($sub, $bare, $by_bare{$bare});
   }
-  "ok" });
   push @{ $self->{_hoisted_decls} },
     Pl::Parser::declare_sub_form($self->_sub_name_for_emission($sub->name), 1);
   push @{ $self->{_hoisted_defs} }, $self->_lower_sub($sub);
@@ -14988,11 +14637,6 @@ sub _fallback_stmt_capture {
 # answers 1: the use resolves outside the block.
 sub _init_reads_scalar {
   my ($self, $init, $name) = @_;
-  return $self->_cap_dual("init:$name", $init->[0], sub { $self->_init_reads_scalar_0($init, $name) });
-}
-
-sub _init_reads_scalar_0 {
-  my ($self, $init, $name) = @_;
   (my $bare = $name) =~ s/^\$//;
   my (%inblk, @blocks);
   for my $el (@$init) {
@@ -15141,12 +14785,6 @@ sub _strip_decl_decorations {
 # variable per iteration; every other loop keeps one binding (its emission is
 # unchanged).  The capture test is the one the declaration paths use.
 sub _cond_mys_closure_captured {
-  my ($self, $names, $kids) = @_;
-  my @r = $self->_cap_dual("condmys", $kids->[0], sub { $self->_cond_mys_closure_captured_0($names, $kids) });
-  return @r;
-}
-
-sub _cond_mys_closure_captured_0 {
   my ($self, $names, $kids) = @_;
   my @sc = grep { /^\$/ } @$names or return ();
   my @subs;

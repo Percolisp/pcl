@@ -73,14 +73,16 @@ ok(binds($out, '11:22', '$cap', 'my', '$cap', '11:4'), 'a named sub reads (captu
 
 # INVERSE: an injected wrong answer must DIE at the hook with both verdicts.
 my $inj = "$dir/inj.pl";
-# (s533b: the requalifier's binding_at hook is GONE -- the requalifier asks the
-# binder itself -- so the inverse row now inverts block_captures, the capture
-# scan's question: a named sub reading a file `my` IS a capture, legacy=1.)
+# (s533b: the requalifier's binding_at hook is GONE; s533d: the capture
+# scan's block_captures hook is GONE too -- both ask the binder themselves --
+# so the inverse row inverts ref_shadowed, the last dual-run hook: promoting
+# the captured block `my $c` (block extent: the MANGLED path) asks, for each later use, whether a shadow scopes
+# it; the use in `r` is NOT shadowed, legacy=0, the injected binder says 1.)
 open my $ifh, '>', $inj or die;
-print $ifh "my \$c = 1; sub r { \$z = \$c; }\nr();\n"; close $ifh;
-my $err = `PCL_BINDER_CHECK=die PCL_BINDER_INJECT=block_captures $^X $root/pl2cl $inj 2>&1 >/dev/null`;
+print $ifh "{ my \$c = 1; sub r { \$z = \$c; } }\nr();\n"; close $ifh;
+my $err = `PCL_BINDER_CHECK=die PCL_BINDER_INJECT=ref_shadowed $^X $root/pl2cl $inj 2>&1 >/dev/null`;
 my $irc = $? >> 8;
-ok($irc != 0 && $err =~ /PCL binder: block_captures disagrees at \S+ line 1 col \d+ `\{ \$z = \$c; \}` \(c\): legacy=1 binder=0 \[my\]/,
+ok($irc != 0 && $err =~ /PCL binder: ref_shadowed disagrees at \S+ line 1 col \d+ `\$c` \(\$c\): legacy=0 binder=1 \[\w+\]/,
    'PCL_BINDER_INJECT: a disagreement DIES naming both verdicts') or diag "rc=$irc\n$err";
 
 done_testing();
