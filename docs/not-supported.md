@@ -1315,12 +1315,15 @@ DROPS until #872, honest failures since.
 `write()` fills it in and sends it to a filehandle.  `$^A` accumulates
 the formatted text.
 
-**PCL behaviour:** Not implemented.  A `format NAME = … .` block is **stripped at
-the source level** (`_preprocess_source`, session 2026-06-25) so it does nothing
-but, crucially, does not corrupt the surrounding code — PPI does not recognise the
-`format` keyword and otherwise swallows the picture lines *and the following
-statement* into one bogus statement, surfacing the `.` terminator as an unknown
-operator (a PARSE ERROR that loses the next real statement).  `write()` is a
+**PCL behaviour:** Not implemented.  A `format NAME = … .` declaration **does
+nothing**, and, crucially, does not corrupt the surrounding code: PCL's PPI
+(vendor/PPI, `docs/ppi-upstream-bugs.md` §40, s532e) reads the picture and
+argument lines as one `PPI::Token::Format` and ends the statement with it, and
+`Pl::Parser::_elide_format_declarations` takes that statement out of the parsed
+document, leaving its newlines so line numbers stay perl's.  (Before s532e a
+line-based SOURCE pass blanked the lines first, because upstream PPI swallows
+the picture lines *and the following statement* into one bogus statement; it
+also blanked format-shaped text inside here-docs and strings.)  `write()` is a
 no-op runtime stub returning `1` (Perl's success value) rather than an
 undefined-function crash.  The format-control specials exist as writable globals
 with Perl-like defaults (`$~`→`"STDOUT"`, `$^`→`"STDOUT_TOP"`, `$=`→60, `$-`/`$%`
@@ -1328,9 +1331,11 @@ with Perl-like defaults (`$~`→`"STDOUT"`, `$^`→`"STDOUT_TOP"`, `$=`→60, `$
 values that Perl updates *as a side effect of writing* (e.g. `$-` lines-left)
 stay at their defaults.
 
-A header the stripper does not match — a quoted or package-qualified name
-(`format 'one =`, `format ::two =`, `format +x =`) — reaches the parser and
-loses its statement.  Since s415 (task #371) that case **refuses** instead — and since s466
+PCL's PPI takes a quoted or package-qualified name (`format 'one =`,
+`format ::two =`) as the declaration's name.  A `format` statement PPI does
+not read as a declaration -- the header not alone on its line, or not where a
+statement starts -- reaches the parser and loses its statement.  Since s415
+(task #371) that case **refuses** instead — and since s466
 (task #1037) the refusal is [STATEMENT-level](#the-shape-of-a-ruled-refusal-ruled-s465-by-the-user-task-1037):
 the file transpiles and only that statement dies, when it is reached:
 

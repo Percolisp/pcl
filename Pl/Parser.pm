@@ -381,58 +381,34 @@ sub _preprocess_source {
   # and the lookahead requires the declarator context (whitespace then a sigil
   # or `(`), so only an actual `CORE::my $x` / `CORE::our (@a)` form is rewritten.
   $src =~ s/($skip_re)|(?<![\w\$\@\%:])CORE::(my|our|state|local)\b(?=\s*[\$\@\%\(])/ defined $1 ? $1 : $2 /ge;
-  $src = _strip_format_blocks($src);
   return $src;
 }
 
-# Remove `format NAME = … .` report templates.  `format`/`write` are
-# deliberately not-supported (docs/not-supported.md), but PPI does not
-# recognise the keyword: it swallows the picture lines AND the following
-# statement into one bogus PPI::Statement, so the `.` terminator surfaces as an
-# unknown Operator and the next real statement is lost — the very corruption
-# this exists to prevent.
-#
-# LINE-ANCHORED, not a regex over the whole file (s415).  The regex version
-# tried to protect string literals with a leading `($str_re)|` alternative, and
-# that heuristic is not merely imperfect, it is WRONG at scale: a quote
-# character inside a regex (`qr/Undefined format "…"/`), inside a format
-# PICTURE line, or an apostrophe pair across two comments (`# doesn't` … `#
-# that's`) opens a "string" that swallows the next format header.  Measured
-# before this change: t/op/write.t stripped 39 of its 104 formats, and the 65
-# survivors each ate the statement after them; t/op/closure.t (267 passing
-# rows), t/comp/parser.t, t/op/gv.t and t/uni/gv.t each lost one the same way.
-#
-# perl's own rule is line-based — a header line ending at `=`, a body, a line
-# holding just `.` — so this reads it that way and cannot be confused by
-# quoting.  What it gives up is the one-line-string guard, which cost nothing
-# real: a header must OWN its line, so only a multi-line string containing a
-# line `format X =` AND a later line `.` could be touched; the safety valve
-# below (no terminator within 500 lines ⇒ leave everything alone) bounds even
-# that.  The NAME is anything up to the `=`: perl takes a qualified name in
-# either spelling and a non-ASCII one (`format ::two =`, `format 'one =`,
-# `format Ẋ =`, `format +x =`, and bare `format =` for STDOUT).
-#
-# Removed lines become EMPTY lines rather than disappearing, so every later
-# line keeps its number and a diagnostic points where perl would point.
-sub _strip_format_blocks {
-  my ($src) = @_;
-  return $src unless $src =~ /^[ \t]*format\b/m;
-  my @lines = split /^/, $src;
-  my $i = 0;
-  while ($i < @lines) {
-    unless ($lines[$i] =~ /^[ \t]*format(?:[ \t]+[^\n=]+)?[ \t]*=[ \t]*\r?\n?$/) {
-      $i++;
-      next;
-    }
-    my ($end, $limit) = (undef, $i + 500 < $#lines ? $i + 500 : $#lines);
-    for my $j ($i + 1 .. $limit) {
-      if ($lines[$j] =~ /^\.[ \t]*\r?\n?$/) { $end = $j; last }
-    }
-    if (!defined $end) { $i++; next }   # no terminator in sight: not a format
-    $lines[$_] = "\n" for $i .. $end;
-    $i = $end + 1;
+# `format NAME = … .` report templates are not supported (docs/not-supported.md
+# "format / write"): a declaration does nothing.  PCL's PPI builds one as its
+# own statement -- Word `format`, the name, `=`, and a PPI::Token::Format
+# holding the picture and argument lines up to the `.` line (vendor/PPI,
+# docs/ppi-upstream-bugs.md §40) -- so the statement is taken out of the
+# document HERE, at the one place every document is parsed, and replaced by
+# the newlines it spanned, so that every later line keeps its number and a
+# diagnostic points where perl would point.  (Until s532e a line-anchored
+# SOURCE pass, `_strip_format_blocks`, blanked the lines before PPI saw them,
+# because PPI lexed the body as code and swallowed the next statement; it also
+# blanked format-shaped lines inside here-docs and strings, which this does
+# not.)
+sub _elide_format_declarations {
+  my ($doc) = @_;
+  my $formats = $doc->find('PPI::Token::Format') or return;
+  for my $body (@$formats) {
+    my $stmt = $body->parent;
+    next unless $stmt && $stmt->isa('PPI::Statement')
+             && $stmt->schild(0) && $stmt->schild(0)->content eq 'format';
+    my $lines = () = $stmt->content =~ /\n/g;
+    $stmt->insert_before(PPI::Token::Whitespace->new("\n" x $lines))
+      if $lines;
+    $stmt->remove;
   }
-  return join '', @lines;
+  return;
 }
 
 # PCL's PPI lexes a SPACED scalar (`$ bits`, docs/ppi-upstream-bugs.md §39)
@@ -816,6 +792,7 @@ sub _ppi_parse {
     my $redo  = _ppi_new($fixed, %opt);   # the seed applies to the reparse too
     $doc = $redo if $redo;
   }
+  _elide_format_declarations($doc) if $doc;
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
   _canonical_spaced_symbols($doc, $src) if $doc;

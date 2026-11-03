@@ -2366,6 +2366,8 @@ blanks the format's lines in the SOURCE before PPI sees it (formats are
 not-supported, `docs/not-supported.md`).  Registry §40, checker
 `format-body-lexed-as-code`; task #3745.
 
+**FIXED on PCL's PPI branch** (s532e: group AU, commit `1ff6ccd8` on branch `pcl`, vendored as vendor/PPI -- a new `PPI::Token::Format` holds the picture and argument lines up to and including the `.` line, like a Pod token its section: when the word `format` starts a statement and the rest of its line is `[NAME] =`, `Tokenizer::_format_declaration` makes that line's tokens itself (the name as one Word -- perl takes `'one` and `::two` there) and the next line starts the body; the Lexer ends the statement after the Format token, and a statement starts after it); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AU.md`).  PCL's SOURCE pass `Pl::Parser::_strip_format_blocks` is DELETED; `_elide_format_declarations` takes the format statement out of the parsed document and leaves its newlines (line numbers unchanged).  Emission identical for the files the stripper read right (t/op/gv.t, t/op/rt119311.t, t/uni/gv.t, t/op/closure.t); it changes where the line-based stripper blanked text that was not a format: format-shaped lines inside here-docs, strings and a regex code block are kept (t/op/write.t's fresh_perl programs and three `eval` strings, t/comp/parser.t's `(?{ format = ... })`), and the code a mis-stripped span had wiped comes back (t/op/write.t lines 1930-1956).  Guard `Pl/t/format-skip-01.t`.
+
 ---
 
 ## 41. A name with an EMPTY package segment (`foo::::bar`) is split into two Words  [CONFIRMED 1.291 and PCL's branch a2fa26a0]

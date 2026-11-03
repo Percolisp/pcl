@@ -9,7 +9,8 @@
 # close()/select() must not crash the program.
 #
 # Regression for the t/io/defout.t work (2026-06-25):
-#   - `format NAME = ... .` is stripped at the source level (PPI otherwise
+#   - `format NAME = ... .` does nothing (PCL's PPI reads it as one statement,
+#     docs/ppi-upstream-bugs.md §40; it was stripped at the source level, PPI otherwise
 #     swallows the next statement into the format and parse-errors on the `.`).
 #   - write() is a no-op stub returning 1 (not an undefined-function crash).
 #   - close() with no args is a success no-op (not an arg-count crash).
@@ -54,7 +55,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 6;
+plan tests => 8;
 
 # A format block must not eat the statement that follows it.
 my $with_format = <<'END';
@@ -87,3 +88,14 @@ is run_cl('sub f { my ($x,$y)=@_; print "y=", (defined $y?$y:"U"), "\n"; }
 is run_cl('my $s = "format X =\nbody\n.\n"; print length($s) > 0 ? "kept\n" : "lost\n";'),
     "kept\n",
     'format-like text inside a string literal is not stripped';
+
+# §40 / #3745 (s532e): PCL's PPI reads a format body as ONE token and ends
+# the declaration with it; Pl::Parser::_elide_format_declarations takes the
+# statement out of the document, leaving its newlines.  The SOURCE stripper it
+# replaced blanked format-shaped lines inside here-docs and strings too.
+is run_cl(qq{my \$s = <<'E';\nformat X =\nab\n.\nE\nprint \$s;\nprint "end\\n";\n}),
+    "format X =\nab\n.\nend\n",
+    'a format-shaped here-doc body is text, not a format';
+is run_cl(qq{{\n    format 'one =\nab\n.\n}\nformat ::two =\n\@<<\n\$x\n.\nformat A=\n.\nprint __LINE__, "\\n";\n}),
+    "12\n",
+    'three formats (a quoted name in a block, a ::name, no space): the code after them runs, line numbers kept';

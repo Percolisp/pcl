@@ -638,9 +638,9 @@ print g(), "\\n";
    tasks => [3744] },
  { id => 40, kind => 'token', dump => 'tokens',
    title => 'A FORMAT body (`format NAME =` ... a lone `.`) is tokenized as code, where perl reads picture text (scan_formline)',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XSTATE', class => 'Word', content => 'format', pred => '', check => 'format-body-lexed-as-code' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_strip_format_blocks' },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser::_strip_format_blocks (s532e: PPI fixed on the branch); the format statement is taken out of the document by Pl::Parser::_elide_format_declarations', commit => '1ff6ccd8', group => 'AU', pr => undef },
    repro => 'format STDOUT =
 hello world
 .

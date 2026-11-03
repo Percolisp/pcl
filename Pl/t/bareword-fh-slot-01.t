@@ -423,7 +423,7 @@ delete $ENV{PCL_OPT};
 
 # `write(BAREWORD)` is the same slot family and it broke the stub's OWN
 # promise.  `p-write` is a no-op returning 1 — format/write templates are
-# blessed not-supported and stripped at the source level — and its docstring
+# blessed not-supported and a declaration does nothing — and its docstring
 # says so "rather than crashing, so a stray write() call does not abort the
 # whole program".  It aborted anyway, because the ARGUMENT was a bare CL
 # symbol: `t/op/write.t` died at `The variable OUT is unbound` with 477 rows

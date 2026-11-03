@@ -264,6 +264,7 @@ our @TRANSITIONS = (
  [ 'Attribute',        '',                        '*',    '=',              'yyl_colon 6124 attribute list' ],
  [ 'Unknown',          '',                        '*',    'XOPERATOR',      '(PPI gave up on this text: the contradiction row says so)' ],
  [ 'Separator',        '',                        '*',    '&end',           'yyl_data_handle 6996: __END__/__DATA__ end the code' ],
+ [ 'Format',           '',                        '*',    'XSTATE',         'scan_formline: a format body ends the declaration (PCL PPI §40; FORMAT skips it)' ],
 );
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1134,6 +1135,14 @@ sub _skip_format {
   my $toks = $c->{toks};
   my $line = $c->{t}->line_number;
   my $end;
+  # PCL's PPI (§40, s532e) holds the body in ONE PPI::Token::Format that ends
+  # the statement: skip the header to it, no contradiction.
+  for my $j ($c->{i} + 1 .. $#$toks) {
+    last if $toks->[$j]->line_number > $line + 1;
+    next unless $toks->[$j]->isa('PPI::Token::Format');
+    $w->{skip}{$_} = 1 for $c->{i} + 1 .. $j;
+    return _set($w, 'XSTATE');
+  }
   for my $j ($c->{i} + 1 .. $#$toks) {
     my $u = $toks->[$j];
     next if $u->line_number <= $line;
