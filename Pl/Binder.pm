@@ -111,7 +111,11 @@ sub bind {
   my $t0 = Time::HiRes::time();
   my $doc = $self->{doc};
   my $i = 0;
-  $self->{ord}{refaddr $_} = $i++ for $doc->tokens;
+  for my $t ($doc->tokens) {
+    $self->{ord}{refaddr $t} = $i;
+    push @{ $self->{text_toks} }, [$i, $t] if _literal_texts_kind($t);
+    $i++;
+  }
   $self->{last} = $i - 1;
   $self->{decl_tok} = {};
   # eval-mode: the caller's lexicals (the capture alist) are the outermost
@@ -170,7 +174,7 @@ sub _walk {
     if ($c->isa('PPI::Token')) { $self->_token($c, $pkg, $cv); next }
     my $cv2 = $cv;
     $cv2 = $c if $c->isa('PPI::Structure::Block') && _is_cv_block($c);
-    $self->_head_decls($c, $pkg) if $c->isa('PPI::Statement::Sub') || $c->isa('PPI::Statement::Compound');
+    $self->_head_decls($c, $pkg, $cv) if $c->isa('PPI::Statement::Sub') || $c->isa('PPI::Statement::Compound');
     $self->_walk($c, $pkg, $cv2);
   }
 }
@@ -194,13 +198,13 @@ sub _is_cv_block {
 # prototype parameters, `catch ($e)`.  (`for my $x`, `if (my $x = …)` are
 # ordinary `my` words and go through _intro_point.)
 sub _head_decls {
-  my ($self, $st, $pkg) = @_;
+  my ($self, $st, $pkg, $cv) = @_;
   my @k = $st->schildren;
   for my $j (0 .. $#k) {
     my $e = $k[$j];
     if ($e->isa('PPI::Structure::Signature')) { $self->_signature($st, $e, \@k, $j) }
     elsif ($e->isa('PPI::Token::Prototype') && $st->isa('PPI::Statement::Sub')) {
-      $self->_proto_params($st, $e, \@k, $j);
+      $self->_proto_params($st, $e, \@k, $j, $pkg, $cv);
     }
     elsif ($e->isa('PPI::Token::Word') && $e->content eq 'catch'
            && $j + 2 <= $#k && $k[$j+1]->isa('PPI::Structure::List')
@@ -264,7 +268,7 @@ sub _signature {
 # head_is_signature, #2872 / #455); otherwise perl reads an (illegal)
 # prototype and binds NOTHING -- the body's names are globals.
 sub _proto_params {
-  my ($self, $st, $proto, $k, $j) = @_;
+  my ($self, $st, $proto, $k, $j, $pkg, $cv) = @_;
   my $text = $proto->content;
   return unless defined &Pl::Parser::proto_text_has_named_params
              && Pl::Parser::proto_text_has_named_params($text);
@@ -281,6 +285,24 @@ sub _proto_params {
                         scope => $st, from => $self->_first_ord($blk),
                         to => $self->_last_ord($blk));
   }
+  # A DEFAULT is an expression evaluated in the sub (#485): its uses are refs
+  # at the Prototype token -- one token, so read through the fragment path --
+  # except a parameter of an EARLIER part, which the default sees (perly.y
+  # sigsub; its own part's name it does not).  Resolved at the token's
+  # ordinal, before the block, i.e. to the OUTER binding.
+  my %left;
+  for my $part (Pl::Parser2::_signature_part_defaults($text)) {
+    my ($canon, $default) = @$part;
+    if (defined $default && $default =~ /[\$\@\%]/) {
+      my $a = refaddr $proto;
+      my $n0 = scalar @{ $self->{refs}{$a} || [] };
+      $self->_code_refs_doc($proto, $default, $pkg, $cv);
+      my $list = $self->{refs}{$a} || [];
+      @$list = (@$list[0 .. $n0 - 1], grep { !$left{ $_->{canon} } } @$list[$n0 .. $#$list]);
+      delete $self->{refs}{$a} unless @$list;
+    }
+    $left{$canon} = 1 if defined $canon;
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -289,6 +311,7 @@ sub _token {
   my ($self, $t, $pkg, $cv) = @_;
   if ($t->isa('PPI::Token::Word')) {
     my $w = $t->content;
+    $self->_note_string_eval($t, $cv) if ($w eq 'eval' || $w eq 'CORE::eval') && _is_string_eval($t);
     if ($w eq 'my' || $w eq 'our' || $w eq 'state') { $self->_declare($t, $pkg) }
     elsif (exists $self->{brace}{ refaddr $t }) {
       $self->_ref($t, $self->{brace}{ refaddr $t }, 'brace', $pkg, $cv);
@@ -307,11 +330,113 @@ sub _token {
     $self->_ref($t, "\@$1", 'arylen', $pkg, $cv);
     return;
   }
+  # `s///ee`: the replacement's VALUE is compiled as perl at run time -- a
+  # string eval (perlop "ee").
+  $self->_note_string_eval($t, $cv)
+    if $t->isa('PPI::Token::Regexp::Substitute') && ($t->get_modifiers || {})->{ee};
   for my $piece (_interp_texts($t)) {
     my ($text, $mode) = @$piece;
     if ($mode eq 'code') { $self->_code_refs($t, $text, $pkg, $cv); next }
     $self->_interp_refs($t, $text, $mode eq 'regex', $pkg, $cv);
   }
+}
+
+# ---------------------------------------------------------------------------
+# THE STRING-EVAL CV FACT (s533d, 1c port 2; docs/binder-dual-run-s525.md
+# §4(c)).  A string `eval` compiles text AT RUN TIME against the pad its CV
+# can see (pp_entereval: the eval's CvOUTSIDE is the running CV), so a name
+# that occurs only inside TEXT -- `eval '$x'`, `my $c = '$x'; eval $c` --
+# can read a visible outer lexical that the compile-time pad never records.
+# The binder records the fact per CV (`eval EXPR` / `CORE::eval EXPR` /
+# `s///ee`; never `eval BLOCK`, a method `->eval` or a key `eval =>`) and
+# reads, on demand, the names every literal TEXT inside such a CV mentions
+# (see text_refs); captures_name(..., eval => 1) counts those as uses.  This
+# is the conservative eval rule of ir-spec §2b, read through the fragment
+# path (Pl::Parser::fragment_doc -- no new scanner).
+sub _is_string_eval {
+  my ($w) = @_;
+  my $pv = $w->sprevious_sibling;
+  return 0 if $pv && $pv->isa('PPI::Token::Operator') && $pv->content eq '->';
+  my $nx = $w->snext_sibling;
+  return 0 if $nx && $nx->isa('PPI::Structure::Block');            # eval BLOCK
+  return 0 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  return 1;
+}
+
+sub _note_string_eval {
+  my ($self, $t, $cv) = @_;
+  push @{ $self->{evals} }, $self->{ord}{ refaddr $t };
+  $self->{stats}{string_eval}++;
+}
+
+# Does a string eval run inside $node's range?  For a block that is not a
+# CV body (a `do { }`, a map block), the CV it runs in counts too: its pad
+# is the one an eval anywhere in that CV sees.
+sub has_string_eval {
+  my ($self, $node) = @_;
+  my @ev = @{ $self->{evals} || [] } or return 0;
+  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
+  return 0 unless defined $a && defined $z;
+  return 1 if grep { $_ >= $a && $_ <= $z } @ev;
+  return 0 if $node->isa('PPI::Statement::Sub') || ($node->isa('PPI::Structure::Block') && _is_cv_block($node));
+  for (my $p = $node->parent; $p; $p = $p->parent) {
+    next unless $p->isa('PPI::Document') || ($p->isa('PPI::Structure::Block') && _is_cv_block($p));
+    my ($ca, $cz) = ($self->_first_ord($p), $self->_last_ord($p));
+    return (defined $ca && grep { $_ >= $ca && $_ <= $cz } @ev) ? 1 : 0;
+  }
+  return 0;
+}
+
+# The literal TEXTS a token carries that a string eval could compile: a
+# quote's raw body (a dq string's too -- `eval "\$x = 1"` names $x through
+# the escape), a heredoc's body, qw's words.  Interpolating regex / command
+# tokens contribute through their ordinary interp refs.
+sub _literal_texts_kind {
+  my ($t) = @_;
+  return $t->isa('PPI::Token::HereDoc') || $t->isa('PPI::Token::Quote')
+      || $t->isa('PPI::Token::QuoteLike::Words');
+}
+
+# The literal-text tokens whose ordinal lies in [$a, $z], in order.
+sub _text_toks {
+  my ($self, $lo0, $z) = @_;
+  my $s = $self->{text_toks} || [];
+  my ($lo, $hi) = (0, scalar @$s);
+  while ($lo < $hi) { my $m = ($lo + $hi) >> 1; if ($s->[$m][0] < $lo0) { $lo = $m + 1 } else { $hi = $m } }
+  my @out;
+  for (my $i = $lo; $i < @$s && $s->[$i][0] <= $z; $i++) { push @out, $s->[$i][1] }
+  return @out;
+}
+
+sub _literal_texts {
+  my ($t) = @_;
+  return (join '', $t->heredoc) if $t->isa('PPI::Token::HereDoc');
+  return ($t->string) if $t->isa('PPI::Token::Quote');
+  return (join ' ', $t->literal) if $t->isa('PPI::Token::QuoteLike::Words');
+  return ();
+}
+
+# The uses a token's literal text names when read as code (cached by the
+# token's current text): refs with via `evaltext`, at the token's ordinal,
+# in the token's package -- resolved like any use there.
+sub text_refs {
+  my ($self, $t) = @_;
+  my $a = refaddr $t;
+  my $sig = _tok_sig($t);
+  my $c = $self->{textc}{$a};
+  return $c->[1] if $c && $c->[0] eq $sig;
+  my @texts = grep { /[\$\@\%]/ } _literal_texts($t);
+  my $new = [];
+  if (@texts) {
+    my $orig = $self->{refs}{$a};
+    my ($pkg, $cv) = $orig && @$orig ? @{ $orig->[0] }{qw(pkg cv)} : ($self->_pkg_at($t), undef);
+    local $self->{rescan} = 1;
+    local $self->{refs}{$a} = [];
+    $self->_code_refs_doc($t, $_, $pkg, $cv) for @texts;
+    $new = [ map { +{ %$_, via => 'evaltext' } } @{ $self->{refs}{$a} } ];
+  }
+  $self->{textc}{$a} = [$sig, $new];
+  return $new;
 }
 
 # A Symbol's canonical container.  PPI's ->symbol reads a following
@@ -581,6 +706,11 @@ sub _interp_refs {
 sub _code_refs {
   my ($self, $host, $code, $pkg, $cv) = @_;
   return unless $code =~ /[\$\@]/;
+  return $self->_code_refs_doc($host, $code, $pkg, $cv);
+}
+
+sub _code_refs_doc {
+  my ($self, $host, $code, $pkg, $cv) = @_;
   my $frag = eval { Pl::Parser::fragment_doc($code) };
   if (!$frag) { $self->{stats}{fragment_fail}++; return }
   $self->{stats}{fragments}++;
@@ -864,6 +994,14 @@ sub for_node {
   return _binder_for($parser, $node, 'requalify', 'requalify');
 }
 
+# The binder that answers the CAPTURE question about $node (1c port 2, s533d):
+# the capture gate, the promoter, the nested-sub hoist and the closure tests.
+sub for_captures {
+  my ($parser, $node) = @_;
+  $parser->{_binder}{calls}{captures}++ if $parser->{_binder};
+  return _binder_for($parser, $node, 'captures', 'captures');
+}
+
 sub _verdict_str { my $v = shift; return defined $v ? $v : 'undef' }
 
 sub _rec_str {
@@ -963,12 +1101,29 @@ sub _q_ref_shadowed {
 # $canons when given) through a lexical declared OUTSIDE it?
 sub _q_block_captures {
   my ($self, $block, $bare, $canons) = @_;
+  return $self->captures_name($block, $bare, $canons, eval => 1);
+}
+
+# THE CAPTURE QUESTION (1c port 2): does $node (a sub body, a whole
+# Statement::Sub -- its signature included -- or any block) read the bare
+# name $bare (restricted to the canons in $canons when given) through a
+# lexical declared OUTSIDE $node?  pad_findlex's OUTER entries, asked about
+# the CURRENT names (a rename pass may have run).  eval => 1: a node that
+# runs a string eval (has_string_eval) also counts the names its literal
+# texts mention (text_refs) -- the string-eval CV fact.  Returns
+# (VERDICT, KIND, NOTE).
+sub captures_name {
+  my ($self, $block, $bare, $canons, %opt) = @_;
   my ($a, $z) = ($self->_first_ord($block), $self->_last_ord($block));
   return (0, 'no-range', 'block not in the table') unless defined $a && defined $z;
   my (@why, %done);
-  for my $r0 ($self->_refs_in($a, $z)) {
-    next if $done{ refaddr $r0->{tok} }++;
-    for my $r (@{ $self->_cur_refs($r0->{tok}) }) {
+  my @toks = grep { !$done{ refaddr $_ }++ } map { $_->{tok} } $self->_refs_in($a, $z);
+  my $ntok = @toks;
+  push @toks, $self->_text_toks($a, $z) if $opt{eval} && $self->has_string_eval($block);
+  for my $i (0 .. $#toks) {
+    next if $i >= $ntok && index(_tok_sig($toks[$i]), $bare) < 0;       # the text never spells it
+    my $refs = $i < $ntok ? $self->_cur_refs($toks[$i]) : $self->text_refs($toks[$i]);
+    for my $r (@$refs) {
       next if $r->{via} eq 'decl';
       my $c = $r->{canon};
       next unless substr($c, 1) eq $bare;

@@ -2395,7 +2395,7 @@ sub parse {
   # ---- Lower each segment into a section record.
   my @sections;
   for my $seg (@segments) {
-    $self->_check_sub_captures($seg->{stmts});
+    $self->_cap_dual("gate", $seg->{stmts}[0], sub { $self->_check_sub_captures($seg->{stmts}); "ok" });
     $self->cur_pkg($seg->{pkg});
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
@@ -3361,6 +3361,15 @@ sub _symbol_is_declarator {
 # its own (`my $y = 7; sub nm {$y} { our $y; $y = 3 }` wrote the LEXICAL),
 # which is the same one-cell-for-two-variables confusion #470 is about,
 # spelled with a declaration instead of a qualified name.
+sub _cap_dual_row {
+  my ($self, $consumer, $node, $ls, $bs) = @_;
+  s/\s+/ /g for $ls, $bs;
+  my $t = $node && ($node->isa("PPI::Token") ? $node : $node->first_token);
+  Pl::Binder::_row("F", $self->{_binder}{file}, $t ? $t->line_number // 0 : 0,
+                   $t ? $t->column_number // 0 : 0,
+                   Pl::Binder::_short($node ? $node->content : ""), $consumer, $ls, $bs);
+}
+
 # The dual-run hook (s525q): the legacy verdict is returned unchanged.
 sub _ref_shadowed {
   my $self = shift;
@@ -3749,6 +3758,7 @@ sub _is_pure_prototype {
 # promoted to a package cell and the default read an unbound name.
 sub _sub_captures_name {
   my ($self, $sub, $bare, $canons) = @_;
+  return $self->_binder_captures_name($sub, $bare, $canons) if $self->{_cap_binder};
   return 1 if $self->_signature_captures_name($sub, $bare, $canons);
   # A SIGNATURE parameter is the sub's own declaration, so a BODY use of that
   # canon is the parameter and never the outer lexical (#454).  Only the
@@ -3780,6 +3790,7 @@ sub _signature_captures_name {
   return 0 unless ref $sub && $sub->can('schildren');
   my ($sig) = grep { _is_signature_node($_) } $sub->schildren;
   return 0 unless $sig;
+  return $self->_binder_captures_name($sig, $bare, $canons) if $self->{_cap_binder};
   my $text = $sig->content;
   return 0 unless Pl::Parser::proto_text_has_named_params($text);
   return 0 unless $text =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;    # cheap early-out
@@ -3896,9 +3907,46 @@ sub _canon_text_patterns {
   return \%canon_pat;
 }
 
+# THE CAPTURE QUESTION ON THE BINDER (s533d, 1c port 2): does $node (a sub
+# body, a whole Statement::Sub with its signature, a Token::Prototype, any
+# block) read $bare (one of the canons in $canons when given) through a
+# lexical declared outside it -- pad_findlex's OUTER entries, plus, where the
+# node runs a string eval, the names its literal texts mention (the
+# string-eval CV fact, Pl::Binder::captures_name).  RULE 12: a node the
+# binder holds no record of DIES -- a guess here is a silently unbound or
+# silently shared variable.
+sub _binder_captures_name {
+  my ($self, $node, $bare, $canons) = @_;
+  my $b = Pl::Binder::for_captures($self, $node);
+  my ($v, $kind) = $b ? $b->captures_name($node, $bare, $canons, eval => 1) : (0, 'no-binder');
+  die "PCL internal: the binder holds no record of the block at line "
+    . (eval { $node->line_number } // '?') . " ($kind) -- the capture question about"
+    . " '$bare' cannot be answered\n" if $kind =~ /^no-(?:range|binder)$/;
+  return $v;
+}
+
+# D0 (s533d) -- TEMPORARY: under PCL_BINDER_CHECK=log each capture CONSUMER
+# computes its final answer twice, legacy and binder, and logs an F row when
+# they differ.  The legacy answer is returned.  Deleted with the legacy chain.
+sub _cap_dual {
+  my ($self, $consumer, $node, $code) = @_;
+  my $mode = ($self->{_binder} && $self->{_binder}{mode}) // '';
+  return $code->() if $mode ne 'log' || $self->{_cap_binder};
+  my @legacy = eval { $code->() };
+  my $lerr = $@;
+  my @bind = do { local $self->{_cap_binder} = 1; local $@; my @r = eval { $code->() }; $@ ? ("DIE:$@") : @r };
+  my $ls = $lerr ? "DIE:$lerr" : join(',', map { $_ // 'u' } @legacy);
+  my $bs = join(',', map { $_ // 'u' } @bind);
+  s/\s+/ /g for $ls, $bs;
+  $self->_cap_dual_row($consumer, $node, $ls, $bs) if $ls ne $bs;
+  die $lerr if $lerr;
+  return wantarray ? @legacy : $legacy[0];
+}
+
 # The dual-run hook (s525q): the legacy verdict is returned unchanged.
 sub _block_captures_name {
   my $self = shift;
+  return $self->_binder_captures_name(@_) if $self->{_cap_binder};
   my $v = $self->_block_captures_name_0(@_);
   Pl::Binder::check($self, 'block_captures', $v, @_)
     if $self->{_binder} && $self->{_binder}{mode};
@@ -5417,7 +5465,7 @@ sub _promote_captured {
   for my $psub (@psubs) {
     next unless grep { $_->isa('PPI::Token::Prototype') } $psub->schildren;
     return $refuse->('signature default in an unrewritable Token::Prototype')
-      if $self->_signature_captures_name($psub, $bare, { $canon => 1 });
+      if $self->_cap_dual("protosig:$canon", $psub, sub { $self->_signature_captures_name($psub, $bare, { $canon => 1 }) ? 1 : 0 });
   }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
@@ -5572,6 +5620,21 @@ sub _reg_captures {
 # cell it is about to mint.  Absent -> the ordinary first-hit answer, unchanged.
 sub _captured_in_subs {
   my ($self, $subs, $canon, $extent, $found) = @_;
+  my $fmt = sub { my ($v, $l) = @_; join(" ", $v, map { ($_->name // "?") . "@" . ($_->line_number // 0) } @$l) };
+  my @lf;
+  my $lv = $self->_captured_in_subs_0($subs, $canon, $extent, \@lf);
+  if ((($self->{_binder} && $self->{_binder}{mode}) // "") eq "log" && !$self->{_cap_binder}) {
+    my @bf;
+    my $bv = do { local $self->{_cap_binder} = 1; eval { $self->_captured_in_subs_0($subs, $canon, $extent, \@bf) } // "DIE:$@" };
+    my ($ls, $bs) = ($fmt->($lv, \@lf), $fmt->($bv, \@bf));
+    $self->_cap_dual_row("promote:$canon", $subs->[0] // $extent, $ls, $bs) if $ls ne $bs;
+  }
+  push @$found, @lf if $found;
+  return $lv;
+}
+
+sub _captured_in_subs_0 {
+  my ($self, $subs, $canon, $extent, $found) = @_;
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   for my $sub (@$subs) {
     next if $extent && !_elem_within($sub, $extent);
@@ -5614,6 +5677,17 @@ sub _captured_in_subs {
 # probe's silent "2 2" miscompile, s295).
 sub _enclosing_lex_decl {
   my ($self, $extent, $bare) = @_;
+  return $self->_cap_dual("enclosing:\$$bare", $extent, sub { $self->_enclosing_lex_decl_0($extent, $bare) }) ? 1 : 0;
+}
+
+sub _enclosing_lex_decl_0 {
+  my ($self, $extent, $bare) = @_;
+  if ($self->{_cap_binder}) {
+    return 0 unless $extent;
+    my $b = Pl::Binder::for_captures($self, $extent);
+    my $r = $b && $b->resolve($extent, "\$$bare");
+    return ($r && $r->{kind} =~ /^(?:my|state)$/) ? 1 : 0;
+  }
   return 0 unless $extent;
   for (my $p = $extent->parent; $p; $p = $p->parent) {
     next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
@@ -10064,6 +10138,7 @@ sub _hoist_nested_sub {
     (my $bare = $var) =~ s/^[\$\@\%]//;
     $by_bare{$bare}{$var} = 1;
   }
+  $self->_cap_dual("hoist", $sub, sub {
   for my $bare (sort keys %by_bare) {
     # W5's exemption, which this sibling scan was missing (task #347): a name
     # already PROMOTED to a package-level cell is legitimately captured — the
@@ -10077,6 +10152,7 @@ sub _hoist_nested_sub {
     die "Parser2 TODO: lexical '$bare' possibly captured by nested sub " . $sub->name . "\n"
       if $self->_sub_captures_name($sub, $bare, $by_bare{$bare});
   }
+  "ok" });
   push @{ $self->{_hoisted_decls} },
     Pl::Parser::declare_sub_form($self->_sub_name_for_emission($sub->name), 1);
   push @{ $self->{_hoisted_defs} }, $self->_lower_sub($sub);
@@ -14912,6 +14988,11 @@ sub _fallback_stmt_capture {
 # answers 1: the use resolves outside the block.
 sub _init_reads_scalar {
   my ($self, $init, $name) = @_;
+  return $self->_cap_dual("init:$name", $init->[0], sub { $self->_init_reads_scalar_0($init, $name) });
+}
+
+sub _init_reads_scalar_0 {
+  my ($self, $init, $name) = @_;
   (my $bare = $name) =~ s/^\$//;
   my (%inblk, @blocks);
   for my $el (@$init) {
@@ -15060,6 +15141,12 @@ sub _strip_decl_decorations {
 # variable per iteration; every other loop keeps one binding (its emission is
 # unchanged).  The capture test is the one the declaration paths use.
 sub _cond_mys_closure_captured {
+  my ($self, $names, $kids) = @_;
+  my @r = $self->_cap_dual("condmys", $kids->[0], sub { $self->_cond_mys_closure_captured_0($names, $kids) });
+  return @r;
+}
+
+sub _cond_mys_closure_captured_0 {
   my ($self, $names, $kids) = @_;
   my @sc = grep { /^\$/ } @$names or return ();
   my @subs;
