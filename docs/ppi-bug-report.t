@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 368;
+use Test::More tests => 370;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1640,6 +1640,17 @@ for my $code ( 'my %h = (format => 1);', '$h{format} = 2;', '$o->format(1);', 's
         my @t = map { short_class($_) } toks("format A =\nx\n.\n$rest\n");
         ok( grep( $_ eq $want, @t ), "after a format: $rest -- a statement starts" ) or diag "got: @t";
     }
+}
+# ... and an argument line that opens a { runs to its matching } -- the block
+# is code, where a lone . may close a NESTED format (perlform; perl's
+# t/op/write.t 'nested formats').
+{
+    my @s = stmts("format NEST =\n\@<<<\n{\n    format BIRDS =\n\@<<<<<\n\$b;\n.\n    \"nest\"\n}\n.\nwrite NEST;\n");
+    is( scalar(@s), 2, 'a nested format inside an argument block: the format and write are two statements' ) or diag join ' | ', @s;
+}
+{
+    my @s = stmts("format P =\n{ literal\n.\nprint 1;\n");
+    is( scalar(@s), 2, 'a { opening a PICTURE line is text (control)' ) or diag join ' | ', @s;
 }
 
 # §41 -- an empty package segment is part of the name (toke.c scan_word6):

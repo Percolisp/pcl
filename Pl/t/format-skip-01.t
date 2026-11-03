@@ -55,7 +55,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 9;
+plan tests => 10;
 
 # A format block must not eat the statement that follows it.
 my $with_format = <<'END';
@@ -102,3 +102,6 @@ is run_cl(qq{{\n    format 'one =\nab\n.\n}\nformat ::two =\n\@<<\n\$x\n.\nforma
 is run_cl(qq{\$_ = "x";\nformat A =\nab\n.\n/x/ and print "m\\n";\nformat B =\ncd\n.\n*G = *B{FORMAT};\nprint "g\\n";\n}),
     "m\ng\n",
     'after a format body a statement starts: a /PATTERN/ is a match, a *glob a glob (t/comp/form_scope.t)';
+is run_cl(qq{format NEST =\n\@<<<\n{\n    my \$birds = "birds";\n    format BIRDS =\n\@<<<<<\n\$birds;\n.\n    "nest"\n}\n.\nprint "after ", __LINE__, "\\n";\n}),
+    "after 12\n",
+    'a format nested in an argument block: the outer format ends at its own . (t/op/write.t "nested formats")';
