@@ -232,6 +232,25 @@ sub opens_scope {
   return $stmt->isa('PPI::Statement::Variable') || is_local_stmt($stmt);
 }
 
+
+# The statements a block lowers: every significant statement but `;`.
+sub lowered_statements {
+  my ($stmts) = @_;
+  return grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
+}
+
+# A PPI NODE among a label's earlier siblings whose text holds `goto LABEL`.
+sub node_mentions_goto {
+  my ($node, $label) = @_;
+  return ref $node && $node->isa('PPI::Node') && mentions_goto($node, $label) ? 1 : 0;
+}
+
+# A token run's text, space-joined (the self-reference scans read it).
+sub joined_text {
+  my ($toks) = @_;
+  return join ' ', map { $_->content } @$toks;
+}
+
 # ---- declarations -------------------------------------------------------------
 
 sub decl_shape {
