@@ -186,7 +186,7 @@ tree).
    `_signature_left_params` (:3582).  Disagreements under it: **#3800, #3801,
    #3804** (all three silent wrongs) -- the port fixes them by construction;
    the binder already answers #475 the perl way (Pl/t/binder-01.t row 11).  Smallest port, biggest value: FIRST.
-   **DONE (s533b, `a6f2f0ac`, 2026-11-03).**  The binder is built in
+   **DONE (s533b, `75e513e0`, 2026-11-03).**  The binder is built in
    production (no flag; `PCL_BINDER_CHECK` arms only the two remaining hooks);
    `_requalify_region` asks `Pl::Binder::requalify_home` per token (`decl` and
    my/state/param/lexsub/outer -> leave, our -> declaring package, global ->
