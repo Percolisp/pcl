@@ -740,7 +740,7 @@ sub _requalify_region {
       my $b = $binding->($_[0]);
       Pl::Binder::check_requalify($self, $_[0], $canon, $pkg,
                                   !defined $b ? $pkg : $b eq 'lex' ? undef : $b)
-        if $self->{_binder};                   # s533b D0 measurement (temporary)
+        if $self->{_binder} && $self->{_binder}{mode};   # s533b D0 (temporary)
       return 0 if !defined $b;                 # (d) global of X → rewrite
       return 1 if $b eq 'lex';                 # (a) my/state → leave alone
       return 0 if $b eq $pkg;                  # (a) our alias already homed here
@@ -775,7 +775,8 @@ sub _requalify_region {
 sub _binding_at {
   my $self = shift;
   my $v = $self->_binding_at_0(@_);
-  Pl::Binder::check($self, 'binding_at', $v, @_) if $self->{_binder};
+  Pl::Binder::check($self, 'binding_at', $v, @_)
+    if $self->{_binder} && $self->{_binder}{mode};
   return $v;
 }
 
@@ -1851,13 +1852,13 @@ sub parse {
   # here that only survives because the calls sit under eval).
   $self->_rewrite_unreachable_gotos($doc);
   $self->_classify_nested_gotos($doc);       # #1747
-  # s525q: the BINDER in DUAL-RUN -- built ONCE here, before any requalify /
-  # rename pass, so it sees the names the source wrote.  Inert: only under
-  # PCL_BINDER_CHECK, and nothing reads it (docs/binder-dual-run-s525.md).
-  if ($ENV{PCL_BINDER_CHECK}) {
-    require Pl::Binder;
-    $self->{_binder} = Pl::Binder::build_for($self, $doc);
-  }
+  # THE BINDER (s525q dual-run; PRODUCTION since s533b): built ONCE here,
+  # before any requalify / rename pass, so it sees the names the source wrote.
+  # The block-package requalifier asks it (_requalify_home).  Under
+  # PCL_BINDER_CHECK the remaining dual-run hooks (_ref_shadowed,
+  # _block_captures_name) also assert against it (docs/binder-dual-run-s525.md).
+  require Pl::Binder;
+  $self->{_binder} = Pl::Binder::build_for($self, $doc);
 
   # #3080: the QUALIFIED spellings the SOURCE wrote, read before the two
   # requalify passes below write qualified tokens of their own (those are this
@@ -3463,7 +3464,8 @@ sub _symbol_is_declarator {
 sub _ref_shadowed {
   my $self = shift;
   my $v = $self->_ref_shadowed_0(@_);
-  Pl::Binder::check($self, 'ref_shadowed', $v, @_) if $self->{_binder};
+  Pl::Binder::check($self, 'ref_shadowed', $v, @_)
+    if $self->{_binder} && $self->{_binder}{mode};
   return $v;
 }
 
@@ -4027,7 +4029,8 @@ sub _canon_text_patterns {
 sub _block_captures_name {
   my $self = shift;
   my $v = $self->_block_captures_name_0(@_);
-  Pl::Binder::check($self, 'block_captures', $v, @_) if $self->{_binder};
+  Pl::Binder::check($self, 'block_captures', $v, @_)
+    if $self->{_binder} && $self->{_binder}{mode};
   return $v;
 }
 
