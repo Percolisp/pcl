@@ -256,19 +256,45 @@ sub joined_text {
 sub decl_shape {
   my ($stmt) = @_;
   my @sk = strip_semi($stmt->schildren);
+  my %r = (sk => \@sk, nsk => scalar(@sk), rest => [@sk[1 .. $#sk]]);
   if (@sk >= 2 && $sk[0]->isa('PPI::Token::Word')) {
-    return { decl => 'state', sk => \@sk, name => $sk[1]->content }
-      if $sk[0]->content eq 'state';
-    return { decl => 'our', sk => \@sk } if $sk[0]->content eq 'our';
+    return { %r, decl => 'our' } if $sk[0]->content eq 'our';
+    return _state_shape(\%r, \@sk) if $sk[0]->content eq 'state';
   }
   my ($name, $init, $declmod) = single_scalar_decl($stmt);
-  return { decl => 'my-scalar', sk => \@sk, name => $name, init => $init,
-           declmod => $declmod } if $name;
+  if ($name) {
+    my %i;
+    if (defined $init) {
+      my $lp = Pl::PExpr::TokenUtils::lowprec_idx($init, 0);
+      @i{qw(init_expr init_mod init_cond)} = split_modifier($init);
+      $i{tail} = [@$init[$lp .. $#$init]] if defined $lp;
+    }
+    return { %r, %i, decl => 'my-scalar', name => $name, init => $init,
+             declmod => $declmod };
+  }
   my $lead = lead_decl_with_expr_tail($stmt);
-  return { decl => 'my-lead', sk => \@sk, name => $lead } if defined $lead;
-  return { decl => 'my-empty', sk => \@sk } if is_empty_my_decl($stmt);
-  return { decl => 'my-noname', sk => \@sk } if is_no_name_my_decl($stmt);
-  return { decl => 'my-list', sk => \@sk };
+  return { %r, decl => 'my-lead', name => $lead } if defined $lead;
+  return { %r, decl => 'my-empty' } if is_empty_my_decl($stmt);
+  return { %r, decl => 'my-noname' } if is_no_name_my_decl($stmt);
+  return { %r, decl => 'my-list' };
+}
+
+# `state NAME [= INIT]`: a SCALAR's below-assignment tail (`state $s = 1, f();`)
+# is split off when the comma is the statement's own and not a parenless list
+# operator's (Pl::PExpr::TokenUtils::lowprec_split_safe): init = the tokens
+# between `=` and the tail, tail_op + tail = the rest.
+sub _state_shape {
+  my ($r, $sk) = @_;
+  my $name = $sk->[1]->content;
+  my $lp;
+  if ($name =~ /^\$/
+      && defined($lp = Pl::PExpr::TokenUtils::lowprec_idx($sk, 3))
+      && Pl::PExpr::TokenUtils::lowprec_split_safe($sk, 3, $lp)) {
+    return { %$r, decl => 'state', name => $name,
+             init => [@$sk[3 .. $lp - 1]], tail_op => $sk->[$lp]->content,
+             tail => [@$sk[$lp + 1 .. $#$sk]] };
+  }
+  return { %$r, decl => 'state', name => $name, init => [@$sk[3 .. $#$sk]] };
 }
 
 sub single_scalar_decl {
@@ -372,6 +398,7 @@ sub multi_decl {
 #   eq          index of the first depth-0 `=`, or undef
 #   container   K[1] is a single `@x` / `%x` symbol
 #   paren       K[1] is a parenthesised name list
+#   names       K[1] itself (the declared name or name list)
 sub decl_list_view {
   my ($k) = @_;
   my ($eq) = grep { $k->[$_]->isa('PPI::Token::Operator')
@@ -381,6 +408,7 @@ sub decl_list_view {
     container => ($k->[1] && $k->[1]->isa('PPI::Token::Symbol')
                   && $k->[1]->content =~ /^[\@\%]\w+$/) ? 1 : 0,
     paren     => ($k->[1] && $k->[1]->isa('PPI::Structure::List')) ? 1 : 0,
+    names     => $k->[1],
   };
 }
 

@@ -10641,85 +10641,12 @@ sub _lower_decl_stmt {
   #    → hoisted cell defvar (+ raw once-flag defvar) and v1's exact
   #    guarded-init shape in place; the bare cell is the statement value
   #    (`sub { state $n }` returns undef via the nil box).
-  my @sk = _strip_semi($first->schildren);
-  if (@sk >= 2 && $sk[0]->isa('PPI::Token::Word') && $sk[0]->content eq 'state') {
-    my $name = $sk[1]->content;
-    # The CL spelling of the state cell, once: a non-ASCII name is
-    # pipe-quoted (#418) and the DECLARATION, the guarded init and every
-    # read of the cell have to agree on it.
-    my $cl   = cl_sym($name);
-    my $kind = $self->{_state_renamed}{$name}
-      or die "Parser2 TODO: unrenamed state declaration: " . $first->content . "\n";
-    # Register the eval-capture pair HERE, not at rename time: visibility
-    # starts at the decl statement (perl: `state $x` masks from its
-    # declaration on, so an eval lexically before it resolves the outer
-    # name), and _lower_sub's restore ends it with the sub (s418, #401).
-    if (my $orig = $self->{_state_eval_capture_orig}{$name}) {
-      $self->{_eval_state_captures}{$orig} = $name;
-    }
-    push @{ $self->{_captured_decls} },
-      _decl_cell($cl, _fresh_container($name), $name);
-    my @forms;
-    if ($kind eq 'init') {
-      my $flag = cl_sym($name . '__init');
-      push @{ $self->{_captured_decls} }, _decl_cell($flag, 'nil');
-      # Scalar: guarded box-set.  Container (@x/%x): the whole assignment
-      # `@x__state__N = LIST` through the expression seam — v1 emits the
-      # p-array-= / p-hash-= form (same path the my-container branch uses).
-      #
-      # #138: only the ASSIGNMENT is once-guarded, so a below-assignment
-      # tail (`state $s = 1, f();`) must sit OUTSIDE the guard and run on
-      # every call.  Unlike the `my` decl, this one cannot hand the whole
-      # run to PExpr — the guard has to be interposed between head and tail
-      # — so it splits, and _lowprec_split_safe decides whether the comma is
-      # ours or a parenless list operator's.
-      # When the comma is AMBIGUOUS (a parenless list operator may own it —
-      # `state $c = \substr $tintin, $x, 1`, state.t) the split is declined
-      # and the whole run stays the initializer, exactly as before: that is
-      # right whenever the operator really does own the comma, which is the
-      # only shape seen in practice.  The residual (`state $s = f 1, $t = 2`)
-      # needs PExpr's arity knowledge to resolve and is recorded in #138.
-      my ($lp, $tail_op, @tail_toks);
-      if ($name =~ /^\$/
-          && defined($lp = _lowprec_idx(\@sk, 3))
-          && _lowprec_split_safe(\@sk, 3, $lp)) {
-        $tail_op   = $sk[$lp]->content;
-        @tail_toks = @sk[$lp + 1 .. $#sk];
-      } else {
-        undef $lp;
-      }
-      my $init_end = defined $lp ? $lp - 1 : $#sk;
-      my $assign = $name =~ /^\$/
-        ? ['box-set', $cl, $self->_lower_expr([@sk[3 .. $init_end]], $first, undef, 1)]
-        : $self->_lower_expr([@sk[1 .. $#sk]], $first);
-      push @forms, ['unless', $flag, $assign, ['setf', $flag, 't']];
-      if (defined $tail_op) {
-        # `,`/`=>`: the tail is a separate statement — the cell is the head's
-        # value, the tail runs unconditionally and supplies the statement
-        # value.  `or`/`and`/`xor`: the tail is CONDITIONAL on the cell's
-        # current value (perl re-tests it on every call, init or not).
-        my $tail = $self->_lower_expr(\@tail_toks, $first,
-                                      ($decl_tail ? () : ':void'));
-        if ($tail_op =~ /^(?:or|and|xor)$/) {
-          return (['p-' . $tail_op, ['progn', @forms, $cl], $tail],
-                  $self->_lower_block(\@rest, $vi, $tail_ctx));
-        }
-        # In TAIL position the comma expression is the sub's return value,
-        # and a comma yields BOTH operands in list context — the same shape
-        # PExpr emits for a bare `A, B` tail statement.
-        if ($decl_tail) {
-          return (['if', '*wantarray*',
-                   ['vector', ['progn', @forms, $cl], $tail],
-                   ['progn', @forms, $cl, $tail]],
-                  $self->_lower_block(\@rest, $vi, $tail_ctx));
-        }
-        return (@forms, $tail, $self->_lower_block(\@rest, $vi, $tail_ctx));
-      }
-    }
-    push @forms, $cl;
-    return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
+  my $d = Pl::Stmt::decl_shape($first);
+  if ($d->{decl} eq 'state') {
+    return $self->_lower_decl_state($d, $first, \@rest, $vi, $tail_ctx, $decl_tail);
   }
-  my $our = $self->_lower_our_decl($first, $decl_tail ? $tail_ctx : undef);
+  my $our = $d->{decl} eq 'our'
+    ? $self->_lower_our_decl($first, $decl_tail ? $tail_ctx : undef) : undef;
   if ($our) {
     # A no-init `our` in TAIL position still has a value in perl — the
     # declared variable, read in the tail's context (probed: `our $A` → 5,
@@ -10728,12 +10655,149 @@ sub _lower_decl_stmt {
     # append the read.  Statement position appends nothing, so emission
     # outside an eval tail is byte-identical.  (Task #227: v1 answered this
     # shape with the emitted variable NAME — a silent-wrong.)
-    my @ok = _strip_semi($first->schildren);
-    push @$our, $self->_lower_expr([@ok[1 .. $#ok]], $first, 'inherit')
-      if $decl_tail && @ok == 2;
+    # (re-read AFTER the lowering above, as before: the tokens are its)
+    my $od = Pl::Stmt::decl_shape($first);
+    push @$our, $self->_lower_expr([@{ $od->{rest} }], $first, 'inherit')
+      if $decl_tail && $od->{nsk} == 2;
     return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
-  my ($name, $init, $declmod_cond) = $self->_single_scalar_decl($first);
+  return $self->_lower_decl_scalar($d, $first, \@rest, $vi, $tail_ctx, $decl_tail)
+    if $d->{decl} eq 'my-scalar';
+  # -- my VAR <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;` /
+  #    `my @raw, @upgraded, @utf8;`)
+  #    Perl declares ONLY the first variable and evaluates the rest as an
+  #    ordinary (void) expression whose first operand is the fresh lvalue; the
+  #    other names are package vars (it warns "Parenthesize").  Lower as a
+  #    `my VAR` let + the whole `VAR <trailing>` expression discarded.  Keep a
+  #    SCALAR BOXED in the remainder (a later `$x = …` must not hit the setf
+  #    raw-slot path — VarAnnotator may have marked it unboxable); a container
+  #    binds the same fresh container `my @a;` alone binds.
+  #    The container spelling was a `Parser2 TODO: unsupported declaration`
+  #    refusal until s393/#314 — one predicate too narrow, and it was
+  #    opbasic/cmp.t's whole file (12078 rows) in the companion suite.
+  if ($d->{decl} eq 'my-lead') {
+    my $sname = $d->{name};
+    $self->_reg_lex($sname);
+    my $vi2 = { %$vi, $sname => { unboxable => 0 } };
+    return (_decl_let([_decl_fresh($sname, $vi)],
+             $self->_lower_expr([@{ $d->{rest} }], $first, ':void'),
+             $self->_lower_block(\@rest, $vi2, $tail_ctx),
+             ($decl_tail ? (cl_sym($sname)) : ())));
+  }
+
+  # -- my @a / my %h / my (LIST) [= INIT];  → fresh containers in a let,
+  # the assignment lowered by the ORIGINAL expression machinery (v1 parses
+  # the whole `my … = …` statement as an expression and produces the
+  # p-array-= / p-hash-= / p-list-= form — same path as Parser.pm's
+  # _process_variable_statement).  All these vars stay boxed/containers.
+  # `my ();` declares nothing.  It is legal Perl and a no-op — perl #113554,
+  # and my.t asserts `eval "my ()"` leaves $@ EMPTY, so refusing it is not an
+  # option once the v1 fallback is gone (task #227).  No binding, no form; in
+  # tail position the value is the EMPTY LIST — emitted as the `(progn)` a
+  # bare `()` already lowers to, which yields 0 elements in list context and
+  # undef in scalar.  `(p-undef)` would wrongly be a 1-element list (the same
+  # trap the bare `return;` lowering documents above) and `(vector)` an empty
+  # ARRAY ref; both were measured against perl before settling here.  Must
+  # precede _multi_decl, which reports an empty name list as "unsupported".
+  if ($d->{decl} eq 'my-empty') {
+    return ($self->_lower_block(\@rest, $vi, $tail_ctx),
+            ($decl_tail ? ('(progn)') : ()));
+  }
+  # `my (undef) = RHS` / `my (undef, undef) = RHS` — a declaration list that
+  # declares NO NAME.  Legal and idiomatic perl ("consume and ignore"), and
+  # NOT the `my ()` no-op above: nothing is declared, but the RHS is still a
+  # list assignment and is EVALUATED — once, in LIST context (probed vs perl
+  # 5.40.3: the RHS sub reports wantarray true and is called exactly once).
+  # So the lowering is the statement MINUS nothing: the whole `my (undef) =
+  # RHS` run goes through the expression machinery exactly as the multi-decl
+  # branch below does for `my (undef, $x) = RHS` (#570's shape) — the only
+  # difference there is the `let` of the names, and there are none.  Without
+  # this arm `_multi_decl` reports "no names" and the die below took the
+  # WHOLE FILE (#610).
+  if ($d->{decl} eq 'my-noname') {
+    return ($self->_lower_expr([@{ $d->{sk} }], $first),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
+  return $self->_lower_decl_list($d, $first, \@rest, $vi, $tail_ctx, $decl_tail);
+}
+
+# `state NAME [= INIT];` (Pl::Stmt decl_shape: state).
+sub _lower_decl_state {
+  my ($self, $d, $first, $rest, $vi, $tail_ctx, $decl_tail) = @_;
+  my @rest = @$rest;
+  my $name = $d->{name};
+  # The CL spelling of the state cell, once: a non-ASCII name is
+  # pipe-quoted (#418) and the DECLARATION, the guarded init and every
+  # read of the cell have to agree on it.
+  my $cl   = cl_sym($name);
+  my $kind = $self->{_state_renamed}{$name}
+    or die "Parser2 TODO: unrenamed state declaration: " . $first->content . "\n";
+  # Register the eval-capture pair HERE, not at rename time: visibility
+  # starts at the decl statement (perl: `state $x` masks from its
+  # declaration on, so an eval lexically before it resolves the outer
+  # name), and _lower_sub's restore ends it with the sub (s418, #401).
+  if (my $orig = $self->{_state_eval_capture_orig}{$name}) {
+    $self->{_eval_state_captures}{$orig} = $name;
+  }
+  push @{ $self->{_captured_decls} },
+    _decl_cell($cl, _fresh_container($name), $name);
+  my @forms;
+  if ($kind eq 'init') {
+    my $flag = cl_sym($name . '__init');
+    push @{ $self->{_captured_decls} }, _decl_cell($flag, 'nil');
+    # Scalar: guarded box-set.  Container (@x/%x): the whole assignment
+    # `@x__state__N = LIST` through the expression seam — v1 emits the
+    # p-array-= / p-hash-= form (same path the my-container branch uses).
+    #
+    # #138: only the ASSIGNMENT is once-guarded, so a below-assignment
+    # tail (`state $s = 1, f();`) must sit OUTSIDE the guard and run on
+    # every call.  Unlike the `my` decl, this one cannot hand the whole
+    # run to PExpr — the guard has to be interposed between head and tail
+    # — so it splits, and _lowprec_split_safe decides whether the comma is
+    # ours or a parenless list operator's.
+    # When the comma is AMBIGUOUS (a parenless list operator may own it —
+    # `state $c = \substr $tintin, $x, 1`, state.t) the split is declined
+    # and the whole run stays the initializer, exactly as before: that is
+    # right whenever the operator really does own the comma, which is the
+    # only shape seen in practice.  The residual (`state $s = f 1, $t = 2`)
+    # needs PExpr's arity knowledge to resolve and is recorded in #138.
+    my ($tail_op, @tail_toks) = ($d->{tail_op}, @{ $d->{tail} || [] });
+    my $assign = $name =~ /^\$/
+      ? ['box-set', $cl, $self->_lower_expr([@{ $d->{init} }], $first, undef, 1)]
+      : $self->_lower_expr([@{ $d->{rest} }], $first);
+    push @forms, ['unless', $flag, $assign, ['setf', $flag, 't']];
+    if (defined $tail_op) {
+      # `,`/`=>`: the tail is a separate statement — the cell is the head's
+      # value, the tail runs unconditionally and supplies the statement
+      # value.  `or`/`and`/`xor`: the tail is CONDITIONAL on the cell's
+      # current value (perl re-tests it on every call, init or not).
+      my $tail = $self->_lower_expr(\@tail_toks, $first,
+                                    ($decl_tail ? () : ':void'));
+      if ($tail_op =~ /^(?:or|and|xor)$/) {
+        return (['p-' . $tail_op, ['progn', @forms, $cl], $tail],
+                $self->_lower_block(\@rest, $vi, $tail_ctx));
+      }
+      # In TAIL position the comma expression is the sub's return value,
+      # and a comma yields BOTH operands in list context — the same shape
+      # PExpr emits for a bare `A, B` tail statement.
+      if ($decl_tail) {
+        return (['if', '*wantarray*',
+                 ['vector', ['progn', @forms, $cl], $tail],
+                 ['progn', @forms, $cl, $tail]],
+                $self->_lower_block(\@rest, $vi, $tail_ctx));
+      }
+      return (@forms, $tail, $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
+  }
+  push @forms, $cl;
+  return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
+}
+
+# `my $x [= INIT | if/unless COND];` (Pl::Stmt decl_shape: my-scalar).
+sub _lower_decl_scalar {
+  my ($self, $d, $first, $rest, $vi, $tail_ctx, $decl_tail) = @_;
+  my @rest = @$rest;
+  my ($name, $init, $declmod_cond) = @$d{qw(name init declmod)};
   # Decl-level modifier (`my $x if @_;`): evaluate the condition for its
   # side effects, in void, BEFORE the let (the outer $x is what it sees).
   my @declmod_eval = $declmod_cond
@@ -10741,7 +10805,7 @@ sub _lower_decl_stmt {
   # A LOOP modifier on the init (#3375): the loop first, in the OUTER scope,
   # then the declaration as if it had no init (see _decl_loop_modifier).
   if ($name && defined $init
-      && _modifier_needs_fallback((_split_modifier($init))[1])) {
+      && _modifier_needs_fallback($d->{init_mod})) {
     push @declmod_eval, $self->_decl_loop_modifier($first, $vi);
     $init = undef;
   }
@@ -10757,8 +10821,7 @@ sub _lower_decl_stmt {
   # only the (boxed) binding.  $x stays BOXED in the remainder: a comma/or
   # write is not a native-root arithmetic event, so no raw slot is lost.
   my ($lowprec_run, $selfref_run);
-  if (defined $init && defined _lowprec_idx($init, 0)
-      && !(_split_modifier($init))[1]) {
+  if (defined $init && $d->{tail} && !$d->{init_mod}) {
     # Self-referencing init (`my $x = $x, …`): the run is lowered INSIDE the
     # fresh let below, where $x already denotes the new nil box, so the RHS
     # would read the binding instead of the shadowed outer one.  Flag it —
@@ -10777,8 +10840,7 @@ sub _lower_decl_stmt {
       if $selfref_run
       && ($self->{_file_lex_renamed}{$name}
           || ($self->{_goto_hoisted} && $self->{_goto_hoisted}{$name}));
-    my @kd = _strip_semi($first->schildren);
-    $lowprec_run = [@kd[1 .. $#kd]];
+    $lowprec_run = [@{ $d->{rest} }];
   }
   if ($name && $self->{_file_lex_renamed}{$name}) {
     # W5: a captured file lexical, rewritten to a fresh package-level name —
@@ -10837,7 +10899,7 @@ sub _lower_decl_stmt {
     # Split the modifier off the init; while/until/for/foreach → whole-stmt v1.
     my ($imod, $icond);
     if (defined $init) {
-      (my $iexpr, $imod, $icond) = _split_modifier($init);
+      (my $iexpr, $imod, $icond) = @$d{qw(init_expr init_mod init_cond)};
       $init = @$iexpr ? $iexpr : undef if defined $imod;
     }
     if ($imod && _modifier_needs_fallback($imod)) {
@@ -10855,7 +10917,7 @@ sub _lower_decl_stmt {
     # modifier, `my $x = $x if C` is perl-undefined behaviour — not handled.
     my $self_init;
     if (defined $init && !$imod
-        && join('', map { $_->content } @$init) =~ /\Q$name\E\b/) {
+        && Pl::Stmt::text_mentions($init, $name)) {
       $self_init = ['p-box-init', $self->_lower_expr($init, $first, undef, 1)];
     }
     # #298: a self-referential init whose only depth-0 low-prec token is a
@@ -10925,63 +10987,12 @@ sub _lower_decl_stmt {
              $self->_lower_block(\@rest, $vi, $tail_ctx),
              (($decl_tail && !@assign) ? ($name) : ())));
   }
-  # -- my VAR <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;` /
-  #    `my @raw, @upgraded, @utf8;`)
-  #    Perl declares ONLY the first variable and evaluates the rest as an
-  #    ordinary (void) expression whose first operand is the fresh lvalue; the
-  #    other names are package vars (it warns "Parenthesize").  Lower as a
-  #    `my VAR` let + the whole `VAR <trailing>` expression discarded.  Keep a
-  #    SCALAR BOXED in the remainder (a later `$x = …` must not hit the setf
-  #    raw-slot path — VarAnnotator may have marked it unboxable); a container
-  #    binds the same fresh container `my @a;` alone binds.
-  #    The container spelling was a `Parser2 TODO: unsupported declaration`
-  #    refusal until s393/#314 — one predicate too narrow, and it was
-  #    opbasic/cmp.t's whole file (12078 rows) in the companion suite.
-  my @kd = _strip_semi($first->schildren);
-  if (defined(my $lead = _lead_decl_with_expr_tail($first))) {
-    my $sname = $lead;
-    $self->_reg_lex($sname);
-    my $vi2 = { %$vi, $sname => { unboxable => 0 } };
-    return (_decl_let([_decl_fresh($sname, $vi)],
-             $self->_lower_expr([@kd[1 .. $#kd]], $first, ':void'),
-             $self->_lower_block(\@rest, $vi2, $tail_ctx),
-             ($decl_tail ? (cl_sym($sname)) : ())));
-  }
+}
 
-  # -- my @a / my %h / my (LIST) [= INIT];  → fresh containers in a let,
-  # the assignment lowered by the ORIGINAL expression machinery (v1 parses
-  # the whole `my … = …` statement as an expression and produces the
-  # p-array-= / p-hash-= / p-list-= form — same path as Parser.pm's
-  # _process_variable_statement).  All these vars stay boxed/containers.
-  # `my ();` declares nothing.  It is legal Perl and a no-op — perl #113554,
-  # and my.t asserts `eval "my ()"` leaves $@ EMPTY, so refusing it is not an
-  # option once the v1 fallback is gone (task #227).  No binding, no form; in
-  # tail position the value is the EMPTY LIST — emitted as the `(progn)` a
-  # bare `()` already lowers to, which yields 0 elements in list context and
-  # undef in scalar.  `(p-undef)` would wrongly be a 1-element list (the same
-  # trap the bare `return;` lowering documents above) and `(vector)` an empty
-  # ARRAY ref; both were measured against perl before settling here.  Must
-  # precede _multi_decl, which reports an empty name list as "unsupported".
-  if (_is_empty_my_decl($first)) {
-    return ($self->_lower_block(\@rest, $vi, $tail_ctx),
-            ($decl_tail ? ('(progn)') : ()));
-  }
-  # `my (undef) = RHS` / `my (undef, undef) = RHS` — a declaration list that
-  # declares NO NAME.  Legal and idiomatic perl ("consume and ignore"), and
-  # NOT the `my ()` no-op above: nothing is declared, but the RHS is still a
-  # list assignment and is EVALUATED — once, in LIST context (probed vs perl
-  # 5.40.3: the RHS sub reports wantarray true and is called exactly once).
-  # So the lowering is the statement MINUS nothing: the whole `my (undef) =
-  # RHS` run goes through the expression machinery exactly as the multi-decl
-  # branch below does for `my (undef, $x) = RHS` (#570's shape) — the only
-  # difference there is the `let` of the names, and there are none.  Without
-  # this arm `_multi_decl` reports "no names" and the die below took the
-  # WHOLE FILE (#610).
-  if (_is_no_name_my_decl($first)) {
-    my @kd = _strip_semi($first->schildren);
-    return ($self->_lower_expr([@kd], $first),
-            $self->_lower_block(\@rest, $vi, $tail_ctx));
-  }
+# `my @a / my %h / my (LIST) [= INIT];` (Pl::Stmt decl_shape: my-list).
+sub _lower_decl_list {
+  my ($self, $d, $first, $rest, $vi, $tail_ctx, $decl_tail) = @_;
+  my @rest = @$rest;
   # `my @a = (1,2) if COND` (#620): a trailing statement MODIFIER is not part
   # of the declaration and not part of the expression, and this branch hands
   # the WHOLE run `@k` both to `_multi_decl` (which then saw `if` where it
@@ -10999,7 +11010,7 @@ sub _lower_decl_stmt {
   # 5.40.3, `my @t = (1,2) if 0` leaves @t declared and EMPTY and does not
   # evaluate the RHS at all, which is exactly what a fresh container plus a
   # `p-if` around the assignment gives.
-  my @k = _strip_semi($first->schildren);
+  my @k = @{ $d->{sk} };
   my ($kmod, $kcond, @loopmod);
   {
     my $kexpr;
@@ -11008,8 +11019,7 @@ sub _lower_decl_stmt {
     # the scalar branch does, then the declaration without its init.
     if (_modifier_needs_fallback($kmod)) {
       push @loopmod, $self->_decl_loop_modifier($first, $vi);
-      my ($eq) = grep { $kexpr->[$_]->isa('PPI::Token::Operator')
-                        && $kexpr->[$_]->content eq '=' } 0 .. $#$kexpr;
+      my $eq = Pl::Stmt::decl_list_view($kexpr)->{eq};
       $kexpr = [ @$kexpr[0 .. $eq - 1] ] if defined $eq;
       ($kmod, $kcond) = (undef, undef);
     }
@@ -11074,7 +11084,7 @@ sub _lower_decl_stmt {
     # form `my @x = …@x…` / `my %h = …%h…`; the list form (`my (undef,@a)`)
     # and a nested declarator in the RHS (`my @a = my @a = …`) still need
     # v1's fuller machinery → fall back the whole file.
-    my ($eq_i) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
+    my $eq_i = Pl::Stmt::decl_list_view(\@k)->{eq};
     my @rhs     = @k[$eq_i + 1 .. $#k];
     # A statement MODIFIER on a SELF-REFERENTIAL init is the one combination
     # the two self-ref shapes below cannot express (#620 residue, task #722):
@@ -11087,9 +11097,9 @@ sub _lower_decl_stmt {
     # LOUD (the #339 announcement, a run-time die since the flip) rather
     # than a silent wrong false-condition value.
     if (defined $kmod
-        && do { my $t = join ' ', map { $_->content } @rhs;
+        && do { my $t = Pl::Stmt::joined_text(\@rhs);
                 grep { $t =~ _reads_name_rx($_) } @$vars }) {
-      @k   = _strip_semi($first->schildren);
+      @k   = @{ Pl::Stmt::decl_shape($first)->{sk} };
       @rhs = @k[$eq_i + 1 .. $#k];
       undef $kmod;
     }
@@ -11100,23 +11110,12 @@ sub _lower_decl_stmt {
     # let binding every name fresh — the declarators reduce to chained
     # assignments in the expression machinery.  Consume the chain head(s),
     # collect their names, and require the FINAL RHS to be self-ref-free.
-    my @chain_names;
     {
-      my @r = @rhs;
-      while (@r >= 3
-             && $r[0]->isa('PPI::Token::Word') && $r[0]->content eq 'my') {
-        my @syms = $r[1]->isa('PPI::Token::Symbol')   ? ($r[1])
-                 : $r[1]->isa('PPI::Structure::List') ? (grep { $_->isa('PPI::Token::Symbol') }
-                                                         map { $_->tokens } $r[1])
-                 : ();
-        my @names = grep { /^[\$\@\%]\w+$/ } map { $_->content } @syms;
-        last unless @names == @syms && @names
-          && $r[2]->isa('PPI::Token::Operator') && $r[2]->content eq '=';
-        push @chain_names, @names;
-        @r = @r[3 .. $#r];
-      }
+      my ($chain, $r) = Pl::Stmt::decl_chain(\@rhs);
+      my @chain_names = @$chain;
+      my @r = @$r;
       if (@chain_names) {
-        my $final_txt = join ' ', map { $_->content } @r;
+        my $final_txt = Pl::Stmt::joined_text(\@r);
         my %seen;
         my @all = grep { !$seen{$_}++ } (@$vars, @chain_names);
         # #3452: a `my` at the FINAL initializer's own level (`my @c = my @d
@@ -11139,7 +11138,7 @@ sub _lower_decl_stmt {
                  $self->_lower_block(\@rest, $vi, $tail_ctx)));
       }
     }
-    my $rhs_txt = join ' ', map { $_->content } @rhs;
+    my $rhs_txt = Pl::Stmt::joined_text(\@rhs);
     my @self_ref = grep { $rhs_txt =~ _reads_name_rx($_) } @$vars;
     if (@self_ref) {
       # A nested declarator in the RHS (`my @a = my @a = …`) or a var already
@@ -11147,8 +11146,7 @@ sub _lower_decl_stmt {
       die "Parser2 TODO: self-referential init: " . $first->content
         if _elems_declare_at_level(@rhs)
         || grep { $self->{_file_lex_renamed}{$_} } @$vars;
-      if (@$vars == 1
-          && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/) {
+      if (@$vars == 1 && Pl::Stmt::decl_list_view(\@k)->{container}) {
         my $var  = $vars->[0];
         my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
         $self->_reg_lex($var);
@@ -11214,9 +11212,10 @@ sub _lower_decl_stmt {
   # form here (task #227).
   my @tailval = ();
   if ($decl_tail && !$has_init) {
+    my $lv = Pl::Stmt::decl_list_view(\@k);
     @tailval = @$vars == 1 ? ($vars->[0])
-             : $k[1]->isa('PPI::Structure::List')
-               ? ($self->_lower_expr([$k[1]], $first, 'inherit')) : ();
+             : $lv->{paren}
+               ? ($self->_lower_expr([$lv->{names}], $first, 'inherit')) : ();
   }
   return (@kmod_eval,
           _decl_let(\@binds,
