@@ -5604,11 +5604,12 @@ op/write.t	474	ok	(missing)	RT \#130703 part 2	NS:`format` / `write` report form
 op/write.t	409	ok	(missing)	RT91032: don't overwrite orig format string	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	111	ok	not ok [PCL #112]	[at t/op/write.t line 1335]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	113	ok	not ok [PCL #115]	[at t/op/write.t line 1356]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	114	ok	not ok [PCL #116]	[at t/op/write.t line 1365]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	112	ok	not ok [PCL #113]	[at t/op/write.t line 1346]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline` (s532e: the unnamed format rows pair by a shifted line since the stripper's wiped rows run)
 op/write.t	115	ok	not ok [PCL #117]	[at t/op/write.t line 1374]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	116	ok	not ok [PCL #118]	[at t/op/write.t line 1383]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	118	ok	not ok [PCL #120]	[at t/op/write.t line 1389]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	119	ok	not ok [PCL #121]	[at t/op/write.t line 1392]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	117	ok	not ok [PCL #119]	[at t/op/write.t line 1386]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline` (s532e: as row 112)
+op/write.t	126	ok	not ok [PCL #128]	[at t/op/write.t line 1413]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline` (s532e: as row 112)
 op/write.t	120	ok	not ok [PCL #122]	[at t/op/write.t line 1395]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	121	ok	not ok [PCL #123]	[at t/op/write.t line 1398]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	122	ok	not ok [PCL #124]	[at t/op/write.t line 1401]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
@@ -5820,7 +5821,6 @@ op/write.t	584	ok	(missing)	no crash with invalid use/format inside format	NS:`f
 op/write.t	589	ok	(missing)	pragmata on format line	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	10	ok	not ok [PCL #11]	skipspace inside "${...}"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	131	ok	not ok [PCL #133]	swrite("1^*2 3@*4", "N", "N") class=""	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	132	ok	(missing)	swrite("1^*2 3@*4", "N", "N") class="Count"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	137	ok	(missing)	swrite("1^*2 3@*4", "N", "N\n") class=""	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	138	ok	(missing)	swrite("1^*2 3@*4", "N", "N\n") class="Count"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	143	ok	(missing)	swrite("1^*2 3@*4", "N", "N\nMoo!") class=""	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
