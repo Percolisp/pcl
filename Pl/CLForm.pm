@@ -335,6 +335,21 @@ sub _is_plist {
   return 1;
 }
 
+# The `local` macros (cl/pcl-runtime.lisp) and how many arguments precede
+# their &body -- the layout above keeps those on the head line (s533c: the
+# `local` statement is lowered as trees, C2 kind 1).
+my %HEADER_ARGS = (
+  'p-local-cell' => 2,            'p-local-cell-if' => 3,
+  'p-local-maybe' => 2,
+  'p-local-hash-elem' => 2,       'p-local-hash-elem-init' => 3,
+  'p-local-array-elem' => 2,      'p-local-array-elem-init' => 3,
+  'p-local-array-slice' => 2,     'p-local-hash-slice' => 2,
+  'p-local-glob' => 3,            'p-local-glob-if' => 4,
+  'p-local-glob-dynamic' => 3,
+  'p-local-deref-scalar' => 1,    'p-local-deref-array' => 1,
+  'p-local-deref-hash' => 1,
+);
+
 sub to_string {
   my ($f, $depth) = @_;
   no warnings 'recursion';   # same as _flat: one frame per nesting level (#1531)
@@ -421,6 +436,19 @@ sub to_string {
     my $first = shift @pairs;
     return _close("($head $first", $depth) unless @pairs;
     return _close("($head $first\n" . join("\n", map { $ind1 . $_ } @pairs), $depth);
+  }
+  # A `local` macro's HEADER -- what it localizes and the value it installs,
+  # the arguments before its &body -- stays on the head line when it fits
+  # flat, as `let`'s binding list does; the body goes one form per line.
+  if (my $n = $HEADER_ARGS{$head}) {
+    if (@args > $n) {
+      my @h = map { _flat($_) } @args[0 .. $n - 1];
+      my $line = (grep { !defined } @h) ? undef : join(' ', "($head", @h);
+      if (defined $line && length($line) + 2 * $depth < ONE_LINE_MAX) {
+        return _close("$line\n"
+          . join("\n", map { $ind1 . to_string($_, $depth + 1) } @args[$n .. $#args]), $depth);
+      }
+    }
   }
   # Keep short scrutinee args (var/list pairs of let/foreach) on the head line
   # when the first arg fits flat; body args go one per line.

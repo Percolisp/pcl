@@ -98,6 +98,7 @@ use strict;
 use warnings;
 use Pl::PExpr::Config ();
 use Pl::PExpr::TokenUtils ();
+use Pl::Environment ();
 
 # The statement classes whose lowering is the expression statement.
 my %EXPR_CLASS = map { ("PPI::Statement$_" => 1) }
@@ -152,7 +153,7 @@ sub classify {
     }
     return { kind => 'compound' };
   }
-  return { kind => 'local' } if is_local_stmt($stmt);
+  return { kind => 'local', %{ local_shape($stmt) } } if is_local_stmt($stmt);
   return { kind => 'decl' } if $stmt->isa('PPI::Statement::Variable');
   return { kind => 'scheduled' } if $stmt->isa('PPI::Statement::Scheduled');
   return { kind => 'use' } if $stmt->isa('PPI::Statement::Include');
@@ -224,6 +225,226 @@ sub is_local_stmt {
     }
   }
   return 0;
+}
+
+# ---- the `local` statement's shape (s533c, C2 kind 1) ----------------------
+#
+# local_shape($stmt) -> { lk => LK, FIELDS }, the sub-kind the structured
+# `local` lowering (Pl::Parser2::_local_plan) dispatches on.  The order of the
+# tests IS the old v1 text lowering's branch order (Pl::Parser's
+# _process_local_declaration, deleted s533c), so a statement takes the same
+# lowering family it always took.
+#
+#   lk         statement                                       fields
+#   ---------  ----------------------------------------------  ---------------
+#   delete     `delete local $h{k}` / `$a[i]` / `$r->{k}` /    sym, arrow, sub
+#              `$r->[i]` (a plain statement)
+#   seam       `my (…) = delete local …`, any other            why
+#              `delete local …` -- still the v1 seam
+#   loopmod    `local … for/foreach/while/until COND`, no `=`  mod, cond
+#   glob       `local *NAME [= RHS]`                           sym, rhs
+#   arylen     `local $#a = N`                                 (nonws)
+#   elem       an element / slice target: `$h{k}` `@h{…}`      ebase (sym |
+#              `$r->{k}` `${$r}{k}` `@{EXPR}{…}` `@$r[…]`       arrow | cast),
+#                                                              sub, sub_idx,
+#                                                              slice, base_expr
+#   globdyn    `local *{EXPR}` / `*$x` / a punctuation glob     punct
+#   deref      `local ${EXPR}` / `$$x` / `@{…}` / `%$x`         sigil
+#   items      variables, `local (LIST)`, `local our …`         our
+#
+# Every record also carries: parts (the significant tokens, `;` and white
+# space removed, the trailing modifier cut off -- v1's @parts), nonws (parts
+# without the `local` word, the paren pre-unwrap applied), mod ('' or the
+# modifier word), cond (its tokens), assign (a top-level `=` before the
+# split), deref_paren (an unsubscripted cast in parens: `local($$r) = …`).
+sub local_shape {
+  my ($stmt) = @_;
+  my @parts = grep {
+    my $r = ref $_;
+    $r ne 'PPI::Token::Whitespace' && !($r eq 'PPI::Token::Structure' && $_->content eq ';')
+  } $stmt->children;
+  my $w0 = $parts[0] && $parts[0]->isa('PPI::Token::Word') ? $parts[0]->content : '';
+  # (a plain statement's run drops comments as well -- the expression
+  # statement's filter; a `local` declaration's run keeps them, as v1's did)
+  return local_delete_shape([grep { ref($_) ne 'PPI::Token::Comment' } @parts])
+    if $w0 eq 'delete';
+  return { lk => 'seam', why => 'my-delete-local' } if $w0 ne 'local';
+  my $assign = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '=' } @parts;
+  my ($mod, $cond) = ('', []);
+  for my $i (0 .. $#parts) {
+    next unless ref($parts[$i]) eq 'PPI::Token::Word'
+      && Pl::PExpr::Config::is_statement_modifier_word($parts[$i]);
+    my $m = $parts[$i]->content;
+    # WITH an assignment only if/unless split (a loop modifier must leave the
+    # run whole: the RHS parse then drops the statement LOUDLY -- the open
+    # scope cannot restore once per iteration); with none, all six do.
+    last if $assign && $m !~ /^(?:if|unless)$/;
+    ($mod, $cond) = ($m, [@parts[$i + 1 .. $#parts]]);
+    splice(@parts, $i);
+    last;
+  }
+  my %r = (parts => \@parts, mod => $mod, cond => $cond, assign => $assign ? 1 : 0);
+  return { %r, lk => 'loopmod' } if $mod ne '' && $mod !~ /^(?:if|unless)$/;
+  my @nonws = grep {
+    my $x = ref $_;
+    $x ne 'PPI::Token::Whitespace' && !($x eq 'PPI::Token::Word' && $_->content eq 'local')
+  } @parts;
+  $r{deref_paren} = local_paren_unwrap(\@nonws);
+  $r{nonws} = \@nonws;
+  my ($n0, $n1, $n2) = @nonws;
+  my $c0 = $n0 ? $n0->content : '';
+  if ($n0 && ref($n0) eq 'PPI::Token::Symbol' && $c0 =~ /^\*(.+)$/
+      && !defined Pl::Environment::punct_glob_name($c0)) {
+    return { %r, lk => 'glob', sym => $n0, rhs => local_rhs_after(\@nonws, 0) };
+  }
+  return { %r, lk => 'arylen' } if $n0 && ref($n0) eq 'PPI::Token::ArrayIndex';
+  my $e = local_elem_shape(\@nonws);
+  return { %r, lk => 'elem', %$e } if $e;
+  my $punct = ($n0 && ref($n0) eq 'PPI::Token::Symbol')
+            ? Pl::Environment::punct_glob_name($c0) : undef;
+  my $block_or_sym = $n1 && (ref($n1) eq 'PPI::Structure::Block'
+                             || ref($n1) eq 'PPI::Token::Symbol');
+  if (defined $punct || (ref($n0 // '') eq 'PPI::Token::Cast' && $c0 eq '*' && $block_or_sym)) {
+    return { %r, lk => 'globdyn', punct => $punct };
+  }
+  if (ref($n0 // '') eq 'PPI::Token::Cast' && $c0 =~ /^[\$\@%]$/ && $block_or_sym) {
+    return { %r, lk => 'deref', sigil => $c0 };
+  }
+  return { %r, lk => 'items',
+           our => ($n0 && ref($n0) eq 'PPI::Token::Word' && $c0 eq 'our') ? 1 : 0 };
+}
+
+# The pre-unwrap of a parenthesised single target -- `local(*foo)`,
+# `local($x)`, `local($h{k})`, `local($r->{k})`, `local(@$r{…})`, `local($$r)`
+# -- IN PLACE on @$nonws.  Returns 1 for an UNSUBSCRIPTED cast (its parens
+# still make the assignment a LIST one, #3365), else 0.  The parens of a
+# SUBSCRIPTED single element are discarded here, and that is #1339 (perl
+# reads list-vs-scalar assignment off them); a lone variable keeps them in
+# `parts`, which the items path reads (#1243 (a)).
+sub local_paren_unwrap {
+  my ($nonws) = @_;
+  return 0 unless @$nonws && ref($nonws->[0]) eq 'PPI::Structure::List';
+  my @flat = flat_children($nonws->[0]);
+  my $has_comma = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq ',' } @flat;
+  if (@flat == 1 && ref($flat[0]) eq 'PPI::Token::Symbol') {
+    splice(@$nonws, 0, 1, @flat);
+    return 0;
+  }
+  return 0 unless @flat >= 2 && !$has_comma
+    && (ref($flat[0]) eq 'PPI::Token::Symbol' || ref($flat[0]) eq 'PPI::Token::Cast');
+  my $deref_paren = (ref($flat[0]) eq 'PPI::Token::Cast'
+    && !grep { ref($_) eq 'PPI::Structure::Subscript'
+               || (ref($_) eq 'PPI::Token::Operator' && $_->content eq '->') } @flat) ? 1 : 0;
+  splice(@$nonws, 0, 1, @flat);
+  return $deref_paren;
+}
+
+# The significant children of a bracketed structure with an expression
+# Statement inside flattened -- the ( ) / { } tokens dropped (v1's walk, which
+# two `local` readers and the deref-block reader share).
+sub flat_children {
+  my ($node) = @_;
+  my @out;
+  for my $child ($node->children) {
+    my $cr = ref $child;
+    next if $cr eq 'PPI::Token::Whitespace' || $cr eq 'PPI::Token::Structure';
+    if ($cr =~ /^PPI::Statement/) {
+      push @out, grep { ref($_) ne 'PPI::Token::Whitespace' } $child->children;
+    } else {
+      push @out, $child;
+    }
+  }
+  return @out;
+}
+
+# A subscript's key groups: its flattened tokens split on top-level commas
+# (`{a, b}` two keys, `[1..3]` one group).
+sub subscript_key_groups {
+  my ($sub) = @_;
+  return split_groups([flat_children($sub)], qr/^,$/);
+}
+
+# The target groups of a `local (…)` list: split on `,` and `=>` (task #509;
+# `undef` stays a group of its own -- a skip slot).
+sub local_list_groups {
+  my ($list) = @_;
+  return split_groups([flat_children($list)], qr/^(?:,|=>)$/);
+}
+
+# A token run split on top-level operators matching $sep; empty groups dropped.
+sub split_groups {
+  my ($toks, $sep) = @_;
+  my (@groups, @cur);
+  for my $t (@$toks) {
+    if (ref($t) eq 'PPI::Token::Operator' && $t->content =~ $sep) {
+      push @groups, [@cur] if @cur;
+      @cur = ();
+    } else {
+      push @cur, $t;
+    }
+  }
+  push @groups, [@cur] if @cur;
+  return @groups;
+}
+
+# The tokens after the first top-level `=` at index >= $from, or undef when
+# there is no `=`.
+sub local_rhs_after {
+  my ($toks, $from) = @_;
+  for my $i ($from .. $#$toks) {
+    next unless ref($toks->[$i]) eq 'PPI::Token::Operator' && $toks->[$i]->content eq '=';
+    return [@$toks[$i + 1 .. $#$toks]];
+  }
+  return undef;
+}
+
+# An element / slice `local` target's fields, or undef.  Three bases: a named
+# container (`$h{k}`, `@a[…]`), an arrow off a scalar (`$r->{k}`), a cast
+# (`${$r}{k}`, `@{EXPR}{…}`, `@$r[…]`).
+sub local_elem_shape {
+  my ($nw) = @_;
+  my ($n0, $n1, $n2) = @$nw;
+  return undef unless $n0 && $n1;
+  my $e = local_elem_base($nw) or return undef;
+  # An EMPTY subscript is not an element target (v1's branch fell through).
+  return subscript_key_groups($e->{sub}) ? $e : undef;
+}
+
+sub local_elem_base {
+  my ($nw) = @_;
+  my ($n0, $n1, $n2) = @$nw;
+  my $sub = 'PPI::Structure::Subscript';
+  if (ref($n0) eq 'PPI::Token::Symbol' && ref($n1) eq $sub) {
+    return { ebase => 'sym', sub => $n1, sub_idx => 1,
+             slice => ($n0->content =~ /^\@/ ? 1 : 0) };
+  }
+  return undef unless $n2 && ref($n2) eq $sub;
+  if (ref($n0) eq 'PPI::Token::Symbol'
+      && ref($n1) eq 'PPI::Token::Operator' && $n1->content eq '->') {
+    return { ebase => 'arrow', sub => $n2, sub_idx => 2, slice => 0 };
+  }
+  if (ref($n0) eq 'PPI::Token::Cast' && $n0->content =~ /^[\$\@]$/
+      && (ref($n1) eq 'PPI::Structure::Block' || ref($n1) eq 'PPI::Token::Symbol')) {
+    return { ebase => 'cast', sub => $n2, sub_idx => 2,
+             slice => ($n0->content eq '@' ? 1 : 0),
+             base_expr => (ref($n1) eq 'PPI::Structure::Block' ? 1 : 0) };
+  }
+  return undef;
+}
+
+# Standalone `delete local SYM SUBSCRIPT` / `delete local $r->SUBSCRIPT`.
+sub local_delete_shape {
+  my ($parts) = @_;
+  my ($d, $l, $s, $x, $y) = @$parts;
+  return { lk => 'seam', why => 'delete-local-other' }
+    unless $l && ref($l) eq 'PPI::Token::Word' && $l->content eq 'local'
+        && $s && ref($s) eq 'PPI::Token::Symbol' && $x;
+  my $sub = 'PPI::Structure::Subscript';
+  return { lk => 'delete', parts => $parts, sym => $s, arrow => 0, sub => $x }
+    if ref($x) eq $sub;
+  return { lk => 'delete', parts => $parts, sym => $s, arrow => 1, sub => $y }
+    if ref($x) eq 'PPI::Token::Operator' && $x->content eq '->' && $y && ref($y) eq $sub;
+  return { lk => 'seam', why => 'delete-local-other' };
 }
 
 # The label of a standalone-label statement, or undef.

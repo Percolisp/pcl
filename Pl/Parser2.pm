@@ -10278,16 +10278,16 @@ sub _blk_refused {
           $self->_lower_block(\@rest, $vi, $tail_ctx));
 }
 
-# `local …;` (Pl::Stmt kind local).
-# -- local …;  → v1's local machinery via the fallback seam; the opened
-# save/restore scope wraps the lowered block remainder (see _lower_local).
-# Standalone `delete local $h{k};` is a plain PPI::Statement with the same
+# `local …;` (Pl::Stmt kind local, sub-kind lk from Pl::Stmt::local_shape).
+# -- local …;  → the structured `local` lowering (_lower_local): the opened
+# save/restore scope(s) wrap the lowered block remainder.  Standalone
+# `delete local $h{k};` is a plain PPI::Statement with the same
 # scope-to-block-end behaviour — same route.
 sub _blk_local {
   no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
-  return $self->_lower_local($first, \@rest, $vi, $tail_ctx);
+  return $self->_lower_local($first, \@rest, $vi, $tail_ctx, $rec);
 }
 
 # BEGIN / END / … (kind scheduled) and use / no / require (kind use).
@@ -13399,7 +13399,9 @@ sub _embed_hook {
 # the token snapshot/restore around it, the string context encoding and the
 # native/fallback census went with it.
 sub _lower_expr {
-  my ($self, $parts, $stmt, $ctx, $rvalue) = @_;
+  # %opt: as_key => 1 compiles a hash ELEMENT's subscript by the emitter's key
+  # rule (Pl::Parser::_parse_expression_form; the structured `local`, s533c).
+  my ($self, $parts, $stmt, $ctx, $rvalue, %opt) = @_;
   my @parts = _strip_semi(@$parts);
   die "Parser2: empty expression" unless @parts;
   $self->_seam_note_expr(\@parts) if _seam_census();
@@ -13437,7 +13439,8 @@ sub _lower_expr {
     $p->_parse_expression_form(\@parts, $stmt, $fb_ctx,
       sub_info   => $self->_cur_sub_info,
       lexicals   => $self->{_let_bound_vars} // {},
-      var_facts  => $self->{_cur_vi} // {});
+      var_facts  => $self->{_cur_vi} // {},
+      ($opt{as_key} ? (as_key => 1) : ()));
   };
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $form;
@@ -14567,18 +14570,712 @@ sub _fallback_stmt {
 
 # (Pl::Stmt::is_local_stmt -- moved there with its notes, s533a)
 
-# `local` scopes to the end of the enclosing block: v1 emits the save/restore
-# form(s) OPEN and counts them in _local_let_depth (closed at block end by
-# emit-order bookkeeping).  v2's tree structure does the same thing by
-# construction — nest the lowered block remainder inside the open text via
-# raw_wrap.  Degenerate locals that open no scope (`local $#a = N`, skipped
-# stash locals) come back with 0 opens and embed as a plain raw statement.
+# ---------------------------------------------------------------------------
+# THE `local` STATEMENT, STRUCTURED (s533c; parser program step 1d / C2 kind 1,
+# task #3694; design docs/codegen-review-s526.md §12 row C2).
+#
+# A `local` scopes to the end of the enclosing block, so its lowering is a
+# list of OPEN forms -- each a complete runtime call (`p-local-cell`,
+# `p-local-hash-elem`, a `let` of temporaries, …) whose &body is everything
+# after it -- plus INNER forms that run first inside the innermost open (the
+# list assignment, a comma tail).  _local_plan builds that list from the
+# statement's Pl::Stmt record (`local_shape`'s sub-kind lk); _local_nest
+# puts the lowered block remainder inside.  The forms are the ones v1's text
+# machinery (Pl::Parser's _process_local_declaration, deleted with this)
+# printed, built as trees: same heads, same argument order, the same
+# temporaries in the same order (the counter is the seam parser's, which
+# its other users -- `my (…) = delete local` -- still share).  What still
+# goes through the v1 seam is named: record lk `seam` and the plans that
+# return undef below.  docs/ir-spec.md "local" is the semantics.
 sub _lower_local {
-  my ($self, $stmt, $rest, $vi, $tail_ctx) = @_;
-  my ($text, $opens) = $self->_fallback_stmt_capture($stmt);
+  my ($self, $stmt, $rest, $vi, $tail_ctx, $rec) = @_;
+  $rec //= Pl::Stmt::classify($stmt);
+  my $plan = $self->_local_plan($stmt, $rec);
+  if (!$plan) {
+    my ($text, $opens) = $self->_fallback_stmt_capture($stmt);
+    my @rest_forms = $self->_lower_block($rest, $vi, $tail_ctx);
+    return ((defined $text ? (raw($text)) : ()), @rest_forms) unless $opens;
+    return raw_wrap($text, $opens, @rest_forms);
+  }
+  $self->_seam_note_local($stmt, $rec) if _seam_census();
   my @rest_forms = $self->_lower_block($rest, $vi, $tail_ctx);
-  return ((defined $text ? (raw($text)) : ()), @rest_forms) unless $opens;
-  return raw_wrap($text, $opens, @rest_forms);
+  return _local_nest($plan, \@rest_forms);
+}
+
+# The plan's opens, innermost last, each wrapping the next; the inner forms
+# and then the block remainder are the innermost body.
+sub _local_nest {
+  my ($plan, $rest) = @_;
+  my @body = (@{ $plan->{inner} }, @$rest);
+  @body = ([@$_, @body]) for reverse @{ $plan->{opens} };
+  return @body;
+}
+
+my %LOCAL_PLAN = (
+  delete  => '_local_plan_delete',  glob   => '_local_plan_glob',
+  arylen  => '_local_plan_arylen',  elem   => '_local_plan_elem',
+  globdyn => '_local_plan_globdyn', deref  => '_local_plan_deref',
+  items   => '_local_plan_items',
+  seam    => undef,                 # `my (…) = delete local …` + the odd delete
+  loopmod => undef,                 # `local $x for LIST` (no population has one)
+);
+
+# { opens => [FORM…], inner => [FORM…] }, or undef = this statement stays on
+# the v1 seam (by its record kind, never by default).  Rule 12: a kind with
+# no entry DIES.
+sub _local_plan {
+  my ($self, $stmt, $rec) = @_;
+  my $lk = $rec->{lk} // '';
+  die "Parser2: no `local` lowering for statement kind '$lk': " . $stmt->content . "\n"
+    unless exists $LOCAL_PLAN{$lk};
+  my $m = $LOCAL_PLAN{$lk} or return undef;
+  return $self->$m($stmt, $rec);
+}
+
+# A statement the structured lowering also drops: the announced, perl-shaped
+# drop form, as v1's _drop_this_statement printed it.
+sub _local_drop {
+  my ($self, $parts, $stmt, $reason) = @_;
+  my $p = $self->fallback_parser;
+  $p->_announce_dropped_statement($parts, $stmt, $reason);
+  return { opens => [], inner => [raw($p->_dropped_statement_cl($parts, $stmt, $reason))] };
+}
+
+# A temporary of the `local` lowering: pcl-local-KIND-N / pcl-del-N, numbered
+# by the seam parser's counter (one sequence for every `local` site).
+sub _local_tmp {
+  my ($self, $prefix) = @_;
+  my $p = $self->fallback_parser;
+  $p->{_local_counter} //= 0;
+  return $prefix . $p->{_local_counter}++;
+}
+
+sub _local_list_ctx { return ['let', ['list', ['list', '*wantarray*', 't']], $_[0]] }
+sub _local_let1     { return ['let', ['list', ['list', $_[0], $_[1]]]] }
+
+# One localizer, conditional or not: under an if/unless modifier it goes
+# inside p-local-maybe, which saves and restores only when the test holds
+# (task #541: perl does not run the statement at all when it is false).
+sub _local_open {
+  my ($localizer, $test) = @_;
+  return defined $test ? ['p-local-maybe', $test, $localizer] : $localizer;
+}
+
+# The CL boolean of the trailing if/unless modifier (one reading, rule 11).
+sub _local_cond_form {
+  my ($self, $mod, $cond, $stmt) = @_;
+  my $t = ['p-true-p', $self->_lower_expr($cond, $stmt)];
+  return $mod eq 'unless' ? ['not', $t] : $t;
+}
+
+# A variable's storage name, as v1's _transform_pkg_var spells it.
+sub _local_var_cl { return $_[0]->fallback_parser->_transform_pkg_var($_[1]) }
+
+# The sigil of a storage name (`Pkg::@x` carries it after the `::`).
+sub _local_sigil {
+  my ($cl) = @_;
+  return ($cl =~ /::([%\@\$])/) ? $1 : substr($cl, 0, 1);
+}
+
+sub _local_is_stash { my ($cl) = @_; return (!ref($cl) && $cl =~ /^\(p-stash /) ? 1 : 0 }
+
+# The container a named element target lives in: a foreign-qualified runtime
+# global's resolver form (task #700), else the storage name.
+sub _local_container {
+  my ($self, $name) = @_;
+  return Pl::ExprToCL::_foreign_runtime_global_form($name) // $self->_local_var_cl($name);
+}
+
+# One subscript key group, compiled: a non-keyword bareword in `{…}` is its
+# string; a hash ELEMENT's whole subscript takes the emitter's key rule
+# (#3865 / #4062); else the expression in CTX.
+sub _local_key_form {
+  my ($self, $group, $open, $stmt, $ctx, $elem) = @_;
+  if ($open eq '{' && @$group == 1 && ref($group->[0]) eq 'PPI::Token::Word') {
+    my $w = $group->[0]->content;
+    return "\"$w\""
+      if $w !~ /^(?:if|unless|while|until|for|foreach|sub|my|our|local|state|undef|defined|not|and|or)$/;
+  }
+  return $self->_lower_expr($group, $stmt, undef, undef, as_key => 1) if $elem && $open eq '{';
+  return $self->_lower_expr($group, $stmt, $ctx);
+}
+
+sub _local_elem_place {
+  my ($open, $cl, $keys) = @_;
+  return @$keys == 1 ? [($open eq '{' ? 'p-gethash' : 'p-aref'), $cl, $keys->[0]]
+                     : [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @$keys];
+}
+
+# The VALUE a deref target dereferences: `$$x` the scalar's, `${EXPR}` the
+# expression's, `${name}` (a bareword) the package variable's NAME.
+sub _local_deref_ref_form {
+  my ($self, $node, $stmt) = @_;
+  return $self->_lower_expr([$node], $stmt) if ref($node) eq 'PPI::Token::Symbol';
+  my @inner = Pl::Stmt::flat_children($node);
+  return '"' . $inner[0]->content . '"' if @inner == 1 && ref($inner[0]) eq 'PPI::Token::Word';
+  return $self->_lower_expr(\@inner, $stmt);
+}
+
+# Seam-census row for a structured `local` (PCL_V2_SEAM_CENSUS): counted
+# under `local-structured:LK` so the census still says how many there were.
+sub _seam_note_local {
+  my ($self, $stmt, $rec) = @_;
+  $self->{_seam_local}{ $rec->{lk} }++;
+}
+
+# Is this statement inside a block, or in an eval region's `package X;` --
+# the seam's block-depth fact (several v1 decisions key on it; a `local`
+# outside every block wraps the rest of the FILE).
+sub _stmt_in_block_depth {
+  my ($self, $stmt) = @_;
+  for (my $a = $stmt->parent; $a; $a = $a->parent) {
+    return 1 if $a->isa('PPI::Structure::Block');
+  }
+  return ($self->environment->current_package // 'main') ne ($self->cur_pkg // 'main') ? 1 : 0;
+}
+
+# The fast-path operators a top-level `local`'s body must not inline: such a
+# `local` wraps the REST OF THE FILE in one form, and inlining into a form
+# that large blew SBCL's constraint propagation up (R1, s268).
+sub _local_notinline_decl {
+  return ['declare', ['notinline', map { "pcl::$_" } qw(
+    p-+ p-- p-* p-/ p-% p-== p-!= p-< p-> p-<= p->= p-<=>
+    p-. p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge p-str-cmp
+    unbox to-number to-string p-true-p p-bool %pcl-nan-p)]];
+}
+
+# ---- the families ------------------------------------------------------------
+
+# `delete local $h{k}` / `$a[i]` / `$r->{k}` / `$r->[i]` (standalone): one
+# save/restore open per key whose first body form deletes the slot.
+sub _local_plan_delete {
+  my ($self, $stmt, $rec) = @_;
+  my $open = $rec->{sub}->start->content;
+  my $cl;
+  if ($rec->{arrow}) {
+    $cl = ['unbox', $self->_lower_expr([$rec->{sym}], $stmt)];
+  } else {
+    my $base = substr($rec->{sym}->content, 1);
+    $cl = $self->_local_var_cl(($open eq '{' ? '%' : '@') . $base);
+    return { opens => [], inner => [] } if _local_is_stash($cl);   # not supported, skipped
+  }
+  my @keys = $self->_local_key_list($rec->{sub}, $open, $stmt);
+  my ($macro, $del) = $open eq '{' ? ('p-local-hash-elem', 'p-delete')
+                                   : ('p-local-array-elem', 'p-delete-array');
+  return { opens => [map { [$macro, $cl, $_, [$del, $cl, $_]] } @keys], inner => [] };
+}
+
+# The keys of a subscript, one form each; a lone qw// expands into its words.
+sub _local_key_list {
+  my ($self, $sub, $open, $stmt) = @_;
+  my @t = Pl::Stmt::flat_children($sub);
+  if (@t == 1 && ref($t[0]) =~ /QuoteLike::Words/) {
+    (my $raw = $t[0]->content) =~ s/^qw\s*\S//;
+    $raw =~ s/\S$//;
+    return map { "\"$_\"" } grep { $_ ne '' } split /\s+/, $raw;
+  }
+  return map { $self->_local_key_form($_, $open, $stmt) } Pl::Stmt::subscript_key_groups($sub);
+}
+
+# `local *NAME [= RHS] [if COND]`: the static glob, every slot saved; the RHS
+# replaces only the slot it names (#2080) and is evaluated before the
+# localization (it may read @_).
+sub _local_plan_glob {
+  my ($self, $stmt, $rec) = @_;
+  my $g = $self->_local_static_glob($rec->{sym}->content);
+  my $rhs = defined $rec->{rhs} ? $self->_lower_expr($rec->{rhs}, $stmt) : ':none';
+  my $test = $rec->{mod} ne '' ? $self->_local_cond_form($rec->{mod}, $rec->{cond}, $stmt) : undef;
+  return { opens => [_local_glob_open($g, $test, $rhs)], inner => [] };
+}
+
+# A static glob name `*NAME` / `*Pkg::NAME` as [static => PKG, NAME]: an
+# unqualified one lives in the current package, except the standard handles,
+# which perl resolves in main:: from every package (#3411).
+sub _local_static_glob {
+  my ($self, $gc) = @_;
+  return [static => ($1 || 'main'), $2] if $gc =~ /^\*(.*)::([^:]+)$/;
+  my ($name) = $gc =~ /^\*(\w+)$/;
+  $name //= '';
+  my $pkg = ($self->environment ? $self->environment->current_package : undef) // 'main';
+  $pkg = 'main' if Pl::Environment::fh_forced_main_name($name);
+  return [static => $pkg, $name];
+}
+
+# The localizer of one glob: p-local-glob(-if) for a static name,
+# p-local-glob-dynamic for one named at run time (#564); VAL is the value
+# that replaces the slot it names (#2080), or :none (the whole glob cleared).
+sub _local_glob_open {
+  my ($g, $test, $val) = @_;
+  my ($how, @name) = @$g;
+  return ['p-local-glob-dynamic', $name[0], $test // 't', $val] if $how eq 'dynamic';
+  my @at = ("\"$name[0]\"", "\"$name[1]\"", $val);
+  return defined $test ? ['p-local-glob-if', $test, @at] : ['p-local-glob', @at];
+}
+
+# `local $#a = N`: perl changes the length and never restores it (RT #7411),
+# so it is the plain assignment.  Under a modifier: the v1 seam (none occurs).
+sub _local_plan_arylen {
+  my ($self, $stmt, $rec) = @_;
+  return undef if $rec->{mod} ne '';
+  return { opens => [], inner => [$self->_lower_expr($rec->{nonws}, $stmt)] };
+}
+
+# `local *{EXPR}` / `local *$x` / a punctuation glob: the glob named at run
+# time (#564), through the runtime's one dynamic-glob resolver.
+sub _local_plan_globdyn {
+  my ($self, $stmt, $rec) = @_;
+  my $nw = $rec->{nonws};
+  my $name = defined $rec->{punct} ? Pl::ExprToCL::cl_string_literal($rec->{punct})
+           : ref($nw->[1]) eq 'PPI::Token::Symbol' ? $self->_lower_expr([$nw->[1]], $stmt)
+           : $self->_lower_expr([Pl::Stmt::flat_children($nw->[1])], $stmt);
+  my $rhs = Pl::Stmt::local_rhs_after($nw, defined $rec->{punct} ? 1 : 2);
+  my $test = $rec->{mod} ne '' ? $self->_local_cond_form($rec->{mod}, $rec->{cond}, $stmt) : undef;
+  my $val = $rhs ? $self->_lower_expr($rhs, $stmt) : ':none';
+  return { opens => [_local_glob_open([dynamic => $name], $test, $val)], inner => [] };
+}
+
+# An element / slice target -- `$h{k}`, `@h{…}`, `$a[i]`, `$r->{k}`,
+# `${$r}{k}`, `@{EXPR}{…}`, `@$r[…]`: one save/restore open per key.  A
+# single element with an initializer takes the -init macro (the value is
+# computed BEFORE the fresh box is installed: `local $a[2] = $a[2]`); a slice
+# with one computes the right side first into a temporary, opens, then
+# assigns the slice.  A condition read more than once, and an expression
+# base, are bound once (#3366).
+sub _local_plan_elem {
+  my ($self, $stmt, $rec) = @_;
+  my ($nw, $mod, $sub, $slice) = @$rec{qw(nonws mod sub slice)};
+  my $open = $sub->start->content;
+  my $cl = $self->_local_elem_container($stmt, $rec, $open);
+  return { opens => [], inner => [] } if _local_is_stash($cl);   # stash element: body only
+  my @kg = Pl::Stmt::subscript_key_groups($sub);
+  my $rhs = Pl::Stmt::local_rhs_after($nw, $rec->{sub_idx} + 1);
+  my $init = $rhs ? $self->_lower_expr($rhs, $stmt, (@kg > 1 || $slice) ? 1 : undef) : undef;
+  my $kctx = ($open eq '[' || $slice) ? 1 : undef;
+  my @keys = map { $self->_local_key_form($_, $open, $stmt, $kctx, (!$slice && @kg == 1)) } @kg;
+  my $macro = $open eq '{' ? 'p-local-hash-elem' : 'p-local-array-slice';
+  # A hash SLICE's key group that is not one literal key may name many keys
+  # at run time (`@h{@k}`): p-local-hash-slice localizes each.
+  my @macros = map { ($slice && $open eq '{' && !_local_literal_key($_)) ? 'p-local-hash-slice' : $macro } @kg;
+  my (@opens, @inner, $test);
+  if ($mod ne '') {
+    $test = $self->_local_cond_form($mod, $rec->{cond}, $stmt);
+    if (@keys > 1 || $slice) {
+      my $ct = $self->_local_tmp('pcl-local-cond-');
+      push @opens, _local_let1($ct, $test);
+      $test = $ct;
+    }
+  }
+  my $bind_base = sub {
+    return unless $rec->{base_expr};
+    my $bt = $self->_local_tmp('pcl-local-base-');
+    push @opens, _local_let1($bt, defined $test ? ['if', $test, $cl, 'nil'] : $cl);
+    $cl = $bt;
+  };
+  if (defined $init && @keys == 1 && !$slice) {
+    my $mi = $open eq '{' ? 'p-local-hash-elem-init' : 'p-local-array-elem-init';
+    push @opens, _local_open([$mi, $cl, $keys[0], $init], $test);
+  } elsif (defined $init) {
+    my $tmp = $self->_local_tmp('pcl-local-init-');
+    my $ti = _local_list_ctx($init);
+    push @opens, _local_let1($tmp, defined $test ? ['if', $test, $ti, 'nil'] : $ti);
+    $bind_base->();
+    push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
+    my $assign = _local_list_ctx(
+      ['p-setf', [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys], $tmp]);
+    push @inner, defined $test ? ['when', $test, $assign] : $assign;
+  } else {
+    $bind_base->() if @keys > 1;
+    push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
+  }
+  return { opens => \@opens, inner => \@inner };
+}
+
+# The container of an element target: a named one's storage (a stash's is
+# the `(p-stash …)` text, which the caller skips), an arrow's referent, a
+# cast's through the cast form a plain read uses (#1341).
+sub _local_elem_container {
+  my ($self, $stmt, $rec, $open) = @_;
+  my $nw = $rec->{nonws};
+  if ($rec->{ebase} eq 'sym') {
+    my $base = substr($nw->[0]->content, 1);
+    return $self->_local_container(($open eq '{' ? '%' : '@') . $base);
+  }
+  return ['unbox', $self->_lower_expr([$nw->[0]], $stmt)] if $rec->{ebase} eq 'arrow';
+  my $base = ref($nw->[1]) eq 'PPI::Token::Symbol'
+    ? $self->_lower_expr([$nw->[1]], $stmt)
+    : $self->_lower_expr([Pl::Stmt::flat_children($nw->[1])], $stmt);
+  return Pl::ExprToCL::_cast_form($open eq '{' ? 'p-cast-%' : 'p-cast-@', $base);
+}
+
+# A key group that is one literal key (a string, a number, a bareword, one
+# scalar): it names exactly one key.
+sub _local_literal_key {
+  my ($g) = @_;
+  return 0 unless @$g == 1;
+  my $t = $g->[0];
+  return ($t->isa('PPI::Token::Quote') || $t->isa('PPI::Token::Number')
+          || $t->isa('PPI::Token::Word')
+          || ($t->isa('PPI::Token::Symbol') && $t->content =~ /^\$/)) ? 1 : 0;
+}
+
+# `local ${EXPR}` / `$$x` / `@{EXPR}` / `%$x` [= INIT]: localization through
+# a symbolic name (a hard reference dies at run time, as in perl), in the
+# p-local-deref-* macros.  An initializer is evaluated BEFORE the localization
+# (`local ${'g'} = ${'g'} + 1` reads the old value) and assigned through the
+# place a plain `${'g'} = …` writes (#1260); a computed name is evaluated once.
+sub _local_plan_deref {
+  my ($self, $stmt, $rec) = @_;
+  my ($nw, $mod, $sigil) = @$rec{qw(nonws mod sigil)};
+  my $ref = $self->_local_deref_ref_form($nw->[1], $stmt);
+  my $macro = $sigil eq '@' ? 'p-local-deref-array'
+            : $sigil eq '%' ? 'p-local-deref-hash' : 'p-local-deref-scalar';
+  my $test = $mod ne '' ? $self->_local_cond_form($mod, $rec->{cond}, $stmt) : undef;
+  return { opens => [_local_open([$macro, $ref], $test)], inner => [] }
+    unless @$nw >= 4 && ref($nw->[2]) eq 'PPI::Token::Operator' && $nw->[2]->content eq '=';
+  my $rctx = ($sigil eq '$' && !$rec->{deref_paren}) ? undef : 1;
+  my $init = $self->_lower_expr([@$nw[3 .. $#$nw]], $stmt, $rctx);
+  $init = _local_list_ctx($init) if $rctx;
+  my ($name_tmp, $operand) = (undef, $ref);
+  if (Pl::CLForm::to_flat($ref) !~ /\A"[^"\\\x00-\x1f]*"\z/) {
+    $name_tmp = $self->_local_tmp('pcl-local-name-');
+    $operand = $name_tmp;
+  }
+  my %cast = ('$' => 'p-cast-$', '@' => 'p-cast-@', '%' => 'p-cast-%');
+  my $place = Pl::ExprToCL::_cast_form($cast{$sigil}, $operand);
+  my $ctmp = defined $test ? $self->_local_tmp('pcl-local-cond-') : undef;
+  my $tmp = $self->_local_tmp('pcl-local-init-');
+  my @opens;
+  if (defined $ctmp) { push @opens, _local_let1($ctmp, $test); $test = $ctmp }
+  my $ti = defined $test ? ['if', $test, $init, 'nil'] : $init;
+  if (defined $name_tmp) { push @opens, _local_let1($name_tmp, $ref); $ref = $name_tmp }
+  push @opens, _local_let1($tmp, $ti), _local_open([$macro, $ref], $test);
+  my $fn = $sigil eq '@' ? 'p-array-deref-=' : $sigil eq '%' ? 'p-hash-deref-=' : 'p-setf';
+  my $assign = ($sigil eq '$' && $rec->{deref_paren})
+             ? ['p-list-=', ['vector', $place], $tmp]          # local($$r) = LIST
+             : [$fn, $place, $tmp];
+  return { opens => \@opens, inner => [defined $test ? ['when', $test, $assign] : $assign] };
+}
+
+# Variables and lists -- `local $x`, `local $x = V`, `local @a = L`,
+# `local ($a, $h{k}, undef, $$r) = LIST`, `local our $x`, `local $_` -- each
+# target a STRUCTURED item (task #509): a variable is a binding (an ORDINARY
+# package global a `p-local-cell` open, task #289 -- its storage is a global
+# cell, and a `let` would be a lexical shadow no called sub sees; a runtime
+# special or a temporary a dynamic `let`), an element or a deref its own
+# save/restore open.  A list (or a parenthesised scalar: `local($x) = @_`
+# stores the FIRST element, #1243 (a)) assigns through the targets' PLACES
+# after every open, the right side computed first into a temporary.  An
+# if/unless modifier makes the SAVE AND RESTORE conditional, never the value
+# (#541), its condition evaluated once, first.
+sub _local_plan_items {
+  my ($self, $stmt, $rec) = @_;
+  my ($parts, $mod) = @$rec{qw(parts mod)};
+  $self->_local_our_decls($rec->{nonws}) if $rec->{our};
+  my @items;
+  my ($init_idx, $paren_lhs) = (-1, 0);
+  my $ok = eval {
+    for my $i (0 .. $#$parts) {
+      my $t = $parts->[$i];
+      my $r = ref $t;
+      if ($r eq 'PPI::Token::Symbol' || $r eq 'PPI::Token::Magic') {
+        push @items, $self->_local_target_item([$t], $stmt);
+      } elsif ($r eq 'PPI::Structure::List') {
+        $paren_lhs = 1;
+        push @items, map { $self->_local_target_item($_, $stmt) } Pl::Stmt::local_list_groups($t);
+      } elsif ($r eq 'PPI::Token::Operator' && $t->content eq '=') {
+        $init_idx = $i;
+        last;
+      }
+    }
+    1;
+  };
+  return $self->_local_drop($parts, $stmt, $self->fallback_parser->_shape_expr_error($@)) unless $ok;
+  return $self->_local_drop($parts, $stmt, "unsupported `local` target shape") unless @items;
+  # Whole-stash local (`local %Pkg::`) is not supported (not-supported.md
+  # "Live symbol-table hashes"): such a target is skipped.
+  if (grep { _local_is_stash($_->{cl}) } @items) {
+    @items = grep { !_local_is_stash($_->{cl}) } @items;
+    return { opens => [], inner => [] } unless @items;
+  }
+  return $self->_local_drop($parts, $stmt, $self->fallback_parser->_shape_expr_error($@))
+    unless eval { _local_glob_opens(\@items, $init_idx >= 0 ? 'rhs' : undef); 1 };
+  my $solo = $self->_local_solo(\@items, $paren_lhs);
+  my $v0 = $items[0]{cl};
+  # `local $.` / `local $|` (no value): the magic's own save/restore.
+  if (@items == 1 && !ref($v0) && $init_idx < 0
+      && ($v0 eq '$.' || $v0 eq '|$.|' || $v0 eq '$|' || $v0 eq '|$\\||')) {
+    my $test = $mod ne '' ? $self->_local_cond_form($mod, $rec->{cond}, $stmt) : undef;
+    my $m = ($v0 eq '$.' || $v0 eq '|$.|') ? 'p-local-dot' : 'p-local-pipe';
+    return { opens => [_local_open([$m], $test)], inner => [] };
+  }
+  my %st = (bindings => [], let_star => 0, tail => undef,
+            ctmp => ($mod ne '' ? $self->_local_tmp('pcl-local-cond-') : undef));
+  if ($init_idx >= 0 && $solo) {
+    $self->_local_solo_binding(\%st, $items[0], [@$parts[$init_idx + 1 .. $#$parts]], $mod, $stmt);
+  } else {
+    _local_fresh_bindings(\%st, \@items);
+  }
+  my $rhs_tmp;
+  if ($init_idx >= 0 && !$solo) {
+    my $rhs = _local_list_ctx($self->_lower_expr([@$parts[$init_idx + 1 .. $#$parts]], $stmt, 1));
+    $rhs = ['if', $st{ctmp}, $rhs, 'nil'] if $mod ne '';
+    $rhs_tmp = $self->_local_tmp('pcl-local-rhs-');
+    unshift @{ $st{bindings} }, [$rhs_tmp, $rhs, 1];
+  }
+  if (defined $st{ctmp}) {
+    unshift @{ $st{bindings} }, [$st{ctmp}, $self->_local_cond_form($mod, $rec->{cond}, $stmt), 1];
+    $st{let_star} = 1;
+  }
+  my @opens = $self->_local_binding_opens(\%st, $stmt, $mod, ($rhs_tmp || $st{let_star}) ? 'let*' : 'let');
+  for my $it (grep { $_->{kind} eq 'elem' } @items) {
+    push @opens, _local_open([$it->{macro}, $it->{cl}, $_], $st{ctmp}) for @{ $it->{keys} };
+  }
+  push @opens, _local_open([$_->{macro}, $_->{cl}], $st{ctmp}) for grep { $_->{kind} eq 'deref' } @items;
+  push @opens, _local_glob_opens(\@items, $rhs_tmp, $st{ctmp});
+  my @inner = defined $st{tail} ? ($st{tail}) : ();
+  if ($rhs_tmp) {
+    push @inner, _local_list_assign(\@items, $rhs_tmp, $mod ne '' ? $st{ctmp} : undef)
+      if grep { $_->{kind} ne 'glob' } @items;
+  } elsif ($init_idx >= 0 && $solo && _local_sigil($v0) =~ /^[\@%]$/) {
+    push @inner, $v0;   # `local @a = L` as a sub's last statement returns the list
+  }
+  return { opens => \@opens, inner => \@inner };
+}
+
+# Is this the SOLO-binding shape -- one variable (or element) target whose
+# value is its own initializer?  A parenthesised SCALAR makes it a list
+# assignment (#1243 (a)); an array or hash imposes list context on its own,
+# so `local(@a) = X` stays solo (and keeps perl-tests/min_local.t:18's
+# `local (@bim) = local(@bee) = LIST` reading below).  A deref target never is.
+sub _local_solo {
+  my ($self, $items, $paren_lhs) = @_;
+  return 0 unless @$items == 1;
+  my $k = $items->[0]{kind} // '';
+  return 0 if $k eq 'deref' || $k eq 'glob';
+  my $agg = $k eq 'var' && _local_sigil($items->[0]{cl}) =~ /^[\@%]$/;
+  return ($paren_lhs && !$agg) ? 0 : 1;
+}
+
+# `local our $x …`: each named variable is declared (a package cell) before
+# the localization binds it.
+sub _local_our_decls {
+  my ($self, $nonws) = @_;
+  my $p = $self->fallback_parser;
+  my $pkg = ($self->environment ? $self->environment->current_package : undef) // 'main';
+  for my $t (@$nonws[1 .. $#$nonws]) {
+    next if ref($t) ne 'PPI::Token::Symbol';
+    push @{ $self->{_captured_decls} }, $p->_our_cell_decl($pkg, $t->content);
+    $self->environment->add_our_variable($pkg, $t->content) if $self->environment;
+  }
+}
+
+# `local $x = V` (one target, its own value): the binding's INIT is the value
+# -- a fresh box, a copied array / hash (the right side evaluated with the
+# OLD contents) -- and `local $x = A, B` runs B as the first statement inside
+# the scope (#138: `=` binds tighter than `,`).
+sub _local_solo_binding {
+  my ($self, $st, $item, $rhs, $mod, $stmt) = @_;
+  my @rhs = @$rhs;
+  my $lp = $mod ne '' ? undef : Pl::PExpr::TokenUtils::lowprec_idx(\@rhs, 0);
+  if (defined $lp && Pl::PExpr::TokenUtils::lowprec_split_safe(\@rhs, 0, $lp)
+      && $rhs[$lp]->content =~ /^(?:,|=>)$/) {
+    my @tail = @rhs[$lp + 1 .. $#rhs];
+    splice(@rhs, $lp);
+    $st->{tail} = $self->_lower_expr(\@tail, $stmt) if @tail;
+  }
+  my $var = $item->{cl};
+  my $sigil = _local_sigil($var);
+  my $init = $self->_lower_expr(\@rhs, $stmt, ($sigil eq '@' || $sigil eq '%') ? 1 : undef);
+  my $b = $st->{bindings};
+  if ($var eq '$!' || $var eq '|$!|') {
+    push @$b, ['pcl::*p-stored-errno*', ['pcl::%pcl-local-errno-init', $init]];
+  } elsif ($sigil eq '%') {
+    push @$b, [$var, ['p-copy-hash', _local_list_ctx($init)]];
+  } elsif ($sigil ne '@') {
+    push @$b, [$var, ['p-box-for-local', $init]];
+  } elsif (ref($init) eq 'ARRAY' && @$init == 3 && $init->[0] eq 'p-array-='
+           && !ref($init->[1]) && $init->[1] !~ /\s/) {
+    # `local @bee = local(@bee) = R` / `local @bim = local(@bee) = R`: the
+    # inner assignment would mutate the vector the outer `let` saves --
+    # bypass it (same name) or give the inner name its own binding.
+    my ($mutated, $inner) = @$init[1, 2];
+    if ($mutated eq $var) {
+      push @$b, [$var, ['p-copy-array', _local_list_ctx($inner)]];
+    } else {
+      my $tmp = $self->_local_tmp('pcl-local-inner-');
+      unshift @$b, [$tmp, _local_list_ctx($inner), 1];
+      push @$b, [$mutated, ['p-copy-array', $tmp]], [$var, ['p-copy-array', $tmp]];
+      $st->{let_star} = 1;
+    }
+  } else {
+    push @$b, [$var, ['p-copy-array', _local_list_ctx($init)]];
+  }
+}
+
+# Bare `local $x` / a list: every VARIABLE target starts out empty (the
+# value is unconditional even under a modifier, #541 -- the modifier gates
+# the save and restore).  `undef` slots, elements and derefs bind nothing.
+sub _local_fresh_bindings {
+  my ($st, $items) = @_;
+  for my $it (@$items) {
+    next if $it->{kind} =~ /^(?:skip|elem|deref|glob)$/;
+    my $var = $it->{cl};
+    my $sigil = _local_sigil($var);
+    push @{ $st->{bindings} },
+        ($var eq '$!' || $var eq '|$!|') ? ['pcl::*p-stored-errno*', '0']
+      : $sigil eq '@' ? [$var, ['make-array', '0', ':adjustable', 't', ':fill-pointer', '0']]
+      : $sigil eq '%' ? [$var, ['make-hash-table', ':test', "'equal"]]
+      :                 [$var, ['make-p-box', 'nil']];
+  }
+}
+
+# The binding opens, split by Pl::GlobalPartition (task #289): the dynamic
+# `let`/`let*` FIRST (its temporaries hold values read while every slot is
+# still the old one), then one `p-local-cell` per ordinary global.  Under a
+# modifier the localized NAMES move into p-local-maybe / p-local-cell-if,
+# the temporaries (the third field) stay outside.  A `local` outside every
+# sub and block wraps the rest of the FILE: its body must not inline the
+# fast-path operators (the notinline declaration; `locally` when no `let`).
+sub _local_binding_opens {
+  my ($self, $st, $stmt, $mod, $let) = @_;
+  my @let_b  = grep {  Pl::GlobalPartition::is_exception_global($_->[0]) } @{ $st->{bindings} };
+  my @cell_b = grep { !Pl::GlobalPartition::is_exception_global($_->[0]) } @{ $st->{bindings} };
+  my @outer = $mod ne '' ? (grep { $_->[2] } @let_b) : @let_b;
+  my @cond  = $mod ne '' ? (grep { !$_->[2] } @let_b) : ();
+  my $top = $self->environment->in_subroutine == 0 && !$self->_stmt_in_block_depth($stmt);
+  my $pairs = sub { return ['list', map { ['list', $_->[0], $_->[1]] } @_] };
+  my @opens;
+  push @opens, [$let, $pairs->(@outer)] if @outer;
+  push @opens, ['locally'] if !@outer && $top;
+  push @{ $opens[-1] }, _local_notinline_decl() if $top;
+  push @opens, ['p-local-maybe', $st->{ctmp}, ['let', $pairs->(@cond)]] if @cond;
+  push @opens, map { $mod ne '' ? ['p-local-cell-if', $st->{ctmp}, @$_[0, 1]]
+                                : ['p-local-cell', @$_[0, 1]] } @cell_b;
+  return @opens;
+}
+
+# The list assignment of a `local (…) = LIST`: an ordinary list assignment
+# over the targets' PLACES (tasks #509 / #510), gated on the condition.  A
+# solo deref target takes its symbolic assignment (p-list-= reads its LHS
+# syntactically and cannot take a resolver CALL, task #700).
+sub _local_list_assign {
+  my ($items, $rhs_tmp, $ctmp) = @_;
+  my $assign = ['p-list-=', ['vector', map { $_->{place} } @$items], $rhs_tmp];
+  if (@$items == 1 && ($items->[0]{kind} // '') eq 'deref') {
+    my $sig = substr($items->[0]{macro}, length('p-local-deref-'), 1);
+    my $fn = $sig eq 'h' ? 'p-hash-deref-=' : $sig eq 'a' ? 'p-array-deref-=' : 'p-setf';
+    $assign = [$fn, $items->[0]{place}, $rhs_tmp];
+  }
+  return defined $ctmp ? ['when', $ctmp, $assign] : $assign;
+}
+
+# ONE target of a variable / list `local`, as { kind, cl, place, … }:
+#   skip   an `undef` placeholder: no storage, one right-side slot
+#   var    a variable; cl = its storage name, place = its setf place (they
+#          differ for a magic name: `$!` is stored in *p-stored-errno* and
+#          written through (p-errno-string), task #510)
+#   elem   a subscripted slot; cl = the CONTAINER, keys / macro = how to save
+#          and restore it, place = its setf place
+#   deref  a foreign-qualified runtime global (#700) or `$$r` / `${EXPR}`
+#          (#3470): cl = the NAME / reference the p-local-deref-* macro reads
+# Rule 12: any other shape DIES here (the caller turns it into the
+# statement's announced drop) -- never a phantom `local` of whatever Symbol
+# the group contains.
+sub _local_target_item {
+  my ($self, $g, $stmt) = @_;
+  my ($t0, $t1) = @$g;
+  if (@$g == 1 && ref($t0) eq 'PPI::Token::Word' && $t0->content eq 'undef') {
+    return { kind => 'skip', cl => '(p-undef)', place => ['p-undef'] };
+  }
+  # A GLOB in the list (#4185) -- `*{"P::a"}`, `*$name`, `*a`, `*Pkg::a`, a
+  # punctuation glob: localized by the glob family's own open, its value the
+  # list's element at its position (place = a skip slot for the assignment).
+  my $glob = $self->_local_glob_item($g, $stmt);
+  return { kind => 'glob', cl => '(glob)', place => ['p-undef'], glob => $glob } if $glob;
+  if (@$g == 1 && (ref($t0) eq 'PPI::Token::Symbol' || ref($t0) eq 'PPI::Token::Magic')) {
+    my $c = $t0->content;
+    if (my $place = Pl::ExprToCL::_foreign_runtime_global_form($c)) {
+      my $sigil = substr($c, 0, 1);
+      (my $name = $c) =~ s/^[\$\@\%]//;
+      return { kind => 'deref', cl => "\"$name\"", place => $place,
+               macro => $sigil eq '@' ? 'p-local-deref-array'
+                      : $sigil eq '%' ? 'p-local-deref-hash' : 'p-local-deref-scalar' };
+    }
+    my $cl = $self->_local_var_cl($c);
+    my $place = ref($t0) eq 'PPI::Token::Magic' ? $self->_lower_expr([$t0], $stmt) : $cl;
+    return { kind => 'var', cl => $cl, place => $place };
+  }
+  if (@$g == 2 && ref($t0) eq 'PPI::Token::Symbol' && ref($t1) eq 'PPI::Structure::Subscript') {
+    my $open = $t1->start->content;
+    my $cl = $self->_local_container(($open eq '{' ? '%' : '@') . substr($t0->content, 1));
+    my @kg = Pl::Stmt::subscript_key_groups($t1);
+    die "Parser2 TODO: empty subscript in a `local` target\n" unless @kg;
+    my $elem = ($t0->content =~ /\A\$/ && @kg == 1);
+    my @keys = map { $self->_local_key_form($_, $open, $stmt, ($open eq '[' ? 1 : undef), $elem) } @kg;
+    return { kind => 'elem', cl => $cl, keys => \@keys, scalar => $elem ? 1 : 0,
+             macro => $open eq '{' ? 'p-local-hash-elem' : 'p-local-array-slice',
+             place => _local_elem_place($open, $cl, \@keys) };
+  }
+  if (@$g == 2 && ref($t0) eq 'PPI::Token::Cast' && $t0->content eq '$'
+      && (ref($t1) eq 'PPI::Token::Symbol' || ref($t1) eq 'PPI::Structure::Block')) {
+    my $place = $self->_lower_expr([@$g], $stmt);
+    return { kind => 'deref', place => $place, macro => 'p-local-deref-scalar',
+             cl => $self->_local_deref_ref_form($t1, $stmt) };
+  }
+  die "Parser2 TODO: unsupported `local` target: "
+    . join('', map { $_->content // '' } @$g) . "\n";
+}
+
+# A glob target group as [static => PKG, NAME] / [dynamic => NAME-FORM], or
+# undef.  The same three spellings the single-target statement takes (the
+# glob, globdyn records): a Symbol `*NAME`, a punctuation glob, `*{EXPR}` /
+# `*$x`.
+sub _local_glob_item {
+  my ($self, $g, $stmt) = @_;
+  my ($t0, $t1) = @$g;
+  if (@$g == 1 && ref($t0) eq 'PPI::Token::Symbol' && $t0->content =~ /^\*/) {
+    my $punct = Pl::Environment::punct_glob_name($t0->content);
+    return [dynamic => Pl::ExprToCL::cl_string_literal($punct)] if defined $punct;
+    return $self->_local_static_glob($t0->content);
+  }
+  return undef unless @$g == 2 && ref($t0) eq 'PPI::Token::Cast' && $t0->content eq '*';
+  return [dynamic => $self->_lower_expr([$t1], $stmt)] if ref($t1) eq 'PPI::Token::Symbol';
+  return [dynamic => $self->_lower_expr([Pl::Stmt::flat_children($t1)], $stmt)]
+    if ref($t1) eq 'PPI::Structure::Block';
+  return undef;
+}
+
+# The glob targets of a list `local`, one open each (#4185), after every
+# other open: under an initializer each takes the right side's element at its
+# own position -- static, so every target before it must take exactly ONE
+# slot (a scalar, an element, `undef`, a glob); after an array, a hash or a
+# slice the position is not static and the statement is refused (rule 12).
+sub _local_glob_opens {
+  my ($items, $rhs_tmp, $test) = @_;
+  my (@opens, $slot);
+  $slot = 0;
+  for my $it (@$items) {
+    if ($it->{kind} eq 'glob') {
+      die "Parser2 TODO: unsupported `local` target: a glob after a list-valued target\n"
+        if $rhs_tmp && !defined $slot;
+      push @opens, _local_glob_open($it->{glob}, $test,
+                                    $rhs_tmp ? ['p-aref-deref', $rhs_tmp, $slot] : ':none');
+    }
+    $slot = undef if defined $slot && !_local_one_slot($it);
+    $slot++ if defined $slot;
+  }
+  return @opens;
+}
+
+# Does a list target take exactly one element of the right side?
+sub _local_one_slot {
+  my ($it) = @_;
+  my $k = $it->{kind};
+  return 1 if $k eq 'skip' || $k eq 'glob';
+  return _local_sigil($it->{cl}) eq '$' ? 1 : 0 if $k eq 'var';
+  return ($it->{macro} eq 'p-local-deref-scalar') ? 1 : 0 if $k eq 'deref';
+  return $it->{scalar} ? 1 : 0 if $k eq 'elem';
+  die "Parser2: no slot count for a `local` target of kind '$k'\n";
 }
 
 sub _fallback_stmt_capture {
@@ -15002,8 +15699,11 @@ sub _seam_census_dump {
   print STDERR join("\t", 'pcl-seam', 'totals', $tag,
                     'expr='      . ($self->{_seam_expr} // 0),
                     'seam-stmt=' . _hist_total($self->{_seam_stmt})), "\n";
-  for my $cat (qw(stmt head)) {
-    my $h = { stmt => $self->{_seam_stmt}, head => $self->{_seam_expr_head} }->{$cat} or next;
+  # `local-structured`: the `local` statements lowered as trees (s533c), by
+  # Pl::Stmt::local_shape sub-kind -- no longer seam statements.
+  for my $cat (qw(stmt head local-structured)) {
+    my $h = { stmt => $self->{_seam_stmt}, head => $self->{_seam_expr_head},
+              'local-structured' => $self->{_seam_local} }->{$cat} or next;
     print STDERR join("\t", 'pcl-seam', $cat, $_, $h->{$_}), "\n"
       for sort { $h->{$b} <=> $h->{$a} || $a cmp $b } keys %$h;
   }

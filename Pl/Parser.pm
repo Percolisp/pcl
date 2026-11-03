@@ -12530,6 +12530,10 @@ sub _parse_expression_form {
   # %opt: sub_info + lexicals + var_facts — the FACTS ExprToCL's Kind-A rules
   # read (Phase A: the first two used to reach only ExprToCL2's native
   # attempt; var_facts is #1140's array family, for `local-push`).
+  # as_key: the expression is a hash ELEMENT's subscript, compiled by the
+  # emitter's ONE key rule (_hash_key_form, #3865 / #4062) -- the structured
+  # `local $h{KEY}` (s533c) asks it, as _parse_expression_internal's AS_KEY does.
+  my $as_key = delete $opt{as_key};
 
   my $form;
   eval {
@@ -12537,7 +12541,7 @@ sub _parse_expression_form {
     my ($node_id) = $expr_o->parse_expr_to_tree($parts);
     $expr_o->annotate_contexts($node_id, $context);
     my $gen = $self->_expr_generator($expr_o, %opt);
-    $form = $gen->gen_node_form($node_id);
+    $form = $as_key ? $gen->_hash_key_form($node_id) : $gen->gen_node_form($node_id);
   };
 
   if ($@) {

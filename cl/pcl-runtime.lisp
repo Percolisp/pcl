@@ -26645,7 +26645,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-11400"
+(defparameter *pcl-cache-generation* "v2-11700"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -34507,11 +34507,14 @@ would consume, so it dies naming the stream (rule 12)."
             (,orig-len (length ,arr-var))
             (,old-ex   (< ,iv ,orig-len))
             (,old-bx   (when ,old-ex (aref ,arr-var ,iv))))
-       ;; Extend array if needed and install a fresh box set to init-val
+       ;; Extend array if needed and install a fresh box set to init-val --
+       ;; THROUGH box-set, as the hash twin %p-lhe-init does: a raw
+       ;; (make-p-box VAL) of a BOX (a foreach alias `$i`) wraps the box itself,
+       ;; and the element read back as SCALAR(0x1) (task #4441).
        (when (>= ,iv (length ,arr-var))
          (dotimes (n (1+ (- ,iv (length ,arr-var))))
            (vector-push-extend nil ,arr-var)))
-       (setf (aref ,arr-var ,iv) (make-p-box ,init-val))
+       (setf (aref ,arr-var ,iv) (let ((b (make-p-box nil))) (box-set b ,init-val) b))
        (unwind-protect
             (progn ,@body)
          (if ,old-ex

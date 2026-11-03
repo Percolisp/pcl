@@ -624,11 +624,15 @@ EOF
   my $ev = Pl::Parser2->parse_code(q{my $e = eval { 42 };});
   like($ev, qr/\(p-eval-block 42\)/, '#78: eval block body is structural');
 
-  # local inside the block → raw_wrap → decline → v1 text route (multiline).
+  # local inside the block: since s533c (C2 kind 1) a `local` statement is
+  # lowered as a TREE, so the block stays structural -- the binding open wraps
+  # the rest of the body, and no v1 source echo is left.  (Until s533c this
+  # row asserted the decline to the v1 text body: the local was raw text.)
   my $lc = Pl::Parser2->parse_code(
     q{my @a = (1); my @q = map { local $_ = 5; $_ } @a;});
-  like($lc, qr/\(lambda \(\$_\)\n/,
-       '#78: local-in-block declines to the v1 text body');
+  like($lc, qr/\(lambda \(\$_\) \(let \(\(\$_ \(p-box-for-local 5\)\)\) \$_\)\)/,
+       '#78/s533c: local-in-block lowers structurally (the let wraps the rest)');
+  unlike($lc, qr/;; local/, '#78/s533c: no v1 source echo of the local statement');
 
   # package inside the block → decline (v1 owns the revert wrapper).
   my $pk = Pl::Parser2->parse_code(
