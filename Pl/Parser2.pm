@@ -72,47 +72,6 @@ sub _stmt_refusal {
   return $t ? $t->[1] : undef;
 }
 
-# ---- s533a D2: the statement classifier's DUAL-RUN --------------------------
-# PCL_STMT_CHECK=die|log (unset = today's path; the classifier is not called):
-# each branch of the legacy statement dispatch names the kind it took, and the
-# classifier's answer for the same statement must be among them.  `die` dies
-# on a disagreement; `log` appends one TSV row to $PCL_STMT_LOG (file, line,
-# axis, legacy kinds, classifier kind, statement text).  Deleted when the
-# dispatch switches on Pl::Stmt (D3) -- its job is then done.
-our $STMT_CHECK = $ENV{PCL_STMT_CHECK} // '';
-our (%STMT_COUNT, $STMT_FILE);
-END {
-  if ($STMT_CHECK eq q{log} && defined $ENV{PCL_STMT_LOG} && %STMT_COUNT) {
-    if (open my $fh, q{>>:utf8}, $ENV{PCL_STMT_LOG}) {
-      print $fh join(qq{\t}, q{C}, $STMT_FILE // q{-},
-        map { "$_=$STMT_COUNT{$_}" } sort keys %STMT_COUNT), qq{\n};
-    }
-  }
-}
-sub _stmt_took {
-  my ($self, $stmt, $axis, @want) = @_;
-  my $got = eval {
-      $axis eq 'kind'     ? Pl::Stmt::classify($stmt)->{kind}
-    : $axis eq 'decl'     ? Pl::Stmt::decl_shape($stmt)->{decl}
-    : $axis eq 'compound' ? Pl::Stmt::compound_shape($stmt)->{ckind}
-    : die "unknown axis $axis\n";
-  } // do { (my $e = $@) =~ s/\s+/ /g; "DIED: $e" };
-  $STMT_COUNT{$axis}++;
-  $STMT_FILE = $self->filename // $STMT_FILE;
-  return if grep { $_ eq $got } @want;
-  (my $txt = $stmt->content) =~ s/\s+/ /g;
-  my $row = join "\t", 'S', ($self->filename // '-'), ($stmt->line_number // 0),
-    $axis, join('|', @want), $got, substr($txt, 0, 160);
-  die "PCL stmt-check: $row\n" if $STMT_CHECK eq 'die';
-  if (defined(my $log = $ENV{PCL_STMT_LOG})) {
-    open my $fh, '>>:utf8', $log or die "PCL_STMT_LOG $log: $!\n";
-    print $fh "$row\n";
-    close $fh;
-  } else {
-    print STDERR "PCL stmt-check: $row\n";
-  }
-}
-
 # The `use re` hints a string eval inherits from its site, bound by parse()
 # for one unit's compile (#4101; _eval_re_seed / re_pragma_at below).
 our $RE_SEED;
@@ -10354,160 +10313,9 @@ sub _lower_block_1 {
   if (my @f = $self->_goto_nested_fire(\@s, $vi, $tail_ctx))  { return @f }
   if (my @f = $self->_goto_dispatch_hook(\@s, $vi, $tail_ctx)) { return @f }
 
-  # -- #63 forward `goto LABEL` to a standalone label among these statements:
-  # a lexical `(go)` cannot reach a tag whose tagbody opens LATER, and Perl
-  # allows the goto to sit inside a map/grep block (a pseudo-block the jump
-  # may leave) — i.e. inside a LAMBDA here, where only a dynamic transfer
-  # works.  Lowering: wrap the statements before the label in
-  # (catch :pcl-goto-LBL …) falling through to the label point, and lower
-  # every `goto LBL` in that prefix as (throw :pcl-goto-LBL nil) — the
-  # `_catch_labels` registry on this object (ExprToCL's goto branch reads it
-  # through the seam parser's lex_home) is `local`ized around the prefix
-  # lowering so backward
-  # gotos (in the tagbody remainder) keep the lexical (go).  Only the FIRST
-  # standalone label of the list is considered (a later label's prefix
-  # would cross this one's tagbody; the recursion inside the tagbody
-  # re-scans).  The wrap is skipped — leaving the label case's forward-goto
-  # gate as the safety net — when the prefix contains a declaration/local
-  # statement (its let/save-restore scope must enclose the label, which the
-  # catch would cut) or when the goto textually precedes such a statement.
   if (@s >= 2) {
-    # ALL top-level standalone labels, in order.  The first drives the classic
-    # single-label wraps below; the full list drives the #252 general wrap.
-    my @labels;    # [index, name]
-    for my $i (1 .. $#s) {
-      my $l = Pl::Stmt::standalone_label($s[$i]);
-      push @labels, [$i, $l] if defined $l;
-    }
-    my ($k, $lbl) = @labels ? @{ $labels[0] } : ();
-    if (defined $k && $lbl =~ /^\w+$/) {
-      my @prefix = @s[0 .. $k - 1];
-      my $has_goto = grep { Pl::Stmt::mentions_goto($_, $lbl) } @prefix;
-      # A goto in this prefix to a LATER label needs the #252 general wrap
-      # below: the single-label wraps open no catch for that label, so its
-      # goto would lower to a lexical (go) with no tag in scope.
-      my $cross = 0;
-      if (@labels > 1) {
-        PFX: for my $p (@prefix) {
-          for my $j (1 .. $#labels) {
-            if (Pl::Stmt::mentions_goto($p, $labels[$j][1])) { $cross = 1; last PFX; }
-          }
-        }
-      }
-      my $scope_stmt = grep {
-        Pl::Stmt::opens_scope($_)
-      } @prefix;
-      if (!$cross && $has_goto && !$scope_stmt) {
-        my $tag = ':' . cl_sym('pcl-goto-' . $lbl);
-        my @pre_forms = do {
-          local $self->{_catch_labels}{$lbl} = $tag;
-          $self->_lower_block(\@prefix, $vi, undef);
-        };
-        $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
-        return (['catch', $tag, @pre_forms],
-                $self->_lower_block([@s[$k .. $#s]], $vi, $tail_ctx));
-      }
-      # Decl-hoist variant (#126, t/test.pl watchdog): the prefix DOES contain
-      # declarations, whose let scope must survive past the label (the plain
-      # catch-wrap would cut it).  When every one of them is a simple
-      # single-scalar `my $x [= INIT];` (no local, no modifiers, no self-init,
-      # no re-declaration), pre-bind them all as nil boxes in ONE let around
-      # both the catch and the label point — v1's flat-decl model, structured —
-      # and lower each decl in place as its bare assignment (the
-      # _goto_hoisted flag, consulted by the Statement::Variable branch).  A
-      # goto that jumps over a hoisted decl leaves its box nil = undef,
-      # perl's jumped-over-my behaviour.  Anything outside the subset keeps
-      # the standalone-label forward-goto gate as the safety net.
-      elsif (!$cross && $has_goto) {
-        my $hoist = $self->_goto_hoist_decls(\@prefix);
-        my @hoist = $hoist ? @$hoist : ();
-        if (@hoist) {
-          my $tag = ':' . cl_sym('pcl-goto-' . $lbl);
-          my @pre_forms = do {
-            local $self->{_catch_labels}{$lbl} = $tag;
-            local $self->{_goto_hoisted} = { map { $_ => 1 } @hoist };
-            $self->_lower_block(\@prefix, $vi, undef);
-          };
-          $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
-          my $vi2 = { %$vi, map { $_ => { unboxable => 0 } } @hoist };
-          return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @hoist],
-                   ['catch', $tag, @pre_forms],
-                   $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)));
-        }
-      }
-      # -- #252 GENERAL forward-goto shape (Text::Balanced's _match_tagged):
-      # several standalone labels and gotos that CROSS an intervening label.
-      # Preconditions: label names distinct, every goto to every label is
-      # strictly FORWARD (textually before its label statement), and NO
-      # top-level declaration/local before the LAST label.  Declarations do
-      # not defeat the branch — a leading `my`/`local` is consumed by its
-      # ordinary statement branch, which NESTS the block remainder (labels
-      # included) inside its let/save-restore and recurses back here, so the
-      # declaration's scope encloses every segment and this branch fires at
-      # the level where only code remains.  (A decl BETWEEN labels would need
-      # cross-catch hoisting — rare, still gated below; a goto that jumps
-      # over a declaration keeps the classic #126 single-label hoist.)
-      # Lowering: nest catches so the catch for EACH label encloses
-      # everything before that label:
-      #   (catch :L3 (catch :L2 (catch :L1 P0…) P1…) P2…) P3…
-      # A (throw :Li) from any depth in any earlier segment unwinds to Li's
-      # catch, whose next sibling form is Li's segment — exactly perl's jump
-      # — and normal completion falls through the segments in source order.
-      # The block value is the LAST segment's tail.  Backward or mixed gotos
-      # never fire this branch; they keep the classic tagbody machinery and
-      # its forward-goto gate as the safety net.
-      if (@labels && !grep { $_->[1] !~ /^\w+$/ } @labels) {
-        my %ln;
-        my $dup = grep { $ln{ $_->[1] }++ } @labels;
-        my ($backward, $any_goto) = (0, 0);
-        LBL: for my $L (@labels) {
-          my ($idx, $name) = @$L;
-          for my $j (0 .. $#s) {
-            next if $j == $idx;
-            next unless Pl::Stmt::mentions_goto($s[$j], $name);
-            if ($j > $idx) { $backward = 1; last LBL; }
-            $any_goto = 1;
-          }
-        }
-        my $decl_stmt = grep {
-          Pl::Stmt::opens_scope($_)
-        } @s[0 .. $labels[-1][0] - 1];
-        # #2287: declarations before the last label are HOISTED when they
-        # are all in the #126 subset (core File::Copy's `copy`: `my $from_h;
-        # if (…) { open … or goto fail_open1 } … my $to_h; …` — without the
-        # hoist this level declined, `my $from_h` nested the remainder, and
-        # the catches opened one level down, AFTER the first goto, which then
-        # lowered to a bare (go) with no tag).  The let opens around the
-        # whole catch nest; each decl lowers in place as its assignment.
-        my $ghoist = $decl_stmt
-          ? $self->_goto_hoist_decls([ @s[0 .. $labels[-1][0] - 1] ]) : [];
-        if (!$dup && !$backward && $any_goto && $ghoist && (@$ghoist || !$decl_stmt)) {
-          my @gh = @$ghoist;
-          my $gvi = @gh ? { %$vi, map { $_ => { unboxable => 0 } } @gh } : $vi;
-          my @tags = map { ':' . cl_sym('pcl-goto-' . $_->[1]) } @labels;
-          my (@segs, $start);
-          $start = 0;
-          for my $L (@labels) {
-            push @segs, [ @s[$start .. $L->[0] - 1] ];
-            $start = $L->[0] + 1;
-          }
-          push @segs, [ @s[$start .. $#s] ];
-          my ($wrap, @tail_forms);
-          {
-            local @{ $self->{_catch_labels} }{ map { $_->[1] } @labels } = @tags;
-            local $self->{_goto_hoisted} = @gh ? { map { $_ => 1 } @gh } : $self->{_goto_hoisted};
-            $wrap = ['catch', $tags[0], $self->_lower_block($segs[0], $gvi, undef)];
-            $wrap = ['catch', $tags[$_], $wrap,
-                     $self->_lower_block($segs[$_], $gvi, undef)]
-              for 1 .. $#labels;
-            @tail_forms = $self->_lower_block($segs[-1], $gvi, $tail_ctx);
-          }
-          return ($wrap, @tail_forms) if !@gh;
-          return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @gh],
-                           $wrap, @tail_forms));
-        }
-      }
-    }
+    my @f = $self->_lower_goto_wraps(\@s, $vi, $tail_ctx);
+    return @f if @f;
   }
 
   my ($first, @rest) = @s;
@@ -10543,6 +10351,168 @@ sub _lower_block_1 {
   return $self->$arm($rec, $first, \@rest, $vi, $tail_ctx, $first_tail);
 }
 
+# The block-level forward-goto wraps (a standalone label among these
+# statements and the gotos that reach it); () when none fires.
+# -- #63 forward `goto LABEL` to a standalone label among these statements:
+# a lexical `(go)` cannot reach a tag whose tagbody opens LATER, and Perl
+# allows the goto to sit inside a map/grep block (a pseudo-block the jump
+# may leave) — i.e. inside a LAMBDA here, where only a dynamic transfer
+# works.  Lowering: wrap the statements before the label in
+# (catch :pcl-goto-LBL …) falling through to the label point, and lower
+# every `goto LBL` in that prefix as (throw :pcl-goto-LBL nil) — the
+# `_catch_labels` registry on this object (ExprToCL's goto branch reads it
+# through the seam parser's lex_home) is `local`ized around the prefix
+# lowering so backward
+# gotos (in the tagbody remainder) keep the lexical (go).  Only the FIRST
+# standalone label of the list is considered (a later label's prefix
+# would cross this one's tagbody; the recursion inside the tagbody
+# re-scans).  The wrap is skipped — leaving the label case's forward-goto
+# gate as the safety net — when the prefix contains a declaration/local
+# statement (its let/save-restore scope must enclose the label, which the
+# catch would cut) or when the goto textually precedes such a statement.
+sub _lower_goto_wraps {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
+  my ($self, $s, $vi, $tail_ctx) = @_;
+  my @s = @$s;
+  # ALL top-level standalone labels, in order.  The first drives the classic
+  # single-label wraps below; the full list drives the #252 general wrap.
+  my @labels;    # [index, name]
+  for my $i (1 .. $#s) {
+    my $l = Pl::Stmt::standalone_label($s[$i]);
+    push @labels, [$i, $l] if defined $l;
+  }
+  my ($k, $lbl) = @labels ? @{ $labels[0] } : ();
+  if (defined $k && $lbl =~ /^\w+$/) {
+    my @prefix = @s[0 .. $k - 1];
+    my $has_goto = grep { Pl::Stmt::mentions_goto($_, $lbl) } @prefix;
+    # A goto in this prefix to a LATER label needs the #252 general wrap
+    # below: the single-label wraps open no catch for that label, so its
+    # goto would lower to a lexical (go) with no tag in scope.
+    my $cross = 0;
+    if (@labels > 1) {
+      PFX: for my $p (@prefix) {
+        for my $j (1 .. $#labels) {
+          if (Pl::Stmt::mentions_goto($p, $labels[$j][1])) { $cross = 1; last PFX; }
+        }
+      }
+    }
+    my $scope_stmt = grep {
+      Pl::Stmt::opens_scope($_)
+    } @prefix;
+    if (!$cross && $has_goto && !$scope_stmt) {
+      my $tag = ':' . cl_sym('pcl-goto-' . $lbl);
+      my @pre_forms = do {
+        local $self->{_catch_labels}{$lbl} = $tag;
+        $self->_lower_block(\@prefix, $vi, undef);
+      };
+      $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
+      return (['catch', $tag, @pre_forms],
+              $self->_lower_block([@s[$k .. $#s]], $vi, $tail_ctx));
+    }
+    # Decl-hoist variant (#126, t/test.pl watchdog): the prefix DOES contain
+    # declarations, whose let scope must survive past the label (the plain
+    # catch-wrap would cut it).  When every one of them is a simple
+    # single-scalar `my $x [= INIT];` (no local, no modifiers, no self-init,
+    # no re-declaration), pre-bind them all as nil boxes in ONE let around
+    # both the catch and the label point — v1's flat-decl model, structured —
+    # and lower each decl in place as its bare assignment (the
+    # _goto_hoisted flag, consulted by the Statement::Variable branch).  A
+    # goto that jumps over a hoisted decl leaves its box nil = undef,
+    # perl's jumped-over-my behaviour.  Anything outside the subset keeps
+    # the standalone-label forward-goto gate as the safety net.
+    elsif (!$cross && $has_goto) {
+      my $hoist = $self->_goto_hoist_decls(\@prefix);
+      my @hoist = $hoist ? @$hoist : ();
+      if (@hoist) {
+        my $tag = ':' . cl_sym('pcl-goto-' . $lbl);
+        my @pre_forms = do {
+          local $self->{_catch_labels}{$lbl} = $tag;
+          local $self->{_goto_hoisted} = { map { $_ => 1 } @hoist };
+          $self->_lower_block(\@prefix, $vi, undef);
+        };
+        $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
+        my $vi2 = { %$vi, map { $_ => { unboxable => 0 } } @hoist };
+        return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @hoist],
+                 ['catch', $tag, @pre_forms],
+                 $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)));
+      }
+    }
+    # -- #252 GENERAL forward-goto shape (Text::Balanced's _match_tagged):
+    # several standalone labels and gotos that CROSS an intervening label.
+    # Preconditions: label names distinct, every goto to every label is
+    # strictly FORWARD (textually before its label statement), and NO
+    # top-level declaration/local before the LAST label.  Declarations do
+    # not defeat the branch — a leading `my`/`local` is consumed by its
+    # ordinary statement branch, which NESTS the block remainder (labels
+    # included) inside its let/save-restore and recurses back here, so the
+    # declaration's scope encloses every segment and this branch fires at
+    # the level where only code remains.  (A decl BETWEEN labels would need
+    # cross-catch hoisting — rare, still gated below; a goto that jumps
+    # over a declaration keeps the classic #126 single-label hoist.)
+    # Lowering: nest catches so the catch for EACH label encloses
+    # everything before that label:
+    #   (catch :L3 (catch :L2 (catch :L1 P0…) P1…) P2…) P3…
+    # A (throw :Li) from any depth in any earlier segment unwinds to Li's
+    # catch, whose next sibling form is Li's segment — exactly perl's jump
+    # — and normal completion falls through the segments in source order.
+    # The block value is the LAST segment's tail.  Backward or mixed gotos
+    # never fire this branch; they keep the classic tagbody machinery and
+    # its forward-goto gate as the safety net.
+    if (@labels && !grep { $_->[1] !~ /^\w+$/ } @labels) {
+      my %ln;
+      my $dup = grep { $ln{ $_->[1] }++ } @labels;
+      my ($backward, $any_goto) = (0, 0);
+      LBL: for my $L (@labels) {
+        my ($idx, $name) = @$L;
+        for my $j (0 .. $#s) {
+          next if $j == $idx;
+          next unless Pl::Stmt::mentions_goto($s[$j], $name);
+          if ($j > $idx) { $backward = 1; last LBL; }
+          $any_goto = 1;
+        }
+      }
+      my $decl_stmt = grep {
+        Pl::Stmt::opens_scope($_)
+      } @s[0 .. $labels[-1][0] - 1];
+      # #2287: declarations before the last label are HOISTED when they
+      # are all in the #126 subset (core File::Copy's `copy`: `my $from_h;
+      # if (…) { open … or goto fail_open1 } … my $to_h; …` — without the
+      # hoist this level declined, `my $from_h` nested the remainder, and
+      # the catches opened one level down, AFTER the first goto, which then
+      # lowered to a bare (go) with no tag).  The let opens around the
+      # whole catch nest; each decl lowers in place as its assignment.
+      my $ghoist = $decl_stmt
+        ? $self->_goto_hoist_decls([ @s[0 .. $labels[-1][0] - 1] ]) : [];
+      if (!$dup && !$backward && $any_goto && $ghoist && (@$ghoist || !$decl_stmt)) {
+        my @gh = @$ghoist;
+        my $gvi = @gh ? { %$vi, map { $_ => { unboxable => 0 } } @gh } : $vi;
+        my @tags = map { ':' . cl_sym('pcl-goto-' . $_->[1]) } @labels;
+        my (@segs, $start);
+        $start = 0;
+        for my $L (@labels) {
+          push @segs, [ @s[$start .. $L->[0] - 1] ];
+          $start = $L->[0] + 1;
+        }
+        push @segs, [ @s[$start .. $#s] ];
+        my ($wrap, @tail_forms);
+        {
+          local @{ $self->{_catch_labels} }{ map { $_->[1] } @labels } = @tags;
+          local $self->{_goto_hoisted} = @gh ? { map { $_ => 1 } @gh } : $self->{_goto_hoisted};
+          $wrap = ['catch', $tags[0], $self->_lower_block($segs[0], $gvi, undef)];
+          $wrap = ['catch', $tags[$_], $wrap,
+                   $self->_lower_block($segs[$_], $gvi, undef)]
+            for 1 .. $#labels;
+          @tail_forms = $self->_lower_block($segs[-1], $gvi, $tail_ctx);
+        }
+        return ($wrap, @tail_forms) if !@gh;
+        return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @gh],
+                         $wrap, @tail_forms));
+      }
+    }
+  }
+  return ();
+}
+
 # The block-level arm per Pl::Stmt kind (each receives the record, the
 # statement, the block remainder and the contexts).
 our %BLOCK_ARM = (
@@ -10563,6 +10533,7 @@ our %BLOCK_ARM = (
 
 # A refused statement (Pl::Stmt kind refused): its perl-shaped run-time die.
 sub _blk_refused {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   return (raw($self->fallback_parser->refused_statement_form($first, $rec->{why})),
@@ -10575,6 +10546,7 @@ sub _blk_refused {
 # Standalone `delete local $h{k};` is a plain PPI::Statement with the same
 # scope-to-block-end behaviour — same route.
 sub _blk_local {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   return $self->_lower_local($first, \@rest, $vi, $tail_ctx);
@@ -10595,6 +10567,7 @@ sub _blk_local {
 # (Role-Tiny role-basic-basic.t) and violates the compile-stream invariant
 # of docs/declaration-ordering-fix-plan.md.
 sub _blk_sched {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   return ($self->_fallback_stmt($first, sched => 1),
@@ -10604,6 +10577,7 @@ sub _blk_sched {
 # __END__ / __DATA__ (kind end).
 # -- __END__/__DATA__: whole-statement fallback (declarations hoisted).
 sub _blk_end {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
@@ -10618,6 +10592,7 @@ sub _blk_end {
 # bounded: _reg_lex marks the names let-bound, so the filter drops them.
 # -- my $x [= INIT];  → (let (($x …)) rest...)
 sub _lower_decl_stmt {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   {
@@ -10723,6 +10698,7 @@ sub _lower_decl_stmt {
 
 # `state NAME [= INIT];` (Pl::Stmt decl_shape: state).
 sub _lower_decl_state {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $d, $first, $rest, $vi, $tail_ctx, $decl_tail) = @_;
   my @rest = @$rest;
   my $name = $d->{name};
@@ -10795,6 +10771,7 @@ sub _lower_decl_state {
 
 # `my $x [= INIT | if/unless COND];` (Pl::Stmt decl_shape: my-scalar).
 sub _lower_decl_scalar {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $d, $first, $rest, $vi, $tail_ctx, $decl_tail) = @_;
   my @rest = @$rest;
   my ($name, $init, $declmod_cond) = @$d{qw(name init declmod)};
@@ -10991,6 +10968,7 @@ sub _lower_decl_scalar {
 
 # `my @a / my %h / my (LIST) [= INIT];` (Pl::Stmt decl_shape: my-list).
 sub _lower_decl_list {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $d, $first, $rest, $vi, $tail_ctx, $decl_tail) = @_;
   my @rest = @$rest;
   # `my @a = (1,2) if COND` (#620): a trailing statement MODIFIER is not part
@@ -11230,6 +11208,7 @@ sub _lower_decl_list {
 # the definition into the section's decl/def buckets.  A bodyless forward
 # declaration (`sub foo;`) hoists only a p-declare-sub (no definition).
 sub _lower_named_sub_stmt {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   # Prototyped/signatured: v1 owns the whole definition, same as the
@@ -11293,6 +11272,7 @@ sub _lower_named_sub_stmt {
 # namespace in the document.  Unqualified GLOBALS after the switch keep the
 # section package — v1's exact (documented) divergence.
 sub _lower_package_stmt {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   # Pl::Stmt::package_record: the name, the version (a real version literal
@@ -11383,6 +11363,7 @@ sub _lower_package_stmt {
 
 # A standalone label `AGAIN:` (Pl::Stmt kind label).
 sub _lower_label_stmt {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   my $lbl = $rec->{label};
@@ -11417,6 +11398,7 @@ sub _lower_label_stmt {
 # A compound statement (Pl::Stmt kind compound): a labelled loop or bare block
 # that a `goto` targets opens its tagbody here; then the common tail.
 sub _blk_compound {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   my @s = ($first, @rest);
@@ -11463,6 +11445,7 @@ sub _blk_compound {
 # would strand the sub's reference (the statement's own enclosing sub does
 # not veto — its body IS the let's scope).
 sub _blk_expr {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   if ($rec->{plain}) {
@@ -11488,6 +11471,7 @@ sub _blk_expr {
 # The common tail of the statement kinds _lower_stmt lowers (expr, compound,
 # return, loopctl): the licensed-handle scope hooks, then _lower_stmt.
 sub _blk_tail {
+  no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
   # -- a licensed handle declared in an if/unless/while/until CONDITION

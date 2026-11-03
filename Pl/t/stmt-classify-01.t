@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # stmt-classify-01.t -- Pl::Stmt, THE statement classifier (s533a, C1 of the
 # parser program #3694): one row per kind and per shape reader, pure unit rows
 # (PPI only, no SBCL).  A statement is parsed with the vendored PPI and its

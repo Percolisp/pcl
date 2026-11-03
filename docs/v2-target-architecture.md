@@ -99,6 +99,18 @@ into token arrays.  The classifier is small (the knowledge already
 exists, scattered), pure, and testable in isolation — and it is the one
 place a grammar bug can live, which is the point.
 
+**Progress (s533a, C1 of #3694): BUILT as `Pl/Stmt.pm`.**  `classify`
+returns the kind (refused / local / decl / scheduled / use / end / sub /
+package / label / compound / return / loopctl / expr; an unknown class
+dies) and `decl_shape` / `compound_shape` / `break_shape` / `expr_shape`
+the sub-kinds and spans; `_lower_block_1` dispatches through
+`%BLOCK_ARM`, `_lower_stmt` and `_lower_compound` switch on the record,
+and the three functions hold no `isa` / `content` / token-index shape test
+(emission byte-identical).  The decl arm's below-assignment tail is a
+field (`tail`) but still handed whole to PExpr, as before; the
+`init`/`names` spans of the other kinds are what C2 and the 1c ports
+consume next.
+
 ### 2.3 Facts — analysis results as data **[today, generalized in E5.5]**
 
 `Pl/VarAnnotator.pm` is already the model: a side-effect-free pass over
