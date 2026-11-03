@@ -5,6 +5,9 @@ Parser-structure program, Option 1 step 0, member **c2** (`docs/parser-review-s5
 Direction A, migration step 1).  **Inert by design**: with `PCL_BINDER_CHECK`
 unset the binder module is not even loaded, and with it set nothing reads its
 answers -- each hook compares, the legacy verdict is what the resolver returns.
+**Since s533b (1c port 1, §6 item 1) the binder is built in PRODUCTION and the
+block-package requalifier reads it; the `binding_at` hook is gone and
+`PCL_BINDER_CHECK` arms the two remaining hooks only.**
 
 | file | what it is |
 |---|---|
@@ -183,6 +186,23 @@ tree).
    `_signature_left_params` (:3582).  Disagreements under it: **#3800, #3801,
    #3804** (all three silent wrongs) -- the port fixes them by construction;
    the binder already answers #475 the perl way (Pl/t/binder-01.t row 11).  Smallest port, biggest value: FIRST.
+   **DONE (s533b, `a6f2f0ac`, 2026-11-03).**  The binder is built in
+   production (no flag; `PCL_BINDER_CHECK` arms only the two remaining hooks);
+   `_requalify_region` asks `Pl::Binder::requalify_home` per token (`decl` and
+   my/state/param/lexsub/outer -> leave, our -> declaring package, global ->
+   positional package, special -> main; no record -> DIE, rule 12).  The D0
+   measurement compared the requalifier's FINAL home, not `_binding_at`'s
+   verdict, and found 15 sites (the 10 of #3800/#3801/#3804 below plus the
+   uses after a lost declarator -- universal.t:187-188, taint.t:1765 -- that
+   the s525q hook could not see, because the current-names layer read the
+   already-rewritten declarator -- and NEW #4423, a C-style `for (my $i ...)`'s
+   condition and step, core Encode.pm:184/196).  Deleted: `_binding_at`,
+   `_binding_at_0`, `_head_binding`, `_decl_binding_in`, `_q_binding_at`.  STAY
+   (other readers): `_stmt_binding` (`_ref_shadowed_0`), `_pkg_stmt_in_effect_at`
+   (`_pkg_in_effect_at`, `_pkg_region_at`), `_signature_left_params`
+   (`_signature_binds`) -- they go with port 3.  Not reached: #3801's
+   FILE-level bare-block form (the span pass reads only the first declarator,
+   #4425), a `package NAME { }` block inside a sub (no region, #4421).
 2. **Capture gate + promoter** (`_check_sub_captures` :3857 from parse:2500,
    `_captured_in_subs` :5631 -> `_sub_captures_name` :3805 ->
    `_block_captures_name`; `_promote_captured` :5551; `_hoist_nested_sub`

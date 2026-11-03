@@ -127,10 +127,19 @@ itself carries no host-specific semantics beyond them.
   `@a` → `@X::a`, `$a[0]` → `$X::a[0]`, `$#a` → `$#X::a`, and the same in
   interpolating text. A consumer reading the emitted CL therefore sees
   explicit `X::$z` symbols, never a bare name whose package depends on an
-  enclosing `in-package`. Lexicals, in-scope `our` aliases (which resolve
-  to their DECLARING package), already-qualified names and the always-main
-  specials are left where they are; `$a`/`$b` are excluded because the sort
-  lowering lexically binds those two symbols. Sub definitions, `*glob`
+  enclosing `in-package`. Each bare name's home is the BINDER's answer
+  (`Pl/Binder.pm` `requalify_home`, perl's pad model; s533b): a lexical
+  (`my`/`state`/signature parameter/lexical sub, a string eval's captured
+  caller lexical) and the declaring token itself stay as written; an
+  in-scope `our` alias takes its DECLARING package; any other name is a
+  global of the package POSITIONALLY in force at the use (a nested
+  `package Y { … }` inside the region homes to Y); a name perl forces into
+  `main::` in every sigil (`$STDOUT`, `@ENV`, …) takes `main::`.  Example:
+  `sub f { package Q; for (my $i = 0; $i < 3; $i++) { … } $g = 1 }`
+  leaves all three `$i` lexical and writes `$Q::g`.  Already-qualified
+  names and the commonest specials (`$_ @_ @ARGV $ARGV %ENV @INC %INC %SIG`)
+  are left unrewritten; `$a`/`$b` are requalified like any global (the
+  sort lowering binds the pair its comparator reads, #287). Sub definitions, `*glob`
   installs and bareword calls in such a region never had the problem —
   they resolve through the package stack at lowering time.
 
