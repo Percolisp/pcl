@@ -1161,4 +1161,23 @@ sub inlist { require WCtx3524 } \$main::tag = 11; \@foo = inlist(); clr();
      '#3524 a required file runs in scalar context; do FILE keeps the caller\'s');
 }
 
+# #4364: `(require NAME)` inside a list -- PPI classes the parenthesised run
+# as a Statement::Include (its first token), which the term walker declined:
+# the whole statement was DROPPED.  Expected text probed vs perl 5.40.3.
+{
+  for my $m (['RqA4364', 42], ['RqB4364', '"bee"']) {
+    open my $fh, '>', File::Spec->catfile($tempdir, "$m->[0].pm") or die;
+    print $fh "package $m->[0]; $m->[1];\n"; close $fh;
+  }
+  my $output = run_pl(qq{use lib "$tempdir";
+print "v: ", (require RqA4364), "\\n";
+my \@x = (1, (require RqB4364), 2); print "x=\@x\\n";
+my \$s = (require RqA4364); print "s=\$s\\n";
+print "cond\\n" if (require RqA4364);
+print "list: ", join(",", (require RqA4364), (require RqB4364)), "\\n";
+});
+  is($output, "v: 42\nx=1 bee 2\ns=1\ncond\nlist: 1,1\n",
+     '#4364 (require NAME) in a list is the require term, never a dropped statement');
+}
+
 done_testing();

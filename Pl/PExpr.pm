@@ -722,10 +722,16 @@ sub parse {
     if (ref($e1) eq "PPI::Statement::Expression"
         || ref($e1) eq "PPI::Statement"
         || ref($e1) eq "PPI::Statement::Break"
-        || ref($e1) eq "PPI::Statement::Variable") {
+        || ref($e1) eq "PPI::Statement::Variable"
+        || (ref($e1) eq "PPI::Statement::Include"
+            && ($e1->type // '') eq 'require')) {
       # Usually puts an expression object around the items in expr list.
       # Also handles Statement::Break (return/last/next) and
-      # Statement::Variable (`my $x = ...`).
+      # Statement::Variable (`my $x = ...`).  And a `require` run in parens:
+      # PPI classes a statement by its FIRST token, so `(require A)` inside a
+      # list is a Statement::Include, while `my $v = require A` is two tokens
+      # of a plain statement -- the same term once unwrapped (#4364; it used
+      # to fall through to "single node of unknown type", a statement drop).
       #
       # STRIPPING THE DECLARATOR IS PART OF UNWRAPPING (#1178).  Which of the
       # two classes PPI hands us is decided by the run's FIRST token, not by
