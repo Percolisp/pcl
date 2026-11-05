@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 37;
+plan tests => 39;
 
 sub run_cl {
     my ($code) = @_;
@@ -561,3 +561,33 @@ close STDOUT; open STDOUT, '>&', $save;
 print "buf=[$buf]\n";
 }), "ok 1 - one\nok 2 - after close\nprogram line\nok 3 - stdout is a string\nbuf=[into buf\n]\n1..3\n",
    'TAP reaches the original stdout through a close / re-open / in-memory STDOUT; the no_plan trailer too');
+
+# ── tasks #4186 #4203: the Test::Builder methods a Test::Builder-based module
+# calls -- Test::Pod's import (`$Test->exported_to($caller); $Test->plan(@_)`,
+# @_ empty for `use Test::Pod 1.00`), Test::Warn's warning_like
+# (`$Tester->maybe_regex($exp)`), Test::LeakTrace (`$Test->cmp_ok`).  Before:
+# "Can't locate object method" -- Test::Pod did not load and two board files
+# PCL skipped ran in perl.  Expected text probed vs perl 5.40.3.
+is(run_cl(q{use Test::More tests => 2;
+my $tb = Test::Builder->new;
+print "# exp=", $tb->exported_to, "\n";
+for my $s ('/ab+c/i', 'm{ab}', 'm!x.y!s', '/plain/', 'nope', undef) {
+  my $r = $tb->maybe_regex($s);
+  print "# mr(", (defined $s ? $s : 'undef'), ")=", (defined $r ? $r : 'undef'), "\n";
+}
+my $q = qr/zz/; print "# qr passes: ", ($tb->maybe_regex($q) == $q ? "same" : "diff"), "\n";
+$tb->exported_to('Foo::Bar'); print "# set=", $tb->exported_to, "\n";
+$tb->cmp_ok(3, '<', 4, 'cmp via builder');
+$tb->plan();
+pass('after empty plan');
+}),
+   "1..2\n# exp=main\n# mr(/ab+c/i)=(?i)ab+c\n# mr(m{ab})=undef\n# mr(m!x.y!s)=(?s)x.y\n"
+   . "# mr(/plain/)=plain\n# mr(nope)=undef\n# mr(undef)=undef\n# qr passes: same\n"
+   . "# set=Foo::Bar\nok 1 - cmp via builder\nok 2 - after empty plan\n",
+   'Test::Builder->exported_to / maybe_regex / cmp_ok / an empty plan, as Test::Builder answers (#4186 #4203)');
+SKIP: {
+  skip 'Test::Pod is not installed for this perl', 1 if !eval { require Test::Pod; 1 };
+  is(run_cl(q{eval "use Test::Pod 1.00";
+print $@ ? "FAIL: " . substr($@, 0, 200) . "\n" : "loaded\n";
+}), "loaded\n", 'the installed Test::Pod loads (its import calls exported_to and an empty plan, #4186)');
+}

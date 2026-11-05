@@ -563,12 +563,18 @@
    (#3436): their `like'/`unlike' calls read a string pattern as Test::More
    does.  Keyed by package object; written only by %test-module-imported.")
 
+(defvar *test-builder-exported-to* nil
+  "Test::Builder's Exported_To: a Perl package name, or NIL (undef) --
+   ->exported_to (#4186) reads and writes it.")
+
 (defun %test-module-imported (module-name pkg)
   "p-use's hook: MODULE-NAME (one PCL provides) was imported into PKG, a CL
    package.  Test::More and Test::Simple make PKG a Test::More caller (#3436)."
   (when (and pkg (member module-name '("Test::More" "Test::Simple")
                          :test #'string=))
     (%tap-open-stream)
+    ;; Test::Builder::Module::import: `$tb->exported_to($caller)' (#4186).
+    (setf *test-builder-exported-to* (pcl-pkg-perl-name pkg))
     (setf (gethash pkg *test-more-importers*) t)))
 
 (defun %test-more-caller-p ()
@@ -1609,7 +1615,11 @@
 ;;;
 ;;; Besides those, has_plan / skip_all / skip / is_passing and the
 ;;; Test::Builder::Module->builder class method are answered (#3400, the
-;;; Test::Requires skip path).  Every OTHER Test::Builder method is deliberately absent: method dispatch
+;;; Test::Requires skip path), and the methods with a one-line faithful
+;;; meaning a Test::Builder-based module calls (ok diag note plan done_testing
+;;; current_test cmp_ok exported_to maybe_regex -- #3346 #4186 #4203; the
+;;; census of Test::Pod / Test::Warn / Test::Deep / Test::Fatal /
+;;; Test::NoWarnings / Test::LeakTrace is in task #4186).  Every OTHER Test::Builder method is deliberately absent: method dispatch
 ;;; then dies "Can't locate object method \"X\" via package \"Test::Builder\"",
 ;;; naming the gap, instead of a stub returning a plausible wrong value that
 ;;; would silently corrupt a file's counts (CLAUDE.md rule 12).
@@ -1621,7 +1631,7 @@
 ;; runtime's (the %p-reserve-sub-name rule).
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (shadow '("PL-SKIP" "PL-SKIP_ALL" "PL-OK" "PL-DIAG" "PL-NOTE" "PL-PLAN"
-            "PL-DONE_TESTING")
+            "PL-DONE_TESTING" "PL-CMP_OK")
           (find-package "Test::Builder")))
 
 (defvar *test-builder-singleton* nil
@@ -1736,9 +1746,41 @@
        (apply #'pl-note args)
        0)
 
+;; ->plan with NO arguments returns (Test::Builder: `return unless $cmd`) --
+;; Test::Pod's import calls `$Test->plan(@_)` with an empty import list.
 (defun |Test::Builder|::pl-plan (self &rest args)
        (declare (ignore self))
-       (apply #'pl-plan args))
+       (when (%test-flat-values args)
+         (apply #'pl-plan args)))
+
+(defun |Test::Builder|::pl-cmp_ok (self got op expected &optional name &rest args)
+       (declare (ignore self args))
+       (pl-cmp_ok got op expected name))
+
+;; ->exported_to([PACKAGE]) (#4186): Test::Builder's Exported_To, the package
+;; the TAP functions were exported to -- Test::Builder::Module's import (`use
+;; Test::More`) records its caller (%test-module-imported), and a module
+;; written on the builder sets it itself (Test::Pod's import).
+(defun |Test::Builder|::pl-exported_to (self &optional pack &rest args)
+       (declare (ignore self args))
+       (when (and pack (%pcl-definedp pack))
+         (setf *test-builder-exported-to* (to-string pack)))
+       (or *test-builder-exported-to* (p-undef)))
+
+;; ->maybe_regex(RE) (#4203): Test::Builder's own sub -- a qr// object passes
+;; through; a `/RE/flags' or `m<d>RE<d>flags' string becomes `(?FLAGS)RE'
+;; (RE alone when there are no flags) -- the reading Test::More's like uses
+;; (%test-more-maybe-regex, #3436); anything else is undef.  Test::Warn's
+;; warning_like calls it for every expected message.
+(defun |Test::Builder|::pl-maybe_regex (self &optional re &rest args)
+       (declare (ignore self args))
+       (cond ((or (null re) (not (%pcl-definedp re))) (p-undef))
+             ((p-regex-match-p (unbox re)) re)
+             (t (multiple-value-bind (pat mods)
+                    (%test-more-maybe-regex (to-string re))
+                  (cond ((null pat) (p-undef))
+                        ((plusp (length mods)) (format nil "(?~A)~A" mods pat))
+                        (t pat))))))
 
 (defun |Test::Builder|::pl-done_testing (self &rest args)
        (declare (ignore self))
