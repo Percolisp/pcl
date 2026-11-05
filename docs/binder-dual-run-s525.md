@@ -223,7 +223,7 @@ tree).
    `_enclosing_lex_decl` (:5654); rename reason `__file__` (:captured).
    Under it: **#3802**, **#3806** and the 9 design-gap sites (which need the
    eval fact first, or the port changes those files' emission).
-   **DONE (s533d, `cab2fd3f`, 2026-11-05).**  The capture gate, the promoter,
+   **DONE (s533d, `1fed1b04`, 2026-11-05).**  The capture gate, the promoter,
    the nested-sub hoist and the closure tests that went through
    `_block_captures_name` (`_init_reads_scalar`, `_cond_mys_closure_captured`)
    ask `Pl::Binder::captures_name` (pad_findlex's OUTER entries, positional,
