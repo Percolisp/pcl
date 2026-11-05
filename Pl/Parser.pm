@@ -1647,6 +1647,9 @@ sub _qualified_sub_to_cl {
   # Perl allows ' as package separator (old style): BASEOBJ'doit == BASEOBJ::doit
   # Convert to :: before processing
   $name =~ s/'/::/g;
+  # gv.c: a forced-main identifier (INC ENV SIG STDIN ...) names main::'s
+  # sub from every package (#4163).
+  $name = "main::$name" if Pl::Environment::forced_main_name($name);
   if ($name =~ /^(.+)::([^:]+)$/) {
     my ($pkg, $bare) = ($1, $2);
     # Only MULTI-segment names need pipe-quoting; single-segment names are

@@ -1001,11 +1001,33 @@ sub class_bareword_shape {
     return $name =~ /\A[\p{Lu}\p{Lt}\p{Lo}]/ ? 1 : 0;
 }
 
+# gv.c's forced-main IDENTIFIERS (S_find_default_stash): an unqualified glob
+# of one of these names is main::'s from every package -- the variable, the
+# handle and the SUB alike (`package Q; sub INC {}` defines main::INC, #4163).
+# `our` is the exception perl makes itself: it names the CURRENT package's
+# variable explicitly (`package Q; our @INC` is @Q::INC, probed 5.40.3).
+my @FORCED_MAIN = qw(_ INC ENV SIG ARGV STDIN STDOUT STDERR ARGVOUT);
+my %FORCED_MAIN = map { $_ => 1 } @FORCED_MAIN;
+
+=head2 forced_main_name($name)
+
+True when the unqualified identifier C<$name> is one of gv.c's forced-main
+names: a sub, variable or handle of that name is C<main::>'s whatever package
+names it.  The sub qualifiers (C<Pl::Parser::_qualified_sub_to_cl> for a
+definition, C<Pl::ExprToCL::cl_name> for a call or a C<\&NAME>) ask it.
+
+=cut
+
+sub forced_main_name {
+    my $name = shift;
+    return defined $name && $FORCED_MAIN{$name} ? 1 : 0;
+}
+
 # The handles perl resolves in main:: whatever package names them unqualified
-# (gv.c's forced-main list, handle members).  A qualifier on one of these is
-# therefore NOT the same glob as the bare name — see canon_filehandle_name.
-my %FORCED_MAIN_HANDLE = map { $_ => 1 }
-    qw(STDIN STDOUT STDERR ARGV ARGVOUT ENV INC _);
+# (gv.c's forced-main list, handle members -- SIG is not a handle the runtime
+# interns).  A qualifier on one of these is therefore NOT the same glob as the
+# bare name — see canon_filehandle_name.
+my %FORCED_MAIN_HANDLE = map { $_ => 1 } grep { $_ ne 'SIG' } @FORCED_MAIN;
 
 =head2 fh_forced_main_name($name)
 

@@ -474,6 +474,11 @@ sub cl_name {
   my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
                   ? $self->environment->current_package()
                   : 'main';
+  # gv.c: a forced-main identifier (INC ENV SIG STDIN ...) is main::'s sub
+  # from every package -- qualified explicitly, since the section may be READ
+  # in another package (#4163; the definition side: Parser::_qualified_sub_to_cl).
+  return cl_pkg('main') . '::' . cl_sym("pl-$perl_name")
+    if Pl::Environment::forced_main_name($perl_name);
   # Reader-safety net: a residual colon in the NAME position (e.g. the Word
   # `온ꪵ::` from a unicode stash access PPI can't tokenize as one Symbol)
   # would misread as a package marker — pipe-quote the whole symbol so a bad
@@ -497,6 +502,7 @@ sub _split_func_sym {
     ($pkg, $name) = ($1, $2);
   } else {
     $pkg  = $self->environment ? ($self->environment->current_package // 'main') : 'main';
+    $pkg  = 'main' if Pl::Environment::forced_main_name($func_sym);   # #4163
     $name = $func_sym;
   }
   return ($pkg, $name);
