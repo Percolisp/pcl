@@ -159,6 +159,26 @@ differing site sorted or given a declared order** -- a correctness fix on its ow
   `find` at ~8x; the rest of the compiler is likely similar (the README's whole-program
   ratio is 1.9-3.4x).  Estimate: a typical small eval ~16 ms -> ~50 ms.  Cache hits
   (most evals: the same accessor text every run, #1200) cost the same as today.
+* **MEASURED s534 (the USER asked why ~3x).**  The "3x" is an EXTRAPOLATION from PPI alone, and it
+  applies to the TRANSPILE half of an eval only.  (a) Today's eval, 200 small evals, perl 5.40.3 vs PCL
+  `59317afd`: perl ~4 us per eval; PCL ~9 ms for a NEW text = ~7 ms transpile in the perl server + pipe,
+  plus ~1.6 ms SBCL compiling the emitted CL -- and ~1.6 ms for a REPEATED text too, because the
+  per-process cache holds TEXT and SBCL recompiles it on every execution (#2191; #2421 = the cheap
+  compile policy).  So in the image a new eval costs ~7 x 3 + 1.6 = ~23 ms (2.5x today's 9 ms, not 3x),
+  and the 0.35 s server start is gone: break-even ~25 distinct uncached eval texts per run.
+  (b) WHY PPI is 3.8x under PCL (quiet box, load 1.8, `Calc.pm`, best of 5): parse 0.157 -> 0.604 s,
+  tokenizer 0.081 -> 0.272 s (3.4x), `find` 0.011 -> 0.111 s (10x), `tokens()` 0.004 -> 0.031 s.
+  sb-sprof (N=20, 28,943 samples; the parse loop = 75 % of the run, module loading the rest):
+  INHERITED METHOD DISPATCH re-resolved by name on every call (`p-method-call`'s `find-in-class`:
+  `%pcl-find-package` + `find-symbol` per class up , an `equal` visited list) = 27 % of the run,
+  ~36 % of the loop -- PPI's Token -> Element chains are 2-4 deep; the lever is the per-CLASS method
+  cache #582 (designed, blocked on -write invalidation).  WEAK-TABLE LOCKS = ~13 %: box-set's
+  `remhash` on `*p-weak-boxes*` (8.7 %) runs on every general-path store once ANY `weaken` ran -- PPI
+  weakens its parent links -- and every SBCL weak-table operation takes the global system lock; plus
+  `gethash/weak` from `refaddr` and the isa walk (4.7 %) -> #4501.  Overload lookup per boolean test
+  of an element (PPI overloads bool / "" / ==) via the MRO = 3.5 % (no per-class cache either).
+  The rest is the generic boxed code (box-set, make-p-box, hash elements, regex).  With #582 + #4501
+  PPI would plausibly fall to ~2x perl (an estimate: half the loop is those two).
 * Two cheap levers, measured first: (a) PPI's `PPI::Node::_wanted` builds every
   `find('Class')` matcher with a STRING EVAL (`Node.pm:648`) -- replace it with a closure
   on the `pcl` branch (faster in perl too; upstreamable); (b) the compiler's own hot
