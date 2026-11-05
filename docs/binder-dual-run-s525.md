@@ -223,6 +223,23 @@ tree).
    `_enclosing_lex_decl` (:5654); rename reason `__file__` (:captured).
    Under it: **#3802**, **#3806** and the 9 design-gap sites (which need the
    eval fact first, or the port changes those files' emission).
+   **DONE (s533d, `cab2fd3f`, 2026-11-05).**  The capture gate, the promoter,
+   the nested-sub hoist and the closure tests that went through
+   `_block_captures_name` (`_init_reads_scalar`, `_cond_mys_closure_captured`)
+   ask `Pl::Binder::captures_name` (pad_findlex's OUTER entries, positional,
+   body + signature) with the string-eval rule of §4(c) (`eval_sees`: a
+   literal text names L only where a string eval can see L); no range / no
+   binder / no record DIES (rule 12).  `_enclosing_lex_decl` asks
+   `Binder::enclosing_decl` (a same-name my/state whose SCOPE encloses the
+   extent, before or after it).  D0 compared the consumer's FINAL answer: the
+   #3802 / #3806 / #4462 sites only, corpus-diff IDENTICAL, the wide A/B's
+   diffs exactly those files (+ the #3961 flip).  Deleted:
+   `_block_captures_name_0`, `_canon_text_patterns`, `_signature_captures_name`,
+   `_sub_signature_canons`, the legacy `_enclosing_lex_decl` walk, the
+   `block_captures` hook, Binder's `_q_block_captures` (Parser2 -274 net).
+   STAY: `_signature_part_defaults` / `_signature_param_canons` (read by
+   `Binder::_proto_params`), `_signature_left_params` / `_signature_binds`
+   (`_ref_shadowed`, port 3).  Found: #4462 (fixed by the port), #4461 (filed).
 3. **Span** (`_check_my_spanning` :3128 and `_rename_spanning_lexicals` :4505
    / :4671-:4740 -> `_canon_refs_in` -> `_ref_shadowed`; `_lex_referenced_after`
    :3075 from `_pkgblock_shadows_file_lexical` :3044).  Query: "does binding B
