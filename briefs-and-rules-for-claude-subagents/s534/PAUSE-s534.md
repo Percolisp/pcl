@@ -1,0 +1,4 @@
+# s534 running notes (the reviewing session, Opus 5.5, 2026-11-05)
+
+## 23:3x -- SESSION START; the USER: continue, three subtasks at a time, Opus 5.5 at effort xhigh
+Box rebooted (uptime 2 min at 23:33; `/tmp` empty); main `fb70357a` = MAIN-READY-68 + s533 records, clean; main's CODE sha `0f2db817`, generation v2-10900.  Stale `HEAVY.holder*` (dead s533c pids 791378 / 791398) cleared.  Nothing running.  The three slots RESUME s533's checkpointed batches: s532e (owes the everyday `--record` only), s533c (owes every batch-end bar), s533d (owes the gate, irc, the bench, records, `--record`).  Written: `s534/SHARED-BOX.md` (rules 14-15: merge order s532e -> s533d -> s533c, re-proving after each move), `resume-s532e.md`, `resume-s533c.md`, `resume-s533d.md`.  LAUNCHING three agents (opus, effort xhigh, no isolation -- each works in its existing worktree).  Queued behind them: s532b (minus #4185), s532c, s532d (FILL AT LAUNCH).
