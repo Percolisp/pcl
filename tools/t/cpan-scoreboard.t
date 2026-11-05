@@ -28,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 54;
+use Test::More tests => 58;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -201,6 +201,30 @@ like($rows_out, qr/^SBCL\t2\t0\t1$/m, 'run-dist-t --rows reports the SBCL exit c
   like($out2, qr/^LOST\s+fixture-dist rows\.t — 3 passing row\(s\) \(5 -> 2\)$/m,
        'a file whose ok count fell reports its lost passing rows');
   like($out2, qr/^TOTAL passing: baseline 6, current 3$/m, 'the run prints the passing TOTAL both ways');
+}
+
+# ── --diff's UNVERIFIED bucket and the moved *PLAN* (#4382) ─────────────────
+# dies.t stops after row 1 in the current run (its *PLAN* row), so a blessed
+# failing row 2 there was never REACHED: not fixed.  A file the current
+# per-file table does not list was not run.  A *PLAN* row whose shortfall
+# text moved says so.  (The s532 round: 16 of 18 FIXED were such rows.)
+{
+  my $base = "$tmp/unver.rows.tsv";
+  open my $fh, '>', $base or die;
+  print $fh "fixture-dist\tdies.t\t0\t*PLAN*\tran 2 of 3, rc 255\t3 row(s)\t#999 (a cause)\n";
+  print $fh "fixture-dist\tdies.t\t2\tdies late\t\t\t#999 (a cause)\n";
+  print $fh "fixture-dist\tabsent.t\t1\tnot run\t\t\t#999 (a cause)\n";
+  print $fh "fixture-dist\trows.t\t9\tgone now\t\t\t#999 (a cause)\n";
+  close $fh;
+  my $out = `perl \Q$root/tools/cpan-scoreboard.pl\E --diff \Q$base\E \Q$rows\E --board-baseline \Q$tsv\E --board-current \Q$tsv\E 2>&1`;
+  like($out, qr/^\?\s+fixture-dist dies\.t: 1 blessed row\(s\) not reached \(the file ran 1 row\(s\)\)/m,
+       'a blessed row above the row a stopped file reached is UNVERIFIED, never FIXED');
+  like($out, qr/^\?\s+fixture-dist absent\.t: 1 blessed row\(s\) not reached \(file not in the current board\)/m,
+       'a blessed row of a file the current board did not run is UNVERIFIED');
+  like($out, qr/^MISMATCH \*PLAN\* fixture-dist dies\.t: blessed 'ran 2 of 3, rc 255', now 'ran 1 of 3, rc 255'$/m,
+       'a *PLAN* row whose shortfall text moved prints a MISMATCH line');
+  like($out, qr/^3 NEW \/ 1 FIXED \/ 2 UNVERIFIED \/ 0 LOST$/m,
+       'only the row of a file that ran its plan is FIXED; the summary counts UNVERIFIED');
 }
 
 # ── THE PERL ORACLE, the SKIP verdict, MISMATCH (s531b, #4160 / ruling 4) ──

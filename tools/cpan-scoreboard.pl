@@ -44,7 +44,11 @@
 # file has six columns; causes are added BY EDIT, exactly like the sweep's.
 #
 # --diff compares two row files and prints NEW / FIXED / LOST and the CAUSES
-# line, the way tools/sweep-diff.pl does for the perl-tests sweep.  LOST needs
+# line, the way tools/sweep-diff.pl does for the perl-tests sweep -- and its
+# `?` UNVERIFIED bucket (#4382): a blessed row in a file the current run
+# stopped BEFORE reaching (its *PLAN* row says "ran M", or it has a *FILE*
+# row, or --board-current does not list it) is never FIXED.  A *PLAN* row
+# whose shortfall text moved prints a MISMATCH *PLAN* line.  LOST needs
 # the two PER-FILE tables (a file that aborts earlier loses passing rows
 # without adding failing ones); without them it says NOT CHECKED rather than
 # printing nothing, because an unchecked gate must never look like a passed one.
@@ -169,17 +173,33 @@ if (@ARGV && $ARGV[0] eq '--diff') {
                    . "[--board-baseline F --board-current F]\n";
     my $base = load_rows($pos[0]);
     my $cur  = load_rows($pos[1]);
+    my $bcur = defined $board_cur ? load_board($board_cur) : undef;
 
     my @new   = sort grep { !$base->{$_} } keys %$cur;
-    my @fixed = sort grep { !$cur->{$_}  } keys %$base;
+    my ($fixed, $unver) = split_fixed($base, $cur, $bcur);
     for my $k (@new) {
         my $r = $cur->{$k};
         printf "NEW    %s %s #%s %s\n         got %s / expected %s\n",
                $r->{dist}, $r->{file}, $r->{num}, $r->{desc}, $r->{got}, $r->{expected};
     }
-    for my $k (@fixed) {
+    for my $k (@$fixed) {
         my $r = $base->{$k};
         printf "FIXED  %s %s #%s %s\n", $r->{dist}, $r->{file}, $r->{num}, $r->{desc};
+    }
+    my $nunver = 0;
+    for my $f (sort keys %$unver) {
+        my ($n, $why) = (scalar @{ $unver->{$f}{rows} }, $unver->{$f}{why});
+        $nunver += $n;
+        printf "?      %s %s: %d blessed row(s) not reached (%s) — not verified, not fixed\n",
+               (split /\t/, $f), $n, $why;
+    }
+    # A *PLAN* row in both files whose shortfall text MOVED (ran 8 -> ran 1):
+    # neither NEW nor FIXED, and it is the line that says a file stops earlier.
+    for my $k (sort keys %$base) {
+        my ($b, $c) = ($base->{$k}, $cur->{$k});
+        next unless $c && $b->{desc} eq '*PLAN*' && $c->{got} ne $b->{got};
+        printf "MISMATCH *PLAN* %s %s: blessed '%s', now '%s'\n",
+               $b->{dist}, $b->{file}, $b->{got}, $c->{got};
     }
 
     # LOST — baseline PASSING rows the current run did not produce.  Row files
@@ -208,15 +228,48 @@ if (@ARGV && $ARGV[0] eq '--diff') {
     # A cause-less row is QUEUE, not baseline (#993, the sweep's rule).
     # ONE reading, three populations (tools/lib/PCLCauses.pm).
     print PCLCauses::causes_line([ map { $_->{cause} } values %$base ], $pos[0]);
-    printf "\n%d NEW / %d FIXED / %d LOST\n", scalar(@new), scalar(@fixed), $lost;
+    printf "\n%d NEW / %d FIXED / %d UNVERIFIED / %d LOST\n",
+           scalar(@new), scalar(@$fixed), $nunver, $lost;
     exit(@new || $lost ? 1 : 0);
+}
+
+# A blessed failing row the current run did not produce is FIXED only if the
+# file got that far (#4382, the sweep's `?` bucket): a file that STOPPED short
+# -- the current run has its *FILE* row (no rows at all) or its *PLAN* row
+# ("ran M of N, rc R", the shortfall text) -- never reached a blessed row
+# numbered above M, and with --board-current a file missing from the current
+# per-file table was not run at all.  Those rows are UNVERIFIED.  Returns
+# ([FIXED keys], {"dist\tfile" => {why, rows => [keys]}}).
+sub split_fixed {
+    my ($base, $cur, $bcur) = @_;
+    my %ran;
+    for my $r (values %$cur) {
+        my $f = "$r->{dist}\t$r->{file}";
+        if ($r->{desc} eq '*FILE*') { $ran{$f} = 0 }
+        elsif ($r->{desc} eq '*PLAN*' && $r->{got} =~ /^ran (\d+) of /) { $ran{$f} //= $1 }
+    }
+    my (@fixed, %unver);
+    for my $k (sort grep { !$cur->{$_} } keys %$base) {
+        my $r = $base->{$k};
+        my $f = "$r->{dist}\t$r->{file}";
+        my $why;
+        if ($bcur && !$bcur->{$f}) { $why = 'file not in the current board' }
+        elsif (defined $ran{$f}
+               && ($ran{$f} == 0 || ($r->{num} =~ /^\d+\z/ && $r->{num} > $ran{$f}))) {
+            $why = "the file ran $ran{$f} row(s)";
+        }
+        if (defined $why) { $unver{$f}{why} //= $why; push @{ $unver{$f}{rows} }, $k }
+        else              { push @fixed, $k }
+    }
+    return (\@fixed, \%unver);
 }
 
 # ────────────────────────────────────────────────────────────────── the run ──
 my $jobs = 8;
 my $timeout = 120;
-my @dists;           # [dir, no_dist_lib, [extra @INC dirs]]
+my @dists;           # [dir, no_dist_lib, [extra @INC dirs], serial]
 my @pending_inc;     # --dist-inc=DIR,DIR: extra @INC for the NEXT dist only
+my $pending_serial = 0;   # --dist-serial: the NEXT dist's files run one at a time, in order (#4381)
 my $only_rx;         # --only=REGEX: run only the t-files whose DIST/NAME matches
 my $no_dist_lib = 0;
 my ($tsv, $rows_file);
@@ -240,8 +293,10 @@ while (@ARGV) {
   elsif ($a eq '--timeouts')    { $timeouts_tsv = shift @ARGV }
   elsif ($a eq '--no-dist-lib') { $no_dist_lib = 1 }
   elsif ($a =~ /^--dist-inc=(.+)$/) { @pending_inc = split /,/, $1 }
+  elsif ($a eq '--dist-serial')     { $pending_serial = 1 }
   elsif ($a =~ /^--only=(.+)$/)     { $only_rx = qr/$1/ }   # a census in CHUNKS (s518e)
-  else { push @dists, [abs_path($a), $no_dist_lib, [@pending_inc]]; @pending_inc = () }
+  else { push @dists, [abs_path($a), $no_dist_lib, [@pending_inc], $pending_serial];
+         @pending_inc = (); $pending_serial = 0 }
 }
 @dists or die "usage: $0 [--jobs N] [--timeout S] [--no-dist-lib] [--tsv F] [--rows F] <dist-dir>...\n";
 
@@ -250,12 +305,13 @@ my %file_timeout = %{ PCLTimeouts::read_timeouts($timeouts_tsv) };
 # Work list: one entry per t-file.
 my @work;
 for my $d (@dists) {
-  my ($dir, $ndl, $inc) = @$d;
+  my ($dir, $ndl, $inc, $serial) = @$d;
   -d "$dir/t" or die "no t/ in $dir\n";
   for my $t (t_files("$dir/t")) {
     my $rel = basename($dir) . "/" . t_name($t, $dir);
     next if $only_rx && $rel !~ $only_rx;
     push @work, { dist => $dir, ndl => $ndl, inc => $inc, t => $t, rel => $rel,
+                  serial => $serial,
                   to => PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout) };
   }
 }
@@ -273,7 +329,8 @@ my $tmp = tempdir("cpan-board-XXXXXX", TMPDIR => 1, CLEANUP => 1);
 $work[$_]{idx} = $_ for 0 .. $#work;
 
 # Fork pool: each child runs one t-file, writes one result line to a pipe.
-my %kids;
+my %kids;        # pid -> the work item it runs
+my %dist_busy;   # a SERIAL dist -> how many of its files run now (0 or 1)
 my @queue = @work;
 pipe(my $rd, my $wr) or die "pipe: $!";
 my @rows;
@@ -395,11 +452,31 @@ sub spawn_one {
     print $wr join("\t", @$r), "\n";
     exit 0;
   }
-  $kids{$pid} = 1;
+  $kids{$pid} = $w;
+  $dist_busy{ $w->{dist} }++ if $w->{serial};
+}
+
+# A SERIAL dist (--dist-serial, #4381) runs one file at a time, in its sorted
+# order: its next file is not READY while one of its files runs.  The other
+# workers take other dists' files meanwhile -- the queue is scanned for the
+# first ready item, so a serial dist never holds the pool up.
+sub next_ready {
+  for my $i (0 .. $#queue) {
+    next if $queue[$i]{serial} && $dist_busy{ $queue[$i]{dist} };
+    return splice @queue, $i, 1;
+  }
+  return undef;
+}
+
+sub spawn_ready {
+  while (@queue && keys %kids < $jobs) {
+    my $w = next_ready() // last;
+    spawn_one($w);
+  }
 }
 
 close_wr_when_done: {
-  spawn_one(shift @queue) while @queue && keys %kids < $jobs;
+  spawn_ready();
   close $wr if !@queue && !%kids;
 }
 # Reader loop: reap + refill as lines arrive.
@@ -410,8 +487,10 @@ while (@rows < $expected) {
   chomp $line;
   push @rows, [split /\t/, $line, NFIELDS];
   my $done = wait();
-  delete $kids{$done} if $done > 0;
-  spawn_one(shift @queue) if @queue;
+  if ($done > 0 && (my $w = delete $kids{$done})) {
+    $dist_busy{ $w->{dist} }-- if $w->{serial};
+  }
+  spawn_ready();
 }
 close $rd;
 1 while wait() > 0;

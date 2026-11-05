@@ -46,17 +46,27 @@ ARGS=$(perl -e '
     my ($dist, $flags) = split /\t/;
     my $path = $dist =~ m{/} ? "$tree/$dist" : "$home/.cpan/build/$dist";
     die "cpan-board.sh: no dist directory $path\n" if !-d $path;
-    if ($flags eq "--no-dist-lib") { push @nolib, $path }
-    elsif ($flags eq "-") { push @plain, $path }
-    elsif ($flags =~ /^--inc=(.+)$/) {
-      # extra @INC dirs for THIS dist only (a dependency fetched under
-      # ~/.cpan/build, never installed; the dist own inc/ that its make
-      # test adds): relative paths resolve against ~/.cpan/build (s518e)
-      my @d = map { m{^/} ? $_ : "$home/.cpan/build/$_" } split /,/, $1;
-      -d $_ or die "cpan-board.sh: no --inc directory $_ for $dist\n" for @d;
-      push @plain, "--dist-inc=" . join(",", @d), $path;
+    my ($nolib, @pre) = (0);
+    for my $fl (split " ", $flags) {
+      if    ($fl eq "-") { }
+      elsif ($fl eq "--no-dist-lib") { $nolib = 1 }
+      elsif ($fl eq "--serial") {
+        # the dist`s t-files depend on each other`s side effects (TT compile2.t
+        # reads the cache compile1.t writes): ONE worker runs them in order,
+        # as make test does (#4381)
+        push @pre, "--dist-serial";
+      }
+      elsif ($fl =~ /^--inc=(.+)$/) {
+        # extra @INC dirs for THIS dist only (a dependency fetched under
+        # ~/.cpan/build, never installed; the dist own inc/ that its make
+        # test adds): relative paths resolve against ~/.cpan/build (s518e)
+        my @d = map { m{^/} ? $_ : "$home/.cpan/build/$_" } split /,/, $1;
+        -d $_ or die "cpan-board.sh: no --inc directory $_ for $dist\n" for @d;
+        push @pre, "--dist-inc=" . join(",", @d);
+      }
+      else { die "cpan-board.sh: unknown flag \"$fl\" for $dist\n" }
     }
-    else { die "cpan-board.sh: unknown flags \"$flags\" for $dist\n" }
+    push @{ $nolib ? \@nolib : \@plain }, @pre, $path;
   }
   print join("\n", @plain, (@nolib ? ("--no-dist-lib", @nolib) : ())), "\n";
 ' "$LIST" "$TREE" "$HOME") || exit 1
