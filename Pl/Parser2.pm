@@ -14829,12 +14829,16 @@ sub _local_plan_glob {
 
 # A static glob name `*NAME` / `*Pkg::NAME` as [static => PKG, NAME]: an
 # unqualified one lives in the current package, except the standard handles,
-# which perl resolves in main:: from every package (#3411).
+# which perl resolves in main:: from every package (#3411).  A STASH glob
+# `*Pkg::` / `*A::B::` is the glob named `Pkg::` in main (`B::` in A):
+# `local *Fooo:: = \%Baro::` (t/mro/package_aliases.t).  Rule 12: a name
+# none of these reads is refused, never localized under a guessed name.
 sub _local_static_glob {
   my ($self, $gc) = @_;
   return [static => ($1 || 'main'), $2] if $gc =~ /^\*(.*)::([^:]+)$/;
+  return [static => ($1 || 'main'), $2] if $gc =~ /^\*(?:(.*)::)?([^:]+::)$/;
   my ($name) = $gc =~ /^\*(\w+)$/;
-  $name //= '';
+  die "Parser2 TODO: unsupported `local` target: the glob name $gc\n" unless defined $name;
   my $pkg = ($self->environment ? $self->environment->current_package : undef) // 'main';
   $pkg = 'main' if Pl::Environment::fh_forced_main_name($name);
   return [static => $pkg, $name];

@@ -12,9 +12,10 @@
 # Every runtime expectation is perl 5.40.3's output, probed s533c.  On the
 # 0f2db817 extraction TAP rows 1-6 (#4185: the statement was refused), 7
 # (#4441: SCALAR(0x1)), 13 (#4443: undef) and the shape rows 14-15 (a v1
-# source echo, the text layout) FAIL; rows 8-12 and 16 pass on both trees and
-# pin the families the structured lowering replaced (a second program, so
-# they do not depend on the #4185 rows).
+# source echo, the text layout) and 17 (a stash glob's name: the base reads
+# `*A::C::` as "A::C::" in main, by a stale `$1`) FAIL; rows 8-12 and 16 pass
+# on both trees and pin the families the structured lowering replaced (a
+# second program, so they do not depend on the #4185 rows).
 
 use v5.30;
 use strict;
@@ -33,7 +34,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 my $fixture = <<'PL';
 no strict 'refs';
@@ -119,3 +120,15 @@ like($cl, qr/\(p-local-cell \$x \(p-box-for-local 5\)\n\s+\(p-local-hash-elem-in
      'the opens nest, each header on its head line');
 like($cl, qr/\(p-list-= \(vector \$x \(p-gethash %h "j"\)\) pcl-local-rhs-\d+\)/,
      'a list local assigns through the targets\' places');
+
+# -- a STASH glob's static name (t/mro/package_aliases.t:406) -------------------
+# s533c's first tree spelling read `*Fooo::` as the glob named "" (caught by
+# the wide emission A/B); v1's text got "Fooo::" only by a stale `$1`.  The
+# aliasing itself does not happen under `local` -- #4444.
+my ($gfh, $glob_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+print $gfh q{sub f { local *Fooo:: = \%Baro::; local *A::C::; 1 }
+};
+close $gfh;
+my $gcl = PCLCore::transpile("$pl2cl $glob_file");
+like($gcl, qr/\(p-local-glob "main" "Fooo::" .*\n(?s:.*)\(p-local-glob "A" "C::" :none/,
+     'a stash glob *Pkg:: / *A::B:: is the glob named Pkg:: in main / B:: in A');
