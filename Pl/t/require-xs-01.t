@@ -60,7 +60,7 @@ plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 my $core = PCLSbcl::cached_core("$root/cl/pcl-runtime.lisp");
 plan skip_all => "no cached core" if !($core && -f $core);
 
-plan tests => 16;
+plan tests => 17;
 
 my $d = tempdir(CLEANUP => 1);
 make_path("$d/Opt");
@@ -143,7 +143,10 @@ my $oke = eval { require Outer; 1 };
 my $ee  = first_line($@);
 print "H ", ($oke ? 1 : 0), " ",
       ($ee =~ m{\ACan't locate Opt/XS\.pm } ? "inner" : "other [$ee]"), " ",
-      (exists $INC{'Outer.pm'} ? "present" : "absent"), "\n";
+      (exists $INC{'Outer.pm'} ? "present" : "absent"), " ",
+      (defined $INC{'Outer.pm'} ? "defined" : "undef"), "\n";
+eval { require Outer; 1 };
+print "H2 ", ($@ =~ /\AAttempt to reload Outer\.pm aborted/ ? "reload" : "other [$@]"), "\n";
 
 print "I ", (eval { require Opt::XS; 1 } ? "xs" : "pp"), "\n";
 
@@ -187,8 +190,13 @@ is($r{C}, 'yes', '... and says in our own parenthesis why');
 is($r{D}, 'absent', 'a module presented as not installed leaves no %INC entry');
 is($r{E}, 'same', 'a SECOND require answers identically (the per-process memo)');
 is($r{J}, 'yes', '`use` at compile time reports the same not-found text');
-is($r{H}, '0 inner absent',
+# Outer's own load DIED, so perl leaves $INC{'Outer.pm'} = undef (exists, not
+# defined) and a second require dies "Attempt to reload" -- the expectation
+# was 'absent' until #4162 (s532b), which encoded PCL's old missing entry;
+# perl-probed with a missing inner module: `0 inner present undef` + reload.
+is($r{H}, '0 inner present undef',
    'a module requiring an XS module fails naming the INNER file (innermost frame wins)');
+is($r{H2}, 'reload', '... and the outer file is not run again (#4162)');
 
 # ── what must NOT change, perl as the oracle ─────────────────────────────
 is($r{F}, 'loadable-object',
