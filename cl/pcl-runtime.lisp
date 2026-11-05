@@ -391,7 +391,7 @@
    #:p-run-compile-phase-blocks
    ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
    #:p-sub-exists #:p-sub-defined #:p-undef-sub
-   #:p-unit-value #:p-unit-value-assumed #:p-unit-module-true
+   #:p-unit-value #:p-unit-value-assumed #:p-unit-module-true #:p-unit-return
    #:p-coderef-exists-p #:p-coderef-defined-p
    ;; Tie/untie/tied
    #:p-tie-proxy #:make-p-tie-proxy #:p-tie-proxy-p
@@ -2635,9 +2635,17 @@
    and both callers used to spell them out, which is one copy too many.
    Used for EBADF (9, a handle that is not open) and ENOENT (2, a PerlIO layer
    name no layer answers to: perl's own binmode/open answer, probed 5.40.3)."
-  (setf *p-stored-errno* errno)
-  (setf (sb-alien:extern-alien "errno" sb-alien:int) errno)
+  (%p-set-errno errno)
   nil)
+
+(defun %p-set-errno (errno)
+  "Set $! to ERRNO without a system call: both halves (see %p-io-errno-fail).
+   Also perl's own SETERRNO(0, ...) -- a require that FOUND its file clears
+   $! (pp_ctl.c S_require_file, task #4166), so the search's misses and
+   whatever the program left there never reach the exit status of a die
+   raised while the file loads."
+  (setf *p-stored-errno* errno)
+  (setf (sb-alien:extern-alien "errno" sb-alien:int) errno))
 
 (defun %pcl-local-errno-init (n)
   "Helper for 'local $! = N': coerce n to int, set C errno, return int for let binding."
@@ -26637,7 +26645,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-11200"
+(defparameter *pcl-cache-generation* "v2-11400"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -27187,19 +27195,13 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %p-inc-hook-load (rel-path hook)
   "Load the source an @INC hook supplied (HOOK from %P-REQUIRE-LOCATE) as
-   the module REL-PATH, then give %INC its entry: the hook element itself,
-   unless the hook stored one (perlvar %INC).  Returns the unit's value, or
-   dies when it is false (#1688)."
-  (destructuring-bind (text elem preset) hook
-    (let ((v (multiple-value-bind (path dir) (%p-inc-hook-spool rel-path text)
-               (unwind-protect (p-load-module-cached path t)
-                 (ignore-errors
-                   (sb-ext:delete-directory (concatenate 'string dir "/")
-                                            :recursive t))))))
-      (%p-require-true-or-die rel-path v)
-      (unless preset
-        (setf (gethash rel-path *p-inc-table*) elem))
-      v)))
+   the module REL-PATH; the unit's value.  The true-value test and the %INC
+   entry are %P-REQUIRE-RUN's."
+  (multiple-value-bind (path dir) (%p-inc-hook-spool rel-path (first hook))
+    (unwind-protect (p-load-module-cached path t)
+      (ignore-errors
+        (sb-ext:delete-directory (concatenate 'string dir "/")
+                                 :recursive t)))))
 
 ;;; --- Cache Management ---
 
@@ -28919,24 +28921,107 @@ would consume, so it dies naming the stream (rule 12)."
   nil)
 
 (defun p-unit-module-true ()
-  "The unit is under the `module_true' feature: its value is 1."
+  "The unit is under the `module_true' feature where it ENDS: falling off
+   the end answers 1."
   (setf *p-unit-module-true* t)
   nil)
+
+;;; A top-level `return' answers by the module_true state AT THE RETURN, not
+;;; at the end of the file (task #4168): perl marks the return op itself when
+;;; the feature is in force where it is compiled (op.c op_convert_list,
+;;; OPf_SPECIAL; pp_ctl.c pp_leaveeval reads it).  The emitter states it --
+;;; (p-unit-return T-OR-NIL (p-return ...)) at every top-level return of a
+;;; module unit it lowers natively; a return it does not mark keeps the old
+;;; answer, the end-of-file state.
+(defvar *p-unit-return-module-true* :unknown
+  "The module_true state at the top-level `return' that ended the unit being
+   loaded: T, NIL, or :UNKNOWN (a return the emitter did not mark).")
+
+(defmacro p-unit-return (module-true form)
+  "FORM, a top-level `return' of a module unit, compiled where the
+   `module_true' feature is MODULE-TRUE (T or NIL)."
+  `(progn (setf *p-unit-return-module-true* ,module-true) ,form))
 
 (defun %p-unit-result (returned)
   "The value require answers for the unit just loaded, from RETURNED (a
    top-level `return`'s value, or '%P-UNIT-NO-RETURN) and the unit's state."
-  (cond (*p-unit-module-true* 1)
-        ((not (eq returned '%p-unit-no-return)) returned)
+  (cond ((not (eq returned '%p-unit-no-return))
+         (if (if (eq *p-unit-return-module-true* :unknown)
+                 *p-unit-module-true*
+                 *p-unit-return-module-true*)
+             1
+             returned))
+        (*p-unit-module-true* 1)
         ((eq *p-unit-value* :assumed) 1)
         ((eq *p-unit-value* :none) *p-undef*)
         (t *p-unit-value*)))
 
 (defun %p-require-true-or-die (name value)
-  "VALUE, require's answer for NAME, when true; else perl's die."
-  (if (p-true-p value)
-      value
-      (p-die (format nil "~A did not return a true value" name))))
+  "VALUE, require's answer for NAME, when true; else perl's die, with NAME
+   ABSENT from %INC (an entry a hook stored is deleted too: pp_ctl.c)."
+  (cond ((p-true-p value) value)
+        (t (remhash name *p-inc-table*)
+           (p-die (format nil "~A did not return a true value" name)))))
+
+;;; ── A REQUIRED FILE THAT DIES (task #4162) ─────────────────────────────
+;;; perl's three outcomes for a file require FOUND (pp_ctl.c
+;;; S_pop_eval_context_maybe_croak): the file DIES -- $INC{NAME} becomes
+;;; undef and the die is raised again as MSG . "Compilation failed in
+;;; require" at the require's own location; the file's value is FALSE --
+;;; NAME stays absent, "NAME did not return a true value" (#1688); else
+;;; $INC{NAME} = the file.  A later require that finds the undef entry dies
+;;; "Attempt to reload NAME aborted." -- a file that died never runs twice.
+
+(defun %p-inc-loaded-p (key)
+  "True when %INC says KEY is loaded, NIL when KEY is absent; perl's die
+   when the entry is there but undef (a load that died, or a program's own
+   `$INC{KEY} = undef')."
+  (multiple-value-bind (v found) (gethash key *p-inc-table*)
+    (cond ((not found) nil)
+          ((%pcl-definedp v) t)
+          (t (p-die (format nil "Attempt to reload ~A aborted.~%~
+                                 Compilation failed in require" key))))))
+
+(defun %p-require-failed (key c where)
+  "The die REQUIRE raises for KEY when the file it was loading died with the
+   perl condition C: $INC{KEY} = undef, then MSG . \"Compilation failed in
+   require\" at the require's own location WHERE (an object die is
+   stringified, as perl's croak does)."
+  (setf (gethash key *p-inc-table*) *p-undef*)
+  (let ((msg (concatenate 'string (to-string (%p-caught-perl-value c))
+                          "Compilation failed in require")))
+    (if where (p-die msg :loc where) (p-die msg))))
+
+(defun %p-require-guard (key thunk)
+  "THUNK's value -- the load of the file REQUIRE found for KEY.  A perl die
+   escaping it is %P-REQUIRE-FAILED's.  Any other error leaves $INC{KEY} =
+   undef too and goes on unchanged: a CL error is a PCL bug, and its
+   backtrace is the diagnosis.  An XS module with no artifact on this host
+   (p-xs-no-artifact, #1917) passes through to p-use's own handler."
+  (let ((where (%p-loc-string)))
+    (handler-bind ((error (lambda (c)
+                            (unless (typep c '(or p-die-error p-exception))
+                              (setf (gethash key *p-inc-table*) *p-undef*)))))
+      (handler-case (funcall thunk)
+        ((and p-die-error (not p-xs-no-artifact)) (c)
+          (%p-require-failed key c where))
+        (p-exception (c) (%p-require-failed key c where))))))
+
+(defun %p-require-run (key abs-path hook &optional (inc-value abs-path))
+  "Load the file REQUIRE found for KEY -- ABS-PATH, or the source the @INC
+   HOOK supplied (from %P-REQUIRE-LOCATE) -- and give %INC its entry:
+   INC-VALUE for a file, the hook element for a hook unless the hook stored
+   one itself (perlvar %INC).  The file's value (#1688)."
+  (let ((value (%p-require-true-or-die
+                key (%p-require-guard
+                     key (lambda ()
+                           (if hook
+                               (%p-inc-hook-load key hook)
+                               (p-load-module-cached abs-path)))))))
+    (cond ((null hook) (setf (gethash key *p-inc-table*) inc-value))
+          ((not (third hook))
+           (setf (gethash key *p-inc-table*) (second hook))))
+    value))
 
 (defun p-load-module-cached (source-path &optional uncached)
   "Load a Perl module with caching.  Returns the module unit's VALUE
@@ -28961,7 +29046,8 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((*wantarray* nil)
         (*pcl-caller-wantarray* nil)
         (*p-unit-value* :none)
-        (*p-unit-module-true* nil))
+        (*p-unit-module-true* nil)
+        (*p-unit-return-module-true* :unknown))
     (%p-unit-result
      (p-loc-save
       (catch :p-return
@@ -29594,8 +29680,8 @@ would consume, so it dies naming the stream (rule 12)."
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg (or (and into (%pcl-find-package into)) *package*)))
-    ;; Already loaded?
-    (when (gethash rel-path *p-inc-table*)
+    ;; Already loaded?  (An undef entry -- a load that died -- dies, #4162.)
+    (when (%p-inc-loaded-p rel-path)
       ;; Still import for repeated use statements (but not for bare require)
       (when do-import
         (%p-do-import module-name caller-pkg import-args))
@@ -29637,21 +29723,18 @@ would consume, so it dies naming the stream (rule 12)."
         (%p-io-errno-fail 2)
         (p-die (format nil "Can't locate ~A in @INC (@INC contains: ~{~A~^ ~})"
                        rel-path (map 'list #'to-string @INC))))
+      ;; FOUND: perl clears $! here (#4166, %p-set-errno).
+      (%p-set-errno 0)
       ;; Load with circular detection.  THE HANDLER IS THE FAILURE PATH ONLY:
       ;; a load that succeeds never enters it, and the frame is established once
       ;; per module load, not per call into the module (#1917 — see the
       ;; p-xs-no-artifact note above *p-xs-unavailable-modules*).
+      ;; %p-require-run gives %INC its entry (#4162: undef when the file dies).
       (let ((value
              (handler-case
                  (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
-                   (if hook
-                       (%p-inc-hook-load rel-path hook)
-                       (%p-require-true-or-die
-                        rel-path (p-load-module-cached abs-path))))
+                   (%p-require-run rel-path abs-path hook))
                (p-xs-no-artifact () (%p-xs-not-installed rel-path)))))
-        ;; Update %INC (a hook's entry is %p-inc-hook-load's)
-        (unless hook
-          (setf (gethash rel-path *p-inc-table*) abs-path))
         ;; Import symbols from module (skipped for bare require)
         (when do-import
           (%p-do-import module-name caller-pkg import-args))
@@ -29745,8 +29828,9 @@ would consume, so it dies naming the stream (rule 12)."
     ;; (a numeric-looking STRING still names a file, matching perl).
     (when (numberp path-str)
       (return-from p-require-file (p-require-version path-str)))
-    ;; Check %INC to avoid reloading (Perl keys %INC by the string used).
-    (when (gethash path-str *p-inc-table*)
+    ;; Check %INC to avoid reloading (Perl keys %INC by the string used; an
+    ;; undef entry dies, #4162).
+    (when (%p-inc-loaded-p path-str)
       (return-from p-require-file t))
     ;; A `.pm` path is a module require — delegate to the bareword machinery.
     ;; NOT an explicit path (`./M.pm`, `../lib/M.pm`, `/abs/M.pm`): perl's rule
@@ -29798,12 +29882,10 @@ would consume, so it dies naming the stream (rule 12)."
         ;; reason as p-use's twin above (#1247 (b)).
         (%p-io-errno-fail 2)
         (p-die (format nil "Can't locate ~A" path-str)))
-      (if hook
-          (%p-inc-hook-load path-str hook)
-          (prog1 (%p-require-true-or-die path-str
-                                         (p-load-module-cached abs-path))
-            (setf (gethash path-str *p-inc-table*)
-                  (sb-ext:native-namestring (pathname abs-path))))))))
+      (%p-set-errno 0)                  ; FOUND: perl clears $! (#4166)
+      (%p-require-run path-str abs-path hook
+                      (and abs-path
+                           (sb-ext:native-namestring (pathname abs-path)))))))
 
 ;;; ============================================================
 ;;; List Functions

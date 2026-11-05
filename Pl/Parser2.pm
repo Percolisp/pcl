@@ -2498,9 +2498,17 @@ sub parse {
     # 'inherit' turns on the tail machinery ($decl_tail for trailing
     # declarations, the ret-var transform for tail if-modifiers/compounds)
     # exactly as in a sub body (s308b, drops the E3 trailing-decl retry).
+    # And a MODULE unit, whose value is its last run statement's (#1688):
+    # its LAST segment is lowered in tail position too, so a statement
+    # modifier, a bare block or an if/unless there carries perl's value --
+    # the tail machinery a sub body's implicit return uses -- and the
+    # assembly trusts that value (`unit_tail`) instead of assuming true
+    # (#4168).
+    my $unit_tail = $self->module_unit && !$self->eval_mode
+                    && $seg == $segments[-1];
     my @runtime = $self->_lower_block(\@top,
         Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info, $self),
-        $self->eval_mode ? 'inherit' : undef);
+        ($self->eval_mode || $unit_tail) ? 'inherit' : undef);
     # The FILE half of the location register (task #1240): once per section's
     # run bucket, because the file changes only across a sub call (p-sub-frame
     # saves and restores it) or a file load.  See _lower_block's header.
@@ -2512,6 +2520,7 @@ sub parse {
     push @def_lines, @{ $self->{_hoisted_def_lines} };
     push @sections, {
       pkg      => $seg->{pkg},
+      unit_tail => ($unit_tail && @top) ? 1 : 0,   # #4168, see above
       reopen   => $seg->{reopen},
       version  => $seg->{version},
       # #1587: only an eval-mode collapsed region sets this — the package the
@@ -2681,7 +2690,7 @@ sub parse {
     # entries with equal positions.
     push @body, map { ($_, '') } $self->_interleaved_defs($sec);
     # This section's RUN phase, held back until every section has compiled.
-    push @run_groups, [$i, $pkg, $cl_pkg, $sec->{run}];
+    push @run_groups, [$i, $pkg, $cl_pkg, $sec->{run}, $sec->{unit_tail}];
   }
   # The compile->run boundary: UNITCHECK/CHECK (reverse) then INIT (source
   # order) run once, after the whole file has compiled and before the first
@@ -2735,7 +2744,7 @@ sub parse {
       if $i > 0 || @sections > 1;
     for my $ei (0 .. $#$run) {
       my $form = $run->[$ei];
-      $form = _unit_value_form($form)
+      $form = _unit_value_form($form, $g->[4])
         if $uv_at && $uv_at->[0] == $gi && $uv_at->[1] == $ei;
       push @body, $form, '';
     }
@@ -2824,13 +2833,16 @@ sub _unit_value_site {
 # multi-form `progn` (their CL value is NIL or not the last statement's) take
 # (p-unit-value-assumed) instead -- a false "did not return a true value"
 # would fail a module perl loads; a missed one only keeps PCL's old answer.
+# TAIL (#4168): the statement was lowered in TAIL position (the module's last
+# segment), so its CL value IS perl's whatever its head -- the opaque test
+# does not apply; only a form count other than one still assumes.
 my %UNIT_VALUE_OPAQUE = map { $_ => 1 } qw(let let* block progn tagbody p-if p-unless);
 sub _unit_value_form {
-  my ($form) = @_;
+  my ($form, $tail) = @_;
   (my $head) = $form =~ /\A(?:\s|;[^\n]*\n)*\(\s*([^\s()]+)/;
   return "$form\n(p-unit-value-assumed)"
     if _cl_top_form_count($form) != 1
-    || (defined $head && $UNIT_VALUE_OPAQUE{lc $head});
+    || (!$tail && defined $head && $UNIT_VALUE_OPAQUE{lc $head});
   return "(p-unit-value\n$form\n)";
 }
 
@@ -11455,6 +11467,22 @@ sub _lower_stmt {
   return $self->_lower_expr_stmt($stmt, $vi, $tail_ctx);
 }
 
+# #4168: a `return` at the top level of a MODULE unit (outside every sub)
+# answers by the `module_true` state AT THE RETURN, not at the file's end:
+# perl marks the return op where it is compiled (op.c op_convert_list,
+# OPf_SPECIAL) and pp_leaveeval reads that mark.  FORM is wrapped
+# (p-unit-return T-OR-NIL FORM); the loader (%p-unit-result) reads it.
+sub _unit_return_form {
+  my ($self, $stmt, $form) = @_;
+  return $form if !$self->module_unit || $self->environment->in_subroutine;
+  my $loc = $stmt->location or return $form;
+  my $doc = $stmt->top;
+  my $regions = $self->{_module_true_regions}{ refaddr $doc }
+    //= Pl::Parser::feature_regions_of($doc, 'module_true');
+  return ['p-unit-return',
+          Pl::Parser::feature_at($regions, $loc) ? 't' : 'nil', $form];
+}
+
 # A `return` / `next` / `last` / `redo` / `goto` statement (Pl::Stmt kinds
 # return, loopctl); the spans come from Pl::Stmt::break_shape.
 sub _lower_break_stmt {
@@ -11529,6 +11557,7 @@ sub _lower_break_stmt {
       ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
       : ['p-return'];
     $form = Pl::Passes::fact('tail-return', $tail_ok, $form);
+    $form = $self->_unit_return_form($stmt, $form);
     return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
   }
   # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
