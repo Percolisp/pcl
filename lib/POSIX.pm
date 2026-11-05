@@ -29,9 +29,19 @@
 package POSIX;
 use strict;
 use warnings;
-use Exporter q{import};
+use Exporter ();
 
 our $VERSION = '2.13';
+
+# perl's POSIX::import: a tag may be spelled without its colon, the legacy
+# `foo_h' form (`POSIX->import("locale_h")', t/run/locale.t) -- it is
+# rewritten to `:foo_h' before Exporter sees it (#4169).
+sub import {
+    my $pkg = shift;
+    s/^(?=\w+_h$)/:/ for my @list = @_;
+    local $Exporter::ExportLevel = 1;
+    Exporter::import($pkg, @list);
+}
 
 # ---------------------------------------------------------------- constants
 

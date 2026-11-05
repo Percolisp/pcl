@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -132,3 +132,10 @@ both_agree('use POSIX; my $ok = eval { POSIX::sigprocmask(0); 1 };'
            . ' my $ok2 = eval "use POSIX qw(nosuchname); 1";'
            . ' print +($ok ? "silent" : "loud"), " ", ($ok2 ? "silent" : "loud"), "\n";',
            'an unimplemented name is LOUD at the call AND at the import');
+
+# ---- #4169: the legacy tag spelling without its colon -------------------
+# perl's POSIX::import rewrites `foo_h` to `:foo_h` (t/run/locale.t does
+# `POSIX->import("locale_h")`, and skipped the whole file when it failed).
+both_agree('eval { require POSIX; POSIX->import("locale_h") }; print "err=[$@] ", LC_ALL() + 0, "\n";'
+           . ' package Q; use POSIX qw(sys_wait_h); print +(defined &Q::WNOHANG ? 1 : 0), "\n";',
+           'POSIX->import("locale_h"): the colon-less tag spelling imports the tag (#4169)');

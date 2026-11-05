@@ -308,7 +308,7 @@ t/re/uniprops07.t	29260	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/run/locale.t	44	#4169 (s531a: split out of #1705 -- lib/POSIX.pm has no locale_h export tag, so the file skip_alls)
+t/run/locale.t	44	#4285 (the file stops at `use I18N::Langinfo` -- XS, no PCL build; behind it a real setlocale; was #4169 (the `locale_h` tag spelling POSIX->import accepts), fixed s532b)
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
 t/run/switchd-78586.t	2	not-supported.md#perls-command-line-switches-what-pcl-does-not-do-s506f (its #! line carries -d:Mod, which pcl refuses: the file does not transpile)
 t/run/switches.t	0	s488a BOOKKEEPING, not a move (was 11): the s473t5d splice wrote 11 beside its own verdict row of 28/112 = 140 rows produced of perl's 140, i.e. zero short.  Re-measured 0 on this tree AND on a `git archive f6b56feb` extraction; #1700 + #1699 had already removed both of the file's aborts, and the 11 skip rows it names are rows PCL does produce

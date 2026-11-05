@@ -8519,7 +8519,7 @@ run/exit.t	9	ok	not ok	WEXITSTATUS	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (re
 run/exit.t	14	ok	not ok	WIFEXITED	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
 run/exit.t	15	ok	not ok	WIFSIGNALED	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
 run/exit.t	16	ok	not ok	WTERMSIG	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
-run/locale.t	0	ok*	(no TAP)	*summary*	#4169 (s531a: split out of #1705 -- lib/POSIX.pm has no locale_h export tag, so the file skip_alls)
+run/locale.t	0	ok*	(no TAP)	*summary*	#4285 (the file stops at `use I18N::Langinfo` -- XS, no PCL build; behind it a real setlocale; was #4169 (the `locale_h` tag spelling POSIX->import accepts), fixed s532b)
 run/runenv_hashseed.t	278	ok	not ok	mode = DETERMINISTIC same key order with different seed no more than 2 times	#1588
 run/runenv_hashseed.t	59	ok	not ok	mode = NO same key order with different seed no more than 2 times	#1588
 run/runenv_hashseed.t	68	ok	not ok	mode = RANDOM same key order no more than 2 times	#1588
