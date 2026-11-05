@@ -5029,6 +5029,23 @@ does.  Example, probed: `M.pm` = `package M; sub f {} 0;` makes `eval {
 require M }` die `M.pm did not return a true value`; `package M; +{ k => 1
 };` makes `(require M)->{k}` 1.
 
+A top-level `return` answers by the `module_true` state AT THE RETURN (perl
+marks the op where it is compiled): the emitter wraps it `(p-unit-return
+T-OR-NIL FORM)`, and only falling off the end reads the end-of-file state
+(task #4168).  A module unit's LAST segment is lowered in tail position, so a
+statement modifier, a bare block or an `if`/`unless` there carries perl's
+value -- the tail machinery a sub's implicit return uses -- and is wrapped
+`(p-unit-value …)` whatever its head.  A file that DIES while it loads leaves
+`$INC{NAME}` = undef (`exists`, not `defined`) and the die is raised again as
+MSG . `Compilation failed in require` at the require's own location; a
+require that finds an undef entry dies `Attempt to reload NAME aborted.`
+instead of running the file again; a FALSE file leaves the entry absent
+(%p-require-run, task #4162).  A require that FINDS its file clears `$!`, so
+a die while it loads exits 255 unless the file itself left an errno (task
+#4166).  Example, probed: with `D.pm` = `package D; die "dm\n";`, `eval {
+require D }` twice gives `dm\nCompilation failed in require…` then `Attempt to
+reload D.pm aborted.\nCompilation failed in require…`, and D's body ran once.
+
 ### 9.1 The string-eval protocol (normative, s295)
 
 String eval must let the eval'd code *read and write* the enclosing
