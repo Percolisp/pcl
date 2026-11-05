@@ -50,11 +50,11 @@ ARGS=$(perl -e '
     for my $fl (split " ", $flags) {
       if    ($fl eq "-") { }
       elsif ($fl eq "--no-dist-lib") { $nolib = 1 }
-      elsif ($fl eq "--serial") {
+      elsif ($fl =~ /^--serial(?:=(.+))?$/) {
         # the dist`s t-files depend on each other`s side effects (TT compile2.t
         # reads the cache compile1.t writes): ONE worker runs them in order,
         # as make test does (#4381)
-        push @pre, "--dist-serial";
+        push @pre, defined $1 ? "--dist-serial=$1" : "--dist-serial";
       }
       elsif ($fl =~ /^--inc=(.+)$/) {
         # extra @INC dirs for THIS dist only (a dependency fetched under

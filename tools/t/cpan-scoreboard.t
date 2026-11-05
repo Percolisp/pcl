@@ -28,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 59;
+use Test::More tests => 60;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -248,6 +248,18 @@ like($rows_out, qr/^SBCL\t2\t0\t1$/m, 'run-dist-t --rows reports the SBCL exit c
   chomp @t;
   is_deeply(\@t, ["serial-dist\ta.t\tPASS\t1\t0\t0", "serial-dist\tb.t\tPASS\t1\t0\t0"],
             '--dist-serial: the dist\'s files ran one at a time, in order (b.t saw a.t\'s marker)');
+  # --dist-serial=REGEX: only the matching family is a chain (TT: ^compile).
+  open my $c, '>', "$sd/t/c.t" or die;
+  print $c "use Test::More tests => 1;\nok(1, 'c is independent');\n";
+  close $c;
+  system("perl \Q$root/tools/cpan-scoreboard.pl\E --no-oracle --jobs 2 --timeout 120 "
+       . "--tsv \Q$st\E --rows \Q$sr\E --dist-serial=^[ab] \Q$sd\E >$tmp/serial2.out 2>&1") == 0
+    or diag("scoreboard exited $?");
+  @t = do { open my $f, '<', $st or die; grep { /\S/ && !/^#/ } <$f> };
+  chomp @t;
+  is_deeply(\@t, ["serial-dist\ta.t\tPASS\t1\t0\t0", "serial-dist\tb.t\tPASS\t1\t0\t0",
+                  "serial-dist\tc.t\tPASS\t1\t0\t0"],
+            '--dist-serial=REGEX: the matching files still run in order; the rest run beside them');
 }
 
 # ── THE PERL ORACLE, the SKIP verdict, MISMATCH (s531b, #4160 / ruling 4) ──

@@ -269,7 +269,7 @@ my $jobs = 8;
 my $timeout = 120;
 my @dists;           # [dir, no_dist_lib, [extra @INC dirs], serial]
 my @pending_inc;     # --dist-inc=DIR,DIR: extra @INC for the NEXT dist only
-my $pending_serial = 0;   # --dist-serial: the NEXT dist's files run one at a time, in order (#4381)
+my $pending_serial = 0;   # --dist-serial[=REGEX]: the NEXT dist's files (those whose t-name matches REGEX) run one at a time, in order (#4381)
 my $only_rx;         # --only=REGEX: run only the t-files whose DIST/NAME matches
 my $no_dist_lib = 0;
 my ($tsv, $rows_file);
@@ -294,6 +294,7 @@ while (@ARGV) {
   elsif ($a eq '--no-dist-lib') { $no_dist_lib = 1 }
   elsif ($a =~ /^--dist-inc=(.+)$/) { @pending_inc = split /,/, $1 }
   elsif ($a eq '--dist-serial')     { $pending_serial = 1 }
+  elsif ($a =~ /^--dist-serial=(.+)$/) { $pending_serial = qr/$1/ }
   elsif ($a =~ /^--only=(.+)$/)     { $only_rx = qr/$1/ }   # a census in CHUNKS (s518e)
   else { push @dists, [abs_path($a), $no_dist_lib, [@pending_inc], $pending_serial];
          @pending_inc = (); $pending_serial = 0 }
@@ -311,7 +312,7 @@ for my $d (@dists) {
     my $rel = basename($dir) . "/" . t_name($t, $dir);
     next if $only_rx && $rel !~ $only_rx;
     push @work, { dist => $dir, ndl => $ndl, inc => $inc, t => $t, rel => $rel,
-                  serial => $serial,
+                  serial => (ref $serial ? scalar(t_name($t, $dir) =~ $serial) : $serial) ? 1 : 0,
                   to => PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout) };
   }
 }
@@ -460,7 +461,9 @@ sub spawn_one {
 }
 
 # A SERIAL dist (--dist-serial, #4381) runs one file at a time, in its sorted
-# order: its next file is not READY while one of its files runs.  The other
+# order (with --dist-serial=REGEX only the files whose t-name matches: the
+# dependent family, so the rest of the dist keeps its parallel workers):
+# its next serial file is not READY while one of its files runs.  The other
 # workers take other dists' files meanwhile -- the queue is scanned for the
 # first ready item, so a serial dist never holds the pool up.
 sub next_ready {
