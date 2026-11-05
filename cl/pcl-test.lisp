@@ -575,6 +575,8 @@
     (%tap-open-stream)
     ;; Test::Builder::Module::import: `$tb->exported_to($caller)' (#4186).
     (setf *test-builder-exported-to* (pcl-pkg-perl-name pkg))
+    ;; ... and Exporter's glob assignment: the import re-wins a shadowed name.
+    (%test-more-rewin-exports pkg module-name)
     (setf (gethash pkg *test-more-importers*) t)))
 
 (defun %test-more-caller-p ()
@@ -1675,13 +1677,17 @@
 ;;; bound to the same function.  The list is perl's @Test::More::EXPORT; a name
 ;;; the TAP layer does not implement is left absent (can answers false, as for
 ;;; any undefined sub), never stubbed.
+(defparameter *test-more-export-names*
+  '("ok" "use_ok" "require_ok" "is" "isnt" "like" "unlike"
+    "is_deeply" "cmp_ok" "skip" "todo" "todo_skip" "pass" "fail"
+    "eq_array" "eq_hash" "eq_set" "plan" "done_testing" "can_ok"
+    "isa_ok" "new_ok" "diag" "note" "explain" "subtest"
+    "BAIL_OUT")
+  "perl's @Test::More::EXPORT, as far as the TAP layer implements it.")
+
 (defun %test-more-stash-install ()
   (let ((pkg (%pcl-find-package "Test::More")))
-    (dolist (name '("ok" "use_ok" "require_ok" "is" "isnt" "like" "unlike"
-                    "is_deeply" "cmp_ok" "skip" "todo" "todo_skip" "pass" "fail"
-                    "eq_array" "eq_hash" "eq_set" "plan" "done_testing" "can_ok"
-                    "isa_ok" "new_ok" "diag" "note" "explain" "subtest"
-                    "BAIL_OUT"))
+    (dolist (name *test-more-export-names*)
       (let* ((cl-name (%pcl-cl-sub-name name))
              (src (find-symbol cl-name :pcl)))
         (when (and src (fboundp src))
@@ -1692,6 +1698,25 @@
                   (gethash own *p-declared-subs*) :defined)))))))
 
 (%test-more-stash-install)
+
+;;; A LATER `use Test::More' re-wins a name an earlier import took (#4363):
+;;; perl's Exporter assigns the glob again (`*main::ok = \&Test::More::ok', with
+;;; a "Prototype mismatch" warning).  The TAP functions are :pcl's, INHERITED by
+;;; every user package, so the import itself installs nothing -- and a name an
+;;; earlier user-module import SHADOWED (%p-own-code-symbol, #4081) kept that
+;;; module's function.  Each such OWN symbol is pointed at the TAP function;
+;;; an inherited name is left alone (it already is the TAP function).
+(defun %test-more-rewin-exports (pkg module-name)
+  "MODULE-NAME (Test::More or Test::Simple) was imported into PKG."
+  (dolist (name (if (string= module-name "Test::Simple")
+                    '("ok")
+                    *test-more-export-names*))
+    (let* ((cl-name (%pcl-cl-sub-name name))
+           (src (find-symbol cl-name :pcl)))
+      (multiple-value-bind (own status) (find-symbol cl-name pkg)
+        (when (and src (fboundp src) own (not (eq own src))
+                   (member status '(:internal :external)))
+          (setf (fdefinition own) (fdefinition src)))))))
 ;; Test::Builder::Module->builder (#3400): Test::Requires and every module
 ;; written on Test::Builder::Module (`use base 'Test::Builder::Module'`)
 ;; ask its CLASS for the builder; it is the same singleton.

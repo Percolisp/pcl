@@ -154,5 +154,30 @@ is("a", "a", "two");
 Test::Builder->new->ok(1, "three");
 PERL
 
+# #4363 (the #4081 residue): a LATER `use Test::More` re-wins names an earlier
+# user-module import took -- perl's Exporter assigns the glob again (with a
+# "Prototype mismatch" warning) -- also for a call compiled BEFORE the import.
+# STDOUT only (perl's warning and PCL's detector line are stderr, and differ
+# in text); expected text probed vs perl 5.40.3.
+{
+  local $ENV{PCL_DETECT} = 'off';
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $fh <<'PERL';
+BEGIN { $INC{"My/T7.pm"} = 1; package My::T7; use Exporter "import"; our @EXPORT = qw(ok is); sub ok { print "myok\n"; 1 } sub is { print "myis\n"; 1 } }
+use My::T7;
+sub f { ok(1, "compiled before the import"); is(2, 2, "is too") }
+no warnings; use Test::More tests => 3;
+f();
+ok(1, "after");
+PERL
+  close $fh;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+  print $cl_fh $cl_code; close $cl_fh;
+  my $out = `sbcl @sbcl_rt --load $cl_file 2>/dev/null`;
+  $out =~ s/^;.*\n//gm; $out =~ s/^PCL Runtime loaded\n//gm; $out =~ s/^\s*\n//gm;
+  is($out, "1..3\nok 1 - compiled before the import\nok 2 - is too\nok 3 - after\n",
+     '#4363 a later `use Test::More` re-wins ok / is from an earlier user import');
+}
 
 done_testing;
