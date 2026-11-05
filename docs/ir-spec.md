@@ -1201,7 +1201,11 @@ Two consequences a consumer must know:
   position (`(p-aref-deref TMP i)`; #4185).  When the statement is the LAST of a
   block whose value is used, that value is the localized target's (#4443).
   Example: `sub f { local $x = 5 }` lowers to
-  `(p-local-cell $x (p-box-for-local 5) $x)` and returns 5.
+  `(p-local-cell $x (p-box-for-local 5) $x)` and returns 5.  A static glob
+  name is `(p-local-glob "PKG" "NAME" …)`; a STASH glob `*Pkg::` / `*A::B::` is
+  the glob named `Pkg::` in main / `B::` in A, and a name the lowering cannot
+  read is refused, never guessed.  (Localizing a stash glob does not alias the
+  stash today: #4444.)
 
 **Exception set** — names that keep `defvar` and the dynamic `let`, decided
 by name alone (`Pl::GlobalPartition`, the one authority both emitters ask):
