@@ -331,7 +331,10 @@ $work[$_]{idx} = $_ for 0 .. $#work;
 # Fork pool: each child runs one t-file, writes one result line to a pipe.
 my %kids;        # pid -> the work item it runs
 my %dist_busy;   # a SERIAL dist -> how many of its files run now (0 or 1)
-my @queue = @work;
+# A SERIAL dist's chain is the longest single thread of work, so it STARTS
+# first (its items lead the queue, in their own order) and the other workers
+# take the other dists beside it -- at the end of the queue it would run alone.
+my @queue = ((grep { $_->{serial} } @work), (grep { !$_->{serial} } @work));
 pipe(my $rd, my $wr) or die "pipe: $!";
 my @rows;
 

@@ -28,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 58;
+use Test::More tests => 59;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -225,6 +225,29 @@ like($rows_out, qr/^SBCL\t2\t0\t1$/m, 'run-dist-t --rows reports the SBCL exit c
        'a *PLAN* row whose shortfall text moved prints a MISMATCH line');
   like($out, qr/^3 NEW \/ 1 FIXED \/ 2 UNVERIFIED \/ 0 LOST$/m,
        'only the row of a file that ran its plan is FIXED; the summary counts UNVERIFIED');
+}
+
+# ── --dist-serial (#4381): a dist whose t-files depend on an EARLIER file's
+# side effect (Template-Toolkit compile2.t reads the cache compile1.t writes)
+# runs its files one at a time, in order, on two workers too.  b.t passes
+# only when a.t (which sleeps first) has finished before b.t starts.
+{
+  my $sd = "$tmp/serial-dist";
+  mkdir $sd; mkdir "$sd/t";
+  open my $a, '>', "$sd/t/a.t" or die;
+  print $a "use Test::More tests => 1;\nsleep 3;\nopen my \$f, '>', 't/marker' or die; close \$f;\nok(1, 'a wrote the marker');\n";
+  close $a;
+  open my $b, '>', "$sd/t/b.t" or die;
+  print $b "use Test::More tests => 1;\nok(-e 't/marker', 'a.t ran to its end first');\nunlink 't/marker';\n";
+  close $b;
+  my ($st, $sr) = ("$tmp/serial.tsv", "$tmp/serial.rows.tsv");
+  system("perl \Q$root/tools/cpan-scoreboard.pl\E --no-oracle --jobs 2 --timeout 120 "
+       . "--tsv \Q$st\E --rows \Q$sr\E --dist-serial \Q$sd\E >$tmp/serial.out 2>&1") == 0
+    or diag("scoreboard exited $?");
+  my @t = do { open my $f, '<', $st or die; grep { /\S/ && !/^#/ } <$f> };
+  chomp @t;
+  is_deeply(\@t, ["serial-dist\ta.t\tPASS\t1\t0\t0", "serial-dist\tb.t\tPASS\t1\t0\t0"],
+            '--dist-serial: the dist\'s files ran one at a time, in order (b.t saw a.t\'s marker)');
 }
 
 # ── THE PERL ORACLE, the SKIP verdict, MISMATCH (s531b, #4160 / ruling 4) ──
