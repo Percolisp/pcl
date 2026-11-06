@@ -3656,7 +3656,8 @@ sub _stmt_declares_canon {
   # nested inside a block within the statement is likewise block-scoped —
   # skipped by the nested-block climb.
   return 0 unless ref($stmt) eq 'PPI::Statement'
-               || ref($stmt) eq 'PPI::Statement::Expression';
+               || ref($stmt) eq 'PPI::Statement::Expression'
+               || ref($stmt) eq 'PPI::Statement::Break';   # `return … if (my $t = …)` (#4304)
   return 1 if grep { $_->[1]->content eq $canon } _decl_syms_under($stmt);
   return 0;
 }
@@ -4991,7 +4992,8 @@ sub _embedded_decl_candidates {
   }
   my @out;
   for my $top (@tops) {
-    next unless ref($top) eq 'PPI::Statement' || ref($top) eq 'PPI::Statement::Expression';
+    next unless ref($top) eq 'PPI::Statement' || ref($top) eq 'PPI::Statement::Expression'
+             || ref($top) eq 'PPI::Statement::Break';   # Pl::Stmt's plain (#4304)
     push @out, map { [$top, $_] } $self->_embedded_my_syms($top);
   }
   return @out;
@@ -10265,8 +10267,8 @@ our %BLOCK_ARM = (
   label     => '_lower_label_stmt',
   compound  => '_blk_compound',
   expr      => '_blk_expr',
-  return    => '_blk_tail',
-  loopctl   => '_blk_tail',
+  return    => '_blk_expr',    # a `my` in its modifier condition (#4304)
+  loopctl   => '_blk_expr',
 );
 
 # A refused statement (Pl::Stmt kind refused): its perl-shaped run-time die.

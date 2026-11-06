@@ -1567,7 +1567,8 @@
     (if al
         (progn
           (%pcl-set-autoload-var (pcl-pkg-perl-name (symbol-package sym))
-                                 (%p-sub-perl-name sym))
+                                 (%p-sub-perl-name sym)
+                                 (symbol-function al))
           (apply (symbol-function al) args))
         (p-die (format nil "Undefined subroutine &~A called"
                        (%p-sub-perl-name sym))))))
@@ -37087,9 +37088,28 @@ would consume, so it dies naming the stream (rule 12)."
                              when result return result)))))))
     (walk class-name nil)))
 
-(defun %pcl-set-autoload-var (pkg-name full-method-name)
-  "Set $PKG::AUTOLOAD to FULL-METHOD-NAME in package PKG-NAME."
-  (let* ((pkg (%pcl-find-package pkg-name))
+(defun %p-autoload-var-package (fn)
+  "The package whose $AUTOLOAD perl sets before running the AUTOLOAD sub FN:
+   the stash of the glob FN was DEFINED under (gv.c's varstash,
+   GvSTASH(CvGV(cv))) -- a named sub's own package, an anonymous sub's
+   compile package -- or NIL when PCL holds no record.  Not the package of
+   the glob it is INSTALLED in: Template::Plugin::Procedural compiles
+   `sub { ... $AUTOLOAD ... }' and assigns it to *{\"${proxy}::AUTOLOAD\"},
+   and its `our $AUTOLOAD' is Procedural's (task #1486)."
+  (when (functionp fn)
+    (let ((nm (gethash fn %pcl-sub-names)))
+      (if nm
+          (let ((sep (search "::" nm :from-end t)))
+            (and sep (subseq nm 0 sep)))
+          (%p-sub-stash-of fn)))))
+
+(defun %pcl-set-autoload-var (pkg-name full-method-name &optional fn)
+  "Set $AUTOLOAD to FULL-METHOD-NAME: in the package the AUTOLOAD sub FN was
+   defined under (%p-autoload-var-package) when known, else in PKG-NAME (the
+   package whose AUTOLOAD glob was found)."
+  (let* ((pkg (or (let ((home (%p-autoload-var-package fn)))
+                    (and home (%pcl-find-package home)))
+                  (%pcl-find-package pkg-name)))
          (sym (when pkg (intern "$autoload" pkg))))
     (when sym
       (unless (boundp sym) (setf (symbol-value sym) (make-p-box nil)))
@@ -37104,7 +37124,8 @@ would consume, so it dies naming the stream (rule 12)."
     (let ((al-info (%pcl-find-autoload-in-isa class-name)))
       (when al-info
         (%pcl-set-autoload-var (car al-info)
-                               (format nil "~A::~A" class-name method-name))
+                               (format nil "~A::~A" class-name method-name)
+                               (symbol-function (cdr al-info)))
         (return-from %pcl-dispatch-autoload
           (values (apply (cdr al-info) obj args) t)))))
   (values nil nil))
@@ -37168,7 +37189,8 @@ would consume, so it dies naming the stream (rule 12)."
           when info
           do (progn
                (%pcl-set-autoload-var
-                (car info) (format nil "~A::SUPER::~A" current-class method-name))
+                (car info) (format nil "~A::SUPER::~A" current-class method-name)
+                (symbol-function (cdr info)))
                (return-from %pcl-super-autoload
                  (values (apply (cdr info) obj args) t)))))
   (values nil nil))

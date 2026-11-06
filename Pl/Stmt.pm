@@ -60,6 +60,8 @@ package Pl::Stmt;
 #                                                       spans: break_shape()
 #   loopctl    any other Statement::Break               next/last/redo/goto;
 #              (`next` `last` `redo` `goto`)            spans: break_shape()
+#              both: field plain = 1 (a `my` in the modifier condition --
+#              `return X if (my $t = ...)` -- scopes to the block, #4304)
 #   expr       PPI::Statement, ::Expression, an         the expression statement;
 #              unnamed ::Sub, ::Given, ::When,          spans: expr_shape();
 #              ::Unknown, ::UnmatchedBrace, ::Null      field: plain (exactly
@@ -166,7 +168,8 @@ sub classify {
   return package_record($stmt) if $stmt->isa('PPI::Statement::Package');
   if ($stmt->isa('PPI::Statement::Break')) {
     my ($w) = $stmt->schildren;
-    return { kind => ($w && $w->content eq 'return') ? 'return' : 'loopctl' };
+    return { kind => ($w && $w->content eq 'return') ? 'return' : 'loopctl',
+             plain => 1 };   # the embedded-my arm (#4304)
   }
   my $class = ref $stmt;
   return { kind => 'expr',
