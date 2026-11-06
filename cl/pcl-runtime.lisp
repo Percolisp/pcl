@@ -303,7 +303,7 @@
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
-   #:p-dynamic-typeglob #:p-glob-copy
+   #:p-dynamic-typeglob #:p-glob-defined #:p-glob-copy
    #:p-glob-slot #:p-glob-undef #:p-local-glob #:p-local-glob-if
    #:p-local-glob-dynamic #:p-local-dot
    #:p-defcell #:p-local-cell #:p-local-cell-if #:p-local-maybe
@@ -16598,6 +16598,26 @@ which is one of #1140's escape spellings (probed)."
         (when (and perl-name (not (nth-value 1 (gethash perl-name h))))
           (setf (gethash perl-name h) (%p-stash-variable-value pkg perl-name)))))))
 
+(defun %p-stash-has-entry-p (pkg bare)
+  "Does PKG's stash snapshot (p-stash) hold the key BARE, a perl name?  The
+   snapshot's own per-symbol rule asked for ONE name, without building it
+   (task #4301): the sub `pl-BARE' with a body (%p-sub-has-body-p), or a
+   variable / filehandle symbol %p-stash-variable-name names BARE.  Only
+   symbols PRESENT in PKG count, as p-stash's `eq symbol-package' test."
+  (flet ((own (cl-name)
+           (multiple-value-bind (sym status) (find-symbol cl-name pkg)
+             (and (member status '(:internal :external))
+                  (eq (symbol-package sym) pkg)
+                  sym))))
+    (or (let ((sub (own (%pcl-cl-sub-name bare))))
+          (and sub (%p-sub-has-body-p sub)))
+        (loop for cl-name in (list (%pcl-invert-case (concatenate 'string "$" bare))
+                                   (%pcl-invert-case (concatenate 'string "@" bare))
+                                   (%pcl-invert-case (concatenate 'string "%" bare))
+                                   (%pcl-invert-case bare))
+              thereis (let ((sym (own cl-name)))
+                        (and sym (equal (%p-stash-variable-name sym) bare)))))))
+
 (defun p-stash (pkg-name)
   "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
    Keys are lowercase Perl sub names; values are (make-p-box function).  Child
@@ -19205,10 +19225,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; the glob's name.  p-make-typeglob stores the name ALREADY
     ;; %pcl-invert-case'd (symbol case, "stdin"), so look up directly — the
     ;; string branch would invert a second time.
+    ;; The glob's OWN package first (task #1423): `\*DATA` in main is
+    ;; main::DATA, and every module with an `__END__` section has a DATA of
+    ;; its own -- the name scan below answered whichever one the hash met
+    ;; first (TT t/filter.t read a module's one-newline section, s532c).
     ((p-typeglob-p fh)
      (let* ((name (p-typeglob-name fh))
+            (own  (%p-typeglob-own-symbol fh))
             (sym  (find-symbol name :pcl)))
-       (or (and sym (gethash sym *p-filehandles*))
+       (or (and own (gethash own *p-filehandles*))
+           (and sym (gethash sym *p-filehandles*))
            (loop for k being the hash-keys of *p-filehandles*
                  using (hash-value v)
                  when (and (symbolp k) (string= (symbol-name k) name))
@@ -20467,6 +20493,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    A COPY of a glob ref (`my ($dh) = @_' on a gensym, `\\*FH') is another box
    holding the SAME glob, so it reaches the same slot (task #3243)."
   (intern (p-typeglob-name glob) (p-typeglob-package glob)))
+
+(defun %p-typeglob-own-symbol (glob)
+  "The symbol GLOB's name has IN ITS OWN PACKAGE -- present there, never one
+   the package merely inherits from :pcl -- or NIL.  Nothing is interned: a
+   READ of a handle must not create one (task #1423)."
+  (let ((pkg (p-typeglob-package glob)))
+    (when (packagep pkg)
+      (multiple-value-bind (sym status) (find-symbol (p-typeglob-name glob) pkg)
+        (and (member status '(:internal :external)) sym)))))
 
 (defun %p-install-fh (fh stream &optional (cloexec t))
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
@@ -26645,7 +26680,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-11700"
+(defparameter *pcl-cache-generation* "v2-11800"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -33477,6 +33512,78 @@ would consume, so it dies naming the stream (rule 12)."
          (let ((pkg (or (%pcl-find-package pkg-str)
                         (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
            (make-p-typeglob pkg (%pcl-invert-case bare-str))))))))
+
+(defparameter *p-magical-glob-words*
+  '("SIG" "ENV" "INC" "ARGV" "STDIN" "STDOUT" "STDERR" "ISA")
+  "Multi-character names whose main:: glob perl has from the outset.
+   Probed 5.40.3, s532c: `ARGVOUT', `EXPORT', `VERSION', `DATA' are NOT.")
+
+(defparameter *p-magical-caret-words*
+  '("OPEN" "TAINT" "UNICODE" "UTF8LOCALE" "WARNING_BITS" "UTF8CACHE" "LAST_FH"
+    "GLOBAL_PHASE" "SAFE_LOCALES" "CAPTURE" "CAPTURE_ALL" "MATCH" "PREMATCH"
+    "POSTMATCH" "RE_COMPILE_RECURSION_LIMIT")
+  "The caret words (`${^OPEN}' ...) whose main:: glob perl has from the
+   outset, spelled without the caret.  Probed 5.40.3, s532c:
+   `^RE_TRIE_MAXBUF' and `^RE_DEBUG_FLAGS' are NOT.")
+
+(defun %p-magical-glob-name-p (bare)
+  "Does perl's main:: hold the glob BARE from the outset (perl's GV_ADDMG:
+   a name gv_magicalize gives magic is created by the lookup itself)?  A
+   decimal number (no leading zero), a punctuation character other than
+   # * { }, a control character other than ^B ^G ^J ^K ^M ^Q ^U ^Y ^Z and
+   ^[ .. ^_, a caret word or one of the words above.  Probed 5.40.3 (s532c)
+   over every ASCII punctuation and control character."
+  (let ((n (length bare)))
+    (cond
+      ((zerop n) nil)
+      ((every #'digit-char-p bare) (or (= n 1) (char/= (char bare 0) #\0)))
+      ((= n 1)
+       (let ((c (char bare 0)))
+         (cond ((char= c #\_) t)
+               ((< (char-code c) 32) (find (code-char (+ 64 (char-code c))) "ACDEFHILNOPRSTVWX"))
+               ((< (char-code c) 127) (and (not (alphanumericp c)) (not (find c "#*{}"))))
+               (t nil))))
+      ((< (char-code (char bare 0)) 32)
+       (member (concatenate 'string (string (code-char (+ 64 (char-code (char bare 0)))))
+                            (subseq bare 1))
+               *p-magical-caret-words* :test #'string=))
+      (t (member bare *p-magical-glob-words* :test #'string=)))))
+
+(defun p-glob-defined (name-box)
+  "`defined *{EXPR}' (task #4301): perl's rv2gv under `defined' does not
+   create the glob (OPpDONT_INIT_GV), so the answer is whether it EXISTS.  A
+   glob value, a glob reference and a handle are defined; a NAME is defined
+   when its package's stash holds the entry -- p-stash's own per-symbol
+   rule, %p-stash-has-entry-p.  Nothing is created, not even the package
+   (Template::Plugin::Procedural installs `new' only `unless defined
+   *{\"${proxy}::new\"}')."
+  (%p-check-symbol-reference name-box)
+  (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
+    (p-bool
+     (cond
+       ((or (p-typeglob-p inner) (streamp inner) (%p-socket-p inner)
+            (%p-dirhandle-record-p inner))
+        t)
+       ((let ((r (%p-scalar-ref-referent name-box)))
+          (and r (p-typeglob-p (p-box-value r))))
+        t)
+       (t
+        (let ((name-str (to-string name-box)))  ; ONE read of a magic name
+          (multiple-value-bind (pkg-str bare) (%p-glob-dynamic-name name-str)
+            (let ((pkg (%pcl-find-package pkg-str)))
+              (or
+               ;; $1, $&, ${^OPEN}, STDOUT, ENV ... exist in main from the
+               ;; outset; unqualified, such a name is main's from any
+               ;; package (perlvar), qualified it must name main.  ISA is
+               ;; not forced into main: it is magical in EVERY existing
+               ;; package (probed: `package Foo; defined *{"Foo::ISA"}' 1).
+               (if (string= bare "ISA")
+                   (and pkg t)
+                   (and (%p-magical-glob-name-p bare)
+                        (or (string= pkg-str "")
+                            (eq pkg (find-package "MAIN"))
+                            (not (search "::" name-str)))))
+               (and pkg (%p-stash-has-entry-p pkg bare)))))))))))
 
 (defvar *p-removed-agg-slots* (make-hash-table :test 'eq :weakness :key)
   "The empty ARRAY/HASH containers a glob CLEAR installed, as an identity set

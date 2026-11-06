@@ -517,6 +517,13 @@ sub _split_func_sym {
 # this to reach past the call and lower the mention themselves.
 sub _amp_cast_operand_id {
   my ($self, $arg_id) = @_;
+  return $self->_cast_operand_id($arg_id, '&');
+}
+
+# The same shape test for any SIGIL Cast: `*$x` / `*{EXPR}` answer for '*'
+# (`defined *{EXPR}` asks whether the glob EXISTS, task #4301).
+sub _cast_operand_id {
+  my ($self, $arg_id, $sigil) = @_;
   my $arg_node = $self->expr_o->get_a_node($arg_id);
   return undef unless $self->expr_o->is_internal_node_type($arg_node)
     && ($arg_node->{type} // '') eq 'prefix_op';
@@ -524,7 +531,7 @@ sub _amp_cast_operand_id {
   return undef unless @$k >= 2;
   my $op_node = $self->expr_o->get_a_node($k->[0]);
   return undef unless ref($op_node) eq 'PPI::Token::Cast'
-    && $op_node->content() eq '&';
+    && $op_node->content() eq $sigil;
   return $k->[1];
 }
 
@@ -1807,6 +1814,11 @@ sub gen_binary_op_form {
               && _rhs_writes_match_target($self, $kids->[1]);
     my $saved_lv = $self->lvalue_context;
     $self->lvalue_context(1) if $writes && $self->_is_elem_lvalue_target($kids->[0]);
+    # The target is an ASSIGNMENT to an element (`($h{k} = $2) =~ s///`,
+    # `($h{a} = "x") .= "y"`): the element's box is the lvalue (#4303).
+    $self->lvalue_context(1)
+      if ($writes || Pl::PExpr::TokenUtils::is_compound_assign($op))
+         && $self->_elem_assign_target_p($kids->[0]);
     # A //g MATCH writes the target's pos() (task #3063): perl keeps it on
     # the element's own SV, so an ELEMENT target is passed as its CELL --
     # the live slot box when it exists, a lazy alias when it does not (a
@@ -2449,6 +2461,30 @@ sub _is_elem_lvalue_target {
   my $t = $an->{type} // '';
   return ($t eq 'a_acc' || $t eq 'h_acc'
        || $t eq 'a_ref_acc' || $t eq 'h_ref_acc') ? 1 : 0;
+}
+
+# An ASSIGNMENT TO AN ELEMENT, parenthesised or not -- `($h{k} = $2)`,
+# `($a[0] .= "x")`: perl's value of an assignment is its LEFT side as an
+# LVALUE, so `($block->{$1} = $2) =~ s/^ *(.*?) *$/$1/` (YAML::Tiny's TestML)
+# edits the element, and `($h{a} = "x") .= "y"` appends to it.  Generated in
+# lvalue context the assignment's place is the element's BOX, and p-setf of a
+# box place answers that box -- what `chomp($h{k} = <FH>)` already gets
+# (task #4303).
+sub _elem_assign_target_p {
+  my ($self, $kid_id) = @_;
+  my $xo = $self->expr_o;
+  my $an = $xo->get_a_node($kid_id);
+  if ($xo->is_internal_node_type($an)
+      && (($an->{type} // '') eq 'tree_val' || ($an->{type} // '') eq 'progn')) {
+    my $ch = $xo->get_node_children($kid_id) || [];
+    return 0 unless @$ch == 1;
+    $kid_id = $ch->[0];
+    $an = $xo->get_a_node($kid_id);
+  }
+  return 0 unless ref($an) eq 'PPI::Token::Operator'
+               && Pl::PExpr::TokenUtils::is_assign_op($an->content // '');
+  my $lhs_id = ($xo->get_node_children($kid_id) || [])->[0];
+  return defined $lhs_id && $self->_is_elem_lvalue_target($lhs_id) ? 1 : 0;
 }
 
 # A CLASS-NAME argument position (bless's 2nd arg, tie's 2nd arg): a bareword
@@ -3163,6 +3199,14 @@ sub gen_funcall_form {
     }
     if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
       return ['p-coderef-defined-p', $self->gen_node_form($amp_id)];
+    }
+    # `defined *{EXPR}` / `defined *$x`: does the glob EXIST -- perl's rv2gv
+    # creates nothing under `defined` (task #4301).  The operand is the one
+    # the `*` Cast lowering itself takes.
+    if (defined(my $glob_id = $self->_cast_operand_id($kids->[1], '*'))) {
+      return ['p-glob-defined',
+              $self->_paren_deref_base_form($glob_id, 1)
+              // $self->gen_node_form($glob_id)];
     }
     # …and the bareword-filehandle forms, which read the node itself.  The
     # shape test is the one every other handle site asks (#491), so
