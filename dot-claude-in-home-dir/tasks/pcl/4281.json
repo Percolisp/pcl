@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-06",
+   "description" : "FILED s532b (Opus 5.5, 2026-11-06) from #4168's probes (scratch/s532b/pr/until.pl, p4168loop.pl).  PRE-EXISTING (59317afd the same).  LOW: a loop is rarely the value a caller reads.\n\n    sub u1 { my $i = 5; until ($i > 3) { $i++ } }   # perl 1   PCL \"\"\n    sub u2 { my $i = 0; until ($i > 3) { $i++ } }   # perl 1   PCL \"\"\n    sub w1 { my $i = 0; while ($i) { 1 } }          # perl 0   PCL \"\"\n    sub w2 { my $i = 7; while (!$i) { 1 } }         # perl \"\"  PCL \"\"\n    lib/LpC.pm = `package LpC; my $i = 5; until ($i > 3) { $i++ }`  -> require: perl 1, PCL dies \"did not return a true value\"\n\nperl's value of a while/until loop in tail position is the value of the condition's LAST evaluation (the op that ended the loop leaves it on the stack; for `until` the raw condition value, for `while` its false value).  `for`/`foreach` loops answer \"\" in both (probed: a1..a4 in p4168subloop.pl).  ONE place: the tail lowering of a while/until compound (the sub-body tail machinery #4168 now also uses for a module unit's last segment) -- emit the loop so its value is the last condition value.  Probe the four shapes above + a `last` out of the loop (perl: the value is then whatever `last` leaves -- probe it) before designing.\n",
+   "id" : "4281",
+   "status" : "pending",
+   "subject" : "A `while` / `until` loop as the LAST statement of a sub or a required file answers \"\" in PCL; perl answers the loop condition's last value (`until ($i > 3)` that never runs -> 1, `while ($i)` with $i = 0 -> 0)"
+}

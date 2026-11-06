@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-06",
+   "description" : "FILED s532b (Opus 5.5, 2026-11-06) while fixing #4163, whose filing guessed the opposite (\"`package Q; our @INC` is @main::INC\") -- perl 5.40.3 says otherwise.  PRE-EXISTING (59317afd the same).  LOW: rare, and a silent wrong only for a program that relies on it.\n\n    perl -e 'package Q; our @INC; print \\@INC == \\@main::INC ? \"same\\n\" : \"diff\\n\";\n             our %ENV; print \\%ENV == \\%main::ENV ? \"esame\\n\" : \"ediff\\n\";\n             package R; print \\@INC == \\@main::INC ? \"rsame\\n\" : \"rdiff\\n\";'\n    perl: diff / ediff / rdiff        (the alias stays in scope across `package R`)\n    scratch/s532b/pr/p4163c.pl: `package Q; our @INC; print scalar(@INC) > 0 ? \"inc-is-main\" : \"inc-empty\"` -> perl inc-empty, PCL inc-is-main (same for %ENV).\n\nperl: `our` adds a pad entry whose OURSTASH is PL_curstash and fetches the glob QUALIFIED with it (op.c / pad.c), so S_find_default_stash's forced-main list never applies.  An unqualified `@INC` with no `our` in scope is still @main::INC (that half is right in PCL).  Where: the `our` declaration's home in Parser2 (`_lower_our_decl`) and the binder's `our` record (Pl/Binder.pm's %SPECIAL_MAIN arm, ~line 653 -- s533d's region at the time of filing): an `our` binding of a forced-main name must home in the declaring package, and the uses it covers read that package's variable.  Probe: the three lines above + `our $_` (a lexical-ish special -- perl 5.40: `our $_` is allowed and is $main::_? probe it) + a sub reading the alias.\n",
+   "id" : "4286",
+   "status" : "pending",
+   "subject" : "`package Q; our @INC;` (and `our %ENV`, `our @ARGV` ...) names the CURRENT package's variable in perl -- @Q::INC, empty -- but PCL aliases @main::INC: `our` bypasses gv.c's forced-main rule because it qualifies explicitly"
+}

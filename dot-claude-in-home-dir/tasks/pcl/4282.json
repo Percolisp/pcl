@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-06",
+   "description" : "FILED s532b (Opus 5.5, 2026-11-06), seen while probing #4186.  PRE-EXISTING (59317afd the same).\n\n    printf 'use Test::More tests => 2;\\nok(1, \"a\");\\nok(1, \"b\");\\n' > fresh.pl\n    pcl fresh.pl | od -c       # FIRST run:  1..2 / ok 1 - a / ok 2 - b / 1..2\n    pcl fresh.pl | od -c       # second run (cached): 1..2 / ok 1 - a / ok 2 - b   = perl\n\nThe extra `1..2` is on STDOUT, after the last row, only on the run that BUILDS the script's compiled file (%p-run-exit-build, task #2702: the first run executes the text and compiles the fasl at the tail of the END phase).  Compiling re-evaluates the BEGIN-time forms -- here `(p-use \"Test::More\" :import-args #(\"tests\" 2))` -> %TEST-IMPORT -> pl-plan prints the plan -- and since #3530 the TAP layer writes through its OWN dup of fd 1, so whatever the build does to keep its compile-time output quiet does not reach it.  (Check that guess first: a `use M` whose import PRINTS through plain `print` -- does the first run print it twice too?  If not, the fix is the TAP layer's stream during the build; if so, it is #2702's \"a printing use\" case come back.)  Consumers: a test harness reading the first run's TAP sees two plans (prove: \"More than one plan found in TAP output\").  The sweep / board / companion runners do not go through the script cache (they did not see it); `pcl` users and the everyday battery's FIRST run of a .t would.\n",
+   "id" : "4282",
+   "status" : "pending",
+   "subject" : "The FIRST `pcl prog.t` run of a test script prints the `use Test::More tests => N` plan line TWICE on stdout (the second at the end): the exit-time compiled-file build re-runs the BEGIN-time import, and the TAP layer writes through its own fd dup (#3530)"
+}

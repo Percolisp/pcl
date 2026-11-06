@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-06",
+   "description" : "FILED s532b (Opus 5.5, 2026-11-06) from #4166's measurement.  PRE-EXISTING.  LOW.\n\n    open my $f, \"<\", \"lib/FalseMod.pm\"; -d \"/nonexist\"; my @l = <$f>; print \"eof=\", 0+$!, \"\\n\";   # perl eof=0   PCL eof=2\n    printf 'BEGIN { -d \"/nonexist\" } print \"rt=\", 0+$!, \"\\n\";' > e3.pl; perl e3.pl                   # rt=0\n    the same + a trailing `__END__` line                                                                # rt=2 (!)\n    perl -e 'BEGIN { -d \"/nonexist\" }' -e 'print \"rt=\", 0+$!, \"\\n\";'                                  # rt=2\n\nperl: perlio.c:3174 (PerlIOUnix_read) `else if (len == 0 && count != 0) { PerlIOBase(f)->flags |= PERLIO_F_EOF; SETERRNO(0,0); }` -- a read that hits EOF clears errno.  The lexer reads a program FILE to its end, so a BEGIN-time ENOENT (a `use lib` whose -d checks miss, any failed stat in a BEGIN) is gone when the run phase starts -- unless the file stops at __END__/__DATA__ (no EOF read) or the program is -e.  PCL: `use lib 'lib'; print 0+$!` prints 2 (lib.pm's -d checks); perl 0.  #4166 fixed the half that mattered for exit statuses (a require that FINDS its file clears $!, pp_ctl.c S_require_file).  The fix shape: the readline / read / sysread / eof EOF arm clears *p-stored-errno* (%p-set-errno 0); the program-file half is the same rule applied once at the end of the main file's compile phase when its source has no __END__/__DATA__ -- probe both halves; the second is an artefact, decide whether to emulate it.\n",
+   "id" : "4284",
+   "status" : "pending",
+   "subject" : "A read that reaches END OF FILE leaves $! as it was in PCL; perl's PerlIO sets $! = 0 at EOF (perlio.c PerlIOUnix_read) -- `-d \"/nope\"; my @l = <$fh>; print 0+$!` is 0 in perl, 2 in PCL; the same EOF read is why a perl FILE program's run phase starts with $! = 0 after a BEGIN-time failure"
+}
