@@ -170,9 +170,9 @@ differing site sorted or given a declared order** -- a correctness fix on its ow
   tokenizer 0.081 -> 0.272 s (3.4x), `find` 0.011 -> 0.111 s (10x), `tokens()` 0.004 -> 0.031 s.
   sb-sprof (N=20, 28,943 samples; the parse loop = 75 % of the run, module loading the rest):
   INHERITED METHOD DISPATCH re-resolved by name on every call (`p-method-call`'s `find-in-class`:
-  `%pcl-find-package` + `find-symbol` per class up , an `equal` visited list) = 27 % of the run,
+  `%pcl-find-package` + `find-symbol` per class up @ISA, an `equal` visited list) = 27 % of the run,
   ~36 % of the loop -- PPI's Token -> Element chains are 2-4 deep; the lever is the per-CLASS method
-  cache #582 (designed, blocked on -write invalidation).  WEAK-TABLE LOCKS = ~13 %: box-set's
+  cache #582 (designed, blocked on @ISA-write invalidation).  WEAK-TABLE LOCKS = ~13 %: box-set's
   `remhash` on `*p-weak-boxes*` (8.7 %) runs on every general-path store once ANY `weaken` ran -- PPI
   weakens its parent links -- and every SBCL weak-table operation takes the global system lock; plus
   `gethash/weak` from `refaddr` and the isa walk (4.7 %) -> #4501.  Overload lookup per boolean test
