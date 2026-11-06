@@ -1,5 +1,5 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
-# s532b (2026-11-06, Opus) -- comp/require.t 1730/17 -> 1741/6 BY EDIT (scratch/s532b/comp-one.log, the file ALONE --jobs 1 --timeout 450, parallel = serial): the 11 rows #4162 + #4168 named; op/inccode.t 79/10 unchanged.
+# s532b (2026-11-06, Opus) -- comp/require.t 1730/17 -> 1741/6 BY EDIT (scratch/s532b/comp-one.log, the file ALONE --jobs 1 --timeout 450, parallel = serial): the 11 rows #4162 + #4168 named; op/require_errors.t 11/62 -> 12/61 (the --all --quick run, #4162's "Attempt to reload" row); op/inccode.t 79/10 unchanged.
 # s531d (2026-11-02, Opus, s532 resume) -- THIRTEEN rows spliced BY HAND from THE ROUND ATTRIBUTION of the MAIN-READY-63 companion (~/pcl-agent-scratch/s531/merge/companion-quick.log): each mover bisected with one-file runs over the 14 MAIN-READY merges d47caabe..b31345ca (worktree scratch/s531d/bislog, bisdiff.pl); main's counts for eleven, the s531d tree's for io/pipe.t (#4361 fixed, pipe1.log), op/decl-refs.t (#3551) and op/filetest.t (#3556).  The causes are in each row.
 # s527f (2026-10-31, Opus) -- class/accessor.t 0/0 -> 1/1, class/inherit.t 0/1 -> 1/3, class/phasers.t 0/0 -> 0/2, op/defer.t 4/8 -> 6/6 BY EDIT (scratch/s527f/final4.log, the four files ALONE --jobs 1, after --bless-rows of exactly these four): PCL's PPI builds `class NAME BLOCK` / `field` / `method` / `ADJUST` / `defer BLOCK` as statements of their own (docs/ppi-upstream-bugs.md §52 §53, #3746 #3747), so each is refused at its own site and the statement after it RUNS -- rows that were swallowed now run (the class rows fail under the registered reason; inherit's ':isa() version test can throw' and defer's two goto-within-defer rows now pass)
 
@@ -1990,7 +1990,7 @@ op/ref.t	257	0	210	32	DIFF	s524 round-4 companion (Fable, 2026-10-22, MAIN-READY
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
 op/require_37033.t	10	0	6	0	DIFF	s518d (#3203/#3371: the closed-STDIN row passes): 5/1 -> 6/0; aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
-op/require_errors.t	73	0	11	62	DIFF	s531a (Opus, 2026-11-01, one-file --jobs 1, comp3.log): 6/67 -> 11/62 = #1815 (@INC hooks)	0
+op/require_errors.t	73	0	12	61	DIFF	s532b (Opus, 2026-11-06, --all --quick comp-quick.log, parallel = serial; ce665621 base 11/62): row "check we failed for the right reason" (/Attempt to reload/, GH #17428) passes = #4162; was: s531a (Opus, 2026-11-01, one-file --jobs 1, comp3.log): 6/67 -> 11/62 = #1815 (@INC hooks)	0
 op/require_gh20577.t	9	0	8	1	DIFF	s531d round attribution: 4/5 -> 8/1 = s531a #1815 (MAIN-READY-63): the FatPacked @INC hook object loads Test1 / Test2	0
 op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	25	20	DIFF	s506f: 26/19 -> 25/20, "check $^W has been zeroed" passed on a LOST `$^W = 1` ($^W was a raw 0); #1925	0
