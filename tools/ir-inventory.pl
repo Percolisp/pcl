@@ -286,7 +286,7 @@ my %FAMILY;
   'typeglob' => [qw(p-typeglob p-typeglob-p make-p-typeglob p-typeglob-package
                     p-typeglob-name p-make-typeglob p-glob-assign
                     p-glob-assign-dynamic p-dynamic-typeglob p-glob-copy
-                    p-glob-slot p-glob-undef)],
+                    p-glob-slot p-glob-undef p-glob-defined)],
   'dynamic-scope' => [qw(p-local-glob p-local-glob-if p-local-glob-dynamic
                          p-local-dot p-defcell p-local-cell p-local-cell-if
                          p-local-maybe p-local-pipe p-local-hash-elem

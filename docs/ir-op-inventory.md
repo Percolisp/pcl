@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **767**
+* names exported: **768**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 767
+* with a machine-readable `Contract:` tail: **71** of 768
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -1133,7 +1133,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-time` | function | `nil` | — | — | — | — | — | — | — |
 | `p-times` | function | `(&key wantarray)` | — | — | — | — | — | — | — |
 
-## typeglob (12)
+## typeglob (13)
 
 *No ir-spec §10 row.*  typeglobs and glob assignment — ir-spec §7.1
 
@@ -1144,6 +1144,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-glob-assign` | function | `(pkg-str name-str rhs)` | — | — | — | — | — | — | — |
 | `p-glob-assign-dynamic` | function | `(name-box rhs)` | — | — | — | — | — | — | — |
 | `p-glob-copy` | function | `(dst-pkg dst-uname src-glob)` | — | — | — | — | — | — | — |
+| `p-glob-defined` | function | `(name-box)` | — | — | — | — | — | — | — |
 | `p-glob-slot` | function | `(glob slot)` | — | — | — | — | — | — | — |
 | `p-glob-undef` | function | `(pkg uname)` | — | — | — | — | — | — | — |
 | `p-make-typeglob` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
