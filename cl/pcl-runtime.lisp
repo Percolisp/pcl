@@ -19386,7 +19386,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    #4164, perlfunc open; doio.c skips isSPACE before and after the mode and
    strips it from the end): `open(FH, \" $f\")`, `\"< $f  \"` open $f.  The
    THREE-argument form keeps it -- that is why it exists -- and never comes
-   here."
+   here.
+   A second value T says the string is a PIPE with NO COMMAND (`\"|    \"`,
+   `\"     |\"`, task #4502): perl's open fails with EPIPE there before it
+   forks (doio.c's \"Missing command in piped open\").  The bare fork-opens
+   `\"|-\"` / `\"-|\"` are not that -- their command is perl's `-`."
   (let* ((s   (string-trim +p-open-2arg-blanks+ (to-string expr)))
          (dup (%p-open-dup-mode-prefix s)))
     (cond
@@ -19413,10 +19417,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Classic 2-arg command pipes: "| cmd" writes to cmd's stdin,
       ;; "cmd |" reads cmd's stdout (#70).
       ((and (>= (length s) 1) (char= (char s 0) #\|))
-       (cons "|-" (string-left-trim +p-open-2arg-blanks+ (subseq s 1))))
+       (let ((cmd (string-left-trim +p-open-2arg-blanks+ (subseq s 1))))
+         (values (cons "|-" cmd) (zerop (length cmd)))))
       ((and (>= (length s) 1)
             (char= (char s (1- (length s))) #\|))
-       (cons "-|" (string-right-trim +p-open-2arg-blanks+ (subseq s 0 (1- (length s))))))
+       (let ((cmd (string-right-trim +p-open-2arg-blanks+ (subseq s 0 (1- (length s))))))
+         (values (cons "-|" cmd) (zerop (length cmd)))))
       ((and (>= (length s) 1) (char= (char s 0) #\>))
        (cons ">" (string-left-trim +p-open-2arg-blanks+ (subseq s 1))))
       ((and (>= (length s) 1) (char= (char s 0) #\<))
@@ -21208,7 +21214,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (handler-case (apply #'open path open-args)
     (file-error () (%pcl-save-errno) nil)))
 
-(defun %p-open-impl (fh mode filename &optional three-arg-p more-args)
+(defun %p-open-impl (fh mode filename &optional three-arg-p more-args no-command-p)
   "Implementation of Perl open.  THREE-ARG-P says the program wrote the mode and
    the target as SEPARATE arguments; it is the only thing that distinguishes
    perl's bare fork-open `open(F,\"-|\")` — two arguments, no command, both
@@ -21222,7 +21228,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    a metacharacter in an argument survives literally (probed 5.40.3:
    `'a;echo BOOM'` arrives as that string).  Every other mode takes exactly one
    target and perl is FATAL about a second (`More than one argument to
-   open(,':perlio')`), so this says so rather than picking one (rule 12)."
+   open(,':perlio')`), so this says so rather than picking one (rule 12).
+
+   NO-COMMAND-P is the 2-argument pipe string with no command (`\"|    \"`,
+   %p-open-parse-2arg's second value): EPIPE, no fork, as the empty command of
+   the 3-argument form (task #4502)."
   (let ((r (%p-fh-tie fh)))
     ;; open on a tied handle is OPEN(MODE, LIST); a 2-argument open passes
     ;; its one string.
@@ -21335,7 +21345,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                                 (mapcar #'to-string more-args)))))
                ;; An empty command in the THREE-argument form is perl's error,
                ;; not the bare fork (see this function's docstring, task #535).
-               (when (and three-arg-p (null cmd))
+               ;; So is the 2-arg pipe string with no command, `"|    "` (#4502):
+               ;; the bare fork there made the child run the program on.
+               (when (or no-command-p (and three-arg-p (null cmd)))
                  (setf *p-stored-errno* 32)   ; EPIPE, which is what perl sets
                  (return-from %p-open-impl nil))
                (return-from %p-open-impl
@@ -21402,8 +21414,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       `(multiple-value-bind (%file %more)
            (%p-open-spread-args ,filename (list ,@more))
          (%p-open-impl (%p-fh-install-arg ,fh) ,mode %file t %more))
-      `(let ((%parsed (%p-open-parse-2arg ,mode)))
-         (%p-open-impl (%p-fh-install-arg ,fh) (car %parsed) (cdr %parsed)))))
+      `(multiple-value-bind (%parsed %no-command) (%p-open-parse-2arg ,mode)
+         (%p-open-impl (%p-fh-install-arg ,fh) (car %parsed) (cdr %parsed)
+                       nil nil %no-command))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; sysopen (task #730)

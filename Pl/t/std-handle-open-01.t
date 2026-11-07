@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -197,3 +197,24 @@ show("stdout", fileno(STDOUT));
 print "\n";
 PL
    'fileno is -1 only for an OPEN in-memory handle; a closed one is undef, and a glob answers like its name');
+
+# ── 8. task #4502 — a TWO-argument pipe string with NO COMMAND is an error ──
+# `"|    "` and `"     |"` are perl's "Missing command in piped open": undef,
+# $! = EPIPE (32), checked BEFORE the fork.  PCL read them as the bare
+# fork-open `"|-"` / `"-|"`, and the child went on running the program (each
+# line below printed once per surviving process -- io/pipe.t's 10 *extra*
+# rows).  The bare `"-|"` is the control: it still forks, and the parent reads
+# what the child printed.  Probed 5.40.3, s532c.
+is(run_cl(<<'PL'), "w:undef:32\nr:undef:32\nbare:child-out\none-process\n",
+$| = 1;
+{ local *P; $! = 0; my $r = open(P, "|    ");
+  print "w:", (defined $r ? $r : "undef"), ":", $! + 0, "\n"; }
+{ local *P; $! = 0; my $r = open(P, "     |");
+  print "r:", (defined $r ? $r : "undef"), ":", $! + 0, "\n"; }
+{ local *P; my $pid = open(P, "-|");
+  if (!defined $pid) { print "fork failed\n" }
+  elsif ($pid == 0)  { print "child-out\n"; exit 0 }
+  else { my $l = <P>; close P; print "bare:$l" } }
+print "one-process\n";
+PL
+   'open(P,"|    ") / open(P,"     |") fail with EPIPE and do not fork; the bare "-|" still forks');
