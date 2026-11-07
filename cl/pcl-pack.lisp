@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-11400
+;;; pcl: pipeline=v2 gen=v2-11700
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -2907,8 +2907,7 @@
           (($tmpl :box (make-p-box nil))
             (@args :array (make-array 0 :adjustable t :fill-pointer 0)))
           (p-scalar-ctx (p-list-= (vector $tmpl @args) @_))
-          ;; local $pcl_pack_comma_warned = 0
-(p-local-cell $pcl_pack_comma_warned (p-box-for-local 0)
+          (p-local-cell $pcl_pack_comma_warned (p-box-for-local 0)
             (pl-_pack_check_brackets $tmpl)
             (p-let (($result :box (make-p-box nil)))
               (p-my-= $result "")
