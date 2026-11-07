@@ -699,6 +699,14 @@ PLACE-box))` with the same `-box` twin `\$h{k}` uses; a non-atom key keeps the
 reference to the value (it would be evaluated twice).  Example: `my $v =
 \($h{a} = "x"); $$v .= "y"` leaves `$h{a}` = `xy`.
 
+**An assignment to an ELEMENT is that element's LVALUE** (normative, s532c,
+task #4303): as the target of `=~ s///` / `tr///` and of a compound
+assignment (`OP=`), `($h{k} = V)` / `($a[i] = V)` -- parenthesised or not,
+any assignment operator -- is generated in lvalue context, so its place is
+the element's BOX and the edit lands in the element, as `chomp($h{k} = <FH>)`
+already did.  Example: `($h{a} = "x") .= "y"` leaves `$h{a}` = `xy`, and
+`($b->{$1} = $2) =~ s/^ +//` strips the stored value (YAML::Tiny's TestML).
+
 `(p-backslash X)` — Perl `\X` — returns a **box with `is-ref` = t** whose
 `value` is:
 - for a scalar: the scalar's *box* (so writes through `$$r` hit the
@@ -1262,7 +1270,7 @@ forced promotion of an oversized extent (F6) takes the same test.
 | `my $x = INIT;` (raw slot, §2.2) | `(let (($x INIT)) …rest…)` |
 | `my $i = $i + 1;` (self-ref init) | `(let (($i (p-box-init $i))) …)` — CL `let` inits evaluate in the *outer* environment, matching Perl's "RHS sees the outer variable" rule |
 | `my @a; my %h;` | `let` binding to a fresh vector / hash table |
-| an expression-embedded `my` (`open(my $fh, …)`, `f(my $t)`) — in a plain statement OR in a declaration's initializer (`my $l = X->n(my $t)`, #3431) | `(p-let (($t :box (make-p-box nil))) <the statement> …rest…)` — let-bound around the statement and the block remainder, so it is FRESH each time the block runs (each loop iteration).  A name the declaration mentions a second time keeps the older path (#3490) |
+| an expression-embedded `my` (`open(my $fh, …)`, `f(my $t)`) — in a plain statement OR in a declaration's initializer (`my $l = X->n(my $t)`, #3431) OR in the modifier condition of a `return` / `next` / `last` (`return X if (my $t = f())->[0] eq 'r'`, #4304 -- before it the name was ONE package global shared by every sub that spelled it) | `(p-let (($t :box (make-p-box nil))) <the statement> …rest…)` — let-bound around the statement and the block remainder, so it is FRESH each time the block runs (each loop iteration).  A name the declaration mentions a second time keeps the older path (#3490) |
 | `our $g = V;` | `(p-defcell $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place (`defvar` instead for an exception-set name). `our` shadowing a `my` gates to v1 |
 | `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(p-defcell $n__state__K (make-p-box nil))` + raw once-flag `(p-defcell $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
 | undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
@@ -2353,6 +2361,12 @@ mentioned at all, the answer is perl's, in perl's order:
    with a body, **no `@ISA` walk** (inheritance is the METHOD rule, §7) —
    call it, with `$AUTOLOAD` set to the fully-qualified name and the original
    arguments;
+   the `$AUTOLOAD` written is the one in the package the AUTOLOAD sub was
+   DEFINED in (its own glob's package; an anonymous sub's compile package),
+   not the package whose glob it was found in -- the method rule (§7) and
+   `SUPER::` write the same variable (s532c, task #1486: a `sub { ...
+   $AUTOLOAD ... }` compiled in Template::Plugin::Procedural and assigned to
+   `*{"${proxy}::AUTOLOAD"}` reads Procedural's `our $AUTOLOAD`);
 2. otherwise die `Undefined subroutine &Pkg::name called` (trappable by
    `eval {}` like any other die; the message carries no location of its own —
    the emitted call has none — so a CAUGHT one reads `… called at (eval 0) line
@@ -2620,6 +2634,18 @@ coderef *mention* rather than a call — `\`, `defined`, `exists`, `undef`,
 `goto` — lower it themselves (`(p-backslash (p-get-coderef EXPR))`,
 `(p-coderef-defined-p EXPR)`, …), so `(p-get-coderef EXPR)` in emitted
 code always means "the coderef itself", never a suppressed call.
+
+**`defined *{EXPR}` / `defined *$x` asks whether the glob EXISTS** (normative,
+s532c, task #4301): `(p-glob-defined EXPR)` creates nothing (perl's rv2gv
+under `defined` does not vivify the glob, nor its package).  A glob value, a
+glob reference or an open handle is defined; a NAME is defined when its
+package's stash holds the entry (the per-symbol rule of `p-stash`: a sub with
+a body, a variable, a handle), or when it is one perl's `main::` holds from
+the outset (a decimal number, punctuation other than `# * { }`, most control
+characters, the caret words, `SIG ENV INC ARGV STDIN STDOUT STDERR`; `ISA` in
+any existing package).  Example: `defined *{"Nope::new"}` is false and leaves
+no `Nope::` package behind -- Template::Plugin::Procedural installs its proxy
+`new` only `unless defined *{"${proxy}::new"}`.
 
 **Copy-in / copy-out for an UNSEEN callee (normative, s517b, task #2636).**
 A raw-slot `my` scalar (VarAnnotator's `unboxable` verdict) handed as a
@@ -4259,6 +4285,13 @@ metacharacter in an argument survives literally, exactly as `exec LIST` with
 more than one element does.  Every OTHER mode takes exactly one target and a
 second one is perl's FATAL `More than one argument to open`.
 
+**A pipe open with NO COMMAND fails before it forks** (normative, s532c, task
+#4502): `open(P, "|    ")`, `open(P, "     |")` (two arguments, the command
+empty once the white space is dropped) and `open(P, "-|", "")` answer undef
+with `$!` = EPIPE and create no process, as perl's "Missing command in piped
+open".  Only the exact two-argument spellings `"|-"` / `"-|"` are the bare
+fork-open.  Example: `open(P, "|    ") or print $!+0` prints 32, once.
+
 ### 7.5a What a handle IS, and where it LIVES (normative, s473f)
 
 **A scalar that holds a filehandle holds a GLOB REF.**  In the emitted CL that
@@ -4349,6 +4382,13 @@ program's children follow it — `open(*STDOUT,'>',$f); system("echo x")` puts
 typeglob, a ref to one, a glob in a scalar, and a name string.  A qualifier
 other than `main::` does **not**: `Foo::STDOUT` is that package's own glob and
 descriptor 1 is untouched.
+
+**A glob designator names its OWN package's handle** (normative, s532c, task
+#1423 read half): `\*DATA`, `*FH` and a glob in a scalar resolve to the handle
+of the package the glob names before any other; a module's `__END__` section
+(PCL gives each package its own `DATA`) never answers for `\*DATA` in `main`.
+Example: a program that loads a module with an `__END__` section and calls
+`test_expect(\*DATA)` reads its OWN data section (Template-Toolkit t/filter.t).
 
 **A filehandle is an object of the handle class with no `use`.**
 `STDOUT->autoflush(1)`, `$fh->print(…)`, `$fh->getline`, `$fh->close` all work
