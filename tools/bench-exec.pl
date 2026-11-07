@@ -133,6 +133,26 @@ my @benches = (
   # against subret is the point: it says how much of a dispatch-heavy program
   # the return protocol can be.
   ['methret',   "$HN package C; sub new { bless { v => \$_[1] }, \$_[0] } sub bump { my \$self = shift; return \$self->{v} + 1 } package main; my \$o = C->new(1); my \$s=0; for my \$i (1..\$n) { \$s += \$o->bump } print \"\$s\\n\";", 1_000_000, 0],
+  # ---- THE INHERITED-DISPATCH ROWS (s534a, task #582) ----------------------
+  # methret's method is defined in the object's OWN class, which is the one
+  # shape the own-class method cache (s473s) answers -- so until these rows
+  # the table had no inherited call at all, and "method calls are about par
+  # with perl" was true of exactly one shape.  Same callee, same loop as
+  # methret; only WHERE the method lives changes:
+  #   methinh   the method one @ISA level up (B isa A);
+  #   methinh3  three levels up (D isa C isa B isa A) -- PPI's Token ->
+  #             Element chains are 2-4 deep;
+  #   methpoly  ONE call site over objects of four sibling classes that all
+  #             inherit the method -- PPI's shape, where one `->` sees many
+  #             classes;
+  #   ovlbool   a boolean test of an object whose `bool` overload is two
+  #             levels up (PPI::Token::Word isa PPI::Token isa PPI::Element,
+  #             which overloads bool).
+  # docs/method-lookup-eval-s534.md has what each costs and why.
+  ['methinh',   "$HN package A; sub new { bless { v => \$_[1] }, \$_[0] } sub bump { my \$self = shift; return \$self->{v} + 1 } package B; our \@ISA = ('A'); package main; my \$o = B->new(1); my \$s=0; for my \$i (1..\$n) { \$s += \$o->bump } print \"\$s\\n\";", 1_000_000, 0],
+  ['methinh3',  "$HN package A; sub new { bless { v => \$_[1] }, \$_[0] } sub bump { my \$self = shift; return \$self->{v} + 1 } package B; our \@ISA = ('A'); package C; our \@ISA = ('B'); package D; our \@ISA = ('C'); package main; my \$o = D->new(1); my \$s=0; for my \$i (1..\$n) { \$s += \$o->bump } print \"\$s\\n\";", 1_000_000, 0],
+  ['methpoly',  "$HN package A; sub new { bless { v => \$_[1] }, \$_[0] } sub bump { my \$self = shift; return \$self->{v} + 1 } package P1; our \@ISA = ('A'); package P2; our \@ISA = ('A'); package P3; our \@ISA = ('A'); package P4; our \@ISA = ('A'); package main; my \@o = (P1->new(1), P2->new(2), P3->new(3), P4->new(4)); my \$s=0; for my \$i (1..\$n) { \$s += \$o[\$i % 4]->bump } print \"\$s\\n\";", 1_000_000, 0],
+  ['ovlbool',   "$HN package A; use overload 'bool' => sub { 1 }, fallback => 1; sub new { bless { v => \$_[1] }, \$_[0] } package B; our \@ISA = ('A'); package C; our \@ISA = ('B'); package main; my \$o = C->new(1); my \$s=0; for my \$i (1..\$n) { \$s++ if \$o } print \"\$s\\n\";", 1_000_000, 0],
   ['collatz',   "$HN my \$c=0; for my \$i (1..\$n) { my \$m=\$i; while (\$m>1) { \$m = \$m%2 ? 3*\$m+1 : \$m/2; \$c++ } } print \"\$c\\n\";", 300_000, 0],
   # N_big was 100_000 until s461aq (#881): 100k appends is ~0.003 s of perl and
   # ~0.005 s of PCL, both far under the run-to-run spread of the ~1 s constant
