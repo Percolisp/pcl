@@ -3,6 +3,7 @@
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
 # files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
 # "12 not ok" for months with nothing naming it.
+# s532c (2026-11-08, Opus) -- io/pipe.t BY EDIT (one-file run scratch/s532c/acc-pipe.log, the file ALONE, parallel = serial): #4502 (a 2-arg pipe string with no command forked a child that ran the rest of the program) -- the six `*extra*` rows and rows 22 23 'missing command in piped open input' / 'output' OUT; row 25 'child reaped ...' IN under NEW #4307 (its pass had come from a runaway child).
 # s531d (2026-11-02, Opus, s532 resume) -- THE ROUND ATTRIBUTION of the MAIN-READY-63 companion (s531/merge/companion-quick.log): every mover bisected over the 14 MAIN-READY merges d47caabe..b31345ca with one-file runs (scratch/s531d/bislog, bisdiff.pl); ROWS LEFT: io/pipe 25 (s529a #3868), op/attrs 127 (s530c #3859, `&::is(@proto, ...)`), op/coreamp 16 (s530c #3859: 54 genuinely, 15 newly reached), op/decl-refs 7 (s527c, eight rows reached, 214 fails) + 174 (s531d #3551), op/each 35 36 38 + uni/sprintf 21-23 (s531a #3650 pack U0), op/require_gh20577 4 (s531a #1815), op/symbolcache 2 (s531a #3831), op/tr_latin1 2 (s527b), re/reg_namedcapture 1 (s527e), op/filetest '-l \*foo' (s531d #3556); ROWS ADDED: comp/filter_exception 1 3 (NS:ns-invalid-perl, exposed by #1815), comp/parser 45 (#4222), op/coreamp 16 (#4362); io/pipe 24 'status unaffected by implicit close' NOT added: s531d fixed #4361 (one-file run scratch/s531d/pipe1.log 23/10); filter_exception 2 4 re-keyed from the duplicate #1687.
 # s531a (2026-11-01, Opus) -- the nine files of scratch/s531a/comp2.log (one-file, --jobs 1 --timeout 450) RE-MEASURED with --bless-fails FOR THOSE FILES ONLY: 539 rows LEFT (comp/require.t 490 #1688, op/inccode.t 40 #1815, op/require_errors.t 5 #1815, op/length.t 2 #3650, io/socket.t + io/socketpair.t *summary* #1705); the 19 NEW rows and the 10 comp/require.t rows still carrying the file's blanket #1688 cause given their own (scratch/s531a/fillcause.pl).
 # s530a (2026-10-31, Opus) -- op/for.t rows 111-112 "NULL GvSV" REMOVED BY EDIT: fixed by #3963 (scratch/s530a/comp.log, FIXED ROW both, parallel = serial).
@@ -1609,20 +1610,13 @@ io/perlio_leaks.t	5	not ok	ok	:stdio # TODO [perl #56644] PerlIO resource leaks 
 io/perlio_leaks.t	6	not ok	ok	:stdio # TODO [perl #56644] PerlIO resource leaks on open() and then :pop in :unix and :stdio	#2006 -- perl itself FAILS these four as `# TODO [perl #56644]`; PCL passes them since s494h (#2006(b): the loop's `open my $fh` is closed at each iteration's exit, so the descriptor is reused).  A divergence in PCL's favour, not a failure
 io/perlio_leaks.t	2	not ok	ok	:unix # TODO [perl #56644] PerlIO resource leaks on open() and then :pop in :unix and :stdio	#2006 -- perl itself FAILS these four as `# TODO [perl #56644]`; PCL passes them since s494h (#2006(b): the loop's `open my $fh` is closed at each iteration's exit, so the descriptor is reused).  A divergence in PCL's favour, not a failure
 io/perlio_leaks.t	3	not ok	ok	:unix # TODO [perl #56644] PerlIO resource leaks on open() and then :pop in :unix and :stdio	#2006 -- perl itself FAILS these four as `# TODO [perl #56644]`; PCL passes them since s494h (#2006(b): the loop's `open my $fh` is closed at each iteration's exit, so the descriptor is reused).  A divergence in PCL's favour, not a failure
-io/pipe.t	0	(none)	extra [PCL #27]	*extra* but we did get the exception from die	#1710
-io/pipe.t	0	(none)	extra [PCL #25]	*extra* child reaped if piped program cannot be executed	#1710
-io/pipe.t	0	(none)	extra [PCL #22]	*extra* missing command in piped open input	#1710
-io/pipe.t	0	(none)	extra [PCL #26]	*extra* no exception from PerlIO	#1710
-io/pipe.t	0	(none)	extra [PCL #23]	*extra* output	#1710
-io/pipe.t	0	(none)	extra [PCL #24]	*extra* status unaffected by implicit close	#1710
 io/pipe.t	0	(none)	renumbered	*summary*	#1710
 io/pipe.t	27	ok	not ok	but we did get the exception from die	#1710
 io/pipe.t	14	ok	not ok	errno	#1710
 io/pipe.t	18	ok	not ok	errno	#1710
 io/pipe.t	21	ok	not ok	errno	#1710
-io/pipe.t	22	ok	not ok	missing command in piped open input	#1710
-io/pipe.t	23	ok	not ok	output	#1710
 io/pipe.t	17	ok	not ok	status	#1710
+io/pipe.t	25	ok	not ok	child reaped if piped program cannot be executed	#4307 (a pipe close interrupted by SIGALRM with a returning handler -- row 17's 'status' block -- leaves its child unreaped, and this row's `wait` reaps it; measured for the first time in the main process since #4502: the row's former pass came from a runaway child copy)
 io/print.t	23	ok	not ok	printf with %n (got a5c)	#1710
 io/pvbm.t	7	ok	not ok	pipe(, PVBM ref) fails	#1710
 io/pvbm.t	6	ok	not ok	pipe(PVBM ref, ) fails	#1710

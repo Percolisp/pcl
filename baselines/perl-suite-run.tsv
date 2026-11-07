@@ -1750,7 +1750,7 @@ io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT 
 io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
 io/perlio_leaks.t	8	4	12	0	DIFF	s494h #2006(b) scope-exit close: the fd is reused	0
 io/perlio_open.t	10	0	10	0	OK		0
-io/pipe.t	27	0	23	10	DIFF	s531d (2026-11-02): 22/11 -> 23/10 -- row 25 "child reaped if piped program cannot be executed" passes since s529a #3868 (MAIN-READY-53 44d39de3: the local *NIL scope end closes the handle and reaps); row 24 "status unaffected by implicit close", broken by the same merge (#4361), fixed by s531d #4361 (scratch/s531d/pipe1.log, one-file)	0
+io/pipe.t	27	0	21	6	DIFF	s532c (2026-11-08): 23/10 -> 21/6 -- #4502: `open(P, "|    ")` / `open(P, "     |")` forked a child that ran the rest of the file, so rows 22-27 appeared three times (10 `*extra*` rows on ce665621 / 95a1de03; the 23/10 face already counted 6 of them); now no fork, EPIPE: 27 rows, rows 22 23 pass, row 25 'child reaped' fails honestly under #4307 (its pass came from a runaway copy); scratch/s532c/acc-pipe.log, one-file, parallel = serial
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	26	2	DIFF	s504 #2389: 23/5 -> 26/2 UP at 2284d58d (s501b, exec/fd work): close/stat/lstat(PVBM) fail as perl's do (#1710 rows).  26/2 on every run since (the file read 20/8..26/2 under load in earlier sessions)	0
 io/read.t	2	0	2	0	OK		0
