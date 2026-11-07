@@ -798,6 +798,10 @@
 #         the ONE statement drops -- announced, a run-time die if reached -- and
 #         the file's other rows run.  Measured: ./pl2cl < t/op/for.t, one
 #         `;; PARSE ERROR:` progn.  The row leaves with #1580's lowering.
+#   s535 (2026-11-08, the round attribution, edited not re-blessed): t/op/write.t 1 -> 0 --
+#     the `Handle single node of unknown type` drop is gone since s532e (MAIN-READY-69, 59317afd:
+#     PPI group AU §40 #3745, `PPI::Token::Format` holds a format body and the stripper is deleted);
+#     one-file runs 0f2db817 (1) vs 59317afd (0), ~/pcl-agent-scratch/s535/bisect/.
 #   s531d (2026-11-02, the round attribution, edited not re-blessed): t/comp/parser.t 5 -> 4 --
 #     `sub 'Hello'_he_said (_);` (line 456) lowers since s527d (MAIN-READY-54, b14bd795:
 #     PPI group AC §46); bisected with one-file runs (s531d scratch/s531d/bislog).
@@ -822,4 +826,3 @@ t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x
 t/op/sub_lval.t	33	PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
-t/op/write.t	1	Handle single node of unknown type. Dump: x1
