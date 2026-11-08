@@ -7552,22 +7552,11 @@ sub _repair_glob_pattern_cascade_pass {
 # which is a documented no-op and makes PPI lex the word as a word.  PCL
 # already emits `+x()` as a plain call, so the fix costs no emission shape.
 #
-# SECOND POSITION, same bug (s456ag, §19's addendum): a bare `x` that STARTS a
-# statement, which is how a sub named `x` is called with neither parens nor
-# arguments.  PPI reads it as the operator whenever the previous token is a
-# sub definition's closing `}` — `sub x { 1 } x` and `my sub x { 1 } x` both —
-# and t/op/lexsub.t writes exactly that twice (`{ my sub x {…} x }`, and the
-# `state sub` twin), so each was a dropped statement.  There is no operator
-# reading available at all in that position: `x` is INFIX, so a statement
-# cannot begin with it.
-#
-# THE DISCRIMINATOR IS PPI'S OWN TREE, not the token before: the `x` must be
-# the first significant child of its Statement.  That is what keeps the
-# genuine operator out — in `do { "a" } x 3` and `map { … } x 3` the `x` sits
-# in the MIDDLE of its statement, and those are the shapes a "previous token
-# does not end a term" test would have broken (a `do`/`map` block's `}` does
-# not end a term by `_ends_term`'s rule, which is right for its other callers
-# and wrong here).
+# (A SECOND arm repaired the `x` that STARTS a statement after a sub
+# definition's `}` -- `sub x { 1 } x`, §19b.  PCL's PPI lexes that `x` as a
+# Word since s536j (group AW, §63: after the `}` of a block that ends a
+# statement perl does not expect an operator), and the arm, instrumented to
+# die, never fired over the wide A/B population and the gate: DELETED.)
 sub _repair_word_x_call {
   my ($self, $doc) = @_;
   my @tok = grep { $_->significant } $doc->tokens;
@@ -7575,14 +7564,7 @@ sub _repair_word_x_call {
   for my $i (1 .. $#tok) {
     my ($prev, $t) = @tok[$i - 1, $i];
     next unless $t->isa('PPI::Token::Operator') && $t->content eq 'x';
-    if (!$prev->isa('PPI::Token::Word')) {
-      next unless _starts_statement($t);
-      next unless $self->_document_declares_sub('x', $doc);
-      die "PCL-INSTRUMENT s536j: the 19b arm of _repair_word_x_call fired at line " . ($t->line_number // '?') . "\n";
-      $t->set_content('+x');
-      $repaired = 1;
-      next;
-    }
+    next unless $prev->isa('PPI::Token::Word');
     # A METHOD NAME is a term (`$o->name x 3` repeats the method's value; it
     # was mis-repaired into `$o->name + x(3)` — s407 review, a regression of
     # this repair), and the repair only makes sense at all when this document
@@ -7787,19 +7769,6 @@ sub _ends_term {
   return _ends_term(_prev_sig_token($t))
     if $t->isa('PPI::Token::Operator') && ($t->content eq '++' || $t->content eq '--');
   return 0;
-}
-
-# True when T is the FIRST significant token of its own statement — i.e. a
-# position where perl expects a TERM and no infix operator can stand.  PPI's
-# own tree answers it, which is why it can tell `my sub x {…} x` (a call) from
-# `do { … } x 3` (the repetition operator) where a token-shape test cannot:
-# `_ends_term` answers 0 for BOTH braces, correctly for its other callers.
-sub _starts_statement {
-  my ($t) = @_;
-  my $p = $t->parent;
-  return 0 unless $p && $p->isa('PPI::Statement');
-  my $first = $p->schild(0);
-  return ($first && $first == $t) ? 1 : 0;
 }
 
 # The previous significant token in DOCUMENT order — the raw stream twin of
