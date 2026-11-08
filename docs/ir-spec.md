@@ -5029,6 +5029,15 @@ perl reads the strerror text.  One state, two doors: the box and the accessor
 read the same place and cannot disagree.  The same rule gives `${"!"}` and
 `\$!`-through-an-alias their values.
 
+**A GLOB'S SCALAR SLOT ALWAYS EXISTS** (normative, s536g / task #4604).
+`*x{SCALAR}` is a reference to the package scalar of that glob, which the
+read CREATES (undef) when nothing used it -- gv_fetchpv's GV_ADD makes the SV
+slot of every glob -- for a name nothing mentioned, a `Symbol::gensym` glob
+and a lexical handle's glob alike; `*x{ARRAY}` / `*x{HASH}` / `*x{CODE}`
+answer undef until used, as in perl.  Example: `ref(*main::never{SCALAR})`
+is `SCALAR`, and `${ *{gensym()}{SCALAR} }` is undef rather than a dereference
+of undef (YAML::PP's represent_glob reads every slot that way).
+
 *Boundary (accepted, probed):* perl's `*! = *src` REPLACES the glob, so
 afterwards `$!` is `src`'s plain scalar and the magic is gone; PCL's plain
 `$!` keeps computing, because its emission never reads the slot.
@@ -6083,6 +6092,29 @@ keyword keeps the builtin even with a user sub of its name (`sub length {…};
 length($x)`), unless a `use subs` / import / `CORE::GLOBAL::` override
 displaces it (#732).  A host adding an operator therefore adds no hazard: the
 rule is keyed on the perl side of the name, not on the runtime's symbol list.
+
+A FEATURE-GATED keyword -- a keyword whose name is a feature of feature.pm:
+`say` `fc` `isa` `evalbytes` (measured, `Pl::PExpr::Config::keyword_feature`)
+-- is a keyword only where its feature is in force (s536g, task #4603):
+where a `use feature` / `use VERSION` region turns it on it is the builtin;
+where `no feature` turned it off it is an ordinary identifier, the sub call
+declared or not (`no feature 'fc'; fc("x")` dies "Undefined subroutine
+&main::fc" as in perl); where the file's own pragmas say nothing the builtin
+stands unless a sub of that name is known (declared in the package, or
+imported) -- an import or a BEGIN-time `feature->import` the compiler cannot
+read may have enabled it.  `CORE::NAME` is the builtin always.  The one
+answer is `Pl::Parser::gated_keyword_at`, read by the call-site naming and by
+the parse's implicit-`$_` operand.  Example: `sub say { "U(@_)" } say("x")`
+is `(pl-say "x")`; under `use feature 'say'` it is `(p-say "x")`.
+
+`-NAME` where NAME is callable at the site -- a sub declared ABOVE it, an
+imported or prototyped name, a builtin, or any NAME followed by `(` -- is the
+NEGATION OF A CALL of NAME, and its arguments and prototype are NAME's own
+(s536g, tasks #4222 #4602; perl's lexer reads `-` and the identifier as two
+tokens, PPI hands one Word, `PExpr::_split_negated_call_words` restores the
+two).  Anywhere else it is the bareword string `"-NAME"`, and a fat comma
+after it always quotes it.  Example: with `sub U ($) {...}`, `(-U 3, 2)` is the
+two elements `(p-- (p-scalar-ctx (pl-U 3)))` and `2`; `-K` above `sub K` is `"-K"`.
 
 ### 10-db. The system-database builtins answer in perl's two SHAPES (normative, s495f, task #2093)
 
