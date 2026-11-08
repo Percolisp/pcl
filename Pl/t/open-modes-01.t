@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 10;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -245,4 +245,51 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'a 2-arg open drops the white space around its mode and name (#4164)');
+}
+
+# #4263 + #4262 (s536h): the magic name "-" of the TWO-argument open is a NEW
+# handle on STDIN's / STDOUT's stream (doio.c IoTYPE_STD) -- closing it is true,
+# leaves $! alone and leaves STDOUT open (PCL closed the program's STDOUT, so
+# every later print was LOST); the THREE-argument form opens a FILE named "-".
+# An EMPTY name fails ENOENT in every mode (PCL's read opened the current
+# directory).
+{
+    my $code = <<'PERL';
+my $d = "/tmp/pcl-opendash-$$"; mkdir $d; chdir $d or die "cd: $!";
+open(O, ">-") or die "o: $!"; print O "1 via dash\n"; $! = 2; my $r = close O;
+print "2 after close r=$r err=", 0+$!, "\n";
+my $r2 = close O; print "3 second close=[$r2] err=", 0+$!, "\n";
+open(my $a, ">>-") or die; print "4 fileno=", fileno($a), "\n"; close $a;
+open(my $i, "-") or die; print "5 in fileno=", fileno($i), "\n"; close $i;
+open(my $j, "+<-") or die; print "6 rw fileno=", fileno($j), "\n"; close $j;
+open(my $f3, ">", "-") or die "f3: $!"; print $f3 "file\n"; close $f3;
+print "7 file named dash: ", (-s "-"), "\n";
+open(my $g3, "<", "-") or die "g3: $!"; print "8 read back: ", scalar(<$g3>); close $g3;
+unlink "-"; chdir "/"; rmdir $d;
+print "9 stdout still open\n";
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file" < /dev/null`;
+    is(run_cl($code), $want,
+       'close of a 2-arg "-" handle leaves STDOUT open; the 3-arg "-" is a file (#4263)');
+}
+{
+    my $code = <<'PERL';
+my $d = "/tmp/pcl-openempty-$$"; mkdir $d; chdir $d or die "cd: $!";
+my @t = (sub { open(B, "") }, sub { open(C, "<") }, sub { open(D, ">") },
+         sub { open(E, "   ") }, sub { open(F, ">>") }, sub { open(G, "+<") },
+         sub { open(H, "<", "") }, sub { open(I, ">", "") }, sub { open(J, ">>", "") },
+         sub { open(K, "+<", "") }, sub { open(L, "+>", "") }, sub { open(my $n, "<", "") });
+for my $k (0 .. $#t) { $! = 0; my $r = $t[$k]->(); print "$k ", ($r ? "opened" : "failed " . (0+$!)), "\n"; }
+opendir(my $dh, ".") or die; my @e = grep { !/^\./ } readdir $dh; print "files: [@e]\n";
+chdir "/"; rmdir $d;
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'an empty file name fails ENOENT in every open mode (#4262)');
 }

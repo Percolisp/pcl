@@ -19981,7 +19981,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           do (setf s (symbol-value (synonym-stream-symbol s))))
     s))
 
-(defun %p-fdopen-alias (src)
+(defun %p-fdopen-alias (src &optional std)
   "A NEW stream object over stream SRC, for an fdopen (`>&=FH`) or an fd-less
    dup of an existing handle (task #3185).  perl gives such an open its OWN IO
    that shares the descriptor: a tie on one handle is not a tie on the other
@@ -19992,10 +19992,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    closed STDOUT.  A synonym stream is the cheapest distinct object that
    forwards every operation to SRC's own buffer (one buffer, so program order
    holds); %p-stream-target peels it for every fd question, and
-   %p-close-maybe-pipe closes the alias alone."
+   %p-close-maybe-pipe closes the alias alone.
+
+   STD marks the handle a TWO-argument open of the magic name `-` makes
+   (`open(F, \">-\")`, `\"<-\"`, `\"-\"`, task #4263): perl hands it STDOUT's /
+   STDIN's own PerlIO with IoTYPE_STD, and io_close of an IoTYPE_STD handle
+   only detaches it -- true, no flush, `$!' untouched (doio.c).  PCL's close of
+   that handle closed the program's STDOUT, so every later print was lost."
   (let ((sym (make-symbol "FDOPEN-ALIAS")))
     (setf (symbol-value sym) src
-          (get sym '%p-fdopen-alias) t)
+          (get sym '%p-fdopen-alias) (if std :std t))
     (make-synonym-stream sym)))
 
 (defun %p-fdopen-alias-p (v)
@@ -21197,9 +21203,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; lands HERE for a write the OS refused several statements ago — which is
     ;; how a close used to abort the whole program (task #590).  :abort t on the
     ;; retry discards the unwritable buffer so the descriptor still goes.
-    ;; An fdopen alias closes ITSELF: the source handle keeps the stream.
+    ;; An fdopen alias closes ITSELF: the source handle keeps the stream.  A
+    ;; `-' handle (STD) is not even flushed -- perl's IoTYPE_STD close only
+    ;; detaches it (task #4263); a synonym stream's close leaves its target's
+    ;; buffer alone.
     (when (%p-fdopen-alias-p v)
-      (ignore-errors (finish-output v))
+      (unless (eq (%p-fdopen-alias-p v) :std)
+        (ignore-errors (finish-output v)))
       (close v)
       (return-from %p-close-maybe-pipe t))
     (handler-case (close (%p-stream-target v))
@@ -21607,8 +21617,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                              :name "anonymous temporary file"
                              :auto-close t))))
 
-(defun %p-open-file (path &rest open-args)
-  "CL `open` with PERL'S FAILURE SHAPE: NIL and `$!`, never a signal.
+(defun %p-open-file (name &rest open-args)
+  "CL `open` of the perl file NAME (a string; %p-literal-path is applied here)
+   with PERL'S FAILURE SHAPE: NIL and `$!`, never a signal.
+
+   AN EMPTY NAME IS ENOENT for every mode (task #4262): the kernel's open(2)
+   of \"\" fails so, and perl's PerlIO_open with it.  CL merges an empty
+   pathname with the default directory, so a READ opened the CURRENT
+   DIRECTORY (`open(F, \"\")`, `open(F, \"<\", \"\")` succeeded) and a write
+   failed EISDIR.
 
    perl's `open` returns false for every OS refusal and puts the errno in `$!`;
    SBCL's `open` SIGNALS a FILE-ERROR for all of them but ENOENT (which the
@@ -21621,8 +21638,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
    ONLY FILE-ERROR is caught, deliberately: an OS refusal is perl's answer, and
    anything else escaping CL `open` is a PCL bug that must stay loud (rule 12)."
-  (handler-case (apply #'open path open-args)
-    (file-error () (%pcl-save-errno) nil)))
+  (if (zerop (length name))
+      (%p-io-errno-fail 2)
+      (handler-case (apply #'open (%p-literal-path name) open-args)
+        (file-error () (%pcl-save-errno) nil))))
 
 (defun %p-open-impl (fh mode filename &optional three-arg-p more-args no-command-p)
   "Implementation of Perl open.  THREE-ARG-P says the program wrote the mode and
@@ -21700,15 +21719,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             (anon-dir (%p-open-anon-temp anon-dir ef
                                          (member mode-str '(">>" "+>>")
                                                  :test #'string=)))
-            ;; The magic filename "-" means a standard stream (Perl dups it):
-            ;; "<-" / "<","-" → STDIN; ">-" / ">","-" → STDOUT.
-            ((and (string= file-str "-") (string= mode-str "<"))
-             *standard-input*)
-            ((and (string= file-str "-")
-                  (member mode-str '(">" ">>") :test #'string=))
-             *standard-output*)
+            ;; The magic filename "-" of the TWO-argument form is a NEW handle
+            ;; on a standard stream (task #4263, doio.c IoTYPE_STD): "-" /
+            ;; "<-" / "+<-" → STDIN's, ">-" / ">>-" / "+>-" → STDOUT's, and
+            ;; closing it leaves the standard handle open (%p-fdopen-alias).
+            ;; The THREE-argument form never does this: `open($f, ">", "-")`
+            ;; is a file NAMED "-" (probed 5.40.3) -- that is what the form is
+            ;; for.
+            ((and (not three-arg-p) (string= file-str "-")
+                  (member mode-str '("<" "+<") :test #'string=))
+             (%p-fdopen-alias *standard-input* t))
+            ((and (not three-arg-p) (string= file-str "-")
+                  (member mode-str '(">" ">>" "+>" "+>>") :test #'string=))
+             (%p-fdopen-alias *standard-output* t))
             ((string= mode-str "<")
-             (%p-open-file (%p-literal-path file-str)
+             (%p-open-file file-str
                            :direction :input :if-does-not-exist nil
                            :external-format ef))
             ;; The two OUTPUT opens ask %p-line-buffer-if-tty (task #710): CL
@@ -21717,20 +21742,20 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             ;; handed straight back, untouched.
             ((string= mode-str ">")
              (%p-line-buffer-if-tty
-              (%p-open-file (%p-literal-path file-str)
+              (%p-open-file file-str
                             :direction :output :if-exists :supersede
                             :if-does-not-exist :create :external-format ef)))
             ((string= mode-str ">>")
              (%p-line-buffer-if-tty
-              (%p-open-file (%p-literal-path file-str)
+              (%p-open-file file-str
                             :direction :output :if-exists :append
                             :if-does-not-exist :create :external-format ef)))
             ((string= mode-str "+<")
-             (%p-open-file (%p-literal-path file-str)
+             (%p-open-file file-str
                            :direction :io :if-exists :overwrite
                            :if-does-not-exist nil :external-format ef))
             ((string= mode-str "+>")
-             (%p-open-file (%p-literal-path file-str)
+             (%p-open-file file-str
                            :direction :io :if-exists :supersede
                            :if-does-not-exist :create :external-format ef))
             ;; "+>>" is read/APPEND: perl's O_RDWR|O_APPEND|O_CREAT.  It does
@@ -21738,7 +21763,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             ;; 5.40.3: a 10-byte file gives tell() 10, and a seek(0,0) then
             ;; reads the first line back).
             ((string= mode-str "+>>")
-             (%p-open-file (%p-literal-path file-str)
+             (%p-open-file file-str
                            :direction :io :if-exists :append
                            :if-does-not-exist :create :external-format ef))
             ((or (string= mode-str "|-") (string= mode-str "-|"))
@@ -21776,8 +21801,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; suffix applied, never a standard stream's (the "-" spellings).
     (when (and stream (sb-sys:fd-stream-p (%p-stream-target stream))
                (plusp (length (second mode-ef)))
-               (not (eq stream *standard-input*))
-               (not (eq stream *standard-output*)))
+               (not (eq (%p-fdopen-alias-p stream) :std)))
       (setf (gethash (%p-stream-target stream) *p-layer-spelling*) (fifth mode-ef)))
     (if stream
         ;; Install under the box/bareword/symbolic-name rules — %p-install-fh
