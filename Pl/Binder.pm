@@ -971,14 +971,30 @@ sub text_uses_in {
   return @out;
 }
 
+# Is the literal-text token $t the OPERAND of a string eval (`eval '...'`,
+# `eval(q{...})`, `eval <<'EOS'`) -- text this eval compiles, not text that
+# merely might reach one?
+sub _is_eval_operand {
+  my ($t) = @_;
+  my $n = $t;
+  $n = $n->parent while $n->parent && ($n->parent->isa('PPI::Statement::Expression')
+                                      || $n->parent->isa('PPI::Structure::List'))
+                    && !$n->sprevious_sibling;
+  my $w = $n->sprevious_sibling;
+  return $w && $w->isa('PPI::Token::Word') && ($w->content eq 'eval' || $w->content eq 'CORE::eval')
+      && _is_string_eval($w) ? 1 : 0;
+}
+
 # THE SPANS.  $ranges = [ [lo, hi] | undef, ... ] the ordinal range of each
 # segment in order (undef = an empty segment), $skip = { i => 1 } the segments
 # whose declarations never span (a `package NAME { }` block's: its `my`s die
 # with the block), kinds => { our => 1 } (default my + state) the binding
 # kinds asked about.  Returns one record per such binding declared in a
 # segment i and USED in a later one -- { b, di, segs => { j => 1 }, first }
-# (first = the first later segment with a use; text => 1 when only a
-# string-eval text reaches it) -- in declaration order.
+# (first = the first later segment with a use; text => 1 when the only later
+# uses are POSSIBLE ones: literal texts some string eval in range MIGHT compile,
+# none the operand of an eval -- the renamer promotes such a binding when it
+# can, and the checker does not refuse it) -- in declaration order.
 sub spans {
   my ($self, $ranges, $skip, %opt) = @_;
   my $kinds = $opt{kinds} || { my => 1, state => 1 };
@@ -1005,7 +1021,10 @@ sub spans {
     }
     for my $j ($di + 1 .. $#$ranges) {
       next if $segs{$j} || !$ranges->[$j];
-      $segs{$j} = 1 if $self->text_uses_in($b, @{ $ranges->[$j] });
+      my @t = $self->text_uses_in($b, @{ $ranges->[$j] }) or next;
+      $segs{$j} = 1;
+      # a text that IS a string eval's operand (`eval '$x'`) is a DEFINITE use
+      $code = 1 if grep { _is_eval_operand($_->{tok}) } @t;
     }
     next unless %segs;
     my $first; for (keys %segs) { $first = $_ if !defined $first || $_ < $first }

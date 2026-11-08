@@ -4073,10 +4073,15 @@ sub _span_rename_containers {
 }
 
 # The CHECKER: a binding that spans and was not promoted dies -- the first one
-# in section order (perl-shaped refusal text, docs/not-supported.md).
+# in section order (perl-shaped refusal text, docs/not-supported.md).  A span
+# made only of POSSIBLE uses (a literal text some string eval might compile,
+# never an eval's own operand -- Binder::spans' `text`) does not refuse: the
+# renamer promoted it if it could, and a test file's code-in-strings must not
+# cost the file (perl t/op/each.t: `%h` named in fresh_perl text).
 sub _check_my_spanning {
   my ($self, $facts) = @_;
-  my @left = grep { !$self->{_span_promoted}{ refaddr $_->{b} } } @{ $facts->{spans} || [] };
+  my @left = grep { !$self->{_span_promoted}{ refaddr $_->{b} } && !$_->{text} }
+              @{ $facts->{spans} || [] };
   return unless @left;
   my ($s) = sort { $a->{first} <=> $b->{first} || $a->{b}{canon} cmp $b->{b}{canon} } @left;
   my $c = $s->{b}{canon};
