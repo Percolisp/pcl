@@ -10219,14 +10219,50 @@ per element."
                    (not (and (consp i)
                              (member (car i) '(vector p-.. p-... p-flatten-args
                                                list)))))))
-       (list 'vector
-             (cons (ecase (car form)
-                     (p-aref 'p-aref-box)
-                     (p-gethash 'p-gethash-box)
-                     (p-aref-deref 'p-aref-deref-box)
-                     (p-gethash-deref 'p-gethash-deref-box))
-                   (cdr form))))
+       (list 'vector (cons (%p-elem-box-head (car form)) (cdr form))))
+      ;; A MAGIC-LVALUE CALL -- substr (at most three arguments), pos, vec --
+      ;; is its write-through CELL over its target's PLACE, as the emitter
+      ;; gives a sole one or one of several single values: `for ($x,
+      ;; substr($v,1), @b)' and the paren-less `substr $y, 1' reach $v / $y
+      ;; through the flattened list too (#4684).
+      ((and (consp form) (member (car form) '(p-substr p-pos p-vec)))
+       (%p-magic-lvalue-alias-form form))
       (t nil)))
+
+  (defun %p-elem-box-head (head)
+    "The eager-lvalue (`-box') accessor of the element read HEAD."
+    (ecase head
+      (p-aref 'p-aref-box)
+      (p-gethash 'p-gethash-box)
+      (p-aref-deref 'p-aref-deref-box)
+      (p-gethash-deref 'p-gethash-deref-box)))
+
+  (defun %p-alias-place-form (tgt)
+    "TGT, the target form of a magic-lvalue call, as a PLACE the cell can
+     write through -- a variable as itself, an element as its `-box' read, a
+     scalar deref as p-cast-$-box -- or NIL when it is none of these (then
+     the call keeps its value read, the status quo)."
+    (cond
+      ((and tgt (symbolp tgt)) tgt)
+      ((and (consp tgt)
+            (member (car tgt) '(p-aref p-gethash p-aref-deref p-gethash-deref)))
+       (cons (%p-elem-box-head (car tgt)) (cdr tgt)))
+      ((and (consp tgt) (eq (car tgt) 'p-cast-$))
+       (cons 'p-cast-$-box (cdr tgt)))
+      (t nil)))
+
+  (defun %p-magic-lvalue-alias-form (form)
+    "FORM, a `p-substr' / `p-pos' / `p-vec' call, as its `-lvalue-cell' over
+     its target's place, or NIL: a 4-argument substr is a VALUE (the replaced
+     text), and a target that is no place keeps the read (#4684)."
+    (let ((place (%p-alias-place-form (second form))))
+      (and place
+           (not (and (eq (car form) 'p-substr) (> (length form) 4)))
+           (list* (ecase (car form)
+                    (p-substr 'p-substr-lvalue-cell)
+                    (p-pos 'p-pos-lvalue-cell)
+                    (p-vec 'p-vec-lvalue-cell))
+                  place (cddr form)))))
 
   (defun %p-marked-slice-form (form)
     "FORM with the SLICE that the emitter's `p-viv-slice' marker names

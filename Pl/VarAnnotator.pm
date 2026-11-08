@@ -1385,7 +1385,6 @@ sub _tw_stmt {
       my @lp2 = $list2
         ? (map { $_->schildren } grep { $_->isa('PPI::Statement') } $list2->children)
         : ();
-      _ev_foreach_magic_args($ctx, \@lp2) if @lp2;
       # Same veto, one shape over: `for ($x) { $_ = … }` — see
       # _ev_foreach_alias_list.  The statement-MODIFIER spelling of the same
       # loop vetoes from _tw_stmt_expr, through the same helper.
@@ -1487,27 +1486,22 @@ sub _semi {
 # loop var to a write-through cell (p-substr-lvalue-cell), so a write to the
 # loop var mutates the SCALAR ARG $x.  VarAnnotator otherwise sees no write to
 # $x and would raw-slot it, leaving the cell nothing to write back into.  Veto
-# $x's raw slot (force-box) so the write-through works.  The sole element is
-# the whole list (the paren-less `substr $x, …` included, #4308); a list of
-# SEVERAL elements is the qualifier's own elements (#4581,
-# Pl::Parser::_foreach_scalar_elements -- not a new comma walk), each asked the
-# same alias verdict the lowering asks.
-sub _ev_foreach_magic_args {
-  my ($ctx, $parts) = @_;
-  my @el = Pl::Parser::_foreach_scalar_elements($parts);
-  @el = ($parts) unless @el > 1;
-  for my $e (@el) {
-    my @ah = Pl::Parser::_foreach_alias_rewrite($e);
-    next unless @ah && $ah[0] =~ /^p-(?:substr|pos|vec)$/;
-    # `substr($x, …)`: the first Symbol inside the parens; the paren-less
-    # `substr $x, …` / `pos $x`: the token right after the Word.
-    my @lps = Pl::Parser::_foreach_list_unwrap($e);
-    my $inner = @lps > 1 && $lps[1]->isa('PPI::Structure::List') ? $lps[1] : undef;
-    my $arg = $inner ? $inner->find_first('PPI::Token::Symbol')
-            : (@lps > 1 && $lps[1]->isa('PPI::Token::Symbol')) ? $lps[1] : undef;
-    _ev($ctx, $arg->content, 'magic-lvalue-arg')
-      if $arg && $arg->content =~ /^\$/;
-  }
+# $x's raw slot (force-box) so the write-through works.  ONE comma walk, the
+# slot walk of _ev_foreach_alias_list below, for every spelling: the sole
+# element (the paren-less `substr $x, …` included, #4308), one of several
+# single values (#4581), one element of a list the flattener spreads (#4684:
+# the runtime's %p-aliasing-slice-form gives that one its cell).  The call is
+# the predicate the lowering's head swap asks
+# (Pl::Parser::_magic_lvalue_call_head); its target is the first Symbol
+# inside the parens, or the token right after the Word.
+sub _ev_foreach_magic_slot {
+  my ($ctx, $slot) = @_;
+  return unless Pl::Parser::_magic_lvalue_call_head($slot);
+  my $inner = $slot->[1]->isa('PPI::Structure::List') ? $slot->[1] : undef;
+  my $arg = $inner ? $inner->find_first('PPI::Token::Symbol')
+          : $slot->[1]->isa('PPI::Token::Symbol') ? $slot->[1] : undef;
+  _ev($ctx, $arg->content, 'magic-lvalue-arg')
+    if $arg && $arg->content =~ /^\$/;
 }
 
 sub _ev_foreach_alias_list {
@@ -1526,6 +1520,7 @@ sub _ev_foreach_alias_list {
       _ev($ctx, $slot[0]->content, 'foreach-alias-list')
         if @slot == 1 && $slot[0]->isa('PPI::Token::Symbol')
         && $slot[0]->content =~ /^\$\w+$/;
+      _ev_foreach_magic_slot($ctx, \@slot) if @slot >= 2;
       # A LIST SLICE `(LIST)[I]` aliases the list's own elements (#4682), and
       # so does a nested paren group (a list is flat), so their slots are
       # aliasing slots too -- the same veto, one level in.
@@ -1791,6 +1786,12 @@ sub _tw_walk {
              && !ref $ctx->{known_subs}{$fname}) {
         _tw_mark_magic_lvalue_args($ctx, $xo, @$kids[1 .. $#$kids]);
       }
+      # A map / grep BLOCK sees `$_` ALIASED to each list element, exactly as
+      # a foreach body does, so a bare scalar in the list (and one reached
+      # through a paren group, a list slice or `scalar(...)`) needs its box
+      # (#4685: `map { $_ .= "X" } $m` copied a raw-slot $m).
+      _tw_alias_list_operands($ctx, $xo, @$kids[1 .. $#$kids])
+        if ($fname eq 'map' || $fname eq 'grep') && _has_block_arg($xo, $kids);
       _tw_walk_funcall_args($ctx, $xo, $fname, $kids, $aread, $root_native);
       return;
     }
@@ -2255,6 +2256,46 @@ sub _tw_mark_magic_lvalue_args {
     my $nm = ref($w) eq 'PPI::Token::Word' ? $w->content : '';
     next unless ($nm eq 'substr' && @$ak <= 4) || $nm eq 'vec';
     _tw_mark_lvalue($ctx, $xo, $ak->[1], 'magic-lvalue-arg') if @$ak > 1;
+  }
+}
+
+# The list operands of an ALIASING consumer that has no token-level veto of
+# its own -- a map / grep list (#4685): `$_` aliases each element, so every
+# bare `$name` the list hands on as ITSELF needs its box.  Itself means: the
+# operand, one inside a paren group, the LIST of a list slice `(LIST)[I]`
+# (#4682) and the operand of `scalar(...)` (#4685); a magic-lvalue call's
+# target is boxed by the magic-arg rule (#4684).  An element or a deref is
+# already a live box; anything else is an expression whose value is fresh.
+sub _tw_alias_list_operands {
+  my ($ctx, $xo, @ids) = @_;
+  for my $id (@ids) {
+    my $n = $xo->get_a_node($id);
+    my $k = $xo->get_node_children($id) || [];
+    if (!$xo->is_internal_node_type($n)) {
+      _ev($ctx, $n->content, 'map-alias-list')
+        if ref($n) eq 'PPI::Token::Symbol' && !@$k;
+      next;
+    }
+    my $t = $n->{type} // '';
+    if ($t eq 'tree_val' || $t eq 'progn') {
+      _tw_alias_list_operands($ctx, $xo, @$k);
+    }
+    elsif ($t eq 'a_ref_acc' && @$k) {
+      my $b = $xo->get_a_node($k->[0]);
+      _tw_alias_list_operands($ctx, $xo, $k->[0])
+        if $xo->is_internal_node_type($b)
+        && ($b->{type} // '') =~ /^(?:tree_val|progn)$/;
+    }
+    elsif ($t eq 'funcall' && @$k) {
+      my $w = $xo->get_a_node($k->[0]);
+      my $nm = ref($w) eq 'PPI::Token::Word' ? $w->content : '';
+      if ($nm =~ /^(?:CORE::)?scalar$/ && @$k == 2) {
+        _tw_alias_list_operands($ctx, $xo, $k->[1]);
+      }
+      elsif (($nm eq 'substr' && @$k <= 4) || $nm eq 'vec' || $nm eq 'pos') {
+        _tw_mark_lvalue($ctx, $xo, $k->[1], 'magic-lvalue-arg') if @$k > 1;
+      }
+    }
   }
 }
 

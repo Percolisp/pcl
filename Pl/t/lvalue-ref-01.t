@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 42;
+plan tests => 43;
 
 sub run_cl {
     my ($code) = @_;
@@ -176,6 +176,27 @@ test_cl('#4581 for (substr(...), substr(...), $x, $h{k}) writes every window',
       sub mk { my $l = "local"; for (substr($l, 0, 1), substr($l, 1, 1)) { $_ = uc } $l } print "7 ", mk(), "\n";
       my $v = "UV"; $_ = "q" for substr($v, 0, 1), substr($s, 1); print "8 $v $s\n";},
     "1 xYZ hqC\n2 zB Cz\n3 x! U!V hqC!\n4 A A\n5 2 2\n6 HellO\n7 LOcal\n8 qV zq\n");
+# #4684 (s536i): the same calls in a list the FLATTENER spreads -- one that also
+# holds an array, or a paren-less `substr $y, 1` / `pos $q` among several
+# elements -- and in a map / grep list: each call is its write-through cell
+# there too (the runtime's %p-aliasing-slice-form), its target boxed by the
+# one foreach slot walk.  The writes landed on copies.  Probed under perl 5.40.3.
+test_cl('#4684 a magic-lvalue call in a flattened foreach list, a modifier list or a map list writes its target',
+    q{my $x = "x"; my $v = "vw"; my @b = (1, 2);
+      for ($x, substr($v,1), @b) { $_ .= "+" } print "1 $x $v @b\n";
+      my $w = "ww"; my $y = "yy";
+      for (substr($w, 0, 1), substr $y, 1) { $_ = "M" } print "2 $w $y\n";
+      my $p = "pp"; my $q = "qq"; $p =~ /p/g; $q =~ /q/g;
+      for (pos $p, pos $q) { $_ = 0 } print "3 ", pos($p), pos($q), "\n";
+      my %h = (k => "hk"); my @c = ("c");
+      for (@c, substr($h{k}, 0, 1)) { $_ = "Z" } print "4 @c $h{k}\n";
+      my $u = "uu"; for (vec($u, 0, 8), @c) { $_ = 65 if /^\d+$/ } print "5 $u\n";
+      my $s = "ss"; $_ = "M" for substr($s, 0, 1), @b; print "6 $s @b\n";
+      my $r = { k => "rr" }; my $z = "zz"; my $t = "tt"; my $rt = \$t;
+      for (@c, substr($r->{k}, 1), substr($$rt, 1)) { $_ = "R" if /[rt]/ } print "7 $r->{k} $t\n";
+      my $m = "mm"; map { $_ = "Y" } substr($m, 0, 1); grep { $_ = "Z" } substr($z, 1), @c;
+      print "8 $m $z @c\n";},
+    "1 x+ vw+ 1+ 2+\n2 Mw yM\n3 00\n4 Z Zk\n5 Au\n6 Ms M M\n7 rR tR\n8 Ym zZ Z\n");
 
 # --- \ + a SIGIL-DEREF carrying a subscript (task #861) -------------------
 # The same "backslashed a COPY" failure as \substr above, arriving by a
