@@ -76,4 +76,30 @@ chomp($h{d} = "line\n");          print "12 [$h{d}]\n";
 PL
 is($pcl, $perl, 'an element assignment used as an lvalue (=~ s///, tr///, .=, +=) edits the element');
 
+# #4622 (s536d): the same fact in a USER-SUB ARGUMENT slot -- @_ aliases the
+# assignment's left side, so a write through $_[0] in the callee lands in the
+# element: named, `$`-prototype, method and coderef calls; compound and
+# logical assignments; a deref element.  The scalar-variable rows (3-5) were
+# already right (controls).  FAILS on 84a2e6ec.
+($perl, $pcl) = both('arg', <<'PL');
+sub setit { $_[0] = "via-alias" }
+my %d2; setit($d2{k} = "orig"); print "1 $d2{k}\n";
+my @a; sub setx { $_[0] = 9 } setx($a[0] = 1); print "2 $a[0]\n";
+my $lx; setit($lx = "orig"); print "3 $lx\n";
+our $g; setit($g = "orig"); print "4 $g\n";
+my $n = 0; sub inc { $_[0]++ } inc($n = 5); print "5 $n\n";
+my %h3 = (k => "a"); setit($h3{k} .= "b"); print "6 $h3{k}\n";
+my @a4 = (1); setx($a4[0] += 5); print "7 $a4[0]\n";
+my $r = {}; setit($r->{k} = "orig"); print "8 $r->{k}\n";
+my %h5; setit(($h5{k} = "orig")); print "9 $h5{k}\n";
+my $o = bless {}, 'O'; sub O::m { $_[1] = "meth" } $o->m($d2{m} = "x"); print "10 $d2{m}\n";
+my $cr = \&setit; $cr->($d2{c} = "x"); print "11 $d2{c}\n";
+sub two { $_[0] = "A"; $_[1] = "B" } my %h6; two($h6{a} = 1, $h6{b} = 2); print "12 $h6{a}$h6{b}\n";
+my %h; setit($h{a} ||= "d"); setit($h{b} //= "d"); print "13 $h{a} $h{b}\n";
+sub ro { my $x = shift; $x .= "!"; $x } print "14 ", ro($h{d} = "v"), " $h{d}\n";
+sub rf { \$_[0] } my $rr = rf($h{e} = "e"); $$rr = "E"; print "15 $h{e}\n";
+sub pr ($) { $_[0] = "P" } pr($h{f} = 1); print "16 $h{f}\n";
+PL
+is($pcl, $perl, 'an element assignment as a user-sub argument is aliased by @_ (#4622)');
+
 done_testing();
