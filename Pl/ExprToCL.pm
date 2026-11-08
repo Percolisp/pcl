@@ -729,29 +729,6 @@ sub gen_node_form {
 # gen_transliteration_form; the /e-lambda body stays a raw atom until the
 # inline_lambda step).  Declines (→ text path): Symbol/Magic compounds
 # (stash/typeglob/&sub/errno).  Byte-for-byte gen_leaf's shapes.
-# `-NAME` where NAME is a SUB perl knows at this point is the NEGATED CALL,
-# not the string "-NAME" (#476; probed 5.40.3: `sub K () {5} print -K, -K()`
-# prints -5-5).  PPI lexes `-K` as ONE Word either way, and the Word reaches
-# the emitter two ways -- a funcall head and a list leaf -- so both ask this.
-# Known = a same-file sub, a prototype in scope (an imported constant), or a
-# `(` right after it.  A fat comma after it keeps the string (`-K => 1`).
-# Real victim: core Compress::Zlib::memGzip's `-MAX_WBITS()` was the string
-# "-MAX_WBITS" and every memGzip returned undef (#3344, s517b).
-sub _negated_call_form {
-  my ($self, $word) = @_;
-  return undef unless ref($word) eq 'PPI::Token::Word';
-  return undef unless ($word->content // '') =~ /\A-([A-Za-z_]\w*)\z/;
-  my $name = $1;
-  return undef if exists $RUNTIME_NAMES{$name};
-  my $nx = $word->snext_sibling;
-  return undef if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
-  my $known = ($nx && $nx->isa('PPI::Structure::List'))
-    || $self->sub_info->{$name}
-    || ($self->environment && $self->environment->has_prototype($name));
-  return undef unless $known;
-  return ['p--', ['p-scalar-ctx', [$self->cl_name($name, 1)]]];
-}
-
 # THE ONE NUMERIC-LITERAL WRITER (gen_leaf_form and gen_leaf both call it;
 # they were two copies).  An integer LITERAL perl's tokenizer cannot hold as
 # an IV/UV is an NV in perl -- at compile time, before any arithmetic (#2016,
@@ -872,10 +849,6 @@ sub gen_leaf_form {
   # bareword the classifier could not place, which asks the image at run time
   # (PExpr::_mark_unplaceable_bareword, #1996).  It has to be read here rather
   # than through gen_leaf, whose Word arm declines anything starting with "(".
-  if ($ref eq 'PPI::Token::Word') {
-    my $neg = $self->_negated_call_form($node);
-    return $neg if $neg;
-  }
   if ($ref eq 'PPI::Token::Word' && $node->{_bareword_runtime}) {
     return ['p-bareword-value', _cl_string_literal_form($node->content() // '')];
   }
@@ -2727,15 +2700,10 @@ sub gen_funcall_form {
         $pkg //= 'main';
         return qq{"$pkg"};
       }
-      # `-NAME` where NAME is a SUB perl knows here is the NEGATED CALL, not
-      # the string "-NAME" (#476; probed 5.40.3: `sub K () {5} print -K` is
-      # -5, and so is `-K()`).  PPI lexes `-K` as ONE Word either way.  A
-      # fat comma after it keeps the string (`-K => 1` autoquotes).  Real
-      # victim: core Compress::Zlib::memGzip's `-MAX_WBITS()` was the string
-      # "-MAX_WBITS" and every memGzip returned undef (#3344, s517b).
-      my $neg = $self->_negated_call_form($func_node);
-      return $neg if $neg;
-      # Perl: -bareword produces string "-bareword"
+      # Perl: -bareword produces string "-bareword" -- a `-NAME` whose NAME is
+      # callable here was split into `-` and the call by PExpr's
+      # _split_negated_call_words (#476 #4222 #4602), so a Word still spelled
+      # `-NAME` here is the bareword.
       if ($content =~ /^-[A-Za-z_]\w*$/) {
         return qq{"$content"};
       }
@@ -2760,18 +2728,6 @@ sub gen_funcall_form {
   }
 
   my $func_name = $self->gen_node($kids->[0]);
-
-  # -funcname with arguments = unary negation of the call (PPI tokenizes
-  # "-splice @a" as one Word).  Known built-ins convert; an unknown -name
-  # falls through to the generic tail exactly like the text emitter.
-  if ($func_name =~ /^-([A-Za-z_]\w*)$/) {
-    my $real_func = $1;
-    if (exists $RUNTIME_NAMES{$real_func}) {
-      my $inner_cl = $self->cl_name($real_func, 1);
-      my @arg_forms = map { $self->gen_node_form($_) } @{$kids}[1 .. $#$kids];
-      return ['p--', [$inner_cl, @arg_forms]];
-    }
-  }
 
   # SUPER::method(args) — indirect-object super call: all args flatten at
   # runtime; the first element of the combined list is the invocant.

@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 31;
 
 sub write_pl {
     my ($code) = @_;
@@ -186,3 +186,26 @@ both_agree('print join(" ", -2**2, -1.5**2, -2.0**2, -1e1**2, -0x10**2, -0b11**2
 
 both_agree('my %h = ("-1.5" => "k"); my @a = (1.5, -0.5); print join(" ", $h{-1.5}, "@a", 2 ** -1.5 < 1 ? "y" : "n", -2**-1, 4 * -2 ** 2), "\n";',
            '#2530 negatives: $h{-1.5} is a key, (1.5, -0.5) two elements, 2 ** -1.5 a power');
+
+# ---- #4222 + #4602 (s536g): `-NAME` of a CALLABLE name is `-` applied to a
+# CALL of NAME -- perl's lexer reads the two tokens; PPI hands over ONE Word.
+# PExpr::_split_negated_call_words restores the two, so the arguments, the
+# prototype and the call naming are the spaced spelling's.  Before it the
+# negated zero-arg call became the callee NAME when arguments followed
+# (`|pl-(p-- (p-scalar-ctx (pl-K)))|`, the run died), and a runtime-internal
+# name (`hash`) was the string "-hash" --------------------------------------
+
+both_agree('sub K { 42 } my $t = -K 1; print "$t ", -K(1), " ", -K, " ", -K(), " ", -K (2), "\n";',
+           '#4222 -NAME LIST / -NAME(LIST) / -NAME / -NAME() with a declared sub are -(NAME(...))');
+
+both_agree('sub L { "l(@_)" } sub U ($) { $_[0] * 2 } my @r = (-L 1, 2); my @s = (-U 3, 2); print scalar(@r), " $r[0] | ", scalar(@s), " @s\n";',
+           '#4222 the prototype decides the argument list: -L 1, 2 is -(L(1,2)); -U 3, 2 with ($) is (-U(3)), 2');
+
+both_agree('print eval q{ sub F { 42 } -F 1 }, "\n";',
+           '#4222 t/comp/parser.t row 45: -F after a sub body in an eval string calls F');
+
+both_agree('sub hash { 7 } sub foo { "f(@_)" } my @a = (5, 6); print -hash, " ", -hash(4), " ", -foo(4), " ", -shift(@a), " ", -shift @a, "\n";',
+           '#4602 a runtime-internal name (`hash`) and a keyword (`shift`) negate their CALL too');
+
+both_agree('print -Later, "\n"; sub Later { 5 } my %h = (-Later => 1, -Undecl, 2); print -Later, " ", -Undecl, " ", join(",", sort keys %h), "\n"; sub sh { -shift } print sh(4), "\n";',
+           '#4222 negatives: a sub declared BELOW, an undeclared word and a fat comma keep the string; -shift negates the shift');

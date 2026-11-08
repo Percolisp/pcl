@@ -6700,7 +6700,42 @@ sub cleanup_for_parsing {
     }
   }
 
+  $self->_split_negated_call_words(\@no_ws);
   return \@no_ws;
+}
+
+# `-NAME` where NAME is CALLABLE here is perl's unary minus applied to a CALL
+# of NAME (#476 #3344 #4222 #4602): perl's lexer reads `-` and the identifier
+# as TWO tokens, and the identifier is a call exactly where a bare NAME is --
+# a sub declared above this point, an imported name, a builtin -- or where a
+# `(` follows it; anywhere else it is the bareword, which the negation makes
+# the string "-NAME".  PPI lexes `-NAME` as ONE Word, so the two perl tokens
+# are restored HERE, once, and everything after -- the arity / prototype parse
+# (`-U 3, 2` is `(-U(3)), 2` for `sub U ($)`), the context, the call naming --
+# is the path the spaced spelling `- NAME` already takes.  A fat comma after
+# the word was quoted by the loop above (`-K => 1` is "-K").  The tokens are
+# NEW (the shared tree is never edited: a re-parse splits again) and carry the
+# source token's location, which the call-site readers ask (line, regime).
+sub _split_negated_call_words {
+  my ($self, $tokens) = @_;
+  for (my $i = 0; $i < @$tokens; $i++) {
+    my $t = $tokens->[$i];
+    next unless ref($t) eq 'PPI::Token::Word';
+    next unless ($t->content // '') =~ /\A-([A-Za-z_]\w*)\z/;
+    my $name = $1;
+    my $nx = $tokens->[$i + 1];
+    next unless ($nx && ref($nx) eq 'PPI::Structure::List')
+             || ($self->_bareword_callable_here($name, $t) // '') eq 'yes';
+    my $minus = PPI::Token::Operator->new('-');
+    my $word  = PPI::Token::Word->new($name);
+    if (my $loc = $t->location) {
+      $minus->{_location} = [@$loc];
+      $word->{_location}  = [$loc->[0], $loc->[1] + 1, $loc->[2] + 1, @$loc[3 .. $#$loc]];
+    }
+    splice @$tokens, $i, 1, $minus, $word;
+    $i++;
+  }
+  return;
 }
 
 
