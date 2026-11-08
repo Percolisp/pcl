@@ -102,4 +102,29 @@ sub pr ($) { $_[0] = "P" } pr($h{f} = 1); print "16 $h{f}\n";
 PL
 is($pcl, $perl, 'an element assignment as a user-sub argument is aliased by @_ (#4622)');
 
+# #4644 (s536f): the same two facts for a TIED element -- its box is a tie
+# cell, whose store answered the stored COPY, so the callee's `$_[0] = ...`
+# and the `=~ s///` / `++` on the assignment were lost (or died read-only).
+# The value of an assignment to a box place is the BOX (p-setf's fallback, the
+# compound store-back, `.=`).  Rows 8-10 are untied controls.  FAILS on c8886b61.
+($perl, $pcl) = both('tied', <<'PL');
+sub setit { $_[0] = "via-alias" } sub app { $_[0] .= "+" } sub inc { $_[0]++ }
+tie my %t, 'TH'; $t{k} = "orig"; setit($t{k}); print "1 $t{k}\n";
+setit($t{j} = "orig"); app($t{m} = "m"); app($t{m} .= "n"); print "2 $t{j} $t{m}\n";
+$t{n} = 1; inc($t{n} += 2); $t{o} = 0; setit($t{o} ||= 5); setit($t{p} //= 6); print "3 $t{n} $t{o} $t{p}\n";
+tie my @ta, 'TA'; setit($ta[1] = "b"); my $tr = \%t; setit($tr->{r} = "r"); print "4 $ta[1] $t{r}\n";
+($t{s} = "abc") =~ s/b/B/; $t{u} = "ab"; ($t{u} .= "c") =~ s/a/A/; print "5 $t{s} $t{u}\n";
+print "6 ", join(",", map { "$_=$TH::log{$_}" } sort keys %TH::log), "\n";
+$t{v} = 1; ($t{v} += 1)++; print "7 $t{v}\n";   # its FETCH / STORE count is #4681's
+my $x = "x"; my $y = ($x .= "y"); my $z = 1; my $w = ($z += 2); print "8 $x $y $z $w\n";
+my %u = (k => 5); my $v = ($u{k} -= 1); print "9 $u{k} $v\n";
+my %g; setit($g{a} = 1); setit($g{b} .= "q"); print "10 $g{a} $g{b}\n";
+package TH; our %log;
+sub TIEHASH { bless {}, shift } sub STORE { $log{store}++; $_[0]{$_[1]} = $_[2] } sub FETCH { $log{fetch}++; $_[0]{$_[1]} }
+package TA;
+sub TIEARRAY { bless [], shift } sub STORE { $_[0][$_[1]] = $_[2] } sub FETCH { $_[0][$_[1]] }
+sub FETCHSIZE { scalar @{$_[0]} } sub STORESIZE { $#{$_[0]} = $_[1] - 1 } sub EXTEND {}
+PL
+is($pcl, $perl, 'an assignment to a TIED element is the element: @_ aliases it, =~ s/// and ++ edit it (#4644)');
+
 done_testing();

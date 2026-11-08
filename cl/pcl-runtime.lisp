@@ -11687,8 +11687,16 @@ per element."
          ((= (length args) 4)
           `(error "Can't modify substr in scalar assignment"))
          (t `(p-substr ,@args ,value)))))
-    ;; Other complex place (fallback)
-    (t `(box-set ,place ,value))))
+    ;; Other complex place (fallback): an element / cell BOX.  The value of
+    ;; the assignment is its LEFT side, the lvalue (perl's sassign returns
+    ;; the target SV), so a box place answers the BOX -- as p-scalar-= and
+    ;; p-my-= answer theirs.  box-set's own answer is the setter's for a
+    ;; magic cell: a TIED element (`f($t{k} = V)', `($t{k} = V) =~ s///')
+    ;; then handed on the stored value, a copy (#4644).  A place that is not
+    ;; a box keeps box-set's answer (the value).
+    (t (let ((b (gensym "PLACE")) (r (gensym "R")))
+         `(let* ((,b ,place) (,r (box-set ,b ,value)))
+            (if (p-box-p ,b) ,b ,r))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-viv-marker-p (form)
@@ -11992,9 +12000,12 @@ per element."
        (%p-vivified-elem-form place (lambda (p) `(setf ,p ,(funcall build p)))))
       ((%p-accessor-place-p place)
        `(setf ,place ,(funcall build place)))
-      (t (let ((b (gensym "PLACE")))
-           `(let ((,b ,place))
-              (box-set ,b ,(funcall build b))))))))
+      ;; A BOX place answers the box, the lvalue (p-setf's fallback says why:
+      ;; a tied element's cell would answer the stored copy, #4644).
+      (t (let ((b (gensym "PLACE")) (r (gensym "R")))
+           `(let* ((,b ,place)
+                   (,r (box-set ,b ,(funcall build b))))
+              (if (p-box-p ,b) ,b ,r)))))))
 
 (defmacro %define-compound-pair (boxed raw lambda-list doc &body new-value)
   "Define the BOXED compound-assign macro (any place: boxes, elements, derefs —
@@ -12850,10 +12861,14 @@ per element."
                             (p-box-value ,v)))))
             ;; THE SHORT APPEND, inline: two plain strings whose result stays
             ;; below the buffer threshold are the old concatenate + box-set.
+            ;; A tied element's cell (a magic cell, never a plain string)
+            ;; takes %p-append-box, whose box-set answers the setter's copy:
+            ;; the value is the box, the lvalue (#4644, see p-setf).
             (if (and ,s (simple-string-p ,c) (null (p-box-class ,b))
                      (< (+ (length ,c) (length ,s)) +p-strbuf-min+))
                 (box-set ,b (concatenate 'string ,c ,s))
-                (%p-append-box ,b ,v))))))))
+                (let ((,c (%p-append-box ,b ,v)))
+                  (if (p-box-p ,b) ,b ,c)))))))))
 
 ;;; `x=` DELEGATES OUTRIGHT — no guard — and that fixes a second bug in the
 ;;; same copy.  Its inlined body was `(apply #'concatenate 'string (make-list
