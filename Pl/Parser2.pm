@@ -3932,6 +3932,11 @@ sub _span_rename_scalar {
   my $hi = _blk_extent($segments, $di);
   return if !$multi && !$span_of->{ refaddr $b } && $refuse->('does not cross the boundary');
   return if $segments->[$di]{blockform} && $refuse->('blockform decl segment');
+  # A use inside a signature PPI handed over as ONE TOKEN (a Token::Prototype --
+  # the feature pragma on the sub's own line, #455) has no Symbol to rename:
+  # refuse, as the capture promoter does (the checker then says so).
+  return if (grep { $_->{tok}->isa('PPI::Token::Prototype') } $bd->uses_of($b))
+    && $refuse->('a use in an unrewritable Token::Prototype');
   my $newbare = $unique ? $bare : $bare . '__file__' . $self->{_file_lex_counter}++;
   $self->_filecell_note('span', "\$$bare", $unique ? 'identity' : 'mangle') if $id_ok;
   my $mine = sub { $self->_refers_to_decl($_[0], "\$$bare", $sym) };
@@ -3998,8 +4003,8 @@ sub _span_check_rewritten {
     my $interp = $r->{via} =~ /^(?:interp|interp-code|readline)$/;
     next if $interp && $unique && $segments->[$j]{pkg} eq $segments->[$di]{pkg};
     next if index($txt, $want) >= 0;
-    die sprintf("PCL internal: the span rename of \$%s left a use unrenamed at line %s: %s\n",
-      $bare, $t->line_number // '?', substr($txt, 0, 60));
+    die sprintf("PCL internal: the span rename of %s left a use unrenamed at line %s: %s\n",
+      $b->{canon}, $t->line_number // '?', substr($txt, 0, 60));
   }
 }
 
@@ -4030,6 +4035,7 @@ sub _span_rename_containers {
       next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
       next if $segments->[$di]{blockform};
       next if $self->{_file_lex_renamed}{$csym};
+      next if grep { $_->{tok}->isa('PPI::Token::Prototype') } $bd->uses_of($b);   # #455, as above
       my $hi = _blk_extent($segments, $di);
       my $qname = $segments->[$di]{pkg} . '::' . $bare;
       my $qfix  = _interp_fixer($csym, $qname);
@@ -4056,6 +4062,7 @@ sub _span_rename_containers {
           }
         }
       }
+      $self->_span_check_rewritten($segments, $bd, $b, $bare, $bare, 1, $di);
       $self->{_file_lex_renamed}{$csym} = 1;
       $self->{_span_promoted}{ refaddr $b } = 1;
       $self->_filecell_note('cspan', $csym,
