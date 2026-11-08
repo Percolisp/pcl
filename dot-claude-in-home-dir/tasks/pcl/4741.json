@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536i (Opus 5.5, 2026-11-08) while fixing #4682 / #4283 (scratch/s536i/p/f1.pl in the s536i worktree).  PRE-EXISTING: main 0ac58419 answers the same.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my %k; my %h; $h{$k{x}} = 1; print \"1 \", (exists $k{x} ? \"E\" : \"N\"), \"\\n\";\n    my @i; my @a; $a[$i[3]] = 1; print \"2 \", scalar(@i), \"\\n\";\n    my %j; my $r = []; my $q = \\$r->[$j{zz}]; print \"3 \", (exists $j{zz} ? \"E\" : \"N\"), \"\\n\";\n    my %m; my %n; $n{$m{y}}++; print \"4 \", (exists $m{y} ? \"E\" : \"N\"), \"\\n\";\n    my %o; my $p = {}; $p->{$o{w}} .= \"x\"; print \"6 \", (exists $o{w} ? \"E\" : \"N\"), \"\\n\";\n\nperl: `1 N` / `2 0` / `3 N` / `4 N` / `6 N`.   PCL: `1 N` / `2 0` / `3 E` / `4 E` / `6 N`.\n\nMECHANISM (read, not fixed): Pl/ExprToCL.pm gen_array_access_form / gen_hash_access_form / the deref pair generate the INDEX / KEY (`$kids->[1]`) with gen_node_form under the lvalue context the ELEMENT was asked in.  `\\` (_backslash_lvalue_form) and prefix / postfix `++` / `--` set lvalue_context(1) around the whole operand, so the subscript's own element is lowered with its `-box` (eager, vivifying) accessor: `(p-backslash (p-aref-deref-box $r (p-gethash-box %j \"zz\")))`.  The `=` / `OP=` path does not show it (p-setf's place arms generate the LHS differently).  A subscript is never an lvalue: generate kids->[1] with lvalue_context 0 in the four element generators (s536i's _elem_container_form does the same for the CONTAINER under argbox / matchcell).  Measure the corpus A/B first: every `\\$x[$h{k}]` / `$h{$a[0]}++` site moves from a -box to the plain read.\n",
+   "id" : "4741",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an element's SUBSCRIPT is generated in the element's own lvalue context, so its index / key element VIVIFIES -- `\\$r->[$j{zz}]` and `$n{$m{y}}++` create $j{zz} / $m{y} (perl: neither)"
+}

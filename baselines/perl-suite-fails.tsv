@@ -514,6 +514,10 @@ comp/parser.t	84	ok	not ok	but no body defined	NS:Error compatibility for invali
 comp/parser.t	59	ok	not ok	croak cleanup 3	NS:Error compatibility for invalid Perl input + NS:Error message text and format
 comp/parser.t	116	ok	(missing)	else {foo} line number (no space after {) [perl #122695]	#1694
 comp/parser.t	88	ok	not ok	empty sub decl ignored after compilation error	#1695
+comp/parser.t	89	ok	not ok	stub decl ignored after compilation error	#1695 (s536 round: exposed by s536b #4561, MAIN-READY-79 352e26e0 -- a bodyless `sub NAME;` is a stash entry; PCL compiles the eval whose `@A =~ s/a/b/` is a compile error in perl, principle 9)
+comp/parser.t	90	ok	not ok	stub+proto decl ignored after compilation error	#1695 (s536 round: exposed by s536b #4561, MAIN-READY-79 352e26e0)
+comp/parser.t	91	ok	not ok	stub+attr decl ignored after compilation error	#1695 (s536 round: exposed by s536b #4561, MAIN-READY-79 352e26e0)
+comp/parser.t	92	ok	not ok	stub+proto+attr ignored after compilation error	#1695 (s536 round: exposed by s536b #4561, MAIN-READY-79 352e26e0)
 comp/parser.t	171	ok	(missing)	file of Our long line is set up	#1694
 comp/parser.t	175	ok	(missing)	file of Overflow both small buffer checks	#1694
 comp/parser.t	173	ok	(missing)	file of Overflow the first small buffer check only	#1694

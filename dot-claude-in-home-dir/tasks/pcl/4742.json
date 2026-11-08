@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536i (Opus 5.5, 2026-11-08) while fixing #4682 (scratch/s536i/p/e1.pl, f1.pl in the s536i worktree).  PRE-EXISTING: main 0ac58419 answers the same.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my @b = (1,2,3); my $s = \\((@b)[7]); print scalar(@b), \"\\n\";      # perl 3, PCL 8\n    my $t = \\((@b, 1)[9]); print scalar(@b), \"\\n\";                     # the literal-list spelling\n\nMECHANISM (read): `\\TERM` generates the term in lvalue context (ExprToCL::_backslash_lvalue_form), so a list slice lowers to `(p-backslash (p-aref-deref-box @b 7))`, and p-aref-deref-box's scalar-index arm is `(p-aref-box (p-ensure-arrayref ref) idx)` -- the EAGER element accessor, which extends the array.  s536i (#4682) gave the OTHER aliasing consumers (foreach / map / grep / a user-sub argument) the list slice's own cells through %p-aliasing-slice-form -> %p-lslice-aliases (a missing element there is a lazy alias over the list and creates nothing); `\\` is not one of that rule's consumers.  Fix shape: `\\` of a LIST SLICE (ExprToCL::_is_list_slice_node) refers to %p-lslice-aliases' cells (p-refgen-list over them, or the one cell for a single index) instead of the eager -box head.  Perl also dies on a WRITE through such a ref only when the list held a literal; an in-range array element stays the element (`\\((@b)[1])` writes $b[1] -- correct today, keep it).\n",
+   "id" : "4742",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `\\((@b)[7])` -- a reference to a list slice's element PAST THE END -- grows @b to 8 (perl leaves @b alone: a list slice reads, it never extends its source)"
+}
