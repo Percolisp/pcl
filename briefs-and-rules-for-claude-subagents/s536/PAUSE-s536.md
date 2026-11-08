@@ -1,0 +1,8 @@
+# s536 running notes (the reviewing session, Opus 5.5, 2026-11-08)
+
+## 08:3x -- SESSION START; the USER: "Please continue", then "Run 4 subtasks in parallel now" -> FOUR agents, Opus 5.5 (effort: default -- the USER named none today)
+Box rebooted (uptime 1 min at 08:32).  Main `1407c08c` = MAIN-READY-73 + s535 end records, clean; main's CODE sha `06a4b8ba`, generation v2-11700.  Stale `HEAVY.holder*` (s532d seedpop, s535a d0-ab + sweep; pids dead) CLEARED.  Every leg in flight at s535's end died without its END line -> owed again.
+Written + committed `3988473d`: `s536/SHARED-BOX.md` (rules 19-24: merge order s532c -> s532d -> s535a -> s536a; reserved generations v2-11800 / 11900 / 12000 / 12100; four agents three slots; the ROUND BOARD is mine after s532c merges; regions; the `_stmt_declares_canon` conflict RULED = keep s535a's deletion, s532c's #4304 guards are the proof; s532c's 468aee6d/329092b9 pair LEFT), `resume-s532c.md`, `resume-s532d.md`, `resume-s535a.md`, `s536a-prompt.md` (#135 #4104 #4181-229 #4183 #4182; IDs 4561-4579).
+## 08:4x -- LAUNCHED all four (opus): s532c / s532d / s535a resume in their existing worktrees (no isolation), s536a in a NEW isolated worktree.  Check each `scratch/<label>/MODEL.txt` = claude-opus-5-5 early.
+ROUND DUTY (mine): the CPAN board on main right after s532c merges (one bounded leg); the AUTOLOAD probe rows 37-38 of s534a's matrix after s532c merges.
+OPEN USER QUESTIONS (carried): s534a's three (method + overload cache batch #4523-#4525 as one batch? #4522 first? a dual-run check mode?), `docs/eval-in-cl-plan.md` §7 (#4480), the fork push of PPI `pcl` 86623347 (PR #459), #1836; #4503 waits for the USER's word.
