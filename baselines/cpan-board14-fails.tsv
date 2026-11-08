@@ -207,7 +207,7 @@
 # EDITED (s536, the reviewing session, 2026-11-08; the ROUND BOARD on MAIN-READY-74 fcfcb5d3 + SERIAL one-file re-runs ~/pcl-agent-scratch/s536/round/rerun/ + bisects round/bis/):
 #   YAML-Tiny 11_read_string *PLAN* + row 4 "No tests run" OUT (#3834 fixed: the file runs since -66/-67) -> its row 4 "invalid UTF-8" IN under NEW #4624 (a :utf8 read of
 #   invalid UTF-8 answers undef); Data-Dumper dumper.t 112 IN under NS:ns-b (fails back to -63; `$@` holds the B::Deparse refusal); TT leak.t 7 11 IN under NS:ns-destroy-gc
-#   (scope-exit DESTROY; the file runs all 11 rows since s532c, it ran 3 at -72).  NOT edited: Capture-Tiny 15 22 23 24 *PLAN* = #4623 (a REGRESSION, s532c 40b09ef5 -- to be fixed, not blessed).
+#   (scope-exit DESTROY; the file runs all 11 rows since s532c, it ran 3 at -72).  NOT edited: Capture-Tiny 15 22 23 24 *PLAN* = #4623 (a REGRESSION, s532c 40b09ef5 -- never blessed; FIXED by s532c-4623, MAIN-READY-81 ce06e1f6: the four files run whole again).
 # EDITED (s536d, 2026-11-08; one-file runs scratch/s536d/io4-*.log + yt1.log on the s536d tree):
 #   IO-Compress 105oneshot-{deflate,gzip,zip,rawdeflate} *PLAN* #3493 -> #4643: #3493 FIXED (the shadowing `my $in`), the file runs 1008 rows when the heap allows
 #   (2 of 5 deflate runs heap-exhausted compiling oneshot.pl uncached = #4643, now "ran 1 of 1008, rc 1"); the complete run's 33 new failing rows per file IN
