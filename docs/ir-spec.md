@@ -4775,7 +4775,7 @@ Two consequences a translator must implement or lose output:
 * **`$!` after I/O** (#4284, perl's PerlIO and pp_sys.c):
   - a read that REACHES END OF FILE on a descriptor handle clears `$!` — a
     readline returning undef, a last record without its separator, a list
-    readline, a slurp.  The end-of-file state is STICKY until a `seek`: a
+    readline, a slurp.  The end-of-file state is STICKY until a `seek` (or the close): a
     second read at the end does not clear it again.  An in-memory handle never
     clears it;
   - `read`, `sysread`, `syswrite` and `truncate` clear `$!` before they run,
