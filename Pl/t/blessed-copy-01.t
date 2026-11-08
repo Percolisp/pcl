@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub run_cl {
     my ($code) = @_;
@@ -321,4 +321,50 @@ PL
 4 C1,C0,C1,C0,C1
 5 1000
 6 Q
+OUT
+
+# #4683 (s536i): a BLESSED hash DEREFERENCED into a list is its key / value
+# pairs, as an unblessed one is -- `c(%$o)` passed ONE argument (the object
+# table: "X=HASH(0x1)"), and so did a method, a coderef, a copying-parameter
+# sub, push and unshift (unshift spread no hash at all).  Every list builder
+# reads the same rule: a raw table there is always a %HASH; an object travels
+# as its reference box.  Expected text probed under perl 5.40.3.
+test_cl('a dereferenced BLESSED hash spreads its pairs into an argument list, push and unshift (#4683)',
+        <<'PL', <<'OUT');
+sub c { scalar(@_) . ":" . join(",", sort @_) }
+my $o = bless {a => 1}, 'X';
+print "1 ", c(%$o), "\n";
+my $ao = bless [5, 6], 'Y';
+print "2 ", c(@$ao), "\n";
+my @l = (%$o); print "3 ", scalar(@l), " @l\n";
+for (%$o) { print "4 $_\n" }
+my @p; push @p, %$o; print "5 ", scalar(@p), "\n";
+sub r { my $x = shift; return %$x } my @rr = r($o); print "6 ", scalar(@rr), "\n";
+my @m = map { %$_ } $o; print "7 ", scalar(@m), "\n";
+sub cp { my ($k, $v) = @_; "$k=$v" } print "8 ", cp(%$o), "\n";
+package Ov; use overload '%{}' => sub { {z => 9} }, fallback => 1;
+package main;
+my $ov = bless [], 'Ov';
+print "9 ", c(%$ov), "\n";
+my %h2 = %$o; print "10 ", join(",", %h2), "\n";
+unshift @p, %$o; my %u = (u => 2); unshift @p, %u; print "11 ", scalar(@p), "\n";
+print "12 ", scalar(() = %$o), "\n";
+my $c2 = sub { scalar @_ }; print "13 ", $c2->(%$o), "\n";
+sub X::m { scalar(@_) } print "14 ", $o->m(%$o), " ", c($o) =~ /^1:X=HASH/ ? "obj" : "no", "\n";
+PL
+1 2:1,a
+2 2:5,6
+3 2 a 1
+4 a
+4 1
+5 2
+6 2
+7 2
+8 a=1
+9 2:9,z
+10 a,1
+11 6
+12 2
+13 2
+14 3 obj
 OUT

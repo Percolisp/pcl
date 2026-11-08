@@ -1460,12 +1460,13 @@
 
 (defun %p-args-need-flatten (args)
   "True when the raw &rest ARGS list holds an aggregate that Perl's argument
-   flattening must spread: a raw non-string vector (an array) or a non-blessed
-   hash-table (a hash).  Boxed values — including array/hash REFS, which are
-   boxed — never spread.  Mirrors p-flatten-args' dispatch."
+   flattening must spread: a raw non-string vector (an array) or a hash-table
+   (a hash -- a blessed one too: `f(%$obj)' spreads its pairs, #4683).
+   Boxed values — including array/hash REFS, which are boxed — never
+   spread.  Mirrors p-flatten-args' dispatch."
   (loop for a in args
         thereis (or (and (vectorp a) (not (stringp a)))
-                    (and (hash-table-p a) (not (gethash :__class__ a))))))
+                    (hash-table-p a))))
 
 (defmacro p-raw-params ((&rest params) &body body)
   "Signature fast path for `sub f { my ($a,$b) = @_; … }` whose body provably
@@ -9601,7 +9602,7 @@ per element."
 ;;; every parameter through the copy above, so the cells are dead the moment
 ;;; they are made: read the VALUES instead, with no promotion.  Same list, same
 ;;; order, same hole and hash-pair answers as p-flatten-args (a hole reads
-;;; undef, a hash spreads key/value pairs, a blessed hash is one argument, a
+;;; undef, a hash spreads key/value pairs -- a blessed one too (#4683) -- a
 ;;; %ENV/%INC marker spreads its pairs).
 (defun %p-builtin-arg-list (args)
   "The flattened argument LIST of a CL function that stands for a perl sub
@@ -9629,10 +9630,11 @@ per element."
         ((and (hash-table-p arg) (%p-tied arg))
          (loop for x across (%p-tie-view (%p-tied arg))
                do (vector-push-extend x result)))
-        ((and (hash-table-p arg) (not (gethash :__class__ arg)))
+        ((hash-table-p arg)
          (maphash (lambda (k v)
-                    (vector-push-extend k result)
-                    (vector-push-extend v result))
+                    (when (%p-real-hash-key-p k)    ; never the blessing key
+                      (vector-push-extend k result)
+                      (vector-push-extend v result)))
                   arg))
         ((%p-hash-marker-p arg)
          (loop for x across (%p-marker-pairs arg)
@@ -14898,9 +14900,10 @@ create the key on a read-only call, which perl does not.
      ;; Raw vector = array passed in list context: spread its elements
      ;; (a tied one's lazy element boxes -- perl's PVLVs, task #155).
      (%p-flatten-vector-into (%p-tie-view-of arg) result))
-    ;; Hash in argument context: spread to alternating key-value pairs.  But
-    ;; NOT an untied blessed object (which has :__class__) -- that stays as-is.
-    ((and (hash-table-p arg) (or (%p-tied arg) (not (gethash :__class__ arg))))
+    ;; Hash in argument context: spread to alternating key-value pairs --
+    ;; a BLESSED one too: a raw table here is always a dereferenced %HASH
+    ;; (`f(%$obj)'), an object travels as its reference BOX (#4683).
+    ((hash-table-p arg)
      (%p-flatten-hash-into arg result))
     ;; %ENV / %INC in argument context: the marker IS the hash, so it
     ;; spreads to pairs like any other (see %p-marker-pairs, task #736).
@@ -15336,7 +15339,7 @@ create the key on a read-only call, which perl does not.
            (when (and (vectorp src) (> (length src) 0)) (return t))))
         ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
          (when (> (length val) 0) (return t)))
-        ((and (hash-table-p val) (not (p-box-p item)) (not (gethash :__class__ val)))
+        ((and (hash-table-p val) (not (p-box-p item)))
          (when (> (hash-table-count val) 0) (return t)))
         (t (return t))))))
 
@@ -15382,7 +15385,7 @@ create the key on a read-only call, which perl does not.
          (loop for elem across val do
                (%p-array-store-scalar arr elem)))
         ;; Raw hash-table (not a ref): spread to key/value pairs (%hash in list ctx).
-        ((and (hash-table-p val) (not (p-box-p item)) (not (gethash :__class__ val)))
+        ((and (hash-table-p val) (not (p-box-p item)))   ; blessed too (#4683)
          (dolist (kv (%p-hash-keyval-list val))
            (%p-array-store-scalar arr kv)))
         ;; Regular value - preserve bless class via %p-array-store-scalar
@@ -15460,6 +15463,11 @@ which is one of #1140's escape spellings (probed)."
           ;; Raw CL vector (e.g. qw!...!): spread elements
           ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
            (loop for elem across val do (%p-array-store-scalar flat-arr elem)))
+          ;; Raw hash-table (not a ref): its key/value pairs, as push spreads
+          ;; them -- `unshift @a, %h' stored ONE element (#4683).
+          ((and (hash-table-p val) (not (p-box-p item)))
+           (dolist (kv (%p-hash-keyval-list val))
+             (%p-array-store-scalar flat-arr kv)))
           ;; Regular value - preserve bless class
           (t (%p-array-store-scalar flat-arr item)))))
     ;; The items are already stored the way a slot holds them; putting them
