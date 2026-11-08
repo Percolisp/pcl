@@ -1,3 +1,4 @@
+# s532d (2026-11-08, Opus, EDITED BY HAND -- two rows LEAVE): bless.t 105 "blessing through tied refs" and qr.t 17 "object is blessed" -- #4061: a FIRST bless of an ARRAY / qr referent is recorded on the referent, so a copy taken before the bless (`$untied` behind the tied scalar; `my $b1 = $b; bless $b, "Pie"`) answers the class; #408 diagnosis corrected (PCL did FETCH, twice: #4325); sweep scratch/s532d/out/sweep-own.log, TOTAL 18774 -> 18775
 # s532c (2026-11-08, Opus, EDITED BY HAND): 4 rows LEAVE -- readline.t 26 "<> does not autovivify" + 27 "readline does not autovivify" (#4301: `defined *{EXPR}` creates nothing), method.t 103 "AUTOLOAD is nul-clean" (#1486: $AUTOLOAD is written in the AUTOLOAD sub's own package), pos.t 26 "no assertion failure when getting pos clobbers ref with undef" (#4308: `for my $one (pos $x)` aliases pos, so the two loop variables are one place -- #1457 (c)); measured in the s536 sweep + one-file runs (scratch/s532c sweep.log, m96-tree, pos-fix)
 # s523d (2026-10-22, Opus, EDITED BY HAND): ref.t 200 "freeing freed glob in global destruction" LEAVES -- #3691 removes the glob on `delete $::{x}` instead of announcing, so its runperl child prints exactly "ok" (sweep: ref.t 203 -> 204, TOTAL 18758 -> 18759).
 # s522b (2026-10-20, Opus, EDITED BY HAND): ref.t 200 "freeing freed glob in global destruction" JOINS -- its runperl child runs `delete $::{x}; delete $::{y}`, a non-CODE stash delete, which ANNOUNCES on stderr (Fable s523 withdrew the s522 death: an effect-only miss announces and continues); the child compares stderr, so the row fails on the announcement text alone -- stdout is perl's; it passed on a silent no-op.
@@ -119,7 +120,6 @@ assignwarn.t	88	$x **= 1, tied warns	undef	^Use of uninitialized value	#221 (NS:
 assignwarn.t	90	$x <<= 1, tied warns	undef	^Use of uninitialized value	#221 (NS:Warnings-gated diagnostics are absent; DECIDED s399: #221's trigger HAS FIRED)
 assignwarn.t	92	$x >>= 1, tied warns	undef	^Use of uninitialized value	#221 (NS:Warnings-gated diagnostics are absent; DECIDED s399: #221's trigger HAS FIRED)
 assignwarn.t	116	$x &= 'x', tied warns	undef	^Use of uninitialized value	#221 (NS:Warnings-gated diagnostics are absent; DECIDED s399: #221's trigger HAS FIRED)
-bless.t	105	blessing through tied refs	'ARRAY'	'main'	#408 (bless through a tied scalar does not FETCH -- get-magic missing on the bless operand)
 blocks.t	22	Attributes on BEGIN blocks should warn	' Can't locate loadable object for module this module in @INC'	'Attribute on BEGIN block ignored at - line 1. done'	#221 (NS:Warnings-gated diagnostics are absent)
 blocks.t	13	BEGIN{die} should exit	'begin end Died at - line 1.'	\Abegin\nDied[^\n]*\.\nBEGIN failed[^\n]*\.\nunitcheck\ncheck\nend\z	#1449 (a die in a compile-phase block skips the remaining queued phases)
 blocks.t	17	CHECK{die} should exit	'begin unitcheck end Died at - line 1.'	\Abegin\nunitcheck\nDied[^\n]*\.\nCHECK failed[^\n]*\.\ncheck\nend\z	#1449 (a die in a compile-phase block skips the remaining queued phases)
@@ -368,7 +368,6 @@ qr.t	29	PVLVs	'SCALAR'	'REGEXP'	#1488 CATALOG qr.t "PVLV deref / stringification
 qr.t	36	REGEXP RV leak	'0'	'1'	NS:`DESTROY` called by garbage collector CATALOG qr.t "PVLV deref / stringification of blessed qr//"
 qr.t	31	copying a regexpvlv	'SCALAR'	'REGEXP'	#1488 CATALOG qr.t "PVLV deref / stringification of blessed qr//"
 qr.t	28	likewise produces non-numeric warning	undef	numeric	#221 (NS:Warnings-gated diagnostics are absent)
-qr.t	17	object is blessed			#1487 + NS:Scalar copy does not preserve reference/SV identity CATALOG qr.t "PVLV deref / stringification of blessed qr//"
 qr.t	26	produces non-numeric warning	''	numeric	#221 (NS:Warnings-gated diagnostics are absent)
 qr.t	22	stored regexp	'SCALAR'	'REGEXP'	#1488 CATALOG qr.t "PVLV deref / stringification of blessed qr//"
 readline.t	30	readline *$glob_copy sets PL_last_in_gv	'0'	'-1'	#1490 CATALOG readline.t "tell() after GV unglobbed"
