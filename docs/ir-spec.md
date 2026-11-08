@@ -973,11 +973,16 @@ so each copy's box caches the class, and a bless into a DIFFERENT class
 through any box whose cache already named a class records the new class on
 the referent (the weak table `*p-rebless-stash*`, read before any box's
 slot by `%p-target-class`, `p-get-class` and `p-ref`): `my $o = bless [],
-"P"; my @l = ($o); bless $o, "Q"; ref $l[0]` is `Q`.  Only a re-bless is
-recorded -- a weak-table read on every method call cost an array-object
-method row 69 % (s530a) -- so a copy taken before the referent's FIRST
-bless, and a fresh `\@a` / `\&f` after `bless \@a`, still read their own
-slot (#4061).  A filehandle or GLOB referent keeps its class in
+"P"; my @l = ($o); bless $o, "Q"; ref $l[0]` is `Q`.  **The FIRST bless
+belongs to the referent too** (normative, s532d, task #4061): every bless of
+an ARRAY / CODE / qr referent writes the table, and a box whose cached class
+is NIL -- after every slot a reader consults has missed (the UNBLESSED path:
+`ref`, `blessed`, `reftype`, a method call's invocant, an overload lookup,
+stringification) -- asks the table and caches a hit back into its slot; the
+read is behind a flag set at the first such bless, never before a slot (a
+weak-table read on every method call cost an array-object method row 69 %,
+s530a): `my $u = []; my @l = ($u); bless $u, "Q"; ref $l[0]` is `Q`.  A
+filehandle or GLOB referent keeps its class in
 `*p-handle-stash*` (#2056, #3433). `box-set` copies a class only when the assigned *value* is itself
 a reference: copying a plain value out of a blessed referent yields an
 unblessed scalar, exactly as perl's SV-attached stash does not travel
@@ -994,7 +999,7 @@ and `$a[0] = 3` does not reach `$x`.  A blessed PLAIN scalar (a `bless \$x`
 referent) is not a reference and copies its value, unblessed, as `box-set`
 does.  Example: `my $s = bless {}, "K"; my $t = [$s]; $s = 8; ref $t->[0]`
 is `K`.  (The s529a residue -- a re-bless of an ARRAY / CODE referent through
-one copy -- is closed by the re-bless stash above, s530a; #4061 is what is left.)
+one copy -- is closed by the re-bless stash above, s530a; the first bless, #4061, s532d.)
 
 **A `map` block's result is a COPY, a reference included (normative, s532a,
 #4084).**  `p-map` (and `p-map-flat`) copy every value the block returns

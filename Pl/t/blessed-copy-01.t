@@ -22,12 +22,13 @@
 # Every expected line is perl 5.40.3's output.  The #4000 rows (s530a): perl
 # blesses the REFERENT, so a re-bless of an ARRAY / CODE object through one
 # copy shows through every copy; PCL records the new class on the referent
-# (*p-rebless-stash*).  NOT asserted (filed #4061): a copy taken BEFORE the
-# referent's first bless, and a fresh `\@a` / `\&f` after `bless \@a`.  The
+# (*p-rebless-stash*).  The #4061 rows (s532d): a copy taken BEFORE the
+# referent's FIRST bless, and a fresh `\@a` / `\&f` after `bless \@a`, read
+# the class every bless now records on the referent (the unblessed path).  The
 # #4001 row: a blessed qr// in an element keeps its class.  The #4060 row
 # (s530c): every qr evaluation is a distinct Regexp, so a qr re-bless follows
 # the #4000 referent rule (row 3 of its probe -- a copy taken before the
-# FIRST bless -- is #4061's and not asserted).
+# FIRST bless -- is asserted with the #4061 rows).
 
 use v5.30;
 use strict;
@@ -46,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 10;
 
 sub run_cl {
     my ($code) = @_;
@@ -270,4 +271,54 @@ PL
 12 distinct
 13 1
 14 2
+OUT
+
+test_cl('a FIRST bless of an ARRAY / CODE / qr referent shows through a copy taken BEFORE it (#4061)',
+        <<'PL', <<'OUT');
+use Scalar::Util qw(blessed reftype);
+{ package Q; sub hi { "Q::hi(" . ref($_[0]) . ")" } }
+{ package QO; use overload '""' => sub { "QOobj" }, fallback => 1; }
+my $u = []; my @lu = ($u); bless $u, 'Q'; print "1 ", ref $lu[0], "\n";
+my $u2 = []; my $r2 = $u2; bless $u2, 'Q'; print "2 ", ref $r2, "\n";
+my $bb = []; my $bb2 = $bb; bless $bb, 'Q'; print "3 ", blessed($bb2), "\n";
+sub mk { my @s = (1); bless \@s, 'Q'; return \@s } print "4 ", ref mk(), "\n";
+my @arr; my $ra = \@arr; my $rb = \@arr; bless $ra, 'Q'; print "5 ", ref $rb, "\n";
+sub nm {3} bless \&nm, 'Q'; print "6 ", ref \&nm, "\n";
+my $w = []; my @l = ($w); bless $w, 'QO'; print "7 $l[0]\n";
+my $f = sub { 1 }; my $g = $f; bless $f, 'Q'; print "8 ", ref $g, " ", $g->hi, "\n";
+my $m = []; my $mo = $m; bless $m, 'Q'; print "9 ", $mo->hi, " ", ($mo->isa('Q') ? 1 : 0), ($mo->can('hi') ? 1 : 0), "\n";
+my $c = sub { 7 }; my %h = (c => $c); bless $c, 'Q'; print "10 ", ref $h{c}, " ", $h{c}->hi, " ", $h{c}->(), "\n";
+my $q = qr/x/; my $qo = $q; bless $q, 'Q'; print "11 ", ref $qo, "\n";
+my $s = []; my @sl = ($s); bless $s, 'Q'; print "12 ", reftype $sl[0], " ", ref $sl[0], " ", ref $sl[0], "\n";
+PL
+1 Q
+2 Q
+3 Q
+4 Q
+5 Q
+6 Q
+7 QOobj
+8 Q Q::hi(Q)
+9 Q::hi(Q) 11
+10 Q Q::hi(Q) 7
+11 Q
+12 ARRAY Q Q
+OUT
+
+test_cl('a re-bless after a first bless through another copy: both paths agree; an unblessed ref stays ARRAY (#4061)',
+        <<'PL', <<'OUT');
+{ package Q; sub hi { "Q::hi" } } { package K; sub hi { "K::hi" } }
+my $a1 = []; my $o1 = $a1; bless $a1, 'Q'; bless $a1, 'K'; print "1 ", ref $a1, " ", ref $o1, " ", $o1->hi, "\n";
+my $a2 = []; my $o2 = $a2; bless $a2, 'Q'; bless $o2, 'K'; print "2 ", ref $a2, " ", ref $o2, " ", $a2->hi, "\n";
+my $a3 = []; my $o3 = $a3; bless $o3, 'K'; print "3 ", ref $a3, " ", ref $o3; bless $a3, 'Q'; print " ", ref $a3, " ", ref $o3, "\n";
+my @k; for my $i (1..5) { my $v = [$i]; push @k, $v; bless $v, "C" . ($i % 2) } print "4 ", join(",", map { ref } @k), "\n";
+my $n = 0; for (1..1000) { $n++ if ref [] eq 'ARRAY' } print "5 $n\n";
+my $h = {}; my $ho = $h; bless $h, 'Q'; print "6 ", ref $ho, "\n";
+PL
+1 K K K::hi
+2 K K K::hi
+3 K K Q Q
+4 C1,C0,C1,C0,C1
+5 1000
+6 Q
 OUT

@@ -32507,17 +32507,32 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; lookup on every method call and every ref() of an array or code object --
 ;;; an array-object method row 69 % slower, ref() on an array ref 5x.  A
 ;;; re-bless INTO A DIFFERENT CLASS is rare and is the event that makes a slot
-;;; stale, so the table is written only then and *P-REBLESSED* stays 0 -- one
-;;; fixnum test on the read paths -- in a program that never does one.  A
-;;; copy taken BEFORE the referent's FIRST bless has no slot to go stale and is
-;;; not seen here (task #4061 has the measurement).
+;;; stale, so *P-REBLESSED* stays 0 -- one fixnum test on the read paths that
+;;; ask the table BEFORE a box's slot -- in a program that never does one.
+;;;
+;;; THE FIRST BLESS (task #4061, RULED s532): a copy taken BEFORE the
+;;; referent's first bless (`my @l = ($u); bless $u, "Q"; ref $l[0]') has a
+;;; NIL slot, never a stale one.  So every bless of an ARRAY / CODE referent
+;;; also writes the table (one weak write per bless) and sets
+;;; *P-AGGREGATE-BLESSED*, and the table is read a second time only on the
+;;; UNBLESSED PATH -- a box whose cached class is NIL, after every slot read
+;;; has missed (%p-first-bless-class).  A hit is cached back into the box, so
+;;; the next call through the same container takes the slot.  The blessed
+;;; fast path and hashes (their class lives on the referent) pay nothing; a
+;;; program that blesses only hashes pays one fixnum test on the miss.
 (sb-ext:defglobal *p-reblessed* 0
   "Non-zero once any ARRAY / CODE referent has been re-blessed into a different
    class (#4000): the read paths consult *p-rebless-stash* only then.")
 
+(sb-ext:defglobal *p-aggregate-blessed* 0
+  "Non-zero once any ARRAY / CODE / Regexp referent has been blessed at all
+   (#4061): the UNBLESSED path (%p-first-bless-class) consults
+   *p-rebless-stash* only then.")
+
 (defvar *p-rebless-stash* (make-hash-table :test 'eq :weakness :key)
-  "The class of a RE-BLESSED ARRAY / CODE referent, keyed by the referent (the
-   raw vector or function; #4000).  Weak by key: the entry goes with it.")
+  "The class of a BLESSED ARRAY / CODE / Regexp referent, keyed by the referent
+   (the raw vector, function or qr struct): every bless writes it (#4000 the
+   re-bless, #4061 the first bless).  Weak by key: the entry goes with it.")
 
 (declaim (inline %p-rebless-referent-p))
 (defun %p-rebless-referent-p (v)
@@ -32536,16 +32551,39 @@ would consume, so it dies naming the stream (rule 12)."
        (%p-rebless-referent-p v)
        (gethash v *p-rebless-stash*)))
 
-(defun %p-note-rebless (rv old class)
-  "p-bless's half of #4000: the ARRAY / CODE referent RV is blessed into CLASS
-   through a box whose cached class was OLD.  When that is a CHANGE of class,
-   or RV was re-blessed before, record CLASS on RV itself so every other copy
-   of the reference reads it."
-  (when (or (and old (string/= old class))
-            (and (not (eql *p-reblessed* 0))
-                 (nth-value 1 (gethash rv *p-rebless-stash*))))
+(defun %p-note-bless (rv old class)
+  "p-bless's half of #4000 / #4061: the ARRAY / CODE / Regexp referent RV is
+   blessed into CLASS through a box whose cached class was OLD.  CLASS goes on
+   RV itself, so every other copy of the reference reads it.  A CHANGE of
+   class -- against OLD, or against the class an earlier bless through another
+   copy recorded (a copy taken before that bless has OLD = NIL) -- makes every
+   cached slot suspect, so it sets *P-REBLESSED*."
+  (let ((prior (or old
+                   (and (not (eql *p-aggregate-blessed* 0))
+                        (gethash rv *p-rebless-stash*)))))
     (setf (gethash rv *p-rebless-stash*) class)
-    (setf *p-reblessed* 1)))
+    (setf *p-aggregate-blessed* 1)
+    (when (and prior (string/= prior class))
+      (setf *p-reblessed* 1))))
+
+(declaim (inline %p-first-bless-class))
+(defun %p-first-bless-class (v)
+  "The class a bless recorded on the ARRAY / CODE / Regexp referent V, or NIL
+   -- THE UNBLESSED PATH's lookup (#4061), asked only after every class slot
+   a reader consults has answered NIL.  One fixnum test in a program that
+   never blessed such a referent."
+  (and (not (eql *p-aggregate-blessed* 0))
+       (%p-rebless-referent-p v)
+       (gethash v *p-rebless-stash*)))
+
+(declaim (inline %p-first-bless-cache))
+(defun %p-first-bless-cache (holder v)
+  "%p-first-bless-class of V, cached into HOLDER's class slot on a hit -- the
+   box whose slot is the cache of the class of the reference to V -- so the
+   next read through HOLDER takes the slot (#4061)."
+  (let ((c (%p-first-bless-class v)))
+    (when c (setf (p-box-class holder) c))
+    c))
 
 (declaim (inline %p-held-referent-class))
 (defun %p-held-referent-class (holder v)
@@ -32655,13 +32693,21 @@ would consume, so it dies naming the stream (rule 12)."
       ;; A wrapper V holding an ARRAY / CODE / glob referent: the referent's
       ;; own stash outranks V's slot, which is only the cache of it and goes
       ;; stale on a re-bless through another copy (#4000).
+      ;; Every slot NIL -- the wrapper's and BOX's own, which its callers
+      ;; read next -- is the UNBLESSED path: a first bless through another
+      ;; copy is on the referent (#4061), cached into the wrapper on a hit.
       ((p-box-p v) (or (%p-referent-class box)
                        (and (not (p-box-is-ref box))
-                            (or (%p-rebless-class (p-box-value v))
-                                (p-box-class v)))))
+                            (let ((rv (p-box-value v)))
+                              (or (%p-rebless-class rv)
+                                  (p-box-class v)
+                                  (and (null (p-box-class box))
+                                       (%p-first-bless-cache v rv)))))))
       ;; The referent itself (an array vector, a function, a filehandle
       ;; payload -- the glob perl blesses, #2056 -- or a glob).
       ((%p-held-referent-class box v))
+      ;; ...and BOX's slot NIL: the unblessed path again (#4061).
+      ((and (null (p-box-class box)) (%p-first-bless-cache box v)))
       (t nil))))
 
 (defun %p-fetch-once (x)
@@ -32767,10 +32813,16 @@ would consume, so it dies naming the stream (rule 12)."
       ;; which is what exposed it; the undef payload is not a reference).
       ((or (consp inner) (and (vectorp inner) (not (stringp inner))))
        ;; A RAW array referent that was RE-blessed answers its new class
-       ;; (#4000).
-       (or (%p-rebless-class inner) "ARRAY"))
+       ;; (#4000); one a bless reached first, its class (#4061) -- asked
+       ;; here only for a value with no box (a box's miss was
+       ;; %p-target-class's).
+       (or (%p-rebless-class inner)
+           (and (not (p-box-p val)) (%p-first-bless-class inner))
+           "ARRAY"))
       ;; Code reference
-      ((functionp inner) (or (%p-rebless-class inner) "CODE"))
+      ((functionp inner) (or (%p-rebless-class inner)
+                             (and (not (p-box-p val)) (%p-first-bless-class inner))
+                             "CODE"))
       ;; Typeglob payload.  A glob VALUE is not a reference at all in perl —
       ;; `$g = *foo` makes the SV a GV, and ref($g) is "" — so only an is-ref
       ;; box answers GLOB.  A RAW typeglob is a glob VALUE by the same
@@ -36302,10 +36354,10 @@ would consume, so it dies naming the stream (rule 12)."
                (cond
                  ((hash-table-p rv)
                   (setf (gethash :__class__ rv) class-name))
-                 ;; An ARRAY / CODE referent re-blessed: on the referent
-                 ;; itself, for every other copy (#4000).
+                 ;; An ARRAY / CODE referent blessed: on the referent
+                 ;; itself, for every other copy (#4000, #4061).
                  ((%p-rebless-referent-p rv)
-                  (%p-note-rebless rv old class-name))))))
+                  (%p-note-bless rv old class-name))))))
        ;; The variable/wrapper write stays as the cache box-set copies
        ;; around (fast "is this an object" checks read it).
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
@@ -36321,10 +36373,10 @@ would consume, so it dies naming the stream (rule 12)."
        ;; variable) -- and on the box below, as for any ref.
        (when (or (%p-handle-payload-p inner) (p-typeglob-p inner))
          (setf (gethash inner *p-handle-stash*) class-name))
-       ;; An ARRAY / CODE referent RE-blessed through this box: on the
-       ;; referent itself, for every other copy (#4000).
+       ;; An ARRAY / CODE referent blessed through this box: on the
+       ;; referent itself, for every other copy (#4000, #4061).
        (when (%p-rebless-referent-p inner)
-         (%p-note-rebless inner (and (p-box-p ref) (p-box-class ref)) class-name))
+         (%p-note-bless inner (and (p-box-p ref) (p-box-class ref)) class-name))
        ;; A RAW qr object -- an array element or hash value holding the
        ;; Regexp itself, `bless $a[0], "K"' (#4060): there is no container to
        ;; stamp, and the box made below is stored nowhere, so the class goes
@@ -36359,10 +36411,11 @@ would consume, so it dies naming the stream (rule 12)."
          (and (p-box-class obj)
               (%p-ref-shaped-p (p-box-value obj))
               (p-box-class obj))))
-    ;; A raw filehandle payload (#2056), array vector or function (#4000):
-    ;; the referent's own stash.
+    ;; A raw filehandle payload (#2056), array vector or function (#4000,
+    ;; #4061): the referent's own stash.
     ((%p-handle-stash-class obj))
     ((%p-rebless-class obj))
+    ((%p-first-bless-class obj))
     (t nil)))
 
 (defparameter +p-handle-class+ "IO::Handle"
@@ -36440,7 +36493,11 @@ would consume, so it dies naming the stream (rule 12)."
                  ((and (p-box-p uv) (%p-tielem-box-p invocant))
                   (%pcl-invocant-class uv))))
          (%p-value-invocant-class invocant)))
-    (t (%p-value-invocant-class invocant))))
+    ;; A RAW referent (an unblessed code ref stored in an element has no box):
+    ;; a bless through another copy is on the referent (#4000, #4061).
+    (t (or (%p-rebless-class invocant)
+           (%p-first-bless-class invocant)
+           (%p-value-invocant-class invocant)))))
 
 (defun p-class-invocant-snapshot (&rest names)
   "Record, at the unit's compile->run boundary, whether each qualified class
