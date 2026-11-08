@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536 (reviewing session, 2026-11-08).  After the 21:23 session kill three listeners of s536j's gate (`scratch/s536j/x-final/pl2cl --xserver --xsock ... --xowner N`) were still alive more than 6 minutes after their owners died (`kill -0 N`: no such process). MEASURED before killing them by hand: PPID = systemd --user; blocked in accept (wchan skb_wait_for_more_packets); SIGALRM caught (SigCgt 0x2000), nothing pending; 0 voluntary context switches in 4 s.  A listener whose tick fires would show about 4, so the tick in `_run_xserver` (pl2cl, `$SIG{ALRM}` handler + `alarm 1`) was no longer firing.  Other listeners of the same run did exit, so the tick usually works.  Cost: 25-40 MB RSS each, for as long as nobody kills them. REPRODUCE: kill a gate's process tree mid-run, then look for `pl2cl --xserver` processes whose --xowner pid is gone.  The three processes above are gone, so this needs a fresh reproduction. SUSPECT (not confirmed): the timer is lost on some path through `_xserve` (pl2cl near line 1348 forks a worker; a comment there discusses the alarm timer and fork). CHEAP DISCRIMINATOR: read `_xserve`'s parent path for anything that can run or replace the ALRM handler without the `alarm 1` re-arm; then run one listener under `strace -e trace=alarm,setitimer,rt_sigreturn,accept,clone,fork` and see whether the re-arms stop, and after which request.  Layer: pl2cl only.  Sibling: the `--server` getppid tick (s397a).",
+   "id" : "4781",
+   "status" : "pending",
+   "subject" : "`pl2cl --xserver` can outlive its owner: the once-a-second liveness tick stops firing on some listeners (three found after the s536 session kill)"
+}
