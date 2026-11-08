@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 38;
+plan tests => 40;
 
 sub run_cl {
     my ($code) = @_;
@@ -123,6 +123,27 @@ test_cl('for(substr) positive-start to-end tracks appended text',
 test_cl('for(substr) negative start re-anchors from end',
     q{my $x="abcdef"; for (substr($x,-5)) { $_="XX"; $x.="z"; print "$_\n" }},
     "Xz\n");
+# The PAREN-LESS call is the same lvalue element (#4308): `substr` / `vec`
+# are list operators that take the rest of the element, `pos` a named unary.
+# t/op/magic.t builds every caret glob name this way (`for (substr $v, 0, 1)
+# { $_ = chr(... - 64) }`), so 22 of its "*^X appears to be defined" rows
+# read the unconverted name.  Expected text probed under perl 5.40.3.
+like(transpile('my $x="abcdef"; for (substr $x, 1, 3) { $_="XX" }'),
+    qr/\(p-substr-lvalue-cell /, 'for(substr LIST) paren-less compiles to p-substr-lvalue-cell');
+test_cl('for(substr LIST) paren-less: substr / vec / pos / a modifier / a named loop var write through',
+    q{my $w="ABC"; for (substr $w, 0, 1) { $_="x" } print "1 $w\n";
+      my $v="ABCD"; for (substr $v, 1) { $_="y" } print "2 $v\n";
+      my $q="ABC"; for my $c (substr $q, 2, 1) { $c="z" } print "3 $q\n";
+      my $i=0; my $s="ABCDEF"; for (substr $s, $i + 1, 2) { $_="--" } print "4 $s\n";
+      my $b="\x00"; for (vec $b, 0, 8) { $_=65 } print "5 $b\n";
+      my $p="aaa"; $p =~ /a/g; for (pos $p) { $_=2 } print "6 ", pos($p), "\n";
+      my $n="ABC"; $_="n" for substr $n, 1, 1; print "7 $n\n";
+      our $g="ABC"; for (substr $g, 0, 1) { $_="g" } print "8 $g\n";
+      my $e="ABC"; for (substr $e, 0, 1 or 1) { print "9 $_\n" }
+      for (substr => 1) { print "10 $_\n" }
+      my $v2="^OPEN"; if ($v2 =~ s/^\^(?=.)//) { for (substr $v2, 0, 1) { $_ = chr(ord($_) - 64) } }
+      print "11 ", ord($v2), " ", length($v2), "\n";},
+    "1 xBC\n2 Ay\n3 ABz\n4 A--DEF\n5 A\n6 2\n7 AnC\n8 gBC\n9 A\n10 substr\n10 1\n11 15 4\n");
 
 # --- \ + a SIGIL-DEREF carrying a subscript (task #861) -------------------
 # The same "backslashed a COPY" failure as \substr above, arriving by a

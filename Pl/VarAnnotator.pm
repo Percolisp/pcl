@@ -1392,8 +1392,12 @@ sub _tw_stmt {
         : ();
       my @ah = @lp2 ? Pl::Parser::_foreach_alias_rewrite(\@lp2) : ();
       if (@ah && $ah[0] =~ /^p-(?:substr|pos|vec)$/) {
-        my ($inner) = grep { $_->isa('PPI::Structure::List') } @lp2;
-        my $arg = $inner && $inner->find_first('PPI::Token::Symbol');
+        # `substr($x, …)`: the first Symbol inside the parens; the paren-less
+        # `substr $x, …` (#4308): the token right after the Word.
+        my @lps = Pl::Parser::_foreach_list_unwrap(\@lp2);
+        my $inner = @lps > 1 && $lps[1]->isa('PPI::Structure::List') ? $lps[1] : undef;
+        my $arg = $inner ? $inner->find_first('PPI::Token::Symbol')
+                : (@lps > 1 && $lps[1]->isa('PPI::Token::Symbol')) ? $lps[1] : undef;
         _ev($ctx, $arg->content, 'magic-lvalue-arg')
           if $arg && $arg->content =~ /^\$/;
       }

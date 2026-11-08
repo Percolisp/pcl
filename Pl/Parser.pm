@@ -6462,19 +6462,44 @@ sub _apply_alias_head {
 # A list of SEVERAL elements is a known gap in both spellings (task #267): one
 # head swap cannot rewrite N element forms, and picking them apart needs the
 # per-element lowering the seam does not do.
+# The magic-lvalue builtin a foreach element IS, or undef (one predicate for
+# the head swap here and VarAnnotator's force-box of the scalar argument).
+# `substr(...)` / `pos(...)` / `vec(...)` is Word + argument-List.  The
+# PAREN-LESS call is the same element (#4308): `substr` and `vec` are list
+# operators, so `substr $s, 0, 1` swallows the rest of the element up to a
+# low-precedence `or` / `and` / `xor` (perl dies on a fifth argument), and
+# `pos` is a named unary that takes exactly one scalar (`pos $s`).  t/op/
+# magic.t builds every caret name through `for (substr $v, 0, 1) { $_ = ... }`.
+sub _magic_lvalue_call_head {
+  my ($sig) = @_;
+  return undef unless @$sig >= 2 && ref($sig->[0]) eq 'PPI::Token::Word';
+  my %head = (substr => 'p-substr', pos => 'p-pos', vec => 'p-vec');
+  my $name = $sig->[0]->content;
+  my $h = $head{$name} or return undef;
+  if (ref($sig->[1]) eq 'PPI::Structure::List') {
+    return @$sig == 2 ? $h : undef;
+  }
+  if ($name eq 'pos') {
+    return (@$sig == 2 && ref($sig->[1]) eq 'PPI::Token::Symbol'
+            && $sig->[1]->content =~ /^\$/) ? $h : undef;
+  }
+  return undef unless ref($sig->[1]) eq 'PPI::Token::Symbol'
+                   || ref($sig->[1]) eq 'PPI::Token::Magic';
+  for my $t (@{$sig}[1 .. $#$sig]) {
+    return undef if ref($t) eq 'PPI::Token::Operator'
+                 && $t->content =~ /^(?:or|and|xor|not)$/;
+  }
+  return $h;
+}
+
 sub _foreach_alias_rewrite {
   my ($list_parts) = @_;
   my @sig = _foreach_list_unwrap($list_parts);
   return () unless @sig;
 
-  # Magic-lvalue builtin call: Word + argument-List.
-  if (@sig == 2
-      && ref($sig[0]) eq 'PPI::Token::Word'
-      && ref($sig[1]) eq 'PPI::Structure::List') {
-    my %head = (substr => 'p-substr', pos => 'p-pos', vec => 'p-vec');
-    my $h = $head{ $sig[0]->content } or return ();
-    return ($h, "$h-lvalue-cell");
-  }
+  # Magic-lvalue builtin call: Word + argument-List, or the PAREN-LESS call.
+  my $mh = _magic_lvalue_call_head(\@sig);
+  return ($mh, "$mh-lvalue-cell") if $mh;
 
   # Otherwise: any SINGLE-SCALAR term that ENDS in a subscript is an element
   # access, whatever its spelling — `$h{k}`, `$r->{k}`, `$$r{k}`, `${$r}{k}`,

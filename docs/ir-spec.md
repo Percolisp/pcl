@@ -3062,6 +3062,12 @@ Under raw element storage (§2.3) a slot holding a raw value is **promoted
 in place** to a box at that moment, which is what makes the alias real; a
 hole binds a deferred-element box that vivifies on first write.
 
+A foreach list whose sole element is a magic-lvalue call -- `substr`, `pos`
+or `vec`, with or without parens -- binds VAR to that call's write-through
+cell (`p-substr-lvalue-cell` / `p-pos-lvalue-cell` / `p-vec-lvalue-cell`):
+`for (substr $s, 0, 1) { $_ = "x" }` writes `$s` exactly like
+`for (substr($s, 0, 1))` (#4308).
+
 **`p-foreach-raw` is the read-only twin** (normative, s459am): identical in
 every respect except that VAR is bound to the slot **as it stands**
 (`%p-foreach-elt-raw`) — a raw value directly, an existing box unchanged, a

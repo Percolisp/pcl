@@ -40,11 +40,11 @@ on the left of `=`".  Persistent containers alias; transient computed values do 
 | `$scalar` | the scalar's box is passed | — |
 | `$h{k}` (hash element) | codegen `p-gethash` → **`p-gethash-box`** | `foreach-aliasing-01.t` |
 | `$a[i]` (array element) | codegen `p-aref` → **`p-aref-box`** | `foreach-aliasing-01.t` |
-| `substr/pos/vec(...)` | codegen → **`p-…-lvalue-cell`** (magic cell) | `lvalue-ref-01.t` |
+| `substr/pos/vec(...)`, or paren-less (`substr $s, 0, 1`, #4308) | codegen → **`p-…-lvalue-cell`** (magic cell) | `lvalue-ref-01.t` |
 
 The element + magic-lvalue rewrites are gated by an **AST-level check** in
 `Pl/Parser.pm` `_foreach_alias_rewrite` (sole list element is a Symbol+Subscript,
-or a substr/pos/vec Word+List), then a single rewrite of the generated call head to
+or a substr/pos/vec Word+List or its paren-less call, `_magic_lvalue_call_head`), then a single rewrite of the generated call head to
 its box-returning form.  A two-part match guards against multi-element lists like
 `for ($a[0], $a[1])`.
 
