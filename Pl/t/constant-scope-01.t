@@ -41,7 +41,7 @@ my $pcl_bin      = "$project_root/pcl";
 plan skip_all => "pl2cl not found" unless -x $pl2cl && -x $pcl_bin;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 14;
 
 my $libdir = tempdir(CLEANUP => 1);
 make_path("$libdir/C3870");
@@ -173,4 +173,29 @@ use constant TOP => 3;
 sub t { return TOP * 2 }
 package Q; use constant TOP => 5; sub u { return TOP * 2 }
 package main; print t(), " ", Q::u(), "\n";
+PL
+
+# ---- #4562 (s536b, Role-Tiny concrete-methods.t): a `use constant` in a
+# BLOCK after `package R;` defines R's sub (it took the bare name, read in the
+# section's package: main::X), and a name declared in a BEGIN -- a constant,
+# a prototype -- is known to the BEGIN's own later statements (the parse
+# clock kept the BEGIN's site for every statement inside it).
+both_agree(<<'PL', '#4562: `use constant` after `package R;` in a BEGIN / a sub / a hash form defines R\'s constant');
+BEGIN { package R; use constant X2 => 2; print "b: ", X2, "\n"; }
+print "c: ", R::X2(), " ", (defined &main::X2 ? "main" : "-"), "\n";
+sub f { package R4; use constant X4 => 4; return X4; }
+print "d: ", f(), " ", R4::X4(), "\n";
+BEGIN { package R5; use constant { X5 => 5, Y5 => [5, 6] }; print "e: ", X5, " ", Y5->[1], "\n"; }
+print "f: ", R5::X5(), " ", R5::Y5()->[0], "\n";
+BEGIN { package R6; use constant L6 => (1, 2, 3); }
+my @l = R6::L6(); print "g: @l\n";
+PL
+both_agree(<<'PL', '#4562: a constant / a prototype declared in a BEGIN applies to the BEGIN\'s later statements');
+BEGIN {
+  use constant K => 4;
+  my $s = "abcdefgh";
+  print "a: ", substr($s, 1, K), "|", K + 1, "\n";
+  sub one ($) { "<$_[0]>" }
+  my @r = (one 1, 2); print "b: @r\n";
+}
 PL

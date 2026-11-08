@@ -1641,6 +1641,21 @@ sub _glob_alias_sig_info {
   return $first;
 }
 
+# The name a sub DEFINED here is emitted under.  Inside a block (block_depth
+# > 0) a simple `package Foo;` changes the environment's package stack but
+# NOT the CL section: the emitted text is READ in the section's package, so
+# the sub must carry a fully-qualified name to be interned in Foo regardless
+# of *package*.  ONE rule for every definition that makes a named sub -- a
+# `sub NAME {...}` and a `use constant NAME => ...` (#4562: the constant
+# took the bare name, so `BEGIN { package R; use constant X => 2 }` defined
+# main::X and R::X was undefined).
+sub _in_block_sub_name {
+  my ($self, $name) = @_;
+  return $name if !$name || $name =~ /::/ || $self->_block_depth <= 0;
+  my $pkg = $self->environment->current_package();
+  return $pkg ne 'main' ? "$pkg\::$name" : $name;
+}
+
 # Transform Perl qualified sub name to CL format
 # Perl: A::DESTROY -> CL: A::pl-DESTROY
 # Perl: Hash::Util::func -> CL: |Hash::Util|::pl-func
@@ -2258,6 +2273,16 @@ sub _process_children {
 
   for my $i (0 .. $#children) {
     my $child = $children[$i];
+
+    # THE PARSE CLOCK (#2871) is the statement being lowered.  Parser2
+    # publishes it per statement it lowers itself; a block it hands to v1
+    # whole (a BEGIN body, kind scheduled) kept the BLOCK's site for every
+    # statement inside, so a `use constant X => 1` in the BEGIN registered
+    # BELOW that site and a later `X` in the same BEGIN read as the string
+    # "X" (#4562).  Each statement v1 lowers takes its own site.
+    my $site = $child->isa('PPI::Statement')
+             ? Pl::PExpr::TokenUtils::decl_site($child) : undef;
+    local $self->environment->{parse_site} = $site if $site;
 
     $self->_process_element($child);
 
@@ -7376,16 +7401,7 @@ sub _process_sub_statement {
   # Wrap body in (block nil ...) so p-return works
   # Handle qualified names: A::foo -> A::p-foo (not p-A::foo)
 
-  # When inside a bare block (block_depth > 0), a simple 'package Foo;'
-  # changes the environment's package stack but NOT the CL section.
-  # The sub must carry a fully-qualified name so SBCL interns it in the
-  # correct CL package at read time, regardless of *package*.
-  my $effective_name = $name;
-  if ($name && $name !~ /::/ && $self->_block_depth > 0) {
-    my $pkg = $self->environment->current_package();
-    $effective_name = "$pkg\::$name" if $pkg ne 'main';
-  }
-  my $cl_sub_name = $self->_qualified_sub_to_cl($effective_name);
+  my $cl_sub_name = $self->_qualified_sub_to_cl($self->_in_block_sub_name($name));
 
   # All named subs get a p-declare-sub stub in the declarations bucket.
   # This ensures forward references (e.g. \&foo in a BEGIN block before
@@ -10298,7 +10314,7 @@ sub _emit_constant {
   my $value_parts = shift;
   my $hash_form   = shift;        # `use constant { NAME => VALUE, … }`
 
-  my $cl_sub_name = $self->_qualified_sub_to_cl($name);
+  my $cl_sub_name = $self->_qualified_sub_to_cl($self->_in_block_sub_name($name));
 
   # A NON-LITERAL value is evaluated ONCE, at the `use`, in LIST context, and
   # the sub answers from that cell (task #2681; runtime p-use-constant,
