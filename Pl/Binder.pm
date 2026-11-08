@@ -902,12 +902,145 @@ sub captures {
 # ord-sorted ref list, built once).
 sub _refs_in {
   my ($self, $lo0, $z) = @_;
-  my $s = $self->{sorted} //= [ sort { $a->{ord} <=> $b->{ord} } map { @$_ } values %{ $self->{refs} } ];
+  my $s = $self->_sorted_refs;
   my ($lo, $hi) = (0, scalar @$s);
   while ($lo < $hi) { my $m = ($lo + $hi) >> 1; if ($s->[$m]{ord} < $lo0) { $lo = $m + 1 } else { $hi = $m } }
   my @out;
   for (my $i = $lo; $i < @$s && $s->[$i]{ord} <= $z; $i++) { push @out, $s->[$i] }
   return @out;
+}
+
+sub _sorted_refs {
+  my ($self) = @_;
+  return $self->{sorted} //= [ sort { $a->{ord} <=> $b->{ord} } map { @$_ } values %{ $self->{refs} } ];
+}
+
+# ---------------------------------------------------------------------------
+# THE SPAN QUESTION (s535a, 1c port 3; docs/binder-dual-run-s525.md §6 item 3).
+# Parser2 splits the top level into SECTIONS at `package NAME;` (each one its
+# own CL top-level form, read in its own package); a my-lexical whose USE lies
+# in a later section than its declaration must become a package cell.  The
+# question is "does binding B have a ref in segment j": the ref table grouped
+# by binding, a segment = a range of ordinals.  As written: the table is the
+# source's (the span pass is the first rename pass; a token renamed since is
+# still the same token).
+
+# The USES of binding $b (its declaration excluded), in ordinal order.
+sub uses_of {
+  my ($self, $b) = @_;
+  my $idx = $self->{by_binding} //= do {
+    my %h;
+    for my $r (@{ $self->_sorted_refs }) {
+      next if $r->{via} eq 'decl' || !$r->{binding};
+      push @{ $h{ refaddr $r->{binding} } }, $r;
+    }
+    \%h;
+  };
+  return @{ $idx->{ refaddr $b } || [] };
+}
+
+# The literal-TEXT uses of $b in [$lo, $hi] -- the string-eval rule of port 2
+# (§4(c), ir-spec §2b.4): a quote / heredoc / qw text naming $b counts iff a
+# string eval runs inside $b's visible range (eval_sees).  Resolved as written
+# at the text's position.
+sub text_uses_in {
+  my ($self, $b, $lo, $hi) = @_;
+  return () unless @{ $self->{evals} || [] } && $self->eval_sees($b);
+  (my $bare = $b->{canon}) =~ s/^[\$\@\%\&]//;
+  my @out;
+  for my $t ($self->_text_toks($lo, $hi)) {
+    next if index(_tok_sig($t), $bare) < 0;
+    for my $r (@{ $self->text_refs($t) }) {
+      next unless $r->{canon} eq $b->{canon};
+      my $rb = $self->_resolve_ord($r->{ord}, $r->{canon}, $r->{pkg});
+      push @out, $r if $rb && refaddr($rb) == refaddr($b);
+    }
+  }
+  return @out;
+}
+
+# THE SPANS.  $ranges = [ [lo, hi] | undef, ... ] the ordinal range of each
+# segment in order (undef = an empty segment), $skip = { i => 1 } the segments
+# whose declarations never span (a `package NAME { }` block's: its `my`s die
+# with the block).  Returns one record per my/state binding declared in a
+# segment i and USED in a later one -- { b, di, segs => { j => 1 }, first }
+# (first = the first later segment with a use; text => 1 when only a
+# string-eval text reaches it) -- in declaration order.
+sub spans {
+  my ($self, $ranges, $skip) = @_;
+  # the segments are disjoint and in document order: a binary search on lo
+  my @nz = grep { $ranges->[$_] } 0 .. $#$ranges;
+  my $seg_of = sub {
+    my ($ord) = @_;
+    my ($l, $h) = (0, scalar @nz);
+    while ($l < $h) { my $m = ($l + $h) >> 1; if ($ranges->[ $nz[$m] ][1] < $ord) { $l = $m + 1 } else { $h = $m } }
+    return undef if $l >= @nz;
+    my $j = $nz[$l];
+    return $ord >= $ranges->[$j][0] ? $j : undef;
+  };
+  my @out;
+  for my $b (@{ $self->{bindings} }) {
+    next unless $b->{kind} eq 'my' || $b->{kind} eq 'state';
+    next unless $b->{decl_ord} >= 0;
+    my $di = $seg_of->($b->{decl_ord});
+    next if !defined $di || $skip->{$di};
+    my (%segs, $code);
+    for my $r ($self->uses_of($b)) {
+      my $j = $seg_of->($r->{ord});
+      $segs{$j} = $code = 1 if defined $j && $j > $di;
+    }
+    for my $j ($di + 1 .. $#$ranges) {
+      next if $segs{$j} || !$ranges->[$j];
+      $segs{$j} = 1 if $self->text_uses_in($b, @{ $ranges->[$j] });
+    }
+    next unless %segs;
+    my $first; for (keys %segs) { $first = $_ if !defined $first || $_ < $first }
+    push @out, { b => $b, di => $di, segs => \%segs, first => $first, text => $code ? 0 : 1 };
+  }
+  return @out;
+}
+
+# The binding a DECLARATOR token makes (`my $x`'s `$x`), or undef.
+sub decl_binding {
+  my ($self, $tok) = @_;
+  return $self->{decl_bind}{ refaddr $tok };
+}
+
+# The binding $tok's use of $canon names AS WRITTEN: the token's own record
+# when its text is unchanged since the build, else $canon (rename suffix
+# stripped) resolved at the token's ordinal.  0 = the token does not use
+# $canon; undef = the table holds no record of the token (the caller dies,
+# rule 12).
+sub _use_binding {
+  my ($self, $tok, $canon) = @_;
+  my $a = refaddr $tok;
+  my $list = $self->{refs}{$a} or return undef;
+  (my $orig = $canon) =~ s/$RENAME_SUFFIX//;
+  if (_tok_sig($tok) eq ($self->{sig}{$a} // '')) {
+    for my $r (@$list) { return $r->{binding} if $r->{canon} eq $orig }
+    return 0;
+  }
+  return $self->_resolve_ord($self->{ord}{$a}, $orig, $list->[0]{pkg});
+}
+
+# THE SHADOW QUESTION every rename pass asks (it replaces _ref_shadowed): is
+# $tok's use of $canon a use of the variable $decl declares?  1 / 0, or undef
+# when the table holds no record of either token (rule 12: the caller dies).
+sub refers_to_decl {
+  my ($self, $tok, $canon, $decl) = @_;
+  my $b = $self->{decl_bind}{ refaddr $decl } or return undef;
+  my $u = $self->_use_binding($tok, $canon);
+  return undef unless defined $u;
+  return ($u && refaddr($u) == refaddr($b)) ? 1 : 0;
+}
+
+# The binding of $canon visible right AFTER $node (in $node's scope), or undef
+# when nothing follows it in the document.
+sub binding_after {
+  my ($self, $node, $canon) = @_;
+  my $z = $self->_last_ord($node);
+  return undef unless defined $z && $z < $self->{last};
+  return $self->_resolve_ord($z + 1, $canon, $self->_pkg_at($node));
 }
 
 sub _trace {
@@ -1005,7 +1138,7 @@ sub _binder_for {
   $main->{rebuilds}++;
   _row('R', $main->{file}, $why, $caller, $which, 'tokens=' . ($nb->{last} + 1),
        'build_ms=' . $nb->{stats}{build_ms}) if $main->{mode} eq 'log';
-  if ($key == refaddr($main->{doc})) { %$main = (%$main, %$nb, file => $main->{file}, mode => $main->{mode}, others => $main->{others}, sorted => undef) }
+  if ($key == refaddr($main->{doc})) { %$main = (%$main, %$nb, file => $main->{file}, mode => $main->{mode}, others => $main->{others}, sorted => undef, by_binding => undef, textc => undef, held => undef) }
   else { $main->{others}{$key} = $nb }
   return $key == refaddr($main->{doc}) ? $main : $nb;
 }
@@ -1026,6 +1159,23 @@ sub for_captures {
   my ($parser, $node) = @_;
   $parser->{_binder}{calls}{captures}++ if $parser->{_binder};
   return _binder_for($parser, $node, 'captures', 'captures');
+}
+
+# The binder that answers the SPAN and SHADOW questions about $node (1c port
+# 3, s535a): the span pass, the flatten refusal, and every rename pass's
+# "is this use the declaration's variable" (the old _ref_shadowed).
+sub for_span {
+  my ($parser, $node) = @_;
+  $parser->{_binder}{calls}{span}++ if $parser->{_binder};
+  return _binder_for($parser, $node, 'span', 'span');
+}
+
+# The ordinal range [first, last] of the nodes $a .. $z (undef when the table
+# does not hold them).
+sub ord_range {
+  my ($self, $a, $z) = @_;
+  my ($lo, $hi) = ($self->_first_ord($a), $self->_last_ord($z));
+  return (defined $lo && defined $hi) ? [$lo, $hi] : undef;
 }
 
 sub _verdict_str { my $v = shift; return defined $v ? $v : 'undef' }
