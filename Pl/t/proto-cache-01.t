@@ -34,7 +34,7 @@ my $project_root = "$RealBin/../..";
 my $pl2cl        = "$project_root/pl2cl";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 
-plan tests => 12;
+plan tests => 16;
 
 my $tmp   = tempdir(CLEANUP => 1);
 my $cache = "$tmp/cache";
@@ -164,4 +164,59 @@ PM
     'a changed DEPENDENCY invalidates the depending module\'s entry';
   # and the answer is the one a cache-free compiler gives
   is $after, transpile(off => 1), 'the post-change emission is the uncached one';
+}
+
+# 13-16. A CACHED record compares equal to a WALKED one (task #3961).  The
+#     walk's flags are perl core booleans; JSON::PP used to read them back as
+#     JSON::PP::Boolean objects, so the same-prototype re-registration rule
+#     (Environment::_sited_record keeps the EARLIER site) saw two DIFFERENT
+#     prototypes on a cache hit and the emission depended on whether the
+#     modules were walked in this process: CPAN::FirstTime's prompt() calls.
+#     Each module calls prompt() ABOVE its own `sub prompt ($;$)`; perl
+#     5.40.3 reads PCNdB's call with the IMPORTED ($;$) (`use PCNdA` imports
+#     it at compile time: go() is "B:2") and PCNdC's as a LIST call (`use
+#     PCNdA ()` calls no import: "C:5").  Cold = a fresh cache dir under one
+#     hash seed, warm = the same dir under another.
+write_file("$lib/PCNdA.pm", <<'PM');
+package PCNdA;
+use Exporter 'import';
+our @EXPORT = qw(prompt);
+sub prompt ($;$) { return "A:$_[0]" }
+1;
+PM
+write_file("$lib/PCNdB.pm", <<'PM');
+package PCNdB;
+use PCNdA;
+my @a = (5, 6);
+sub go { return prompt(@a) }
+no warnings;
+sub prompt ($;$) { return "B:$_[0]" }
+1;
+PM
+write_file("$lib/PCNdC.pm", <<'PM');
+package PCNdC;
+use PCNdA ();
+my @a = (5, 6);
+sub go { return prompt(@a) }
+sub prompt ($;$) { return "C:$_[0]" }
+1;
+PM
+sub transpile_module {
+  my ($mod, $dir, $seed) = @_;
+  local $ENV{PCL_CACHE_DIR} = $dir;
+  local $ENV{PERL_HASH_SEED} = $seed;
+  local $ENV{PERL_PERTURB_KEYS} = 0;
+  delete local $ENV{PCL_NO_PROTO_CACHE};
+  return scalar qx{perl -I "$lib" "$pl2cl" --module < "$lib/$mod.pm" 2>/dev/null};
+}
+for my $case (['PCNdB', 'proto:$;$', 'use M imports the prototype'],
+              ['PCNdC', 'list-call', 'use M () imports nothing']) {
+  my ($mod, $kind, $what) = @$case;
+  my $dir  = tempdir(CLEANUP => 1);
+  my $cold = transpile_module($mod, $dir, 0);
+  my $warm = transpile_module($mod, $dir, 1);
+  ok length($cold) && $cold eq $warm,
+     "#3961 $mod ($what): the cold and the warm transpile are byte-identical";
+  like $cold, qr/\("\Q$mod\E" "prompt" 4 "\Q$kind\E"\)/,
+       "#3961 $mod: the call above the module's own sub is perl's $kind";
 }

@@ -1354,7 +1354,8 @@ sub _premerge_include_prototypes {
       next if $module =~ $skip;
       my $menv = $fp->_extract_module_prototypes($module) or next;
       my @imports = $fp->_parse_use_import_list($inc);
-      $fp->_merge_module_prototypes($menv, \@imports, $module);
+      $fp->_merge_module_prototypes($menv, \@imports, $module,
+                                    none => Pl::Parser::use_imports_nothing($inc));
       # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
       $fp->_merge_bare_quote_imports($inc, $menv, scalar @imports, $module);
     } elsif ($type eq 'require') {

@@ -383,9 +383,19 @@ sub taint { $_->{taint} = 1 for @FRAMES; return }
 
 # ------------------------------------------------------------------ the I/O
 
+# A record must READ BACK as the data the walk produced (task #3961): the
+# walk's flags are perl's core booleans (`!!0`), which JSON::PP writes as
+# false / true and decodes, by default, as JSON::PP::Boolean OBJECTS -- so a
+# cached record and a walked one compared UNEQUAL by shape
+# (Environment::_proto_shape_key, the same-prototype re-registration rule),
+# and the emission of a file depended on whether its modules were walked in
+# this process or read from the cache (CPAN/FirstTime.pm's prompt() calls).
+# boolean_values makes the round trip exact (JSON::PP >= 4.0).
 sub _json {
   require JSON::PP;
-  return JSON::PP->new->utf8->canonical;
+  my $j = JSON::PP->new->utf8->canonical;
+  $j->boolean_values(!!0, !!1) if $j->can('boolean_values');
+  return $j;
 }
 
 =head2 load($module, $path, $resolve)

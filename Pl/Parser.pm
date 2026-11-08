@@ -8595,7 +8595,8 @@ sub _process_include_statement {
       # This allows prototypes in other files to work..
       my $module_env = $self->_extract_module_prototypes($module);
       if ($module_env) {
-        $self->_merge_module_prototypes($module_env, \@imports, $module);
+        $self->_merge_module_prototypes($module_env, \@imports, $module,
+                                        none => use_imports_nothing($stmt));
         # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
         $self->_merge_bare_quote_imports($stmt, $module_env, scalar @imports, $module);
       }
@@ -9649,7 +9650,7 @@ sub _expand_import_tags {
 
 # Merge prototypes from another environment (only exported ones)
 sub _merge_module_prototypes {
-  my ($self, $module_env, $imports, $module) = @_;
+  my ($self, $module_env, $imports, $module, %opt) = @_;
 
   # A merged prototype is tagged from_module, and a merge never overwrites
   # a LOCAL declaration (an untagged entry).  Under v2, sub definitions are
@@ -9716,6 +9717,15 @@ sub _merge_module_prototypes {
       }
     }
   }
+
+  # `use M ()` does not call M->import at all (perlfunc use): the stash facts
+  # above stand (a qualified call still sees M's prototypes), the importing
+  # scope gets NOTHING.  Merging every codegen-relevant prototype here made a
+  # same-named sub the file declares BELOW its calls look in force ABOVE them
+  # (the same-prototype re-registration keeps the earlier site) --
+  # CPAN::FirstTime's `use ExtUtils::MakeMaker ()` + its own `sub prompt
+  # ($;$)` (task #3961; use_imports_nothing is the ONE reading).
+  return if $opt{none};
 
   # If specific imports requested, only import those
   if ($imports && @$imports) {
@@ -9946,6 +9956,21 @@ sub bare_quote_import_names {
     || $module_env->get_prototype($_)
     || $exports->{$_}
   } $self->_parse_use_import_list($stmt, bare_quote => 1);
+}
+
+# Is the `use` statement STMT's import list the literal empty list -- `use M
+# ()` / `use M VERSION ()` -- which perl reads as "do not call import" (task
+# #3961)?  `use M qw()` and `use M` are NOT: they call import, with an empty
+# list (Exporter then imports @EXPORT).  A plain function: both lowering
+# paths ask it.
+sub use_imports_nothing {
+  my ($stmt) = @_;
+  my @kids = $stmt->schildren;
+  my @lists = grep { $_->isa('PPI::Structure::List') } @kids;
+  return 0 if @lists != 1 || $lists[0]->schildren;
+  return 0 if grep { $_->isa('PPI::Token::QuoteLike::Words')
+                     || $_->isa('PPI::Token::Quote') } @kids;
+  return 1;
 }
 
 sub _parse_use_import_list {
