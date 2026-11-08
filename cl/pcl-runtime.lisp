@@ -4865,6 +4865,58 @@
         (t (error "use overload: invalid handler ~S for ~S" handler self))))))
 
 ;;; ------------------------------------------------------------
+;;; THE DEREFERENCE OVERLOADS `@{}' / `%{}' (task #4305)
+;;; ------------------------------------------------------------
+;;; perl consults a class's `@{}' handler on EVERY array dereference of an
+;;; object blessed into it, and `%{}' on every hash dereference -- whatever
+;;; the referent is: a blessed SCALAR ref (Mojo::DOM58), a hash-based object
+;;; overloading `@{}', and an ARRAY object overloading `@{}' too (the handler
+;;; is asked before the native array is touched).  pp_rv2av's
+;;; amagic_deref_call: call the handler; a non-reference answer dies; an answer
+;;; pointing at the SAME referent stops (the native deref -- the handler that
+;;; answers its own object, the recursion-safe spelling); a new object with
+;;; overloading of its own is asked again.  #3395 did `&{}' in p-funcall-ref's
+;;; miss branch; this is the container half.
+;;;
+;;; THE COST: an array-object overloading `@{}' passes every container fast
+;;; path, so the test cannot ride in a miss branch the way a tie does.  It is
+;;; ONE fixnum test of a global that is zero until some class in the image
+;;; registers `@{}' or `%{}' (p-register-overloads is the only writer; it is
+;;; never reset -- the exact answer is always p-find-overload's).  Every
+;;; container ENTRY (p-aref-deref, p-gethash-deref, p-cast-@, p-cast-%,
+;;; p-ensure-arrayref, p-ensure-hashref, p-array-last-index, the two element
+;;; designators, the two deref assignments) asks %p-deref-overload first and
+;;; reads what it answers in place of its argument -- the ONE resolver.
+(declaim (type fixnum **p-deref-overloads**))
+(sb-ext:defglobal **p-deref-overloads** 0
+  "1 once a `@{}' or `%{}' handler has been registered in this image, else 0.")
+
+(defmacro %p-deref-overload (ref op)
+  "REF, or what perl's dereference overloading answers for it under OP
+   (\"@{}\" or \"%{}\").  One fixnum test while no class overloads either."
+  `(if (zerop (the fixnum **p-deref-overloads**))
+       ,ref
+       (%p-deref-overload-1 ,ref ,op)))
+
+(defun %p-deref-same-referent-p (a b)
+  "Do A and B point at the same referent (perl's SvRV(a) == SvRV(b))?"
+  (let ((ra (if (p-box-p a) (%p-ref-referent a) a))
+        (rb (if (p-box-p b) (%p-ref-referent b) b)))
+    (eq ra rb)))
+
+(defun %p-deref-overload-1 (ref op)
+  "The slow half of %p-deref-overload: perl's amagic_deref_call loop."
+  (let ((cur ref))
+    (loop
+     (let ((h (p-find-overload cur op)))
+       (when (null h) (return cur))
+       (let ((r (p-scalar-ctx (p-call-overload h cur nil nil))))
+         (unless (and (p-box-p r) (%p-ref-shaped-p (p-box-value r)))
+           (p-die "Overloaded dereference did not return a reference"))
+         (when (%p-deref-same-referent-p r cur) (return r))
+         (setf cur r))))))
+
+;;; ------------------------------------------------------------
 ;;; `nomethod' and the CONVERSION derivations (task #972)
 ;;; ------------------------------------------------------------
 ;;; Both are parts of perl's dispatch that PCL used to skip entirely, and both
@@ -5037,8 +5089,11 @@
                                     (t t))))
                            (t t)))
                    ;; use overload operator handler registration
-                   (setf *p-any-overload-registered* t
-                         (gethash (cons pkg op-str) *p-overload-table*) fn))))))
+                   (progn
+                     (when (or (string= op-str "@{}") (string= op-str "%{}"))
+                       (setf **p-deref-overloads** 1))   ; #4305
+                     (setf *p-any-overload-registered* t
+                           (gethash (cons pkg op-str) *p-overload-table*) fn)))))))
 
 ;;; overload::import / overload::unimport — the runtime entry points behind
 ;;; `overload->import(...)` and modules that call them directly (e.g.
@@ -14197,7 +14252,8 @@ per element."
    a number or a RAW undef is perl's fatal there instead of a symbolic name.
    When idx is a vector (range result), returns a slice instead of a single element.
    When ref is a string, treat as symbolic reference to @name."
-  (let ((arr (%p-listslice-array (unbox ref))))
+  (let* ((ref (%p-deref-overload ref "@{}"))           ; #4305
+         (arr (%p-listslice-array (unbox ref))))
     (cond
       ;; THE HOT PATH, first: an ordinary `$aref->[i]` -- a non-string vector
       ;; indexed by something that is not a vector at all.  Every arm below
@@ -14274,7 +14330,8 @@ per element."
    resolver @{\"name\"} uses (task #1249(2)).  It cannot be left to the vectorp
    arm: a CL string IS a vector, so the name's LENGTH was the answer (7 for
    'main::ga' where perl says 2)."
-  (let* ((v (unbox arr))
+  (let* ((arr (%p-deref-overload arr "@{}"))           ; #4305
+         (v (unbox arr))
          (v (if (p-box-p v) (unbox v) v)))
     (cond
       ((and (vectorp v) (not (stringp v))) (1- (%p-array-count v)))
@@ -15497,7 +15554,8 @@ which is one of #1140's escape spellings (probed)."
   "Ensure ref (a p-box) contains a hash table.
    If ref contains nil or undef, autovivify: create a hash table and store it in the box.
    Returns the raw hash table (not boxed). Used by autovivification macros."
-  (let ((h (unbox ref)))
+  (let* ((ref (%p-deref-overload ref "%{}"))           ; #4305
+         (h (unbox ref)))
     (cond
       ((or (null h) (eq h *p-undef*))
        (let ((new-hash (make-hash-table :test 'equal)))
@@ -15546,7 +15604,8 @@ which is one of #1140's escape spellings (probed)."
   "Ensure ref (a p-box) contains an adjustable vector.
    If ref contains nil or undef, autovivify: create a vector and store it in the box.
    Returns the raw vector (not boxed). Used by autovivification macros."
-  (let ((a (unbox ref)))
+  (let* ((ref (%p-deref-overload ref "@{}"))           ; #4305
+         (a (unbox ref)))
     (cond
       ((or (null a) (eq a *p-undef*))
        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
@@ -15759,7 +15818,8 @@ which is one of #1140's escape spellings (probed)."
    SITE :strict = under `use strict 'refs'` (#2103): see p-aref-deref.
    Returns undef if ref is undef (nil box); write path auto-vivifies via (setf p-gethash-deref).
    When ref is a string, treats as symbolic reference to %name."
-  (let ((h (unbox ref)))
+  (let* ((ref (%p-deref-overload ref "%{}"))           ; #4305
+         (h (unbox ref)))
     (cond
       ;; THE HOT PATH, first and alone: an ordinary `$href->{k}`.  No
       ;; hash-table can satisfy any arm below (*p-undef* is a keyword, and
@@ -16270,7 +16330,8 @@ which is one of #1140's escape spellings (probed)."
    naming a P-BOX.  perl dies `Not a HASH reference` for both.  One check
    here covers all four element primitives; the p-box-p guard is the whole
    cost on the warm path, where H is the hash table itself."
-  (let ((h (unbox hash)))
+  (let* ((hash (%p-deref-overload hash "%{}"))         ; #4305
+         (h (unbox hash)))
     (cond
       ((stringp h) (p-ensure-hashref hash))
       ((and (p-box-p h) (%p-scalar-referent-p hash)) (%p-not-a-ref "HASH"))
@@ -16284,7 +16345,8 @@ which is one of #1140's escape spellings (probed)."
   "The vector behind a Perl array DESIGNATOR — the array-side twin of
    %p-designator-hash (`exists $$p[0]` / `delete $$p[0]` under no strict refs,
    and its scalar-referent fatal — #1628)."
-  (let ((a (unbox arr)))
+  (let* ((arr (%p-deref-overload arr "@{}"))           ; #4305
+         (a (unbox arr)))
     (cond
       ((stringp a) (p-ensure-arrayref arr))
       ((and (p-box-p a) (%p-scalar-referent-p arr)) (%p-not-a-ref "ARRAY"))
@@ -31588,7 +31650,8 @@ would consume, so it dies naming the stream (rule 12)."
    array, stores it back in the box, and returns it (Perl lvalue semantics).
    Symbolic ref: if val unboxes to a string, treats it as a package variable name.
    Typeglob: @{*{...}} resolves to the glob's ARRAY slot (live, lvalue-capable)."
-  (let ((v (unbox val)))
+  (let* ((val (%p-deref-overload val "@{}"))           ; #4305
+         (v (unbox val)))
     (cond
       ;; Direct vector — the overwhelmingly common `@$aref`, kept FIRST so the
       ;; hot path pays nothing for the diagnosis below.
@@ -31645,7 +31708,8 @@ would consume, so it dies naming the stream (rule 12)."
    A string ending in \"::\" is a symbolic stash reference (%{\"Pkg::\"} /
    %{\"main::\"}): return that package's stash (read-only snapshot of its subs),
    so keys/values/exists over a package symbol table work (Class::Inspector etc.)."
-  (let ((v (unbox val)))
+  (let* ((val (%p-deref-overload val "%{}"))           ; #4305
+         (v (unbox val)))
     (cond
       ;; Direct hash — the common `%$href`, first so the hot path is free.
       ((hash-table-p v) v)
@@ -32339,6 +32403,7 @@ would consume, so it dies naming the stream (rule 12)."
   ;; wholesale (its two place arms).  Route there instead of letting the
   ;; autovivify arm below build a fresh table nothing reads — `%$envref = (…)`
   ;; used to be a silent no-op (task #736).
+  (setf hash-ref (%p-deref-overload hash-ref "%{}"))   ; #4305
   (let ((marker (unbox hash-ref)))
     (when (%p-hash-marker-p marker)
       (p-hash-fill marker value)
@@ -32375,6 +32440,7 @@ would consume, so it dies naming the stream (rule 12)."
   "Assign to a dereferenced array: @$ref = (list).
    array-ref is the box containing the array reference.
    Gets or auto-vivifies the array, then clears and repopulates it."
+  (setf array-ref (%p-deref-overload array-ref "@{}")) ; #4305
   (let* ((inner (unbox array-ref))
          (arr (cond
                 ;; Double-boxed (from \@arr): box(box(arr))

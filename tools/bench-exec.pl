@@ -364,6 +364,13 @@ my @benches = (
   ['accum',    "$HN my \$u; for my \$i (1 .. \$n) { \$u .= \"line \$i\\n\" } print length(\$u), \"\\n\";", 30_000, 0],
   # s513c (#2881): append, then READ the growing string -- each read copied it whole.
   ['accumread', "$HN my %h; my \$m = 0; for my \$i (1 .. \$n) { \$h{u} .= \"line \$i\\n\"; \$m++ if substr(\$h{u}, -2, 1) eq \"9\" } print \"\$m\\n\";", 30_000, 0],
+  # s536b (#4305): element / count reads THROUGH a reference -- the container
+  # entries that ask the dereference overloads first.  refderef is a program
+  # with no `@{}` / `%{}` anywhere (the one fixnum test); refderefov is the
+  # same loop in a program where SOME class overloads `@{}` (every deref then
+  # asks p-find-overload of an unblessed reference).
+  ['refderef',  "$HN my \$r = [1 .. 10]; my \$h = { a => 1 }; my \$s = 0; for my \$i (1 .. \$n) { \$s += \$r->[\$i % 10] + \$h->{a} + scalar(\@\$r) } print \"\$s\\n\";", 2_000_000, 0],
+  ['refderefov', "$HN package O; use overload '\@{}' => sub { [] }, fallback => 1; package main; my \$r = [1 .. 10]; my \$h = { a => 1 }; my \$s = 0; for my \$i (1 .. \$n) { \$s += \$r->[\$i % 10] + \$h->{a} + scalar(\@\$r) } print \"\$s\\n\";", 2_000_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------

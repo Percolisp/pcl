@@ -908,6 +908,57 @@ PL
 }
 
 {
+    # #4305 (s536b, Mojo-DOM58 t/dom.t): the DEREFERENCE overloads `@{}` /
+    # `%{}` are asked on every array / hash dereference of an object blessed
+    # into the class -- a blessed SCALAR ref (Mojo::DOM58's shape), a hash
+    # object overloading `@{}` (its handler's own `$_[0]->{list}` is native),
+    # an ARRAY object overloading `@{}` (the handler wins over the referent),
+    # inherited through @ISA, a handler answering its own object (native, the
+    # recursion-safe spelling), a chain of overloaded objects, writes /
+    # exists / delete / keys through the handler's hash, and a handler that
+    # answers a non-reference dies perl's way.
+    my $prog = <<'PL';
+package Obj;
+use overload '@{}' => sub { $_[0]->kids }, '%{}' => sub { {a=>7} }, '""' => sub { "OBJ" }, fallback => 1;
+sub new { my ($c) = @_; my $s = \my $x; bless $s, $c }
+sub kids { ['k0', 'k1'] }
+package AObj; use overload '@{}' => sub { ['h0','h1','h2'] }, fallback => 1;
+sub new { bless [9], shift }
+package HObj; use overload '@{}' => sub { $_[0]->{list} }, fallback => 1;
+sub new { bless { list => [1,2,3] }, shift }
+package SelfA; our $n = 0; use overload '@{}' => sub { $n++; $_[0] }, fallback => 1;
+sub new { bless [5,6], shift }
+package Kid; our @ISA = ('HObj');
+package Bad; use overload '@{}' => sub { 5 }, fallback => 1;
+sub new { my $x; bless \$x, shift }
+package Chain2; use overload '@{}' => sub { ['c2'] }, fallback => 1;
+sub new { my $x; bless \$x, shift }
+package Chain1; use overload '@{}' => sub { Chain2->new }, fallback => 1;
+sub new { my $x; bless \$x, shift }
+package HW; my %store = (a => 1);
+use overload '%{}' => sub { \%store }, fallback => 1;
+sub new { my $x; bless \$x, shift }
+package main;
+my $o = Obj->new;
+print "A $o->[0] $$o[1] ", scalar(@$o), " $#$o $o->{a} [@$o] [@$o[0,1]] [", join(",", keys %$o), "] $o\n";
+my @m = map { "<$_>" } @$o; print "B @m\n";
+my $a = AObj->new; my $h = HObj->new; my $s = SelfA->new; my $k = Kid->new;
+print "C $a->[0] ", scalar(@$a), " | $h->[1] ", scalar(@$h), " $h->{list}[2] | $s->[1] ", scalar(@$s), " n=$SelfA::n | $k->[0]\n";
+push @$h, 4; $h->[0] = 'z'; print "D ", scalar(@{$h->{list}}), " $h->{list}[0]\n";
+print "E ", eval { my $z = Bad->new->[0]; 1 } ? "lived" : ($@ =~ /^(Overloaded dereference did not return a reference)/)[0], "\n";
+print "F ", Chain1->new->[0], "\n";
+my $w = HW->new; $w->{b} = 3; my $ex = (exists $w->{a} ? 1 : 0) . (exists $w->{zz} ? 1 : 0);
+delete $w->{a}; print "G $store{b} $ex ", join(",", sort keys %store), " ", join(",", sort keys %$w), "\n";
+my $p = {q => 1}; my $pa = [7]; print "H $p->{q} $pa->[0] ", ref($w), "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    binmode($fh, ':raw'); print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want,
+       '#4305: the @{} / %{} dereference overloads are asked on every array / hash dereference of an object (perl oracle)');
+}
+
+{
     # #3413 (s520a): a filename builtin takes its operand's `""` overload, as
     # the filetests do (#1031) -- unlink, chmod, chown, utime, truncate,
     # stat and a 3-arg open used the payload's raw text
