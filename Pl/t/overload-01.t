@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 48;
+plan tests => 49;
 
 sub run_cl {
     my ($code) = @_;
@@ -939,4 +939,55 @@ PL
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want,
        '#3413: unlink / chmod / chown / utime / truncate / stat / rename / link / open take a path object\'s "" overload (perl oracle)');
+}
+
+{
+    # #135 (s536a, Role-Tiny overload.t): `use overload` WRITES THE STASH as
+    # overload.pm does -- `(OP` code entries, a method-name handler as
+    # \&overload::nil + the name in ${"P::(OP"}, the `((` / `()` markers and the
+    # fallback in ${"P::()"}; overload::unimport deletes its entry.  Code that
+    # composes a role copies those entries (code first, then
+    # `*$glob = \${ \*{"R::(OP"} }`, a GLOB reference) and the copy overloads; a
+    # class's own entries are visible, so a composer skips them.  The last line:
+    # `*y = $r` with $r holding \$s aliases $s, and \$g with $g a glob is a GLOB
+    # reference (one reading, %p-glob-rhs-inner).
+    my $prog = <<'PL';
+package R;
+sub as_string { "welp" }
+sub as_num { 219 }
+use overload '""' => \&as_string, '0+' => 'as_num', bool => sub(){0}, fallback => 1;
+package C; sub new { bless {}, shift }
+package C2; use overload '""' => sub { "c2" }; sub new { bless {}, shift }
+package R3; use overload '""' => sub { "r3" }, '+' => sub { 1 }; BEGIN { overload->unimport('+') }
+package main;
+no strict 'refs';
+my @ks = sort grep /^\(/, keys %{"R::"};
+print "R: @ks | () = ${'R::()'} | (0+ = ${'R::(0+'} | nil: ",
+  (\&{"R::(0+"} == \&overload::nil ? 1 : 0), " ", (defined &overload::nil ? 1 : 0), "\n";
+print "R3: ", join(" ", sort grep /^\(/, keys %{"R3::"}), "\n";
+my %have = map { $_ => 1 } keys %{"C2::"};
+for my $i (@ks) {
+  my $code = \&{"R::$i"};
+  for my $to ('C', ($have{$i} ? () : 'C2')) {
+    my $glob = \*{"${to}::$i"};
+    *$glob = $code;
+    next unless $code == \&overload::nil;
+    my $ov = ${ \*{"R::$i"} };
+    *$glob = \$ov;
+  }
+}
+*C::as_num = \&R::as_num;
+*C2::as_num = \&R::as_num;
+my ($o, $o2) = (C->new, C2->new);
+print "C: $o ", sprintf("%d", $o), " ", ($o ? "t" : "f"), " | C2: $o2 ", sprintf("%d", $o2), "\n";
+print "C2 has: ", join(" ", sort grep /^\(/, keys %{"C2::"}), "\n";
+my $s = "sv"; my $r = \$s; *D::w = $r; $D::w = "via-alias";
+my $g = *R::as_string; my $gr = \$g; *E::x = $gr;
+print "s=$s E::x=", E::x(), "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    binmode($fh, ':raw'); print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want,
+       '#135: use overload writes perl\'s stash entries; a role-style copy of them (code, then the method-name scalar through a glob ref) overloads the target; *y = $r aliases (perl oracle)');
 }
