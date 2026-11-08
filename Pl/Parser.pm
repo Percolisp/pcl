@@ -6623,9 +6623,26 @@ sub _foreach_scalar_elements {
   my ($list_parts) = @_;
   my @elems = _foreach_split_elements($list_parts) or return ();
   for my $e (@elems) {
-    return () unless @$e && _foreach_single_scalar_p($e);
+    return () unless @$e
+      && (_foreach_single_scalar_p($e)
+          || (@elems > 1 && _foreach_magic_call_elem_p($e)));
   }
   return @elems;
+}
+
+# A magic-lvalue CALL as one element of a SEVERAL-element foreach list (#4581):
+# `substr(...)` / `vec(...)` / `pos(...)` / `pos $x` is exactly ONE value, so
+# the list keeps its static length and each element gets its write-through
+# cell from the per-element alias rewrite, as the sole element does (the k=1
+# rule IS the k=k rule, s369).  The PAREN-LESS `substr $s, 0, 1` / `vec ...`
+# is a list operator that swallows the rest of the list, so the comma split
+# does not see its elements and the list declines (the flattener, as before).
+# The SOLE call keeps the whole-list lowering and its alias swap, unchanged:
+# a cell needs no `(vector …)` wrap -- it never holds a vector to spread.
+sub _foreach_magic_call_elem_p {
+  my ($e) = @_;
+  return 0 unless _magic_lvalue_call_head($e);
+  return ref($e->[1]) eq 'PPI::Structure::List' || $e->[0]->content eq 'pos';
 }
 
 # `for my $x (@a, @b)` — the ORDERED array names when the foreach list is

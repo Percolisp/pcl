@@ -1381,26 +1381,11 @@ sub _tw_stmt {
           $ctx->{foreach_my_alias}{$var->content}++ if $is_my;
         }
       }
-      # A magic-lvalue foreach alias — `for (substr($x,…))` / pos / vec — binds
-      # the loop var to a write-through cell (p-substr-lvalue-cell), so a write
-      # to the loop var mutates the SCALAR ARG $x.  VarAnnotator otherwise sees
-      # no write to $x and would raw-slot it, leaving the cell nothing to write
-      # back into.  Veto $x's raw slot (force-box) so the write-through works.
       my ($list2) = grep { $_->isa('PPI::Structure::List') } @k;
       my @lp2 = $list2
         ? (map { $_->schildren } grep { $_->isa('PPI::Statement') } $list2->children)
         : ();
-      my @ah = @lp2 ? Pl::Parser::_foreach_alias_rewrite(\@lp2) : ();
-      if (@ah && $ah[0] =~ /^p-(?:substr|pos|vec)$/) {
-        # `substr($x, …)`: the first Symbol inside the parens; the paren-less
-        # `substr $x, …` (#4308): the token right after the Word.
-        my @lps = Pl::Parser::_foreach_list_unwrap(\@lp2);
-        my $inner = @lps > 1 && $lps[1]->isa('PPI::Structure::List') ? $lps[1] : undef;
-        my $arg = $inner ? $inner->find_first('PPI::Token::Symbol')
-                : (@lps > 1 && $lps[1]->isa('PPI::Token::Symbol')) ? $lps[1] : undef;
-        _ev($ctx, $arg->content, 'magic-lvalue-arg')
-          if $arg && $arg->content =~ /^\$/;
-      }
+      _ev_foreach_magic_args($ctx, \@lp2) if @lp2;
       # Same veto, one shape over: `for ($x) { $_ = … }` — see
       # _ev_foreach_alias_list.  The statement-MODIFIER spelling of the same
       # loop vetoes from _tw_stmt_expr, through the same helper.
@@ -1498,6 +1483,33 @@ sub _semi {
 #       is the only safe direction for a veto — routing this through the
 #       qualifier would silently drop those vetoes.
 # A THIRD comma walk in this family reopens the shared-primitive question.
+# A magic-lvalue foreach alias — `for (substr($x,…))` / pos / vec — binds the
+# loop var to a write-through cell (p-substr-lvalue-cell), so a write to the
+# loop var mutates the SCALAR ARG $x.  VarAnnotator otherwise sees no write to
+# $x and would raw-slot it, leaving the cell nothing to write back into.  Veto
+# $x's raw slot (force-box) so the write-through works.  The sole element is
+# the whole list (the paren-less `substr $x, …` included, #4308); a list of
+# SEVERAL elements is the qualifier's own elements (#4581,
+# Pl::Parser::_foreach_scalar_elements -- not a new comma walk), each asked the
+# same alias verdict the lowering asks.
+sub _ev_foreach_magic_args {
+  my ($ctx, $parts) = @_;
+  my @el = Pl::Parser::_foreach_scalar_elements($parts);
+  @el = ($parts) unless @el > 1;
+  for my $e (@el) {
+    my @ah = Pl::Parser::_foreach_alias_rewrite($e);
+    next unless @ah && $ah[0] =~ /^p-(?:substr|pos|vec)$/;
+    # `substr($x, …)`: the first Symbol inside the parens; the paren-less
+    # `substr $x, …` / `pos $x`: the token right after the Word.
+    my @lps = Pl::Parser::_foreach_list_unwrap($e);
+    my $inner = @lps > 1 && $lps[1]->isa('PPI::Structure::List') ? $lps[1] : undef;
+    my $arg = $inner ? $inner->find_first('PPI::Token::Symbol')
+            : (@lps > 1 && $lps[1]->isa('PPI::Token::Symbol')) ? $lps[1] : undef;
+    _ev($ctx, $arg->content, 'magic-lvalue-arg')
+      if $arg && $arg->content =~ /^\$/;
+  }
+}
+
 sub _ev_foreach_alias_list {
   my ($ctx, $parts) = @_;
   # The list arrives wrapped differently per spelling: the block form hands

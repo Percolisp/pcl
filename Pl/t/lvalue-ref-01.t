@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 41;
+plan tests => 42;
 
 sub run_cl {
     my ($code) = @_;
@@ -160,6 +160,22 @@ test_cl('#4309 for (substr ELEMENT, ...) writes the element: hash / array / thro
       my %v = (b => "\x00"); for (vec($v{b}, 0, 8)) { $_ = 66 } print "7 $v{b}\n";
       $_ = "x" for substr $a[0], 0, 1; print "8 $a[0]\n";},
     "1 hBC\n2 XYz\n3 hQC\n4 Jello\n5 worlD\n6 [Q]\n7 B\n8 xYz\n");
+# #4581 (s536f): a foreach list of SEVERAL elements, magic-lvalue calls among
+# them, keeps its static length -- each call gets its write-through cell from
+# the per-element alias rewrite, as the sole call does (the writes were lost
+# on the flattener's copies).  Expected text probed under perl 5.40.3.
+test_cl('#4581 for (substr(...), substr(...), $x, $h{k}) writes every window',
+    q{my @a = ("XYZ"); my %h = (k => "hQC");
+      for my $c (substr($a[0], 0, 1), substr($h{k}, 1, 1)) { $c = lc $c } print "1 $a[0] $h{k}\n";
+      my $s = "AB"; my $t = "CD"; for (substr($s,0,1), substr($t,1)) { $_ = "z" } print "2 $s $t\n";
+      my $x = "x"; my $u = "UV"; for ($x, substr($u,0,1), $h{k}) { $_ .= "!" } print "3 $x $u $h{k}\n";
+      my $n = "\x00"; my $m = "\x00"; for (vec($n, 0, 8), vec($m, 0, 8)) { $_ = 65 } print "4 $n $m\n";
+      my $p = "aaa"; my $q = "bbb"; $p =~ /a/g; $q =~ /b/g;
+      for (pos($p), pos($q)) { $_ = 2 } print "5 ", pos($p), " ", pos($q), "\n";
+      my $w = "hello"; for (substr($w, 0, 1), substr($w, 4, 1)) { $_ = uc } print "6 $w\n";
+      sub mk { my $l = "local"; for (substr($l, 0, 1), substr($l, 1, 1)) { $_ = uc } $l } print "7 ", mk(), "\n";
+      my $v = "UV"; $_ = "q" for substr($v, 0, 1), substr($s, 1); print "8 $v $s\n";},
+    "1 xYZ hqC\n2 zB Cz\n3 x! U!V hqC!\n4 A A\n5 2 2\n6 HellO\n7 LOcal\n8 qV zq\n");
 
 # --- \ + a SIGIL-DEREF carrying a subscript (task #861) -------------------
 # The same "backslashed a COPY" failure as \substr above, arriving by a
