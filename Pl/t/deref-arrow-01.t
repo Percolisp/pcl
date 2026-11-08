@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub run_perl {
     my ($code) = @_;
@@ -166,3 +166,26 @@ print "g=", (1 ? $$r->who : "no"), "\n";
     unlike($cl, qr/\(p-cast-\$ \([^)]*p-method-call \$r /,
          '#1620: … and never wraps the method call');
 }
+
+# ── #4481 (s536g): a postfix `->` after a DYNAMIC-name method call with
+# arguments -- `$o->$m(1)->new(7)` -- continues the chain as the static
+# `$o->cls(1)->new(7)` does.  The term fold took `(1)->new(7)` for a term of
+# its own (the `( args )` after `-> $m` is still a raw list / <tree_val>, not
+# a <funcall>), and the statement was DROPPED -- PPI's own Lexer.pm:715 is
+# this shape. ─────────────────────────────────────────────────────────────
+test_transpile('#4481 -> after $o->$m(ARGS), $o->$cref(ARGS), $o->${\ EXPR}(ARGS), Class->$m(ARGS)', <<'PL');
+package P; sub cls { "Q" } sub arr { [7, 8] } sub h { {k => "v"} } sub self { $_[0] } sub n { $_[1] * 10 }
+package Q; sub new { bless {v => $_[1]}, $_[0] } sub x { "x" . $_[0]{v} }
+package main;
+my $o = bless {}, "P"; my $m = "cls"; my $n = "n";
+my $s = $o->$m(1)->new(7); print "1 ", ref($s), " ", $s->{v}, "\n";
+my $m2 = "self"; print "2 ", ref($o->$m2->$m2), "\n";
+my $ma = "arr"; print "3 ", $o->$ma(1)->[0], "\n";
+my $mh = "h"; print "4 ", $o->$mh(1)->{k}, "\n";
+my $cref = sub { "Q" }; my $t = $o->$cref(1)->new(9); print "5 ", ref($t), " ", $t->{v}, "\n";
+my $u = $o->${\ "cls"}(1)->new(3); print "6 ", ref($u), " ", $u->{v}, "\n";
+my $w = P->$m(1)->new(4); print "7 ", ref($w), " ", $w->{v}, "\n";
+sub show { join("|", @_) }
+print "8 ", show($o->$m(1)->new(7)->{v}, 2), " ", $o->$m (1)->new(5)->x, "\n";
+my @l = ($o->$m(1)->new(3)->x, 4); my @k = ($o->$m, (1)); print "9 @l | @k | ", $o->$n(2) + 3, "\n";
+PL

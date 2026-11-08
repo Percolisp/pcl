@@ -2403,12 +2403,20 @@ sub _term_extent {
   # the walker is the only caller that wants them: a parenthesised List
   # directly after a method name IS that call's argument list, and the chain
   # continues past it (`$o->m(1)->n(2)[0]`).  Before step 4 this shape made the
-  # walker DECLINE rather than stop in the middle of a method call.
+  # walker DECLINE rather than stop in the middle of a method call.  The list
+  # may already be the <tree_val> the ()-replacement makes of it -- the shape a
+  # DYNAMIC method name leaves (`$o->$m(1)->new(7)`: a static `name(1)` is a
+  # <funcall> by then, the chain walker's W1), and the chain continues past it
+  # the same way (#4481: it stopped at `$m`, and `(1)->new(7)` was parsed as a
+  # second term -- the statement was DROPPED).
   while (1) {
     my $next = $self->_extend_postfix_chain($e, $end);
+    my $args = $next + 1 <= $limit ? $e->[$next + 1] : undef;
     if ($next > $end
-        && $next + 1 <= $limit
-        && ref($e->[$next + 1]) eq 'PPI::Structure::List'
+        && $args
+        && (ref($args) eq 'PPI::Structure::List'
+            || ($self->is_internal_node_type($args)
+                && ($args->{type} // '') eq 'tree_val'))
         && ($self->is_arrow_op($e->[$next - 1])
             # -> ${ EXPR } ( args ): the name step is Cast+Block (W7)
             || ($next >= 2
@@ -2566,6 +2574,19 @@ sub _fold_terms {
       my $prev = $e->[$i - 1];
       next if ref($prev) eq 'PPI::Token::Cast'
            || $self->is_arrow_op($prev);
+      # ...and so is the ARGUMENT LIST of a method whose name is not a funcall
+      # yet -- `-> $m ( args )`, `-> ${ EXPR } ( args )`: the `( args )` after
+      # the name belongs to that call (_term_extent takes it), never a term
+      # of its own.  Folding `(1)->new(7)` alone left `$o->$m` with no
+      # arguments beside a second methodcall, and the statement DROPPED (#4481).
+      if ($r eq 'PPI::Structure::List'
+          || ($self->is_internal_node_type($t) && ($t->{type} // '') eq 'tree_val')) {
+        next if $i >= 2 && $self->is_arrow_op($e->[$i - 2])            # -> NAME ( args )
+             && ref($prev) =~ /^PPI::Token::(?:Symbol|Magic|Word)\z/;
+        next if $i >= 3 && ref($prev) eq 'PPI::Structure::Block'        # -> ${ EXPR } ( args )
+             && ref($e->[$i - 2]) eq 'PPI::Token::Cast' && $e->[$i - 2]->content eq '$'
+             && $self->is_arrow_op($e->[$i - 3]);
+      }
       # A Constructor is a genuine anon-array primary only where nothing
       # before it could own it as a POSTFIX group.  PPI classifies `[...]`
       # by its predecessor, and after a `)` (list slice `(...)[0]`), a qw
