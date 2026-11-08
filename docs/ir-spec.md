@@ -4758,6 +4758,43 @@ Two consequences a translator must implement or lose output:
   `(NFOUND, TIMELEFT)` (`select` is wantarray-sensitive); a failing select(2)
   is -1 with `$!` set — never a silent 0.
 
+### 7.6b Handle identity of `-`, and the STATUS VARIABLES after I/O and wait (normative, s536h)
+
+* **The two-argument `-` is a NEW handle on a standard stream** (tasks #4263,
+  #4262): `-`, `<-`, `+<-` give STDIN's stream, `>-`, `>>-`, `+>-` STDOUT's.
+  The handle shares the standard stream's buffer (program order holds), and its
+  `close` only DETACHES it: true, no flush, `$!` unchanged, and the standard
+  handle stays open (perl's IoTYPE_STD).  The THREE-argument form never does
+  this: `open($f, ">", "-")` opens a file named `-`.  An EMPTY file name fails
+  with ENOENT in every mode.  Example: `open(O, ">-"); print O "a\n"; close O;
+  print "b\n"` prints both lines.
+* **`wait` / `waitpid` always write `$?`** (#4224): the reaped child's status,
+  or -1 when nothing was reaped — no child at all (the result is -1, `$!` is
+  ECHILD) and a WNOHANG poll of a child that is still running (the result is
+  0) alike.
+* **`$!` after I/O** (#4284, perl's PerlIO and pp_sys.c):
+  - a read that REACHES END OF FILE on a descriptor handle clears `$!` — a
+    readline returning undef, a last record without its separator, a list
+    readline, a slurp.  The end-of-file state is STICKY until a `seek`: a
+    second read at the end does not clear it again.  An in-memory handle never
+    clears it;
+  - `read`, `sysread`, `syswrite` and `truncate` clear `$!` before they run,
+    so a successful call leaves 0;
+  - `getc` at end of file sets EBADF; `eof` keeps `$!` (it does enter the
+    end-of-file state, so a readline after it keeps `$!` too);
+  - the main program's RUN phase starts with `$! = 0` when the program came
+    from a FILE that does not stop at `__END__` / `__DATA__` (perl's lexer
+    read it to its end); a `-e` program keeps what its BEGIN blocks left;
+  - `do FILE` that finds and opens its file clears `$!`, as `require` does.
+
+  Example: `BEGIN { -d "/nope" } print 0+$!` prints 0; `open my $h, "<", $f;
+  -d "/nope"; my @l = <$h>; print 0+$!` prints 0.
+* **A SYMBOLIC glob name resolves like a static one** (#4310): an unqualified
+  `*{"NAME"}` is main's glob when NAME is a forced-main name (`_ INC ENV SIG
+  ARGV STDIN STDOUT STDERR ARGVOUT`) or does not begin like an identifier
+  (punctuation, a digit, a caret name), and the current package's otherwise.
+  Example: `package Foo; print *{"STDIN"}{PACKAGE}` prints `main`.
+
 ### 7.7 I/O layers: a handle carries OCTETS unless told otherwise (normative, s470br, task #1115)
 
 perl's default I/O discipline is BYTES, and it is observable in every
