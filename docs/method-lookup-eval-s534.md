@@ -270,7 +270,22 @@ class family (no case sees another's edits), each calling BEFORE and AFTER an
 event so a cache that answered the first call is asked the second.  Expected =
 real perl 5.40.3 (`matrix.perl`); run on each core by `scratch/s534a/run-matrix.sh`.
 
-__MATRIX__
+| cases | perl | base | (a) | (b) | (c) | (d) | (e) | (f) |
+|---|---|---|---|---|---|---|---|---|
+| `@ISA` edits between two calls -- list assign, `unshift`/`shift`, `push` (miss), `local @ISA` (block and in a sub), `*C::ISA = [...]`, `*C::ISA = \@x` then `$x[0] =`, element store, `splice`, through a reference (`@$r =`, `push @$r`, `$r->[0] =`), symbolic `@{"${c}::ISA"}`, `$#ISA = -1`, `undef @ISA`, `@ISA = ()`, `pop`/`push`, in-place element edits (`.=`, `s///`, `tr`, lvalue `substr`, `chop`), `for (@ISA) { $_ = ... }`, `map { $_ = ... }`, `@ISA = reverse ...`, `delete $C::{ISA}`, the invocant's own `@ISA` (26) | = | = | = | = | **12 STALE** | = | = | = |
+| methods defined later (string eval, glob, glob of an existing ref), removed (`undef &`, `delete $C::{m}`, of the found one too), `local *C::m`, redefining the found one (glob, eval) (10) | = | 2 differ (#1530) | = | = | = | = | = | = |
+| `SUPER::` after an `@ISA` edit, the DFS diamond, `use mro 'c3'`, `next::method`, AUTOLOAD (then a real method), AUTOLOAD in a closer class, `@UNIVERSAL::ISA` push/pop, a `UNIVERSAL::` sub then a closer one, `can`/`isa`/`DOES`, `can` after a definition, `isa` after an edit, DESTROY lookup (12) | = | 2 differ (#3631, ns-mro) | = | = | = | = | = | = |
+| `use parent`/`use base` with `::` names, a class born by `bless` at run time, rebless, a class-name string invocant, one site over five classes, a loop that defines a method between rounds, two names one class, a stash alias (8) | = | 2 differ (#4521, the alias after a bless) | = | = | = | = | = | = |
+| inherited overloads: `bool`/`""`/`==`/`.`, an `@ISA` edit under a `""`, an overload defined later by eval, inherited `fallback => 0`, a method-NAME handler redefined (5) | = | 1 differs (#960(a)) | = | = | = | = | = | = |
+| the interning probe (`intern.pl`, 2 lines) | stash grows | unchanged | = | = | = | = | = | = |
+
+"=" means identical to the column on its left's reference: perl for the base
+column, the BASE for every prototype column (a prototype must not change a
+single answer, right or wrong).  The base's 7 divergences from perl are all
+pre-existing and filed (§8).  (c)'s 12 stale cases are exactly the write paths
+its obvious audit did not hook -- a write through a reference or a symbolic
+name, `$#ISA`, `undef`, an element modified in place, an aliasing write, a stash
+delete: each answered the OLD method, silently.
 
 ## 6. Recommendation
 
