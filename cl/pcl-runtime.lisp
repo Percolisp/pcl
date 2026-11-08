@@ -25082,6 +25082,12 @@ would consume, so it dies naming the stream (rule 12)."
               (error () (%pcl-save-errno) nil))))
     count))
 
+(declaim (inline %p-utime-spread-p))
+(defun %p-utime-spread-p (x)
+  "Is X an aggregate spread into utime's argument list (an array, a hash, a
+   list) -- one that FLATTENS, as no scalar argument does (#4321)?"
+  (or (and (vectorp x) (not (stringp x))) (hash-table-p x) (consp x)))
+
 (defun p-utime (&optional atime mtime &rest files)
   "Perl utime ATIME, MTIME, LIST — set access/modification times. Returns count.
    Times are Unix-epoch seconds (same convention as sb-posix:utime).  undef
@@ -25090,7 +25096,18 @@ would consume, so it dies naming the stream (rule 12)."
    short list — 0 files touched, returns 0.  Only a LITERAL undef means
    'now': an undef VARIABLE is time 0, as in perl (probed 5.40.3).  The LIST
    is flattened like p-kill's and a failure sets $! (#2923: `utime $a, $m,
-   @files` touched nothing and answered 0)."
+   @files` touched nothing and answered 0).  The TIMES may come from an
+   array too -- `utime @t, $f' with `@t = (stat $f)[8,9]', Template
+   Toolkit's compile2.t (#4321): utime's argument is ONE list, so a spread
+   in either time slot re-splits the whole flattened list, and its elements
+   are values, never the literal undef (perl tests &PL_sv_undef)."
+  (when (or (%p-utime-spread-p atime) (%p-utime-spread-p mtime))
+    (let ((flat (coerce (p-flatten-args (list* atime mtime files)) 'list)))
+      (return-from p-utime
+        (apply #'p-utime
+               (to-number (if flat (pop flat) 0))
+               (to-number (if flat (pop flat) 0))
+               flat))))
   (let ((a (unless (or (null atime) (eq atime *p-undef*))
              (%pcl-to-integer (to-number atime))))
         (m (unless (or (null mtime) (eq mtime *p-undef*))
@@ -26694,7 +26711,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-11800"
+(defparameter *pcl-cache-generation* "v2-11900"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -27774,6 +27791,9 @@ would consume, so it dies naming the stream (rule 12)."
   (mod-deps nil)
   (res nil)
   (tried nil)
+  ;; the SOURCE file's byte size when the transpile read it (#4165), or NIL
+  ;; for a manifest with no `size` line (a string eval's, an older writer's)
+  (size nil)
   (valid-p nil))
 
 (defvar *p-file-hash-cache* (make-hash-table :test 'equal)
@@ -27803,6 +27823,16 @@ would consume, so it dies naming the stream (rule 12)."
    wrote this cache.  Effect-only hygiene, so SKIP is the ruling and not a die
    (rule 12's s329 boundary)."
   (ignore-errors (file-write-date path)))
+
+(defun %p-mtime-and-size (path)
+  "PATH's write date (the universal time %p-mtime answers) and its byte size,
+   from ONE stat -- or NIL when it cannot be read, by %p-mtime's rule (#1338:
+   a vanished file is a MISS, never an error).  The module cache's SOURCE
+   test (#4165)."
+  (let ((st (ignore-errors (sb-posix:stat path))))
+    (if st
+        (values (+ (sb-posix:stat-mtime st) 2208988800) (sb-posix:stat-size st))
+        nil)))
 
 (defun %p-file-md5 (path)
   "MD5 hex of PATH's bytes, or NIL when it cannot be read.  The digest the
@@ -27997,6 +28027,14 @@ would consume, so it dies naming the stream (rule 12)."
                (when (and (= (length f) 4) (string= (second f) "mod"))
                  (push (cons (third f) (fourth f)) (p-cm-tried manifest))
                  t)))
+            ;; the SOURCE's byte size at transpile time (#4165)
+            ((string= key "size")
+             (let* ((f (%p-split-fields line #\Tab 2))
+                    (n (and (= (length f) 2)
+                            (ignore-errors (parse-integer (second f))))))
+               (when n
+                 (setf (p-cm-size manifest) n)
+                 t)))
             (t nil)))))
 
 (defun %p-manifest-at (path &key check-move)
@@ -28077,18 +28115,28 @@ would consume, so it dies naming the stream (rule 12)."
    could not see; now that a dependency change invalidates the entry directly,
    an age limit would only re-transpile a correct cache once a week — and it
    would make \"an untouched module is a HIT\" untestable.  P-CLEANUP-OLD-CACHE
-   still PRUNES by age; that is disk hygiene, not validity."
+   still PRUNES by age; that is disk hygiene, not validity.
+
+   THE SOURCE'S SIZE (task #4165, RULED s532): the entry is valid only while
+   the source's byte size is the one the transpile recorded (the manifest's
+   `size` line; none = invalid).  A rewrite that restores the old mtime with
+   utime() -- Template Toolkit's compile2.t hacks a compiled template so -- is
+   caught when it changes the length; a same-size same-mtime rewrite is not
+   (docs/not-supported.md ns-cache-same-size-rewrite).  The size comes from the
+   SAME stat as the mtime."
   (when *pcl-skip-cache*
     (return-from p-cache-valid-p nil))
   ;; %P-MTIME, not PROBE-FILE + FILE-WRITE-DATE: the cache is shared, so the
   ;; entry can go between the two calls, and a MISS is the right answer to a
   ;; file that is not there — never an error (task #1338).
-  (let ((cached (%p-mtime cache-path))
-        (source (%p-mtime source-path)))
-    (and cached source (> cached source)
-         (p-cm-valid-p (if deps-path
-                           (%p-manifest-at deps-path :check-move nil)
-                           (%p-cache-manifest source-path))))))
+  (let ((cached (%p-mtime cache-path)))
+    (multiple-value-bind (source size) (%p-mtime-and-size source-path)
+      (and cached source (> cached source)
+           (let ((m (if deps-path
+                        (%p-manifest-at deps-path :check-move nil)
+                        (%p-cache-manifest source-path))))
+             (and (p-cm-valid-p m)
+                  (eql (p-cm-size m) size)))))))
 
 ;;; --- Module Transpilation ---
 

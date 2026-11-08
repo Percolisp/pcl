@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 # A per-program scratch directory, and a reporter for one eval's outcome.
 my $PRE = <<'PL';
@@ -177,4 +177,21 @@ my ($at, $mt) = (1000000000, 1000000000);
 print "utime ", utime($at, $mt, @f), " mtime ", (stat $f[0])[9], "\n";
 my ($u, $v);
 print "now ", utime($u, $v, @f), " recent ", ((stat $f[1])[9] > 1000000000 ? 1 : 0), "\n";
+PL
+
+# #4321 (s532d): utime's argument is ONE list -- the TIMES spread from an
+# array (`utime @t, $f` with `@t = (stat $g)[8,9]`, Template Toolkit's
+# compile2.t) touched nothing and answered 0.
+both_agree(<<'PL', '#4321: utime with the TIMES spread from an array, a stat slice, one array');
+my @f = map { "$T/h$_" } 1 .. 2;
+for (@f) { CORE::open(my $w, '>', $_); CORE::close($w) }
+utime(1500000000, 1500000500, $f[1]);
+my @t = (stat $f[1])[8,9];
+print "spread ", utime(@t, $f[0]), " mtime ", (stat $f[0])[9], "\n";
+utime(1, 2, $f[0]);
+print "slice ", utime((stat $f[1])[8,9], $f[0]), " mtime ", (stat $f[0])[9], "\n";
+my @all = (1400000000, 1400000700, @f);
+print "all ", utime(@all), " ", (stat $f[0])[9], " ", (stat $f[1])[9], "\n";
+my @one = (1300000000);
+print "split ", utime(@one, 1300000900, $f[0]), " ", (stat $f[0])[9], "\n";
 PL

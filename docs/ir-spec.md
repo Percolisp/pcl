@@ -5414,7 +5414,12 @@ the three move together by construction.
 **Validity is ONE predicate** (`p-cache-valid-p`), and both the `.lisp` and
 the fasl go through it. An entry is valid when, and only when:
 
-1. the file exists and is newer than the module's own source; **and**
+1. the file exists and is newer than the module's own source, **and the
+   source's byte size is the one the manifest's `size` line recorded** (s532d,
+   task #4165; one stat gives both, and a manifest with no `size` line is
+   invalid) -- a rewrite that restores the old mtime with `utime` and changes
+   the length is caught, a same-size one is not
+   (`docs/not-supported.md` `ns-cache-same-size-rewrite`); **and**
 2. its manifest exists, parses, **every dependency it names still hashes to
    what the transpile read**, and **no name it recorded as unresolved
    resolves now** (s473i, task #1284); **and**
@@ -5441,6 +5446,7 @@ itself loads.
 # pcl-deps 1
 gen<TAB>v2-830
 source<TAB>installed|local<TAB>/abs/path/A.pm
+size<TAB>BYTES
 dep<TAB>mod|file<TAB>NAME<TAB>installed|local<TAB><md5-hex><TAB>/abs/path/B.pm
 resolve<TAB>mod<TAB>NAME<TAB>head|base
 tried<TAB>mod<TAB>NAME<TAB>/abs/dir

@@ -4533,6 +4533,20 @@ things stay different from perl:
   more than half the heap at exit starts from its text every time — correct,
   only slower to start.  Owner: #2702.
 
+<a id="ns-cache-same-size-rewrite"></a>
+## The module cache: a rewrite with the SAME size and a restored mtime is not seen (s532d, #4165)
+
+A cached module (and a program's own compiled file) is valid while its source's
+mtime is older than the entry, its dependency manifest still hashes, and its
+byte SIZE is the one the transpile read (RULED s532, task #4165).  A rewrite
+that restores the old mtime with `utime` -- Template Toolkit's compile2.t
+hacks a compiled template so -- is caught when the length changes; one that
+keeps the length too runs the old compile, where perl reads the new text.
+Hashing the source on every load would close it at one read of each module
+per load; it is not built (measured only if a row needs it).  `PCL_CACHE_DIR`
+pointed at a fresh directory, or a touch of the file, makes the next run read
+it.
+
 <a id="ns-attributes"></a>
 ## attributes: lvalue set at run time, and variable attributes (task #3162)
 

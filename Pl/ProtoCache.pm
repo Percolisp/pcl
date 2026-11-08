@@ -694,6 +694,12 @@ sub write_deps_file {
   my @lines = ("# pcl-deps 1",
                join("\t", 'gen', generation()),
                join("\t", 'source', trust_class($abs), $abs));
+  # The SOURCE's byte size (#4165): the runtime's validity test compares it
+  # with the size now, beside the mtime -- a rewrite that restores the old
+  # mtime with utime() is caught when it changes the length.  A string eval's
+  # manifest names itself as the source and has no size to record.
+  my $size = ($source ne $file) ? -s $abs : undef;
+  push @lines, join("\t", 'size', $size) if defined $size;
   for my $d (@{ depends_records($frame) }) {
     if (defined $d->{path} && defined $d->{sha}) {
       push @lines, join("\t", 'dep', $d->{kind}, $d->{name},

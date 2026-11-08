@@ -41,7 +41,7 @@ use PCLSbcl ();    # cached_core — the saved core the #1303 rows run through
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 66;
+plan tests => 70;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -215,6 +215,24 @@ PM
     is(run_pcl('use Dep; print Dep::val();'), '99',
        'an edited module is re-transpiled and re-compiled, not served stale');
     is(run_pcl('use Dep; print Dep::val();'), '99', '... and stays right on the next run');
+}
+
+# THE SOURCE'S SIZE (task #4165).  A rewrite that RESTORES the old mtime with
+# utime() -- Template Toolkit's compile2.t hacks a compiled template so -- is
+# not newer than the cache entry; the entry is still invalid when the length
+# changed (the manifest's `size` line).  perl reads the new text.  Both load
+# paths: the fasl (compile => '*') and the text.
+for my $mode (['fasl', compile => '*'], ['text', text => 1]) {
+    my ($tag, %o) = @$mode;
+    my $m = "Hk" . ($tag eq 'fasl' ? 'F' : 'T');
+    my $p = write_mod($m, "package $m; sub v { 'old' } 1;\n");
+    my @t = (time - 100) x 2;
+    utime @t, $p;
+    is(run_pcl("use $m; print ${m}::v();", %o), 'old', "#4165 $tag: the first run reads the module");
+    write_mod($m, "package $m; sub v { 'the hacked one' } 1;\n");
+    utime @t, $p;
+    is(run_pcl("use $m; print ${m}::v();", %o), 'the hacked one',
+       "#4165 $tag: a rewrite with its mtime RESTORED but its length changed is re-transpiled");
 }
 
 # The fasl NAME carries this runtime's identity, because a fasl has this
