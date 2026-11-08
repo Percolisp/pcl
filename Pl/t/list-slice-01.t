@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 21;
 
 sub run_cl {
     my ($code) = @_;
@@ -231,3 +231,19 @@ test_perl_oracle("#3740 a list slice after return, in a hash key and in an anony
     q{sub r { return (4, 5, 6)[1] } my %h; $h{ (1, 2)[0] } = 1;
       my $r = [ (7, 8)[1], (sort { $b <=> $a } 3, 9, 1)[0] ];
       print r(), " ", join(",", keys %h), " @$r ", scalar((4, 5, 6)[1, 2]), "\n";});
+# #4341 (s536f): a list slice indexes the FLAT list -- a nested paren group
+# contributes its elements, a hash its pairs, an empty list nothing (perl's
+# pp_lslice indexes the list as it lies on the stack).  It indexed a list of
+# sub-lists: `((1,2),3)[1]` was 3, `(%h)[0]` "a1", `(%h)[0,1]` one HASH(0x..);
+# and a list slice in an anon-array constructor read ONE element.
+test_perl_oracle("#4341 a list slice flattens nested lists, hashes and empty lists",
+    q{my %hh = (a => 1); my %g = (b => 2); my @a = (5, 6, 7);
+      print join(" ", (%hh)[0], ((1, 2), (3, 4))[2], ((1, 2), 3)[1]), "\n";
+      my @r = ((1, 2), 3)[0, 1]; my @s = (%hh)[0, 1]; print "@r | @s\n";
+      my @b = ((@a), (1, 2))[3, 4]; my @n = (%hh, %g)[2]; my @o = ((), 1, ())[0];
+      print "@b | @n | @o | ", join(",", ((1, 2), (3, 4))[-1, 0]), "\n";
+      my ($p1, $p2) = ((1, 2), (3, 4))[1, 2]; my @z = (1..3, (4, 5))[3];
+      print "$p1 $p2 | @z | ", scalar(@{[ (1, 2, 3)[0, 1] ]}), " | ",
+        ((sort { $a <=> $b } 3, 1, 2), 9)[1, 3], " | ", (%hh, (@a))[2, 3], "\n";
+      for (((1, 2), 3)[0, 1]) { print "$_\n" }
+      my $x = ((1, 2), 3)[1]; my $hr = {q => 1}; my @i = (%$hr)[0]; print "$x @i\n";});

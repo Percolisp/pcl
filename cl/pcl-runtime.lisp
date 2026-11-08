@@ -14241,32 +14241,25 @@ per element."
       1-element vector holding the function's result (itself a vector).  Peel
       it so the subscript sees the actual list.  Safe: a boxed array ref is a
       p-box, not a raw vector, and strings are excluded.
-   2. Flatten Perl @array variables embedded in a literal list-slice vector —
-      `(vector @foo @bar)[0..5]` — so slicing sees the elements, not the
-      sub-arrays.
+   2. FLATTEN the literal list (#4341): a list is always flat in perl, so
+      `((1,2),3)[1]' is 2, `(%h)[0]' a key and `(@foo, @bar)[0..5]' the
+      elements -- %p-listslice-flatten, only when some element is not one
+      slot (%p-listslice-expands-p), so an all-scalar list is indexed as it is.
    Anything else (a real perl array, which has a fill pointer; a box; a string;
-   undef) is returned unchanged."
-  (when (and (vectorp arr)
-             (not (array-has-fill-pointer-p arr))
-             (= (length arr) 1)
+   undef) is returned unchanged, before any other test: this runs on every
+   `$aref->[i]'."
+  (when (or (not (vectorp arr)) (stringp arr) (array-has-fill-pointer-p arr))
+    (return-from %p-listslice-array arr))
+  (when (and (= (length arr) 1)
              (let ((inner (aref arr 0)))
                (and (vectorp inner)
                     (not (stringp inner)))))
     (setf arr (aref arr 0)))
-  (when (and (vectorp arr)
-             (not (array-has-fill-pointer-p arr))
-             (some (lambda (e)
-                     (and (vectorp e)
-                          (not (stringp e))
-                          (array-has-fill-pointer-p e)))
-                   arr))
-    (let ((flat (make-array 0 :adjustable t :fill-pointer 0)))
-      (loop for e across arr do
-            (if (and (vectorp e) (not (stringp e)) (array-has-fill-pointer-p e))
-                (loop for item across e do (vector-push-extend item flat))
-                (vector-push-extend e flat)))
-      (setf arr flat)))
-  arr)
+  (if (and (vectorp arr)
+           (not (array-has-fill-pointer-p arr))
+           (some #'%p-listslice-expands-p arr))
+      (%p-listslice-flatten arr)
+      arr))
 
 (defun p-aref-deref (ref idx &optional site)
   "Perl array ref access $ref->[idx] - unbox the reference first.
@@ -14742,6 +14735,23 @@ create the key on a read-only call, which perl does not.
    and never changes @_'s shape either."
   `(let ((*p-shared-args* @_)) ,call))
 
+(defun %p-flatten-hash-into (h result)
+  "Spread the hash table H onto RESULT as its key/value pairs, the way a list
+   spreads a %hash: a tied one's view (task #155), else each real key (never
+   the :__class__ blessing key) as a COPY -- perl's keys are read-only -- and
+   its value as an ALIAS, exactly as for `values %h'.  Shared by the argument
+   walk (%p-flatten-arg-into) and the list-slice walk (%p-listslice-flatten,
+   #4341)."
+  (if (%p-tied h)
+      (%p-flatten-vector-into (%p-tie-view (%p-tied h)) result)
+      (maphash (lambda (k v)
+                 (when (%p-real-hash-key-p k)
+                   (vector-push-extend (make-p-box k) result)
+                   (vector-push-extend
+                    (if (p-box-p v) v (%p-hash-elem-cell h k))
+                    result)))
+               h)))
+
 (declaim (inline %p-flatten-arg-into))
 (defun %p-flatten-arg-into (arg result)
   "Push ARG onto RESULT the way an argument list spreads it: a raw @array's
@@ -14754,19 +14764,10 @@ create the key on a read-only call, which perl does not.
      ;; Raw vector = array passed in list context: spread its elements
      ;; (a tied one's lazy element boxes -- perl's PVLVs, task #155).
      (%p-flatten-vector-into (%p-tie-view-of arg) result))
-    ((and (hash-table-p arg) (%p-tied arg))
-     (%p-flatten-vector-into (%p-tie-view (%p-tied arg)) result))
-    ((and (hash-table-p arg) (not (gethash :__class__ arg)))
-     ;; Hash in argument context: spread to alternating key-value pairs.
-     ;; But NOT blessed objects (which have :__class__) — those stay as-is.
-     ;; The KEY half is a copy (perl's keys are read-only), the VALUE half
-     ;; an alias, exactly as for `values %h`.
-     (maphash (lambda (k v)
-                (vector-push-extend (make-p-box k) result)
-                (vector-push-extend
-                 (if (p-box-p v) v (%p-hash-elem-cell arg k))
-                 result))
-              arg))
+    ;; Hash in argument context: spread to alternating key-value pairs.  But
+    ;; NOT an untied blessed object (which has :__class__) -- that stays as-is.
+    ((and (hash-table-p arg) (or (%p-tied arg) (not (gethash :__class__ arg))))
+     (%p-flatten-hash-into arg result))
     ;; %ENV / %INC in argument context: the marker IS the hash, so it
     ;; spreads to pairs like any other (see %p-marker-pairs, task #736).
     ((%p-hash-marker-p arg)
@@ -14775,6 +14776,42 @@ create the key on a read-only call, which perl does not.
     (t
      ;; Scalar (p-box, string, number, etc.): keep as-is
      (vector-push-extend arg result))))
+
+(declaim (inline %p-listslice-expands-p))
+(defun %p-listslice-expands-p (item)
+  "True when ITEM, one element of a literal list vector, is not ONE slot of
+   the list it stands in: a nested list or an array (a non-string vector), a
+   hash, the %ENV / %INC marker, or a built-in's empty list (raw NIL)."
+  (or (null item)
+      (and (vectorp item) (not (stringp item)))
+      (hash-table-p item)
+      (%p-hash-marker-p item)))
+
+(defun %p-listslice-flatten (list)
+  "The FLAT list a list slice indexes (#4341; perl's pp_lslice indexes the
+   list as it lies on the stack, and a list is always flat): LIST is a literal
+   list vector (no fill pointer) whose elements may be nested lists, arrays,
+   hashes or empty lists.  A nested literal list contributes its own elements
+   (recursively), an array its elements and a hash its pairs -- each by the
+   argument walk's rule (%p-flatten-vector-into / %p-flatten-hash-into), so an
+   element ALIASES its source slot as in perl (`for ((@a, $x)[3])' writes
+   $x); a NIL is a built-in's empty list and contributes nothing; anything
+   else is one slot, as it is."
+  (let ((result (make-array (length list) :adjustable t :fill-pointer 0)))
+    (labels ((add (item)
+               (cond
+                 ((null item))
+                 ((and (vectorp item) (not (stringp item)))
+                  (if (array-has-fill-pointer-p item)
+                      (%p-flatten-vector-into (%p-tie-view-of item) result)
+                      (loop for x across item do (add x))))
+                 ((hash-table-p item) (%p-flatten-hash-into item result))
+                 ((%p-hash-marker-p item)
+                  (loop for x across (%p-marker-pairs item)
+                        do (vector-push-extend x result)))
+                 (t (vector-push-extend item result)))))
+      (loop for x across list do (add x)))
+    result))
 
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
@@ -15914,9 +15951,13 @@ which is one of #1140's escape spellings (probed)."
 
 (defun p-aref-deref-box (ref idx &optional site)
   "Live BOX at $ref->[idx] — the array-ref analogue of p-gethash-deref-box
-   (SITE likewise ignored)."
-  (declare (ignore site))
-  (p-aref-box (p-ensure-arrayref ref) idx))
+   (SITE likewise ignored).  A VECTOR idx is a LIST SLICE in an lvalue slot
+   (`[ (1,2,3)[0,1] ]'): it reads as p-aref-deref's slice, whose elements are
+   already the slots' aliases (#4341) -- one index taken as its count read a
+   single element."
+  (if (and (vectorp idx) (not (stringp idx)))
+      (p-aref-deref ref idx site)
+      (p-aref-box (p-ensure-arrayref ref) idx)))
 
 ;;; The KEY / INDEX list of a slice or slice-delete, flattened (#387 family
 ;;; 21, s413 — six functions spelled this loop, and the three that DISAGREED
