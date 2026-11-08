@@ -20907,6 +20907,51 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;;; (*p-pipe-pids* is declared up with the standard-handle helpers, which have
 ;;; to carry an entry over when a pipe is opened onto STDOUT/STDIN.)
 
+;;; THE EXEC-STATUS PIPE (#4306): perl's my_popen reports an exec failure in
+;;; the PARENT (util.c, `did_pipes`): a pipe whose ends are close-on-exec is
+;;; opened before the fork; the child writes its errno into it when the exec
+;;; fails and _exits; EOF means the exec happened.  On the errno the parent
+;;; reaps the child, sets $! and open answers false -- `open(P, "/no_such |")`
+;;; is undef with $! ENOENT, never a pid whose close reports 127.  PCL's
+;;; emulated exec (p-exec / %p-exec-become) closes every descriptor once the
+;;; program has started, which is the same EOF.
+(defun %p-exec-status-pipe ()
+  "A pipe (values READ-FD WRITE-FD), both ends FD_CLOEXEC."
+  (multiple-value-bind (r w) (sb-posix:pipe)
+    (dolist (fd (list r w))
+      (ignore-errors
+        (sb-posix:fcntl fd sb-posix:f-setfd
+                        (logior (sb-posix:fcntl fd sb-posix:f-getfd)
+                                +p-fd-cloexec+))))
+    (values r w)))
+
+(defun %p-exec-status-report (fd errno)
+  "The child's half: write ERRNO (4 bytes, least significant first) to FD."
+  (let ((buf (make-array 4 :element-type '(unsigned-byte 8))))
+    (dotimes (i 4)
+      (setf (aref buf i) (ldb (byte 8 (* 8 i)) errno)))
+    (ignore-errors (sb-unix:unix-write fd buf 0 4))))
+
+(defun %p-exec-status-wait (fd)
+  "The parent's half: the child's exec errno read from FD, or NIL at EOF (the
+   exec happened).  Closes FD."
+  (let* ((s (sb-sys:make-fd-stream fd :input t :buffering :none
+                                   :element-type '(unsigned-byte 8)))
+         (buf (make-array 4 :element-type '(unsigned-byte 8)))
+         (n (unwind-protect
+                 (handler-case (read-sequence buf s) (error () 0))
+              (close s))))
+    (when (= n 4)
+      (loop for i below 4 sum (ash (aref buf i) (* 8 i))))))
+
+(defun %p-pipe-exec-failed (pid stream errno)
+  "A piped open whose program could not be exec'd: reap the child, drop the
+   parent's end, set $! to ERRNO and answer false (my_popen returns NULL)."
+  (ignore-errors (sb-posix:waitpid pid 0))
+  (ignore-errors (close stream :abort t))
+  (%p-set-errno errno)
+  *p-undef*)
+
 (defun %p-open-fork-pipe (fh mode-str cmd-args)
   "Perl fork-pipe open.  MODE-STR is \"|-\" (parent writes to the child's
    STDIN) or \"-|\" (parent reads the child's STDOUT).  CMD-ARGS non-nil execs
@@ -20927,50 +20972,69 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ;; PERL_FLUSHALL_FOR_CHILD: every handle, not just the standard ones,
         ;; or a block-buffered buffer is DUPLICATED into both processes.
         (%p-flush-all-output)
-        (let* ((out-buffering (when (sb-sys:fd-stream-p sb-sys:*stdout*)
-                                (sb-impl::fd-stream-buffering sb-sys:*stdout*)))
-               (pid (%p-fork-process)))
-          (cond
-            ((> pid 0)                    ; ---- parent
-             (let ((stream
-                    (if (string= mode-str "|-")
-                        (progn
-                          (sb-posix:close read-fd)
-                          (sb-sys:make-fd-stream
-                           write-fd :output t
-                           :buffering (%p-output-buffering write-fd)
-                           :external-format *p-default-out-ef*))
-                        (progn
-                          (sb-posix:close write-fd)
-                          (sb-sys:make-fd-stream read-fd :input t
-                                                 :external-format *p-default-in-ef*)))))
-               (setf (gethash stream *p-pipe-pids*) pid)
-               (%p-install-fh fh stream)
-               pid))
-            (t                            ; ---- child
-             (box-set $$ (sb-posix:getpid))
-             (if (string= mode-str "|-")
-                 (progn                   ; child READS its rewired STDIN
-                   (sb-posix:close write-fd)
-                   (unless (= read-fd 0)
-                     (sb-posix:dup2 read-fd 0)
-                     (sb-posix:close read-fd))
-                   (%p-std-rebuild 0))
-                 (progn                   ; child WRITES its rewired STDOUT
-                   (sb-posix:close read-fd)
-                   (unless (= write-fd 1)
-                     (sb-posix:dup2 write-fd 1)
-                     (sb-posix:close write-fd))
-                   ;; The SAME rebuild every standard-handle re-point uses
-                   ;; (rule 11), carrying the parent's mode over — see the
-                   ;; docstring: this dup2 is not a re-open.
-                   (%p-std-rebuild 1 out-buffering)))
-             (when cmd-args
-               (apply #'p-exec cmd-args)  ; returns only on exec failure
-               (%p-flush-all-output)      ; :abort t skips the exit hooks
-               (sb-ext:exit :code 127 :abort t))
-             0))))
+        (multiple-value-bind (st-r st-w)      ; the exec-status pipe (#4306)
+            (if cmd-args (%p-exec-status-pipe) (values nil nil))
+          (let* ((out-buffering (when (sb-sys:fd-stream-p sb-sys:*stdout*)
+                                  (sb-impl::fd-stream-buffering sb-sys:*stdout*)))
+                 (pid (%p-fork-process)))
+            (cond
+              ((> pid 0)                  ; ---- parent
+               (when st-w (sb-posix:close st-w))
+               (%p-open-fork-parent fh mode-str pid read-fd write-fd st-r))
+              (t                          ; ---- child
+               (when st-r (sb-posix:close st-r))
+               (%p-open-fork-child mode-str read-fd write-fd out-buffering)
+               (when cmd-args
+                 (apply #'p-exec cmd-args) ; returns only on exec failure
+                 (%p-exec-status-report st-w *p-stored-errno*)
+                 (%p-flush-all-output)    ; :abort t skips the exit hooks
+                 (sb-ext:exit :code 127 :abort t))
+               0)))))
     (error () (%pcl-save-errno) *p-undef*)))
+
+(defun %p-open-fork-parent (fh mode-str pid read-fd write-fd st-r)
+  "%p-open-fork-pipe's parent: keep this process's end of the pipe as FH's
+   stream -- unless the exec-status pipe ST-R reports that the child's program
+   could not be executed (#4306)."
+  (let* ((stream
+          (if (string= mode-str "|-")
+              (progn
+                (sb-posix:close read-fd)
+                (sb-sys:make-fd-stream
+                 write-fd :output t
+                 :buffering (%p-output-buffering write-fd)
+                 :external-format *p-default-out-ef*))
+              (progn
+                (sb-posix:close write-fd)
+                (sb-sys:make-fd-stream read-fd :input t
+                                       :external-format *p-default-in-ef*))))
+         (errno (and st-r (%p-exec-status-wait st-r))))
+    (if errno
+        (%p-pipe-exec-failed pid stream errno)
+        (progn
+          (setf (gethash stream *p-pipe-pids*) pid)
+          (%p-install-fh fh stream)
+          pid))))
+
+(defun %p-open-fork-child (mode-str read-fd write-fd out-buffering)
+  "%p-open-fork-pipe's child: rewire the standard stream onto the pipe."
+  (box-set $$ (sb-posix:getpid))
+  (if (string= mode-str "|-")
+      (progn                   ; child READS its rewired STDIN
+        (sb-posix:close write-fd)
+        (unless (= read-fd 0)
+          (sb-posix:dup2 read-fd 0)
+          (sb-posix:close read-fd))
+        (%p-std-rebuild 0))
+      (progn                   ; child WRITES its rewired STDOUT
+        (sb-posix:close read-fd)
+        (unless (= write-fd 1)
+          (sb-posix:dup2 write-fd 1)
+          (sb-posix:close write-fd))
+        ;; The SAME rebuild every standard-handle re-point uses
+        ;; (rule 11), carrying the parent's mode over — see the
+        ;; docstring: this dup2 is not a re-open.
+        (%p-std-rebuild 1 out-buffering))))
 
 (defun %p-close-maybe-pipe (v)
   "Close stream V; if it is the parent end of a fork-pipe, reap the child and

@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -218,3 +218,21 @@ $| = 1;
 print "one-process\n";
 PL
    'open(P,"|    ") / open(P,"     |") fail with EPIPE and do not fork; the bare "-|" still forks');
+
+# ── 9. task #4306 — a piped open whose program CANNOT BE EXECUTED is false ──
+# perl's my_popen reports the child's exec errno to the PARENT through a
+# close-on-exec pipe: open answers undef with $! ENOENT (2), never the pid of
+# a child whose close then says 127.  A shell command (metacharacters) execs
+# /bin/sh, which succeeds -- the control: a pid, and close reports 127.  A
+# program that does run is unchanged.  Probed 5.40.3, s536b.
+is(run_cl(<<'PL'), "1 undef 2\n2 undef 2\n3 undef 2\n4 pid 0 127\n5 hello\n6 cat\n",
+$| = 1;
+{ local *P; my $r = open(P, "/no_such_process_x |"); print "1 ", (defined $r ? "pid" : "undef"), " ", $! + 0, "\n"; }
+{ local *P; my $r = open(P, "| /no_such_process_y"); print "2 ", (defined $r ? "pid" : "undef"), " ", $! + 0, "\n"; }
+{ my $r = open(my $fh, "-|", "/no_such_process_z", "a"); print "3 ", (defined $r ? "pid" : "undef"), " ", $! + 0, "\n"; }
+{ local *S; my $r = open(S, "/no_such_process_x 2>/dev/null |"); my $c = close(S);
+  print "4 ", ($r ? "pid" : "undef"), " ", ($c ? 1 : 0), " ", $? >> 8, "\n"; }
+{ open(my $ok, "-|", "echo", "hello") or die; my $l = <$ok>; close $ok; print "5 $l"; }
+{ open(my $w, "|-", "cat") or die; print $w "6 cat\n"; close $w; }
+PL
+   'a piped open whose program cannot be executed answers undef with $! ENOENT; a shell command and a real program are unchanged');
