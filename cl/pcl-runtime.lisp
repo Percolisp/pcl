@@ -10204,21 +10204,7 @@ per element."
       ((and (consp form) (= (length form) 3) (eq (car form) 'p-aref-deref)
             (%p-list-slice-base-form-p (second form)))
        (cons '%p-lslice-aliases (cdr form)))
-      ((and (consp form) (= (length form) 3)
-            (member (car form) '(p-aref p-gethash p-aref-deref p-gethash-deref))
-            ;; An ELEMENT only: its container is a variable or an element
-            ;; chain, never a value form -- a LIST SLICE `(lstat $p)[2,4]'
-            ;; is emitted with the same head over (p-list-ctx ...) and a
-            ;; (vector ...) index (Archive::Tar::File, the everyday row).
-            (let ((c (second form)) (i (third form)))
-              (and (or (symbolp c)
-                       (and (consp c)
-                            (member (car c) '(p-aref p-gethash p-aref-deref
-                                              p-gethash-deref p-viv-container
-                                              p-viv-array-container))))
-                   (not (and (consp i)
-                             (member (car i) '(vector p-.. p-... p-flatten-args
-                                               list)))))))
+      ((%p-element-read-form-p form)
        (list 'vector (cons (%p-elem-box-head (car form)) (cdr form))))
       ;; A MAGIC-LVALUE CALL -- substr (at most three arguments), pos, vec --
       ;; is its write-through CELL over its target's PLACE, as the emitter
@@ -10227,6 +10213,52 @@ per element."
       ;; through the flattened list too (#4684).
       ((and (consp form) (member (car form) '(p-substr p-pos p-vec)))
        (%p-magic-lvalue-alias-form form))
+      ;; `scalar(E)' of a scalar PLACE is E itself (perl's scalar() returns
+      ;; the operand's SV, #4685): `for (scalar($x))' / `map { } scalar($m)'
+      ;; alias $x / $m, the element or the deref, as one slot.
+      ((and (consp form) (eq (car form) 'p-scalar) (= (length form) 2))
+       (%p-scalar-alias-form (second form)))
+      (t nil)))
+
+  (defun %p-element-read-form-p (form)
+    "True when FORM is an ELEMENT read: an element head over a variable or an
+     element chain, never over a value form -- a LIST SLICE `(lstat $p)[2,4]'
+     is emitted with the same head over (p-list-ctx ...) and a (vector ...)
+     index (Archive::Tar::File, the everyday row)."
+    (and (consp form) (= (length form) 3)
+         (member (car form) '(p-aref p-gethash p-aref-deref p-gethash-deref))
+         (let ((c (second form)) (i (third form)))
+           (and (or (symbolp c)
+                    (and (consp c)
+                         (member (car c) '(p-aref p-gethash p-aref-deref
+                                           p-gethash-deref p-viv-container
+                                           p-viv-array-container))))
+                (not (and (consp i)
+                          (member (car i) '(vector p-.. p-... p-flatten-args
+                                            list))))))))
+
+  (defun %p-scalar-alias-form (x)
+    "X, the operand of a `p-scalar' read in an aliasing consumer, as the
+     one-slot `(vector PLACE)' alias when X is a scalar place -- a `$'
+     variable, a scalar deref, another `p-scalar' of one, or an ELEMENT, which
+     is perl's LAZY element here as in an argument slot (`for (scalar($h{zz}))'
+     creates nothing, a write through it does: the `-argbox' readers) -- or
+     NIL (an aggregate's count, a call's last value: a fresh value)."
+    (cond
+      ((and (symbolp x) x (plusp (length (symbol-name x)))
+            (char= (char (symbol-name x) 0) #\$))
+       (list 'vector x))
+      ((and (consp x) (eq (car x) 'p-cast-$))
+       (list 'vector (cons 'p-cast-$-box (cdr x))))
+      ((and (consp x) (eq (car x) 'p-scalar) (= (length x) 2))
+       (%p-scalar-alias-form (second x)))
+      ((%p-element-read-form-p x)
+       (list 'vector (cons (ecase (car x)
+                             (p-aref 'p-aref-argbox)
+                             (p-gethash 'p-gethash-argbox)
+                             (p-aref-deref 'p-aref-deref-argbox)
+                             (p-gethash-deref 'p-gethash-deref-argbox))
+                           (cdr x))))
       (t nil)))
 
   (defun %p-elem-box-head (head)

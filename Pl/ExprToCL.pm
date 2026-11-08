@@ -4299,9 +4299,13 @@ sub gen_prefix_op_form {
     }
   }
 
-  if ($op eq '\\' || $op eq '++' || $op eq '--') {
-    # l-value context: \ needs the box (a ref to it, not a copy), ++/--
-    # need writable element boxes — mirrors the text emitter exactly.
+  # `\TERM`: the term in lvalue context -- the one rule every `\` spelling
+  # shares (_backslash_lvalue_form).
+  return $self->_backslash_lvalue_form($kids->[1]) if $op eq '\\';
+
+  if ($op eq '++' || $op eq '--') {
+    # l-value context: ++/-- need writable element boxes — mirrors the text
+    # emitter exactly.
     my $saved_lvalue = $self->lvalue_context;
     $self->lvalue_context(1);
     my $operand = $self->gen_node_form($kids->[1]);
@@ -4309,14 +4313,6 @@ sub gen_prefix_op_form {
     my $head = (ref($operand) eq 'ARRAY' && !ref($operand->[0]))
              ? $operand->[0] : '';
     my @rest = ref($operand) eq 'ARRAY' ? @$operand[1 .. $#$operand] : ();
-    if ($op eq '\\') {
-      # magic-lvalue refs: live cells with write-through setters.  Same table
-      # the `=~` write-target routing reads (%MAGIC_LVALUE_BASE) — the four
-      # heads were spelled here and there independently before.
-      return [$MAGIC_LVALUE_BASE{$head} . '-ref', @rest]
-        if $MAGIC_LVALUE_BASE{$head};
-      return _backslash_of($operand);
-    }
     # prefix ++/--: arylen target gets the setter shape (value = new length)
     if ($head eq 'p-array-last-index') {
       my $delta_op = ($op eq '++') ? '1+' : '1-';
@@ -5832,6 +5828,10 @@ sub _refgen_list_place_target {
 # and each element of `\(E1, E2, ...)` (#4086).  The caller owns the context.
 sub _backslash_lvalue_form {
   my ($self, $id) = @_;
+  # `\scalar($x)` is `\$x`: scalar() returns the operand's SV (#4685), the
+  # rule the argument slots ask (_scalar_noop_operand); `\scalar($h{z})`
+  # creates the element as `\$h{z}` does (probed 5.40.3).
+  $id = $self->_scalar_noop_operand($id);
   my $saved_lv = $self->lvalue_context;
   $self->lvalue_context(1);
   my $form = $self->gen_node_form($id);

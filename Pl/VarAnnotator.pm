@@ -1529,6 +1529,11 @@ sub _ev_foreach_alias_list {
         && (@slot == 1
             || (@slot == 2 && $slot[1]->isa('PPI::Structure::Subscript')
                 && $slot[1]->content =~ /^\[/));
+      # `scalar(E)` is E itself (#4685): its operand is the aliasing slot.
+      _ev_foreach_alias_list($ctx, [$slot[1]])
+        if @slot == 2 && $slot[0]->isa('PPI::Token::Word')
+        && $slot[0]->content =~ /^(?:CORE::)?scalar$/
+        && $slot[1]->isa('PPI::Structure::List');
       @slot = ();
       next;
     }

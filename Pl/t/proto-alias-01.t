@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 sub transpile {
     my ($code) = @_;
@@ -189,3 +189,27 @@ my ($p, $q) = ("p", "q"); sub two { $_[0] .= 1; $_[1] .= 2 } two(scalar($p), sca
 my @b = (1, 2); app(scalar(@b)); my $t = "t"; app(scalar($t . "x")); print "6 @b $t\n";
 }), "1 aZ bZ cZ dZ\n2 [Z] 4 no-yy\n3 zZPP vZ\n4 wM sZZ\n5 p1P q22\n6 1 2 t\n",
    'scalar(SCALAR) in an argument slot is the scalar itself: @_ aliases it (#4323)');
+
+# #4685 (s536i): `scalar(SCALAR)` in the OTHER aliasing consumers -- a foreach
+# list (block and modifier spelling, sole or one of several), a map / grep list
+# and every `\` spelling -- is the scalar itself too (a tied one is FETCHed and
+# STOREd once).  An element under scalar() in a foreach / map list is the LAZY
+# element (a read creates nothing, a write does); `\scalar($k{z})` creates it,
+# as `\$k{z}` does.  All three consumers copied.  Expected text probed under
+# perl 5.40.3.  FAILS on 0ac58419.
+is(run_cl(q{package T; my $f = 0; my $s = 0;
+sub TIESCALAR { my $v = "t"; bless \$v } sub FETCH { $f++; ${$_[0]} } sub STORE { $s++; ${$_[0]} = $_[1] }
+package main;
+my $x = "x"; for (scalar($x)) { $_ .= "F" } my $u = "u"; my $ref = \scalar($u); $$ref .= "R";
+my $m = "m"; map { $_ .= "X" } scalar($m); print "1 $x $u $m\n";
+my %h = (k => "h"); for (scalar($h{k})) { $_ .= "H" } my @a = ("a"); my $r2 = \scalar($a[0]); $$r2 .= "A";
+my $y = "y"; for (scalar($y), $x) { $_ .= "2" } my $z = "z"; $_ .= "M" for scalar($z); print "2 $h{k} @a $y $x $z\n";
+my $q = "q"; my $rq = \$q; for (scalar($$rq)) { $_ .= "D" } my $n = "n"; grep { $_ .= "G" } scalar($n), @a;
+my @r = \(scalar($x), $y); ${$r[0]} .= "X"; my $w = "w"; my $rw = \scalar(scalar($w)); $$rw .= "W"; print "3 $q $n @a $x $w\n";
+tie my $t, 'T'; for (scalar($t)) { $_ .= "!" } print "4 $f $s\n";
+my %e; for (scalar($e{zz})) { } for (scalar($e{yy})) { $_ = 5 } my @b; for (scalar($b[3])) { } for (scalar($b[2])) { $_ = 1 }
+my %k; my $rk = \scalar($k{z}); map { 1 } scalar($k{m});
+print "5 ", (exists $e{zz} ? "E" : "N"), (exists $e{yy} ? "E$e{yy}" : "N"), " ", scalar(@b), " ", (exists $k{z} ? "E" : "N"), (exists $k{m} ? "E" : "N"), "\n";
+my @l = (1, 2); my $c = \scalar(@l); for (scalar(@l)) { $_ .= "" } print "6 $$c @l\n";
+}), "1 xF uR mX\n2 hH aA y2 xF2 zM\n3 qD nG aAG xF2X wW\n4 1 1\n5 NE5 3 EN\n6 2 1 2\n",
+   'scalar(SCALAR) in a foreach list, a map / grep list and under \\ is the scalar itself (#4685)');
