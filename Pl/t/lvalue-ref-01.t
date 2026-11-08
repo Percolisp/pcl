@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 40;
+plan tests => 41;
 
 sub run_cl {
     my ($code) = @_;
@@ -144,6 +144,22 @@ test_cl('for(substr LIST) paren-less: substr / vec / pos / a modifier / a named 
       my $v2="^OPEN"; if ($v2 =~ s/^\^(?=.)//) { for (substr $v2, 0, 1) { $_ = chr(ord($_) - 64) } }
       print "11 ", ord($v2), " ", length($v2), "\n";},
     "1 xBC\n2 Ay\n3 ABz\n4 A--DEF\n5 A\n6 2\n7 AnC\n8 gBC\n9 A\n10 substr\n10 1\n11 15 4\n");
+
+# #4309 (s536b): the window's TARGET may be an ELEMENT -- named or through a
+# reference, both spellings of the call -- and the cell's setter writes the
+# element (it was handed the element's VALUE and died "Modification of a
+# read-only value attempted").  The same rewriter `\substr($h{k}, ...)` uses.
+# Expected text probed under perl 5.40.3.
+test_cl('#4309 for (substr ELEMENT, ...) writes the element: hash / array / through a ref / vec / pos',
+    q{my %h = (k => "ABC"); for (substr($h{k}, 0, 1)) { $_ = "h" } print "1 $h{k}\n";
+      my @a = ("XYZ"); for (substr($a[0], 2)) { $_ = "z" } print "2 $a[0]\n";
+      for (substr $h{k}, 1, 1) { $_ = "Q" } print "3 $h{k}\n";
+      my $r = { s => "hello" }; for (substr($r->{s}, 0, 1)) { $_ = "J" } print "4 $r->{s}\n";
+      my $ar = ["world"]; for my $c (substr($ar->[0], -1)) { $c = "D" } print "5 $ar->[0]\n";
+      for (substr($h{k}, 1, 1)) { print "6 [$_]\n" }
+      my %v = (b => "\x00"); for (vec($v{b}, 0, 8)) { $_ = 66 } print "7 $v{b}\n";
+      $_ = "x" for substr $a[0], 0, 1; print "8 $a[0]\n";},
+    "1 hBC\n2 XYz\n3 hQC\n4 Jello\n5 worlD\n6 [Q]\n7 B\n8 xYz\n");
 
 # --- \ + a SIGIL-DEREF carrying a subscript (task #861) -------------------
 # The same "backslashed a COPY" failure as \substr above, arriving by a

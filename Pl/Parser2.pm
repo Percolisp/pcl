@@ -12173,6 +12173,16 @@ sub _topic_raw_ok {
 sub _alias_box_form {
   my ($form, $from, $to) = @_;
   if (ref($form) eq 'ARRAY' && @$form && !ref $form->[0] && $form->[0] eq $from) {
+    # A magic-lvalue builtin (substr / pos / vec) becomes its write-through
+    # CELL with its TARGET argument a place -- `(p-gethash %h "k")` is the
+    # element's VALUE, and the cell's setter had nowhere to write (#4309:
+    # `for (substr($h{k}, 0, 1)) { $_ = "h" }` died read-only).  The one
+    # rewriter `\substr(...)` and a sub argument already use (ExprToCL's
+    # _write_through_form, rule 11), never a second.
+    if ($to eq "$from-lvalue-cell") {
+      my $cell = Pl::ExprToCL::_write_through_form($form);
+      return $cell if defined $cell;
+    }
     return [$to, @{$form}[1 .. $#$form]];
   }
   if (Pl::CLForm::is_raw($form)) {
