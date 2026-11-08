@@ -11,6 +11,15 @@ The USER ended the session at about 22:1x with all four batches still taking the
 - **s536i `77f3e4f3`**.  NOW VALID: `sweep.log` (18,793 +0, GATE clean), beside the earlier `gate.log` + `ir.log`.  RUNNING: `ab.sh` -> `ab.log`.  OWED after: explain the diffs, the bench leg, the session-log section, the task DONE notes, the history row, MERGE-READY.
 - **s536j `d0fd8e7e`**.  NOW VALID: `ab-final.log` (2,053 files, only `Math/Complex.pm` differs, RCDIFF 0; lib 58 SAME).  RUNNING: `gate.sh` -> `gate-final.out` + `gate-final.log`, `final.sh` -> `final.log` (its sub-logs count only if `final.log` has its END line).  QUEUED: `board1.log`.  OWED after: the "OWED" list further down.
 
+## UPDATE 2 (22:1x) -- the USER closed the session; reads over everything above
+
+All four agents were STOPPED at 22:08 at the USER's word (they had begun spending tokens again); that killed their legs.  Checked after: 0 heavy legs, 0 SBCL, holders cleared.  Changes from the 22:03 list:
+
+- **s536e:** `ir2.log` is VOID (no END line).  The rest stands; the IR leg is owed.
+- **s536h:** `gate4.log` is VOID; `sweep4.log` never ran.  Both owed.
+- **s536i:** `ab.log` finished on `77f3e4f3` (END rc=0): corpus-diff 9 / 111, wide A/B 87 DIFF, RCDIFF 0, not yet explained.  **The worktree holds an UNCOMMITTED, UNVERIFIED edit of `Pl/ExprToCL.pm`** (`_subscript_form`: an element's subscript is a plain read, #4741; the agent had just started it after reading the A/B).  Read the A/B and the diff, then finish or drop it.  If it is committed, `Pl/` moved: the gate, the sweep, ir and the A/B must all be re-taken.
+- **s536j:** `board1.log` finished (END rc=0, TT parser.t row 35 as predicted).  `final.log` and `sweep.log` are VOID (no END line); `corpus-final.log`, `gateset-after.tsv` and the census were written inside that dead leg, so re-take `final.sh`.  **The `gate-final.*` logs are gone: the gate is owed.**  The agent had just written `gate2.sh` (22:08) and filed #4763 (a nested tree with no `.git`: `$ENV{_PCL_RUNTIME_}` and `pcl --version` disagree), probably the reason `gate.sh`'s nested extraction needed replacing.  Read #4763 and `gate2.sh` first.
+
 You are an EXECUTION agent (Opus 5.5) RESUMING your batch in its EXISTING worktree.  Do not spawn subagents.  Every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path.
 
 ## Rules for all four
