@@ -54,7 +54,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 46;
+plan tests => 47;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -396,3 +396,19 @@ system(bless(["/bin/echo one"], 'Q'));
 system { bless(["/bin/echo"], 'Q') } "echo", "prog";}),
    "sys hello\nblk hello\npipe hello\nexec hello\none\nprog\n",
    '#3556: an overloaded object in exec / system / pipe-open LIST is stringified through its "" overload';
+
+# #4224 (s536h): wait / waitpid store into $? whatever the wait answered --
+# -1 when nothing was reaped (no child: -1 + ECHILD; a WNOHANG poll of a child
+# still running: 0), the child's status when one was.  PCL kept $? as it was,
+# and stored an uninitialised word for the poll.  Expected = perl 5.40.3.
+is run_cl(q{use POSIX ":sys_wait_h";
+$? = 42; $! = 0; my $r = wait(); print "1 r=$r st=$? err=", 0+$!, "\n";
+$? = 42; $r = waitpid(-1, 0); print "2 r=$r st=$?\n";
+$? = 42; $r = waitpid(1, 0); print "3 r=$r st=$?\n";
+$? = 42; $r = waitpid(-1, WNOHANG); print "4 r=$r st=$?\n";
+my $pid = fork(); if (!$pid) { sleep 2; exit 3 }
+$? = 42; $r = waitpid($pid, WNOHANG); print "5 r=$r st=$?\n";
+$? = 42; $r = waitpid($pid, 0); print "6 ", ($r == $pid ? "pid" : $r), " st=", $? >> 8, "\n";
+$? = 42; $r = waitpid($pid, 0); print "7 r=$r st=$?\n";}),
+   "1 r=-1 st=-1 err=10\n2 r=-1 st=-1\n3 r=-1 st=-1\n4 r=-1 st=-1\n5 r=0 st=-1\n6 pid st=3\n7 r=-1 st=-1\n",
+   '#4224: wait / waitpid set $? = -1 when no child was reaped (no child, a WNOHANG poll)';

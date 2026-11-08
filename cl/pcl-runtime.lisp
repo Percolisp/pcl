@@ -26821,22 +26821,32 @@ would consume, so it dies naming the stream (rule 12)."
       (%pcl-save-errno)
       *p-undef*)))
 
+(defun %p-wait-status-store (rpid status)
+  "perl's pp_wait / pp_waitpid store into $? WHATEVER the wait answered
+   (task #4224): the child's raw status when a child was reaped (RPID > 0),
+   else -1 -- no child at all (-1, $! = ECHILD) and a WNOHANG poll of a child
+   still running (0) both leave $? = -1 (STATUS_NATIVE_CHILD_SET((result > 0)
+   ? argflags : -1), probed 5.40.3).  PCL kept $? as it was for the first and
+   stored the poll's uninitialised word for the second.  Returns RPID."
+  (%p-set-status (if (plusp rpid) status -1))
+  rpid)
+
 (defun p-waitpid (pid &optional (flags 0))
   "Perl waitpid(PID, FLAGS) - wait for a child.  Returns the reaped PID (or -1
-   / 0), and sets $? to the child's raw wait status (exit_code << 8 | signal)."
+   / 0), and sets $? as %p-wait-status-store says (exit_code << 8 | signal, or
+   -1 when nothing was reaped)."
   (let ((p (truncate (to-number (if (p-box-p pid) (unbox pid) pid))))
         (f (truncate (to-number (if (p-box-p flags) (unbox flags) flags)))))
-    (%p-child-host-error (progn (%pcl-save-errno) -1)
+    (%p-child-host-error (progn (%pcl-save-errno) (%p-wait-status-store -1 0))
                          (multiple-value-bind (rpid status) (sb-posix:waitpid p f)
-                           (%p-set-status status)
-                           rpid))))
+                           (%p-wait-status-store rpid status)))))
 
 (defun p-wait ()
-  "Perl wait - wait for any child.  Returns the reaped PID (or -1), sets $?."
-  (%p-child-host-error (progn (%pcl-save-errno) -1)
+  "Perl wait - wait for any child.  Returns the reaped PID (or -1), sets $?
+   (%p-wait-status-store)."
+  (%p-child-host-error (progn (%pcl-save-errno) (%p-wait-status-store -1 0))
                        (multiple-value-bind (rpid status) (sb-posix:wait)
-                         (%p-set-status status)
-                         rpid)))
+                         (%p-wait-status-store rpid status))))
 
 (defun p-getppid ()
   "Perl getppid - parent process id."
