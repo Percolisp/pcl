@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 17;
 
 # ---- the names, derived from the TABLE THAT DECIDES ------------------------
 # `%RUNTIME_NAMES` in Pl/ExprToCL.pm is what routes a plain call to `p-NAME`,
@@ -276,3 +276,25 @@ P
     like($cl, qr/\(p-__pcl_set_attributes\s/, 'the anonymous-sub attribute registration reaches the runtime');
     unlike($cl, qr/pl-__pcl_set_/,  'no compiler-built registration became a sub call');
 }
+
+# #4601 (s536g): `cwd` / `getcwd` are Cwd's functions, which perl declares
+# WITHOUT a prototype -- never core arity.  A list-operator call of a
+# glob-installed or a user sub of that name takes its arguments (the core
+# table's `cwd => 0` split `cwd 1, 2` and DROPPED the statement), and the
+# imported one is still a term before an operator, as in perl.
+both_agree(<<'P', '#4601 a user / glob-installed cwd or getcwd is a list operator');
+BEGIN { no strict 'refs'; *{"main::cwd"} = sub { "g-cwd(@_)" } }
+print "1 ", cwd 1, 2;
+print "\n";
+sub getcwd { "my-getcwd(@_)" }
+print "2 ", getcwd(3), " ", getcwd 4, 5;
+print "\n";
+P
+
+both_agree(<<'P', '#4601 the imported cwd / getcwd: terms before an operator, a list operator before a list');
+use Cwd;
+my $d = cwd();
+my @p = (cwd, 1);
+print "3 ", (cwd . "/x" eq "$d/x" ? "ok" : "no"), " ", (cwd eq $d ? "ok" : "no"), " ", scalar(@p),
+  " ", ((cwd 1, 2) eq $d ? "ok" : "no"), " ", (getcwd eq $d ? "ok" : "no"), " ", (Cwd::cwd() eq $d ? "ok" : "no"), "\n";
+P

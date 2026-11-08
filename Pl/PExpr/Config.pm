@@ -625,8 +625,9 @@ has known_no_of_params => (
       readlink   => [1, -2],      # readlink EXPR or readlink (uses $_)
       chown      => -1,           # chown UID, GID, LIST
       utime      => -1,           # utime ATIME, MTIME, LIST
-      getcwd     => 0,            # getcwd() - Cwd module but common
-      cwd        => 0,            # cwd() - alias for getcwd
+      # (`cwd` / `getcwd` are NOT here: they are Cwd's functions, which perl
+      # declares WITHOUT a prototype -- a module fact, so lib/Cwd.pm's exports
+      # carry it and a bare `cwd` is a sub call only where it was imported, #4601.)
 
       # "say" is available only if the "say" feature is enabled or if it is
       # prefixed with "CORE::". The "say" feature is enabled automatically

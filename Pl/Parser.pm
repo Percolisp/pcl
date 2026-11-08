@@ -9104,7 +9104,10 @@ sub _extract_module_prototypes {
   # Scalar::Util left in s513d (#2870): its shim carries the real `($)`
   # prototypes, and `blessed $o && $o->isa("K")` is blessed($o) && ... in perl
   # -- skipped, it parsed as blessed($o && ...), silently (probed).
-  if ($module =~ /^(Carp|Cwd|
+  # Cwd left in s536g (#4601): perl's `cwd` / `getcwd` carry NO prototype, so
+  # a bare `cwd` is a call only where Cwd's export made it a known sub -- the
+  # fact the core arity table used to fake as `cwd => 0` for every file.
+  if ($module =~ /^(Carp|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|File::(?!Spec)|IO::|Data::Dumper)/x) {
     # The facts overlay (task #2878) is DATA about the module, not a walk of
