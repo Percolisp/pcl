@@ -6,6 +6,7 @@ THE USER'S WORD TODAY (asked at 01:1x): **three subtasks at a time, Opus 5.5 at 
 * **s532b** -- require family + TAP (`s535/resume-s532b.md`).  Owes only `everyday --record`.  Generation v2-11400.  IDs 4281-4299.
 * **s533c** -- C2 kind 1: `local` off the v1 text seam (`s535/resume-s533c.md`).  Owes the bench, the session-log section, `--record`.  Generation v2-11300.  IDs 4441-4459.
 * **s532c** -- CPAN board hunts (`s535/resume-s532c.md`).  Owes every batch-end bar.  Generation v2-11500.  IDs 4301-4319.
+* **FOURTH SLOT (the USER, 02:1x: "Run a 4th job too")**: **s535a** -- 1c port 3, the span pass on the binder (`s535/s535a-prompt.md`, IDs 4541-4559, generation v2-12000).
 * QUEUED behind them, as slots free: **s534a** (the USER's ask: evaluate faster method lookup, `s534/s534a-prompt.md`, IDs 4521-4539, no generation) FIRST, then **s532d** (`s532/s532d-prompt.md`, IDs 4321-4339, generation set at launch).
 
 RULES FOR THIS ROUND (added):
