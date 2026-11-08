@@ -24,3 +24,6 @@ RULES FOR THIS ROUND (added):
 ## AMENDMENT 11:4x (the USER: the laptop is otherwise idle -- "go to town")
 28. **FOUR heavy slots** from 11:4x (`heavy.sh` four-slot version; the s530 three-slot script is `heavy.sh.three-slot-s530`; same command line).  An exclusive leg (bench, companion, install-container) now takes all four.
 29. A SIXTH label: **s536c** (`s536/s536c-prompt.md`, #1611 the `%RUNTIME_NAMES` call-site hijack, IDs 4601-4619, generation v2-12300).  FIVE agents run.
+
+## AMENDMENT 15:3x (the USER: "Please run 4 subtasks again.")
+30. FOUR agents again: s536b + s536c (running), **s532c RESUMED for its regression #4623** (`s536/resume-s532c-4623.md`, generation v2-12500 if it changes emission, IDs 4310-4319) and **s536d NEW** (`s536/s536d-prompt.md`: #4544 #4625 #4622 #4624, IDs 4641-4659, generation v2-12400).  Merged so far this session: s532c (-74), s532d (-75), s536a (-76), s535a (-77).
