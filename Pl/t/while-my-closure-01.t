@@ -192,4 +192,45 @@ sub m2 { my @a = (1, 2); { my $c = g(my @a = (3)); print "11 $c @a\n"; } "@a" }
 print "12 ", m2(), "\n";
 PERL
 
+# 9. #4641 (s536e): the FILE-level embedded-`my` veto asks the BINDER whether a
+#    named sub uses THIS binding -- a sub's own `@d` / `%d` / `&d` (another
+#    sigil) and a sub defined BEFORE the declaration (it reads the global) no
+#    longer veto, so the loop's `my $d` / `my $q` is fresh per iteration.  The
+#    Capture-Tiny shape (#199) still shares: a later named sub uses the handle.
+test_wm('the file-level embedded-my veto keys on the binding, not the bare name (#4641)', <<'PERL');
+sub h { my @d = @_; my %d = (k => 1); scalar(@d) + keys(%d) }
+sub k { &d() } sub d { 4 }
+my @w; for my $i (1 .. 2) { my $c = my $d = 0; push @w, sub { ++$d }; $w[-1]->() for 1 .. $i }
+print "10 ", join(",", map { $_->() } @w), " ", h(1), k(), "\n";
+my @x; for my $i (1 .. 2) { foo(my $q = 0); push @x, sub { ++$q }; $x[-1]->() for 1 .. $i }
+print "12 ", join(",", map { $_->() } @x), "\n";
+sub foo { $_[0] } sub kk { my @q; }
+our $g = "G";
+sub before { "b=$g" }
+foo(my $g = "L");
+print before(), " $g\n";
+open my $fh, '<', '/dev/null'; sub nf { defined(fileno $fh) ? "open" : "closed" }
+print nf(), "\n";
+PERL
+
+# 10. #4642 (s536e): an embedded `my` its own statement mentions again -- the
+#     other mentions read the OUTER variable (a `my` is visible only after its
+#     statement) -- is renamed, so its let shadows nothing and the outer
+#     variable is not written: element, `$#a` and interpolated mentions, a
+#     package global, a loop, a closure per iteration, a string eval after it.
+test_wm('an embedded my re-mentioned by its statement reads the outer variable (#4642)', <<'PERL');
+sub f { my @env = ("A=1", "B=2", "A=3"); { chomp(my @env = grep { s/^A=// } @env); print "1 @env\n"; } print "2 ", scalar(@env), "\n"; }
+f();
+sub h { my $x = 5; { foo(my $x = $x + 1); print "4 $x\n" } print "5 $x\n" } sub foo { $_[0] } h();
+sub g { my @a = (1, 2, 3); { push(my @a, $a[0] * 10, scalar(@a), $#a); print "6 @a\n"; } print "7 @a\n"; } g();
+our @gl = (4, 5);
+{ chomp(my @gl = map { "$_\n" } @gl); print "8 @gl\n"; }
+print "9 @gl\n";
+my @w; my $q = 10;
+for my $i (1 .. 2) { foo(my $q = $q + $i); push @w, sub { ++$q }; }
+print "10 ", join(",", map { $_->() } @w), " $q\n";
+sub e { my $v = 1; { foo(my $v = $v + 1); print "11 ", eval('$v'), "\n"; } print "12 ", eval('$v'), "\n" } e();
+sub hh { my %h = (a => 1); { foo(my %h = (b => $h{a} + 1)); print "13 ", join(",", %h), "\n"; } print "14 ", join(",", %h), "\n" } hh();
+PERL
+
 done_testing();

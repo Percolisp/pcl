@@ -2210,6 +2210,14 @@ sub parse {
   $self->{_evalcap_counter} = 0;
   $self->_rename_free_eval_captures($doc) if $self->eval_mode;
 
+  # #4642: an expression-embedded `my` its own statement mentions again (the
+  # OUTER variable) takes a fresh `__shadow__N` name, so its let cannot shadow
+  # those mentions -- before the capture promotion and the lowering read the
+  # names.  (The counter is shared with the seam's shadow rename,
+  # _gate_seam_my_shadow, during lowering: one numbering, no collision.)
+  $self->{_shadow_rename_counter} = 0;
+  $self->_rename_rereading_embedded_mys($_) for @segments;
+
   # W5: rewrite file lexicals captured by named subs to fresh package-level
   # cells (see _rename_captured_file_lexicals).  Runs BEFORE the pre-pass so
   # every downstream reader (sub_info, _sub_return_facts, VarAnnotator,
@@ -2238,7 +2246,8 @@ sub parse {
   # the same name simply coexist.  `_shadow_rename_counter` still numbers the
   # v1-SEAM shadow rename, _gate_seam_my_shadow, whose cause is the seam's
   # _let_bound_vars contract and not the declaration model.)
-  $self->{_shadow_rename_counter} = 0;
+  # (Its counter is reset before _rename_rereading_embedded_mys above, which
+  # shares it -- #4642.)
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
@@ -4567,7 +4576,7 @@ sub _rename_captured_file_lexicals {
 # lowering's own test (_lower_block's embedded-`my` arm: a bare
 # PPI::Statement or ::Expression), and the symbols are _embedded_my_syms's.
 sub _embedded_decl_candidates {
-  my ($self, $stmts) = @_;
+  my ($self, $stmts, $all) = @_;
   my @tops;
   for my $st (@$stmts) {
     next unless ref $st && $st->isa('PPI::Statement');
@@ -4580,7 +4589,7 @@ sub _embedded_decl_candidates {
     # A DECLARATION's initializer carries them too (#3431; a scalar chain
     # `my $S = my $F = 0`, #4544): the declarators its lowering let-binds.
     if ($top->isa('PPI::Statement::Variable') && !Pl::Stmt::is_local_stmt($top)) {
-      push @out, map { [$top, $_] } _decl_init_embedded_my_syms($top);
+      push @out, map { [$top, $_] } $self->_decl_init_embedded_my_syms($top, $all);
       next;
     }
     next unless ref($top) eq 'PPI::Statement' || ref($top) eq 'PPI::Statement::Expression'
@@ -10836,12 +10845,13 @@ sub _blk_expr {
     # writes the cell.
     # A name already let-bound in an ENCLOSING scope is declared again: the
     # embedded `my` SHADOWS it (#4625: `{ open my $fh, … }` inside a scope
-    # holding a `$fh` re-opened the outer handle) -- unless the statement
-    # reads that outer variable too (`chomp(my @env = grep {…} @env)`), which
-    # the fresh let would shadow: that keeps the outer one, as before.
+    # holding a `$fh` re-opened the outer handle).  A statement that also
+    # reads the outer variable (`chomp(my @env = grep {…} @env)`) had its
+    # declarator renamed before lowering (#4642, _rename_rereading_embedded_mys);
+    # one it could not rename (a `${x}` brace) keeps the outer one, as before.
     my @pre = $self->_emb_promoted_cells($first);
     my @emb = grep { !$self->{_file_lex_renamed}{$_}
-                  && !($self->{_let_bound_vars}{$_} && _stmt_mentions_again($first, $_)) }
+                  && !$self->_stmt_mentions_again($first, $_) }
               $self->_embedded_my_names($first);
     if (@emb) {
       my @f = $self->_embedded_my_let($first, $vi, \@emb, sub {
@@ -10950,18 +10960,20 @@ sub _embedded_my_let {
 sub _decl_init_embedded_my_names {
   my ($self, $stmt) = @_;
   return grep { !$self->{_file_lex_renamed}{$_} }
-         map  { $_->content } _decl_init_embedded_my_syms($stmt);
+         map  { $_->content } $self->_decl_init_embedded_my_syms($stmt);
 }
 
+# ($all: every declarator, the re-mentioned ones too -- the #4642 rename's
+# candidates.)
 sub _decl_init_embedded_my_syms {
-  my ($stmt) = @_;
+  my ($self, $stmt, $all) = @_;
   my @own = $stmt->schildren;
   @own = ($own[0]) if Pl::Stmt::single_scalar_decl($stmt);
   my %own = map { refaddr($_) => 1 } @own;
   my %seen;
   return grep {
     my $nm = $_->content;
-    !$seen{$nm}++ && !_stmt_mentions_again($stmt, $nm)
+    !$seen{$nm}++ && ($all || !$self->_stmt_mentions_again($stmt, $nm))
   } map  { $_->[1] }
     grep { !$own{ refaddr $_->[0] } }
     _decl_syms_under($stmt, words => 'my', plain => 1);
@@ -10970,11 +10982,53 @@ sub _decl_init_embedded_my_syms {
 # Does STMT mention NAME again besides its declarator?  A `my` is visible only
 # after its statement, so every other mention reads the OUTER variable (`my $l
 # = (my $x = $x + 1)`, `chomp(my @env = grep {…} @env)`) -- the fresh let
-# would shadow it.  ONE predicate for the declaration and the plain arm.
+# would shadow it.  ONE predicate for the declaration arm, the plain arm and
+# the rename that removes the need for both (_rename_rereading_embedded_mys,
+# #4642): the BINDER's count of the statement's mentions as spelled now
+# (Binder::mentions_in -- an element `$env[0]`, `$#env` and interpolated text
+# count; the old text count missed the element spellings).
 sub _stmt_mentions_again {
-  my ($stmt, $name) = @_;
-  my $uses = () = $stmt->content =~ /\Q$name\E\b/g;
-  return $uses > 1 ? 1 : 0;
+  my ($self, $stmt, $name) = @_;
+  my $bd = Pl::Binder::for_captures($self, $stmt);
+  my $n  = $bd ? $bd->mentions_in($stmt, $name) : undef;
+  die sprintf("PCL internal: the binder holds no record of the statement at line %s (asked about %s)\n",
+    $stmt->line_number // '?', $name) unless defined $n;
+  return $n > 0 ? 1 : 0;
+}
+
+# #4642: an expression-embedded `my` re-mentioned by its own statement
+# (`chomp(my @env = grep { s/^A=// } @env)`, `foo(my $x = $x + 1)`): the
+# other mentions read the OUTER variable -- an enclosing lexical or the
+# package global -- but the embedded-`my` let (M2 / #3431) is opened AROUND
+# the statement, so it would shadow them; both arms therefore kept the outer
+# variable for such a name, and the statement WROTE it.  The declarator is
+# renamed instead -- with exactly its binding's uses after the statement
+# (_rename_decl_within: the declaring statement is the skipped region, the
+# binder decides every later token) -- to a fresh `NAME__shadow__N`, which the
+# eval capture alist strips back to NAME: the let binds the fresh name and the
+# statement's other mentions keep reading the outer one.  Runs after the
+# exception rename (its `__excl__` names are fresh already) and before the
+# capture promotion and the lowering, so all of them see one spelling.  A
+# `${x}` code brace in the scope (no token the rewrite reaches) keeps the old
+# path.
+sub _rename_rereading_embedded_mys {
+  my ($self, $seg) = @_;
+  for my $cand ($self->_embedded_decl_candidates($seg->{stmts}, 1)) {
+    my ($top, $sym) = @$cand;
+    my $name = $sym->content;
+    next if $name =~ /__(?:file|state|shadow|excl|lex|evalcap|lexsub)__\w*\z/;
+    next unless $self->_stmt_mentions_again($top, $name);
+    # its scope: the nearest Block (or the document) -- an embedded `my` is
+    # never a compound head's, so the walk from the symbol is the word's
+    my ($root) = _lexical_decl_scope($sym, $sym);
+    next unless $root;
+    (my $bare = $name) =~ s/^[\$\@\%]//;
+    next if _has_code_brace_deref($root, $bare);
+    $self->_rename_decl_within($root, $sym,
+      _reg_rename($name, $name . '__shadow__' . $self->{_shadow_rename_counter}++,
+                  ':reread-shadow'), $top);
+  }
+  return;
 }
 
 # The same declarations, as a de-duplicated list of NAMES.
@@ -10997,123 +11051,48 @@ sub _collect_named_subs {
   return [ grep { $_->name || $_->isa('PPI::Statement::Scheduled') } @ns ];
 }
 
-# Which of @$names does a named sub OTHER than the one holding $stmt reference?
-# That is exactly the condition under which _lower_block refuses to let-bind an
-# expression-embedded `my` — the sub is presumed to share the forward-defvar'd
-# global as its cell, so lexicalizing the decl would strand it.  ONE predicate,
-# read by the refusal AND by the pre-pass that removes the need for it, so the
-# two can never disagree (the s363 detector/rewriter rule).
+# Which of @$names (the statement's expression-embedded `my` declarators) does
+# a named sub OTHER than the one holding $stmt USE?  That is exactly the
+# condition under which _lower_block refuses to let-bind an expression-
+# embedded `my` -- the sub shares the forward-defvar'd global as its cell, so
+# lexicalizing the decl would strand it (Capture-Tiny's Utils.pm, #199).  ONE
+# predicate, read by the refusal AND by the pre-pass that removes the need for
+# it, so the two can never disagree (the s363 detector/rewriter rule).
+#
+# The question is the BINDER's (#4641): a use of THE BINDING the declarator
+# makes (Binder::uses_of), lying inside such a sub -- never a text match of
+# the bare name.  The text scan vetoed on ANY sigil (`sub h { my @d }` vetoed a
+# loop's `my $d`: one shared cell, the closures per iteration shared it), and
+# its two exemptions (the sub declares its own, with no free reference) were a
+# private scope walk the binder answers by construction: a sub's own `my $fh`
+# is another binding, a use BEFORE the declaration is a global's, an inner
+# shadow's use is the shadow's.  A literal text in the sub that a string eval
+# in the binding's range may compile counts too (the port-2 eval rule,
+# Binder::text_uses_in).
 sub _embedded_my_veto_names {
   my ($self, $subs, $stmt, $names) = @_;
+  my @other = grep { !_elem_within($stmt, $_) } @$subs;
+  return () unless @other && @$names;
+  my %want = map { ($_ => 1) } @$names;
+  my $bd = Pl::Binder::for_captures($self, $stmt)
+    or die "PCL internal: the embedded-`my` veto has no binder for this document\n";
   my %bad;
-  SUBSCAN: for my $sub (@$subs) {
-    next if _elem_within($stmt, $sub);
-    my $t = $sub->content;
-    for my $n (@$names) {
-      next if $bad{$n};
-      my $b = substr($n, 1);
-      next unless $t =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/;
-      # A sub that DECLARES the same name has its own lexical and cannot be
-      # sharing this statement's cell — vetoing on it left BOTH sides unbound,
-      # because the "old forward-defvar'd global" the veto falls back to is
-      # never emitted when every mention is a declaration.
-      #   sub s1 { my $fh; … }                 # its own lexical
-      #   sub nf { open my $fh, '>', …; … }    # vetoed → free var, CRASH
-      # (Capture-Tiny's t/lib/Utils.pm, task #199: `Utils::$fh is unbound`.)
-      # The declaration must cover EVERY use, though: a sub can reference the
-      # file-level cell AND declare its own shadow in an inner block —
-      # `sub t { my $l = <$fh>; { my $fh; } }` — and exempting on the shadow
-      # alone strands the outer reference (s329 review probe).
-      next if $self->_sub_declares_name($sub, $n)
-           && !$self->_sub_freely_references_name($sub, $n);
-      $bad{$n} = 1;
-      last SUBSCAN if keys(%bad) == @$names;
+  for my $d (_decl_syms_under($stmt, words => 'my', plain => 1)) {
+    my $sym = $d->[1];
+    my $n = $sym->content;
+    next if !$want{$n} || $bad{$n};
+    my $b = $bd->decl_binding($sym)
+      or die "PCL internal: the binder holds no declaration for `$n` at line "
+           . ($sym->line_number // '?') . "\n";
+    my @uses = map { $_->{tok} } $bd->uses_of($b);
+    for my $sub (@other) {
+      my $r = $bd->ord_range($sub, $sub) or next;
+      my @in = grep { _elem_within($_, $sub) } @uses;
+      push @in, $bd->text_uses_in($b, @$r) if !@in;
+      if (@in) { $bad{$n} = 1; last }
     }
   }
   return grep { $bad{$_} } @$names;
-}
-
-# Does named sub $sub declare $name (sigil-qualified) itself — i.e. does it
-# own a lexical of that name rather than referring to someone else's cell?
-# Used by the embedded-`my` veto above; deliberately checks the EXACT name, so
-# a sub that mentions a different sigil of the same base ($fh vs @fh) still
-# vetoes.
-sub _sub_declares_name {
-  my ($self, $sub, $name) = @_;
-  for my $sym (@{ $sub->find(sub {
-        $_[1]->isa('PPI::Token::Symbol') && $_[1]->content eq $name }) || [] }) {
-    return 1 if $self->_symbol_is_declarator($sym);
-  }
-  return 0;
-}
-
-# Does $sub contain a FREE reference to $name — a use not covered by any of
-# the sub's own declarations of that name?  A use is covered when some
-# declarator of the exact name precedes it in document order AND the block the
-# declaration scopes over contains the use (a declarator in a compound header
-# — `foreach my $fh` — scopes over the compound's BODY only, not the block
-# holding the compound).  Perl scopes a `my` from the END of its statement, so
-# a same-statement use (`my $fh = f($fh)`) really refers to the outer cell;
-# that shape warns in perl and is not distinguished here — it stays covered,
-# which errs toward exempting.  Everything else errs toward VETO, the old
-# conservative behavior.
-sub _sub_freely_references_name {
-  my ($self, $sub, $name) = @_;
-  my $sigil = substr($name, 0, 1);
-  my $base  = substr($name, 1);
-  my $pat   = qr/\Q$sigil\E\Q$base\E\b/;
-  my @decls;    # find() returns document order, so earlier index = earlier decl
-  my @refs;     # [$token, #decls seen before it] — only EARLIER decls can cover
-  for my $tok (@{ $sub->find('PPI::Token') || [] }) {
-    if ($tok->isa('PPI::Token::Symbol')) {
-      next if $tok->content ne $name;
-      if ($self->_symbol_is_declarator($tok)) { push @decls, $tok }
-      else { push @refs, [$tok, scalar @decls] }
-    }
-    else {
-      # The name can hide inside tokens that are not Symbols: `<$fh>` is one
-      # QuoteLike::Readline token, and "$fh"/regex bodies interpolate.  Those
-      # are always USES, never declarators.  Single-quoted strings don't
-      # interpolate; comments/POD are noise.
-      next if $tok->isa('PPI::Token::Quote::Single')
-           || $tok->isa('PPI::Token::Comment')
-           || $tok->isa('PPI::Token::Pod');
-      next if $tok->content !~ $pat;
-      push @refs, [$tok, scalar @decls];
-    }
-  }
-  REF: for my $r (@refs) {
-    my ($tok, $ndecl) = @$r;
-    for my $i (0 .. $ndecl - 1) {
-      my $scope = $self->_decl_scope_block($decls[$i], $sub);
-      my $b = $tok;
-      while ($b && $b != $sub) {
-        next REF if $b == $scope;
-        $b = $b->parent;
-      }
-    }
-    return 1;
-  }
-  return 0;
-}
-
-# The block a declarator's `my` scopes over, within $sub: the nearest
-# enclosing Structure::Block — unless the declarator sits in a compound
-# HEADER (`foreach my $x (…)`, `if (my $x = …)`), in which case it scopes
-# over that compound's body block only.
-sub _decl_scope_block {
-  my ($self, $decl, $sub) = @_;
-  my $node = $decl;
-  while ($node && $node != $sub) {
-    my $parent = $node->parent or last;
-    return $parent if $parent->isa('PPI::Structure::Block');
-    if ($parent->isa('PPI::Statement::Compound')) {
-      my ($blk) = grep { $_->isa('PPI::Structure::Block') } $parent->schildren;
-      return $blk if $blk;
-    }
-    $node = $parent;
-  }
-  return $sub;
 }
 
 sub _lower_stmt {
@@ -13994,9 +13973,13 @@ sub _lower_our_decl {
 #   :seam-shadow       a `my` inside a block that lowers through the v1
 #                      expression seam while an outer lexical of the same name
 #                      is live (_gate_seam_my_shadow, `$x__shadow__N`)
+#   :reread-shadow     an expression-embedded `my` whose own statement mentions
+#                      the name again (the OUTER variable), so its let cannot
+#                      be the name (_rename_rereading_embedded_mys, #4642,
+#                      `$x__shadow__N`)
 my %RENAME_WHY = map { $_ => 1 }
   qw(:spanning :captured :state-cell :exception-global :qualified-global
-     :seam-shadow);
+     :seam-shadow :reread-shadow);
 
 # original perl spelling + reason, keyed by the NEW name.  File-scoped and
 # reset per parse: one Pl::Parser2 object parses one source, `parse` is not

@@ -87,6 +87,7 @@ package Pl::Binder;
 #       ->uses_of($b), ->text_uses_in($b, $lo, $hi)  a binding's uses; its eval-text uses
 #       ->refers_to_decl($tok, $canon, $decl)  the shadow question (s535a)
 #       ->binding_after($node, $canon), ->decl_binding($tok), ->ord_range($a, $z)
+#       ->mentions_in($node, $canon)   $node's non-declarator mentions of $canon, as spelled now (s536e)
 #       Pl::Binder::for_span($p2, $n)  the binder answering the span / shadow question
 
 use strict;
@@ -1031,6 +1032,26 @@ sub spans {
     push @out, { b => $b, di => $di, segs => \%segs, first => $first, text => $code ? 0 : 1 };
   }
   return @out;
+}
+
+# How many times $node mentions $canon AS ITS TOKENS SPELL IT NOW, a
+# declarator excluded (#4642: "does this statement name its embedded `my`
+# again" -- a `my` is visible only after its statement, so each such mention
+# reads another variable).  Every spelling the table reads counts: a Symbol,
+# an element (`$x[0]` is `@x`), `$#x`, interpolated text, a `${x}` brace.
+# undef when the table does not hold $node (the caller dies, rule 12).
+sub mentions_in {
+  my ($self, $node, $canon) = @_;
+  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
+  return undef unless defined $a && defined $z;
+  my (%done, $n);
+  $n = 0;
+  for my $r ($self->_refs_in($a, $z)) {
+    my $t = $r->{tok};
+    next if $done{ refaddr $t }++;
+    $n += grep { $_->{canon} eq $canon && $_->{via} ne 'decl' } @{ $self->_cur_refs($t) };
+  }
+  return $n;
 }
 
 # The binding a DECLARATOR token makes (`my $x`'s `$x`), or undef.
