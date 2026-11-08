@@ -11679,6 +11679,14 @@ per element."
     ;; `*A:: = *B::` -- a stash ALIAS (task #3321): recorded, never copied.
     ((and (listp place) (eq (car place) 'p-stash))
      `(p-stash-assign ,(cadr place) ,value))
+    ;; A TYPEGLOB element of a list assignment -- `(*x, *y) = (\"a", \&f)',
+    ;; `(*{"P::x"}, ...) = LIST' -- stores through the glob assignment the
+    ;; scalar spelling `*x = ...' lowers to (ExprToCL's `=' arm), one slot each
+    ;; (#4442: the fallback box-set wrote into a fresh glob object nobody reads).
+    ((and (listp place) (eq (car place) 'p-make-typeglob) (= (length place) 3))
+     `(p-glob-assign ,(cadr place) ,(caddr place) ,value))
+    ((and (listp place) (eq (car place) 'p-dynamic-typeglob) (= (length place) 2))
+     `(p-glob-assign-dynamic ,(cadr place) ,value))
     ((and (listp place) (eq (car place) 'p-substr))
      (let ((args (cdr place)))
        (cond
@@ -11693,10 +11701,18 @@ per element."
     ;; p-my-= answer theirs.  box-set's own answer is the setter's for a
     ;; magic cell: a TIED element (`f($t{k} = V)', `($t{k} = V) =~ s///')
     ;; then handed on the stored value, a copy (#4644).  A place that is not
-    ;; a box keeps box-set's answer (the value).
+    ;; a box keeps box-set's answer (the value).  A GLOB that arrives here
+    ;; through any other form has no store (rule 12: it dies, never stores
+    ;; nothing -- #4442).
     (t (let ((b (gensym "PLACE")) (r (gensym "R")))
-         `(let* ((,b ,place) (,r (box-set ,b ,value)))
-            (if (p-box-p ,b) ,b ,r))))))
+         `(let ((,b ,place))
+            (when (p-typeglob-p ,b) (%p-glob-place-unsupported ',place))
+            (let ((,r (box-set ,b ,value)))
+              (if (p-box-p ,b) ,b ,r)))))))
+
+(defun %p-glob-place-unsupported (form)
+  "A typeglob reached p-setf's box fallback: no glob-assignment form for it."
+  (error "PCL: assignment to the typeglob form ~S is not supported (#4442)" form))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-viv-marker-p (form)

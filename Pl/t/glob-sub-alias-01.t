@@ -35,7 +35,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -170,3 +170,27 @@ print scalar(@l), " @l\n";
 PL
    "wls 3 r d3\n2 one(a) b\n",
    'BEGIN { *wb = *wls; *o1 = *one } carries the (&$;$) and ($) prototypes');
+
+# ── 8. A LIST assignment to typeglobs stores through the glob assignment the
+# scalar spelling uses, one slot per glob (#4442, s536f: it stored NOTHING --
+# p-list-='s element store wrote into a fresh glob object).  Static, dynamic
+# `*{"P::x"}` and qualified globs; ref, code, array and glob-to-glob values; a
+# glob beside a scalar; the count and the list value.  FAILS on c8886b61. ──
+is(run_cl(<<'PL'),
+no strict 'refs';
+my $caller = "main";
+our ($x, $y) = ("x0", "y0");
+(*{"${caller}::x"}, *{"${caller}::y"}) = (\"x1", \"y1"); print "1 $x $y\n";
+(*x, *y) = (\"x2", \"y2"); print "2 $x $y\n";
+sub f { "f" } our @arr = (1, 2);
+(*g, *h) = (\&f, \@arr); print "3 ", g(), " @h\n";
+our ($c, @c) = ("c", 7); our ($d, @d) = ("d", 8);
+(*a, *b) = (*c, *d); print "4 $a @a $b @b\n";
+(*z) = \*c; print "5 $z\n";
+my $s; ($s, *q) = (1, \"qq"); print "6 $s $q\n";
+my $n = () = (*m1, *m2) = (\"m1", \"m2"); print "7 $n $m1 $m2\n";
+our $p = "p"; (*P::p) = (\$p); print "8 $P::p\n";
+my @r = ((*r1, *r2) = (\"r1", \"r2")); print "9 ", scalar(@r), " $r1 $r2\n";
+PL
+   "1 x1 y1\n2 x2 y2\n3 f 1 2\n4 c 7 d 8\n5 c\n6 1 qq\n7 2 m1 m2\n8 p\n9 2 r1 r2\n",
+   '(*x, *y) = LIST assigns each glob (#4442)');
