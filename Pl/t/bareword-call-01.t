@@ -285,7 +285,7 @@ test_cl('`yes` stands: a sub declared ABOVE IS called',
 
 # `study` and `reset` are perl BUILTINS that Config's arity table does not
 # carry, so the classifier answers `no` for them — the emitter's own table
-# (Pl::ExprToCL::is_runtime_name) is what keeps their call.  Without that
+# (Pl::ExprToCL::source_call_is_builtin) is what keeps their call.  Without that
 # guard `study;` silently became the string "study" (measured by corpus-diff
 # on perl-tests/study.t, 8 sites).
 test_cl('`study` stays a BUILTIN call, not a bareword string',

@@ -3802,7 +3802,7 @@ sub handle_subcalls {
           if (@anon_attrs) {
             my ($fc_node, $fc_id) = $self->make_node_insert('funcall');
             $self->add_child_to_node($fc_id,
-              $self->make_node(PPI::Token::Word->new('__pcl_set_attributes')));
+              $self->make_node(_runtime_op_word(q(__pcl_set_attributes))));
             $self->add_child_to_node($fc_id, $ref_id);
             (my $q = join(' ', @anon_attrs)) =~ s/([\\'])/\\$1/g;
             $self->add_child_to_node($fc_id,
@@ -3812,7 +3812,7 @@ sub handle_subcalls {
           if (defined $anon_proto) {
             my ($fc_node, $fc_id) = $self->make_node_insert('funcall');
             $self->add_child_to_node($fc_id,
-              $self->make_node(PPI::Token::Word->new('__pcl_set_prototype')));
+              $self->make_node(_runtime_op_word(q(__pcl_set_prototype))));
             $self->add_child_to_node($fc_id, $ref_id);
             (my $q = $anon_proto) =~ s/([\\'])/\\$1/g;
             $self->add_child_to_node($fc_id,
@@ -6466,6 +6466,17 @@ sub _reduce_pre {
 # SUBNAME comparator?  Not a builtin, not a keyword, not CORE::, and -- perl's
 # rule -- not when the next token is `->`: then WORD is a CLASS that starts
 # the LIST (`sort K->new->names`, #3403).  ONE predicate for both forms.
+# The head of a call the COMPILER builds (an anonymous sub's attribute or
+# prototype registration): it names the RUNTIME's operator, so it carries the
+# same `_core_qualified` marker the `CORE::NAME` spelling leaves -- a call the
+# program spells with a non-keyword name is the program's sub (#1611,
+# ExprToCL::source_call_is_builtin), and this one must not become one.
+sub _runtime_op_word {
+  my $w = PPI::Token::Word->new($_[0]);
+  $w->{_core_qualified} = 1;
+  return $w;
+}
+
 sub _sort_word_is_subname {
   my ($self, $comp_name, $after) = @_;
   return 0 if exists $self->known_no_of_params->{$comp_name};

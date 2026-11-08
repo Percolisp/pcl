@@ -1134,7 +1134,7 @@ sub _extract_prototype_attributes {
         push @span, $p;
         last if $p == $block;
       }
-      my $text = "__pcl_set_prototype("
+      my $text = "CORE::__pcl_set_prototype("
                . join('', map { $_->content } @span) . ", '$quoted')";
       my $ndoc = fragment_doc($text) or next;
       my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }

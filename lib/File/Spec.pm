@@ -97,9 +97,10 @@ sub rel2abs {
     unless (defined $base) {
         # Real File::Spec::Unix does `require Cwd; Cwd::cwd()`.  lib/Cwd.pm now
         # exists (task #166) so that would work, but it is deliberately NOT
-        # used: Cwd::cwd() is itself just the cwd() builtin, so requiring the
+        # used: Cwd::cwd() is itself just the runtime's cwd (spelled CORE::cwd()
+        # here and in lib/Cwd.pm: a plain cwd() is a SUB call, #1611), so requiring the
         # module here would only add a load to every base-less rel2abs.
-        $base = cwd();
+        $base = CORE::cwd();
     }
     # The no-op relative paths give back the BASE itself, not "$base/." —
     # perl canonpaths the result, so rel2abs('.') is '/tmp', not '/tmp/.'.
@@ -161,10 +162,10 @@ sub path {
 }
 
 # File::Spec::Unix::abs2rel, with `_same` inlined (Unix compares exactly) and
-# Cwd::getcwd() replaced by the cwd builtin the rest of this file uses.
+# Cwd::getcwd() replaced by the runtime's CORE::cwd() the rest of this file uses.
 sub abs2rel {
     my ($class, $path, $base) = @_;
-    $base = cwd() if !defined $base || !length $base;
+    $base = CORE::cwd() if !defined $base || !length $base;
     ($path, $base) = map { __PACKAGE__->canonpath($_) } ($path, $base);
     my ($path_directories, $base_directories);
     if (grep { __PACKAGE__->file_name_is_absolute($_) } ($path, $base)) {
@@ -175,7 +176,7 @@ sub abs2rel {
                                    && __PACKAGE__->file_name_is_absolute($base);
     }
     else {
-        my $wd = (__PACKAGE__->splitpath(cwd(), 1))[1];
+        my $wd = (__PACKAGE__->splitpath(CORE::cwd(), 1))[1];
         $path_directories = __PACKAGE__->catdir($wd, $path);
         $base_directories = __PACKAGE__->catdir($wd, $base);
     }

@@ -182,28 +182,53 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   __pcl_set_prototype __pcl_set_attributes
 );
 
-# Does `cl_name` map this perl name to a RUNTIME BUILTIN (`p-…`) rather than a
-# user sub (`pl-…`)?  Read-only view of the table above, for a caller that must
-# not override the emitter's own dispatch — `Pl::Parser2::_bareword_statement_form`
-# rewrites a lone bareword statement into perl's string constant, and `study;` /
-# `reset;` are BUILTIN CALLS that the bareword classifier does not know about
-# (they are absent from Config's arity table).  Asking the emitter's table is
-# not a second name test: it is the same one decision, read once.
-sub is_runtime_name { return exists $RUNTIME_NAMES{ $_[0] // '' } ? 1 : 0 }
+# THE CALL-SITE NAMING RULE (#2100, #1611; docs/ir-spec.md §10-name): does a
+# word the PROGRAM spelled as a call head (`NAME(...)`, `NAME LIST`) lower to
+# the runtime's builtin (`p-NAME`) rather than to a sub (`pl-NAME`)?  Only when
+# NAME is in the table above AND is a perl KEYWORD.  The table is the runtime's
+# vocabulary, not perl's builtin list: beside `print` and `reverse` it holds
+# internal operators (hash flatten box setf let regex aslice gethash ...), and
+# a non-keyword word followed by `(` is a sub call in perl whether or not the
+# compiler saw the sub declared -- Test::Deep installs `hash` through a
+# COMPUTED glob write, which no declaration scan sees, and `hash($data)` must
+# reach it.  Nodes the COMPILER builds (`__pcl_set_prototype`, ...) carry the
+# `runtime_op` mark and are never asked this.  Read by cl_name and by
+# Pl::Parser2::_rewrite_bareword_stmt (`study;` / `reset;` keep their builtin
+# call), so the two cannot disagree.
+sub source_call_is_builtin {
+  my $name = shift // '';
+  return 0 if !exists $RUNTIME_NAMES{$name};
+  return Pl::PExpr::Config::is_core_keyword($name) ? 1 : 0;
+}
 
-# Does THIS PROGRAM declare (or import) a sub of this name?  The environment's
-# prototype record is the registry every declaration lands in — a plain `sub
-# f {…}`, a prototyped one, a signature, a `use constant`, and a name a `use`
-# merged in — and `min_params` is what separates those from the handful of
-# BUILTIN records `_builtin_prototypes` seeds (open/close/…, which carry no
-# arity).  The same test `_declared_named_unary` makes, for the same reason:
-# it is the one reading of "the program has a sub by this name" (task #2100).
-sub _name_is_declared_sub {
-  my ($self, $name) = @_;
-  return 0 if !defined $name || !length $name;
-  return 0 if !$self->environment;
-  my $rec = $self->environment->get_prototype($name);
-  return ($rec && defined $rec->{min_params}) ? 1 : 0;
+# S536C MEASUREMENT ONLY (deleted before MERGE-READY): one line per cl_name
+# answer for a %RUNTIME_NAMES entry.
+our $S536C_HEAD;
+sub _s536c_log {
+  my ($self, $name, $for_funcall, $force_builtin) = @_;
+  my $kw   = Pl::PExpr::Config::is_core_keyword($name) ? 1 : 0;
+  my $rec  = $self->environment ? $self->environment->get_prototype($name) : undef;
+  my $decl = ($rec && defined $rec->{min_params}) ? 1 : 0;
+  my $file = ($self->environment && $self->environment->source_file) // '-';
+  $file = $ENV{PCL_S536C_FILE} if $file eq '-' && $ENV{PCL_S536C_FILE};
+  my (undef, undef, $cline) = caller(1);
+  my $h = $S536C_HEAD;
+  my ($hp, $hl, $hc, $hs) = ('-', '-', '-', '-');
+  if (ref $h && eval { $h->isa('PPI::Element') }) {
+    $hp = $h->parent ? 'parent' : 'noparent';
+    my $loc = eval { $h->location };
+    $hl = $loc ? $loc->[0] : '-';
+    $hc = $h->content // '-';
+    $hs = $h->{_s536c_synth} ? 'synth' : '-';
+  }
+  my @c = caller(2);
+  my $sub2 = $c[3] // '-';
+  if (open my $fh, '>>', $ENV{PCL_S536C_LOG}) {
+    print $fh join("\t", $file, $name, "ff=$for_funcall", "fb=$force_builtin",
+                   "kw=$kw", "decl=$decl", "site=$cline", "via=$sub2",
+                   $hp, "hl=$hl", "hc=$hc", $hs), "\n";
+    close $fh;
+  }
 }
 
 # Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
@@ -454,19 +479,21 @@ sub cl_name {
   # imported into main:: called as `&connect()`).
   # %RUNTIME_NAMES is NOT perl's builtin list: beside `print` and `reverse` it
   # holds the runtime's own internal operators (flatten, hash, aref, setf,
-  # regex, box, cwd, reftype, …).  A DECLARED sub of such a name is the user's
-  # and must lower to `pl-NAME`; lowering it to the internal operator hijacked
-  # the call — `sub hash {…} hash(1,2)` printed "12" (the runtime's hash
-  # constructor, stringified) and `sub let`/`sub setf` failed inside a
-  # MACROEXPANSION, taking the whole file (task #2100).  A PERL KEYWORD still
+  # regex, box, cwd, reftype, …).  A CALL the program spells with such a name
+  # is a sub call -- perl's rule for any non-keyword word followed by `(` or
+  # used as a list operator, declared or not (`source_call_is_builtin`, the
+  # one reading of the table; #2100 for a declared sub, #1611 for one a
+  # computed glob write installs).  An OPERATOR spelling (`$for_funcall` 0:
+  # `+`, `!`, `x`, ...) and a node the compiler synthesised (`$force_builtin`,
+  # also the `CORE::NAME` spelling) are the runtime's.  A PERL KEYWORD still
   # wins over a declared sub, because that is what perl does (`sub reverse
-  # {…}; reverse(…)` calls the builtin unless imported or `use subs`), and
-  # `is_core_keyword` measures that from the running perl rather than listing
-  # it.  `$force_user` (the `&NAME(...)` sigil) already bypassed the table.
+  # {…}; reverse(…)` calls the builtin unless imported or `use subs`).
+  # `$force_user` (the `&NAME(...)` sigil) already bypassed the table.
+  _s536c_log($self, $perl_name, $for_funcall, $force_builtin)
+    if $ENV{PCL_S536C_LOG} && !$force_user && exists $RUNTIME_NAMES{$perl_name};
   if (!$force_user && exists $RUNTIME_NAMES{$perl_name}
-      && ($force_builtin
-          || Pl::PExpr::Config::is_core_keyword($perl_name)
-          || !$self->_name_is_declared_sub($perl_name))) {
+      && ($force_builtin || !$for_funcall
+          || source_call_is_builtin($perl_name))) {
     return "p-$perl_name";
   }
   # Inside a non-main package, qualify user-defined sub calls so SBCL's reader
@@ -747,7 +774,7 @@ sub _negated_call_form {
   return undef unless ref($word) eq 'PPI::Token::Word';
   return undef unless ($word->content // '') =~ /\A-([A-Za-z_]\w*)\z/;
   my $name = $1;
-  return undef if exists $RUNTIME_NAMES{$name};
+  return undef if source_call_is_builtin($name);
   my $nx = $word->snext_sibling;
   return undef if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
   my $known = ($nx && $nx->isa('PPI::Structure::List'))
@@ -2741,7 +2768,10 @@ sub gen_funcall_form {
   # marker the `use subs` lookup above reads, asked once more here because
   # #2100's declared-sub rule must not catch a shim's own `CORE::` delegation.
   my $head_node      = $self->expr_o->get_a_node($kids->[0]);
+  # A head the COMPILER built (PExpr::_runtime_op_word) carries the same
+  # marker, so it names the runtime's operator too (#1611).
   my $core_qualified = (ref($head_node) && $head_node->{_core_qualified}) ? 1 : 0;
+  local $S536C_HEAD = $head_node;
   my $cl_func = defined $override_pkg
                   ? $self->cl_name("${override_pkg}::${func_name}", 1, 1, $core_qualified)
                   : $self->cl_name($func_name, 1, $force_user, $core_qualified);
@@ -6008,7 +6038,9 @@ sub gen_inline_lambda_form {
   # Deleted in task #501; perl's AUTOLOAD-for-a-sort-name behaviour is
   # probed and preserved by the one mechanism (Pl/t/sort-01.t).
   if ($for_func eq 'sort' && $node->{comparator_name}) {
-    my $cl_func = $self->cl_name($node->{comparator_name});
+    # The NAME is a sub's name by construction (perl: `sort SUBNAME LIST`),
+    # so it is named as a CALL -- `sort hash @x` with a user `sub hash` (#1611).
+    my $cl_func = $self->cl_name($node->{comparator_name}, 1);
     my $proto;
     if ($self->environment) {
       my $cname = $node->{comparator_name};

@@ -76,7 +76,7 @@ sub _modify_attrs {
     for my $a (@attrs) {
         if ($type eq 'CODE') {
             if ($a =~ /\Aprototype\((.*)\)\z/s) {
-                __pcl_set_prototype($ref, $1);
+                CORE::__pcl_set_prototype($ref, $1);
             }
             elsif (builtin::set_sub_attribute($ref, $a)) {
                 if ($a =~ /\A-?lvalue\z/) {

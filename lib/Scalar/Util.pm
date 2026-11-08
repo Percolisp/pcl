@@ -95,7 +95,7 @@ sub set_prototype (&$) {
     # The XS dies on a bad first argument (s502e review, probed vs perl).
     if (!ref $code) { require Carp; Carp::croak("set_prototype: not a reference") }
     if (builtin::reftype($code) ne 'CODE') { require Carp; Carp::croak("set_prototype: not a subroutine reference") }
-    return __pcl_set_prototype($code, $proto);
+    return CORE::__pcl_set_prototype($code, $proto);
 }
 
 # refaddr($ref) — the address of the referent, or undef for a non-ref: the

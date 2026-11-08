@@ -11365,7 +11365,8 @@ sub _is_empty_list_expr {
 #   * a name the EMITTER maps to a runtime builtin (`study;`, `reset;` — real
 #     perl builtins that Config's arity table does not carry, so the
 #     classifier answers `no`) must keep its `(p-study)` call.  The emitter's
-#     own table answers that, through Pl::ExprToCL::is_runtime_name;
+#     own naming rule answers that, through Pl::ExprToCL::source_call_is_builtin
+#     (a non-keyword runtime name is a sub call there too, #1611);
 #   * the rewrite happens IN the lowered form, replacing only the `(pl-NAME)`
 #     node, so every context wrap the ordinary lowering built around the call
 #     — `p-void-ctx`, a sub-body regime, a tail's caller context — is kept.
@@ -11373,7 +11374,7 @@ sub _rewrite_bareword_stmt {
   my ($self, $word, $form) = @_;
   my $name = $word->content // '';
   return $form if $name !~ /\A[^\W\d]\w*(?:(?:::|')[^\W\d]\w*)*\z/;
-  return $form if Pl::ExprToCL::is_runtime_name($name);
+  return $form if Pl::ExprToCL::source_call_is_builtin($name);
   my $expr_o = Pl::PExpr->new(
     environment   => $self->environment,
     parser        => $self->fallback_parser,

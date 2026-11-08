@@ -47,7 +47,7 @@ sub set_prototype {
     # The XS dies on a bad code argument, as Scalar::Util's does (s502e review).
     if (!ref $code) { require Carp; Carp::croak("set_prototype: not a reference") }
     if (builtin::reftype($code) ne 'CODE') { require Carp; Carp::croak("set_prototype: not a subroutine reference") }
-    return __pcl_set_prototype($code, $proto);
+    return CORE::__pcl_set_prototype($code, $proto);
 }
 
 # subname / set_subname (#3529): the sub's NAME is ONE runtime record -- the
