@@ -18163,7 +18163,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Accepts an optional (:loc \"FILE line N\") marker from codegen for the
    ' at FILE line N.' suffix on a message that doesn't end in a newline.
    A warning raised INSIDE the handler skips it and takes the default action,
-   which is perl's own rule — see *p-in-warn-handler*."
+   which is perl's own rule — see *p-in-warn-handler*.
+   THE VALUE is perl's PL_sv_yes whatever happened to the text -- a handler,
+   IGNORE, a closed STDERR (pp_warn; probed 5.40.3: `my $w = warn ...` is 1
+   and is_bool).  It answered NIL, so a sub whose LAST statement warns
+   returned undef: Text::CSV_PP's _cache_diag (80_diag.t row 229, #4181)."
+  (%p-warn-1 raw-args)
+  +p-yes+)
+
+(defun %p-warn-1 (raw-args)
+  "p-warn's effect: build the message and hand it to the handler or STDERR."
   (multiple-value-bind (args loc) (%p-extract-die-markers raw-args)
     ;; `warn LIST` concatenates its flattened list, like `die` and like
     ;; `print` — one flattener for all three (task #2004 residue).

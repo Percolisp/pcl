@@ -27,7 +27,7 @@ my $pl2cl   = "$root/pl2cl";
 my @sbcl_rt = PCLCore::sbcl_prefix("$root/cl/pcl-runtime.lisp");
 plan skip_all => "perl $] has no builtin::is_bool" if $] < 5.036;
 
-plan tests => 11;
+plan tests => 12;
 
 sub run_both {
     my ($code) = @_;
@@ -124,3 +124,12 @@ same('filetests and eof are perl booleans; -s is a size; a missing file is undef
      b(-s $f), b(-T $f), b(-d $d), b(-f $d), b(-M $f), ((-M $f) > 0 ? "age" : "noage"));
    open my $z, "<", "/dev/null" or die; print ",", b(eof($z)), "[", eof($z), "]";
    open my $p, "<", $f or die; print ",", b(eof($p)), "[", eof($p), "]\n";');
+
+# #4181 (s536a, Text-CSV 80_diag.t row 229): warn's VALUE is PL_sv_yes whatever
+# happens to its text -- a handler, a closed STDERR -- so a sub whose last
+# statement warns returns it (Text::CSV_PP::_cache_diag's ok()).  It was undef.
+same('warn returns PL_sv_yes (handler, closed STDERR); a sub ending in a warn returns it',
+  $B . 'local $SIG{__WARN__} = sub { 0 }; sub w { warn "x\n" } sub lw { my $c = { t => 1 }; if ($c->{t}) { w() } }
+   my $a = warn "y\n"; my $r = lw(); my $s = w();
+   my $c; { local $SIG{__WARN__}; open my $save, ">&STDERR" or die; close STDERR; $c = warn "z\n"; open STDERR, ">&", $save or die; }
+   print join(",", b($a), "[$a]", b($s), "[$r]", b($c), "[$c]"), "\n";');
