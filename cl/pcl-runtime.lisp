@@ -19985,6 +19985,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;; replaces a pipe stream that was opened onto a standard handle.
 (defvar *p-pipe-pids* (make-hash-table :test 'eq))
 
+(defvar *p-eof-seen* (make-hash-table :test 'eq)
+  "Descriptor streams whose last read reached end of file (perl's
+   PERLIO_F_EOF), until a seek or a close -- see the note above
+   %p-note-read-eof (task #4284).  Declared here because the close path,
+   %p-close-maybe-pipe, drops a stream's entry.")
+
 (defun %p-stream-target (v)
   "The stream V actually stands for — synonym streams peeled.
    `*standard-output*` and friends are synonym streams over `sb-sys:*stdout*`
@@ -21231,6 +21237,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (ignore-errors (finish-output v)))
       (close v)
       (return-from %p-close-maybe-pipe t))
+    ;; The stream's end-of-file state goes with it (*p-eof-seen*, task #4284).
+    (when (plusp (hash-table-count *p-eof-seen*))
+      (remhash (%p-stream-target v) *p-eof-seen*))
     (handler-case (close (%p-stream-target v))
       (stream-error ()
         (%pcl-save-errno)
@@ -22034,11 +22043,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;;; STICKY until a seek clears it: a second EOF read makes no read(2), and
 ;;; errno is left alone (probed 5.40.3: `@a = <$h>; -d "/nope"; <$h>` keeps 2).
 ;;; Only a descriptor stream has the unix layer -- an in-memory handle keeps
-;;; $! (probed).  The table holds the descriptor streams that have hit EOF;
-;;; it is touched at EOF only, never per line.
-(defvar *p-eof-seen* (make-hash-table :test 'eq :weakness :key)
-  "Descriptor streams whose last read reached end of file (perl's
-   PERLIO_F_EOF), until a seek -- see the note above.")
+;;; $! (probed).  The table *p-eof-seen* (declared beside *p-pipe-pids*) holds
+;;; the descriptor streams that have hit EOF;
+;;; it is touched at EOF only, never per line, and %p-close-maybe-pipe drops
+;;; a stream's entry when it is closed.  A PLAIN table, not a weak one: a weak
+;;; table is synchronized and scanned at every GC, which cost the fhread bench
+;;; row a measurable per-file share (s536h).
 
 (defun %p-note-read-eof (stream &optional keep-errno)
   "A read from STREAM reached end of file: the first time since the last seek,
