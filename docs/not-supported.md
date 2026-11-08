@@ -1093,8 +1093,13 @@ alias — the box already in play is passed through:
   `f($r->{k} = V)`, any assignment operator, parenthesised or not): the
   element's box after the store -- perl's assignment returns its left side as
   an lvalue (s536d, task #4622; a scalar-variable assignment `f($x = V)`
-  already passed its box).  Not yet: an assignment to a TIED hash element
-  (`f($t{k} = V)` passes a copy, #4644).
+  already passed its box).  A TIED element too (`f($t{k} = V)`, `f($t{k} .= V)`,
+  s536f, task #4644).
+- `scalar(SCALAR)` (`f(scalar($x))`, `f(scalar($h{k}))`, `f(scalar($$r))`):
+  the operand itself, as the bare argument passes it (s536f, task #4323).  Not
+  yet in the OTHER aliasing consumers (`for (scalar($x))`, `map { } scalar($x)`,
+  `\scalar($x)` -- #4685).
+- a LIST SLICE argument (`w((@a)[1])`) still passes a copy (#4682).
 
 **Plain `my` lexicals: CLOSED for KNOWN callees (task #189, s330).**  A sub
 whose body writes through `@_` is detected where the fact lives — the callee's

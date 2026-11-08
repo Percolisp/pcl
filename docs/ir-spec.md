@@ -1890,6 +1890,8 @@ value and are not wrapped.
 
 perlop: "A slice of an empty list is still an empty list."  `(@e)[0,1,2]`, `()[0,1]` and `(lstat $missing)[0,1,2]` are (), so `my ($a,$b) = (@e)[0,1] or next` takes the `next`; only a NON-empty list yields one undef per out-of-range index (`(1)[1,0]` has 2 elements), and an ARRAY slice is not a list slice (`@e[0,1,2]` is three undefs).  The IR: a list slice is `(p-aref-deref SRC (vector I …))` -- a vector index arrives only from a LIST subscript -- and an empty SRC (an empty vector, or a built-in's NIL) answers ().  A ONE-index list slice in list context still emits a scalar index (task #3100).
 
+**A list slice indexes the FLAT list (normative, s536f, task #4341).**  perl's list is always flat, so the SRC of `(p-aref-deref SRC I)` is the list as it lies on the stack: a nested paren group contributes its elements, an array its elements, a hash its key / value pairs and a built-in's empty list (raw NIL) nothing -- each element as the argument walk spreads it (an array element and a hash value are their slots' cells).  `((1,2),3)[1]` is 2, `(%h)[0]` a key, `((), 1, ())[0]` is 1.  A VECTOR index to the lvalue accessor `p-aref-deref-box` (a list slice in an lvalue slot: `[ (1,2,3)[0,1] ]`) is the same slice.  (A list slice in an ALIASING consumer still copies a raw-slot variable: #4682.)
+
 **A LIST builtin that finds nothing is the EMPTY LIST in list context (normative, s520a, task #3412).**  `stat` / `lstat` on a missing path, `caller` past the outermost frame and a `getpw*` / `getgr*` lookup that misses answer the zero-length vector in list context (undef in scalar context), never raw NIL or `*p-undef*` -- those are ONE element in an argument list.  Example: `sub n { scalar @_ } n(stat "/no/such")` is `0`, so core `File::stat::stat($missing)` (`populate(CORE::stat $arg)`) returns undef.
 
 ### 3.2f `strict refs` is a LEXICAL fact the dereference SITE carries (normative, s497b, task #2103)
@@ -2545,6 +2547,39 @@ cell; reading it gives the value.
 sub w { $_[0] = "XY" } my $s = "abcdef"; w(substr($s, 1, 2)); # $s is "aXYdef"
 ```
 
+**`scalar(SCALAR)` in an argument slot is the scalar itself (normative,
+s536f, #4323).**  perl's `scalar()` imposes scalar context and returns the
+operand's SV, so in a user-sub, method or coderef argument slot `scalar(E)` of
+a `$` variable, an element or a scalar deref lowers exactly as E does there
+(an element's lazy argbox, a raw-slot variable's copy-back); a `$`-prototype
+slot passes a scalar deref `$$r` as itself, as it passes a variable (#2860).
+Every other slot keeps the `(p-scalar E)` read (#4685).
+
+```perl
+sub app { $_[0] .= "Z" } my $x = "a"; app(scalar($x));   # $x is "aZ"
+```
+
+**The value of an assignment to a BOX place is the box (normative, s536f,
+#4644).**  perl's assignment returns its left side as an lvalue; `p-setf`'s
+box fallback, the compound assignments' store-back and `p-.=` on a box place
+answer that BOX (as `p-scalar-=` / `p-my-=` answer theirs), never `box-set`'s
+own answer -- which for a magic cell (a TIED element, a defelem) is the
+stored copy.  So `f($t{k} = V)` with a tied `%t` hands `@_` the element, and
+`($t{k} = V) =~ s///` edits it.
+
+**`&CORE::NAME(REF, ...)` takes an aggregate first slot as a REFERENCE
+(normative, s536f, #4383).**  perldoc CORE: the `&` form follows the
+builtin's prototype, so when its first slot is `\@` (push, unshift, splice,
+pop, shift) or `\[%@]` (keys, values, each) the argument is wrapped
+`(p-core-amp-aggr ARG "NAME" :array|:aggr)`, which answers the container the
+reference names and dies perl's `Type of arg 1 to &CORE::NAME must be array
+reference` (`hash or array reference`) for anything else -- an aggregate
+spread into the list included.  The arity half is #1577's.
+
+```perl
+my @st = (1, 2); &CORE::push(\@st, 3);   # 3, @st is (1, 2, 3)
+```
+
 **A parameter is a COPY taken at the call (normative, s501q, #2570).**
 `p-raw-params` binds each parameter to the argument's VALUE: a plain number
 or string raw; undef, a dualvar or a magic scalar (`$1`) as a fresh box
@@ -3187,7 +3222,11 @@ A foreach list whose sole element is a magic-lvalue call -- `substr`, `pos`
 or `vec`, with or without parens -- binds VAR to that call's write-through
 cell (`p-substr-lvalue-cell` / `p-pos-lvalue-cell` / `p-vec-lvalue-cell`):
 `for (substr $s, 0, 1) { $_ = "x" }` writes `$s` exactly like
-`for (substr($s, 0, 1))` (#4308).
+`for (substr($s, 0, 1))` (#4308).  The same call is ONE element of a list of
+several (s536f, #4581): `for (substr($s,0,1), substr($t,1), $x)` keeps the
+`(vector …)` shape, each call its cell, so both windows are written.  A
+paren-less `substr` / `vec` among several elements, or a list that also holds
+an array, still goes through the flattener (a copy, #4684).
 
 **`p-foreach-raw` is the read-only twin** (normative, s459am): identical in
 every respect except that VAR is bound to the slot **as it stands**
