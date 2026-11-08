@@ -17,7 +17,8 @@
 # the base 06a4b8ba (inverse-verified on its extraction): a silently wrong
 # value or a loud refusal of valid perl.  Rows 10-15 are the package-region
 # residues (failing on the base too).  Rows 16-19 are shapes the old code got
-# right and the port must keep; row 20 is rule 12.  Every expected text is
+# right and the port must keep; rows 20-21 (#4546, the promoter's rewrite)
+# fail on the base too; row 22 is rule 12.  Every expected text is
 # perl 5.40.3's own output.
 
 use v5.30;
@@ -37,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 20;
+plan tests => 22;
 
 sub write_pl {
     my ($code) = @_;
@@ -273,7 +274,25 @@ my $y = "outer";
 print "$y\n";
 PL
 
-# ── 20. RULE 12: after a rename, a use of the binding the rewrite did not
+# ── 20-21. the capture PROMOTER's rewrite asks the same binder question: a
+#    C-style `for (my $i ...)` in a sub beside a captured file `my $i` keeps its
+#    own `$i` -- the old sibling walk could not see the loop-head declaration,
+#    so the loop's condition and step were renamed to the file cell (#4546;
+#    core Math::Complex::root clobbered the cached `i`).
+is(run_cl(<<'PL'), "loop 0 loop 1 loop 2 cap=5\n", '#4546: a C-style for `my` in a sub is not the promoted file lexical');
+my $i = 5;
+sub cap { $i }
+sub lp { my @o; for (my $i = 0; $i < 3; $i++) { push @o, "loop $i" } "@o" }
+print lp(), " cap=", cap(), "\n";
+PL
+# (like, not is: Math::Complex installs $SIG{FPE}, which the runtime announces on stderr)
+like(run_cl(<<'PL'), qr/^i=i n=4$/m, '#4546: Math::Complex::root leaves i alone');
+use Math::Complex;
+my @r = root(16, 4);
+print "i=", i, " n=", scalar(@r), "\n";
+PL
+
+# ── 22. RULE 12: after a rename, a use of the binding the rewrite did not
 #    reach DIES naming it (_span_check_rewritten) -- never a later section
 #    silently reading another package's variable.  In-process, from a real
 #    binder and the segments the pass would build.
