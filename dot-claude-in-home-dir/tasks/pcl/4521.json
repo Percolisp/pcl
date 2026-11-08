@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s534a (Opus 5.5, 2026-11-08) from the method-lookup probe matrix (scratch/s534a/pr/matrix.pl row 45).  PRE-EXISTING on main 95a1de03 (code sha).\n\nREPRODUCER (perl 5.40.3):\n\n    package Q::Base; sub m { \"Q::Base::m\" }\n    package main;\n    my @r = do { package Q::Kid4; use parent -norequire, \"Q::Base\"; 7 }; print \"3 @r\\n\";\n\nperl: `3 7`.  PCL: the run dies `The function common-lisp:nil is undefined.` (a raw SBCL error, untrappable shape).  The same with `eval { package X; use parent ...; ... }` and with `use base`.  A BARE block `{ package X; use parent ...; }` is right.\n\nMECHANISM (read from `./pl2cl` output): the do-block lowers to `(funcall (lambda () ...))`, and the `use parent` statement's preamble forms -- `(p-eval-always (p-defpackage :|Q::Base|))` and `(p-defclass |Q::Kid4|::plc-q-kid4 (\"Q::Base\") ())` -- are spliced in BETWEEN `funcall` and the lambda:\n\n    (funcall\n      (p-eval-always (p-defpackage :|Q::Base|))\n      (p-defclass |Q::Kid4|::plc-q-kid4 (\"Q::Base\") ())\n      (lambda () ...))\n\nso `funcall` calls the value of `p-eval-always` (NIL).  Layer: Pl/Parser2.pm, where a statement's hoisted preamble forms are attached to the enclosing expression-block lowering (the do/eval BLOCK value form); they belong before the funcall (or inside the lambda body's head), as the bare-block path places them.\n\nProbes: scratch/s534a/pr/p45.pl (four spellings), p45b.pl (the minimal one) in the s534a worktree.  BAR: the reproducer prints `3 7`; the four p45.pl spellings print perl's output; a guard row in an existing Pl/t file.\n",
+   "id" : "4521",
+   "status" : "pending",
+   "subject" : "PCL compiler: `use parent` / `use base` inside a do BLOCK or eval BLOCK that switches package dies \"The function common-lisp:nil is undefined\" -- the use's preamble forms are emitted as ARGUMENTS of the block's funcall"
+}
