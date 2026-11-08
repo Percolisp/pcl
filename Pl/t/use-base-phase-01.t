@@ -35,7 +35,7 @@ my $pcl_bin      = "$project_root/pcl";
 plan skip_all => "pcl not found"  unless -x $pcl_bin;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 my $dir = tempdir(CLEANUP => 1);
 my $n = 0;
@@ -150,4 +150,20 @@ package main;
 print "1 [@Foo::Bar::ISA] ", Foo::Bar->new->who, "\n";
 print "2 [@Q::ISA]\n";
 print "3 [@R::ISA]\n";
+PL
+# #4521 (s536b): `use parent` / `use base` in a do BLOCK, an eval BLOCK or an
+# anonymous sub that switches package -- the use's compile-phase forms (the
+# parent's package, the CLOS class) went in FRONT of the block's
+# `(lambda ...)`, i.e. into the `funcall`'s argument list, and the run died
+# `The function common-lisp:nil is undefined`.
+both_agree(<<'PL', '#4521 use parent / use base inside a do / eval BLOCK / anon sub that switches package');
+package Q::Base; sub m { "Q::Base::m" } sub new { bless {}, shift }
+package main;
+my @r = do { package Q::Kid4; use parent -norequire, "Q::Base"; 7 }; print "1 @r ", Q::Kid4->m, "\n";
+my $e = eval { package Q::Kid5; use parent -norequire, "Q::Base"; 8 }; print "2 $e ", Q::Kid5->m, "\n";
+my $b = do { package Q::Kid6; use base "Q::Base"; 9 }; print "3 $b ", Q::Kid6->m, "\n";
+sub mk { return do { package Q::Kid8; use parent -norequire, "Q::Base"; "k8" } } print "4 ", mk(), " ", Q::Kid8->m, "\n";
+my $s = sub { package Q::Anon; use parent -norequire, "Q::Base"; "anon" }; print "5 ", $s->(), " ", Q::Anon->m, "\n";
+my @l = map { do { package Q::Kid9; use base "Q::Base"; $_ * 2 } } 1, 2; print "6 @l ", Q::Kid9->new->m, "\n";
+print "7 [@Q::Kid4::ISA] [@Q::Kid6::ISA]\n";
 PL

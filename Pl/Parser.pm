@@ -5115,11 +5115,17 @@ sub parse_block_as_function {
     # Definitions (BEGIN blocks) and declarations (our $var defvars) are hoisted
     # to the real buckets rather than inlined — otherwise (eval-when ...) ends up
     # as the first argument to p-funcall-ref, making NIL the function ref.
+    # The PREAMBLE is hoisted too (#4521): `do { package X; use parent ... }`
+    # writes `use parent`'s package / CLOS-class forms there, and inlined
+    # ahead of the `(lambda ...)` they became ARGUMENTS of its `funcall`
+    # (`The function NIL is undefined` -- the value of p-eval-always).  They
+    # are compile-phase forms, which is what a section's preamble holds; the
+    # seam's capture (capture_v1) drains a preamble into its decls the same way.
     my $temp = $self->_sections->[0];
     my @hoisted_defs  = @{$temp->{definitions}};
     my @hoisted_decls = @{$temp->{declarations}};
+    my @hoisted_pre   = @{$temp->{preamble}};
     my @lines = (
-      @{$temp->{preamble}},
       @{$temp->{runtime}},
     );
     $self->_sections($saved_sections);
@@ -5159,6 +5165,10 @@ sub parse_block_as_function {
     if (@hoisted_decls) {
       my $section = $self->_sections->[$self->_cur_section];
       push @{$section->{'declarations'}}, @hoisted_decls;
+    }
+    if (@hoisted_pre) {
+      my $section = $self->_sections->[$self->_cur_section];
+      push @{$section->{'preamble'}}, @hoisted_pre;
     }
     return @lines ? join("\n", @lines) : "(lambda () nil)";
   }
