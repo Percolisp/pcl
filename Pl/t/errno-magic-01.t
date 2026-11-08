@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -167,4 +167,43 @@ $! = 2;
 our %W; *W = *!;
 print "1 gt0=", (0 < keys(%W) ? 1 : 0), "\n";
 print "2 through-alias ENOENT=[", $W{ENOENT}, "] EACCES=[", $W{EACCES}, "]\n";
+PL
+
+# ---- #4284 (s536h): the status variables after a read ----------------------
+# A read that REACHES END OF FILE clears $! (perlio.c's unix layer), once per
+# EOF until a seek; read / sysread / syswrite / truncate clear it before they
+# run (pp_sysread / pp_syswrite / pp_truncate SETERRNO(0,0)); getc at EOF is
+# EBADF; eof() keeps $!; an in-memory handle keeps it.  PCL left $! as the
+# last failed call had set it for all of them.
+both_agree(<<'PL', '#4284: $! after reads that reach end of file, read/sysread/syswrite/truncate, getc, eof');
+my $f = "/tmp/pcl-eof4284-$$.txt";
+open(my $w, ">", $f) or die; print $w "a\nb\n"; close $w;
+sub nz { -d "/nonexist-pcl-4284" }
+my ($h, $buf, $n, $x, @a);
+open($h, "<", $f) or die; nz(); @a = <$h>; print "1 list=", 0+$!, "\n"; nz(); @a = <$h>; print "2 again=", 0+$!, "\n"; close $h;
+open($h, "<", $f) or die; $x = <$h>; nz(); $x = <$h>; print "3 buffered=", 0+$!, "\n"; $x = <$h>; print "4 eof-read=", 0+$!, "\n"; close $h;
+open($h, "<", $f) or die; @a = <$h>; nz(); seek($h, 0, 1); $x = <$h>; print "5 after-seek=", 0+$!, "\n"; close $h;
+open($h, "<", $f) or die; $x = <$h>; $x = <$h>; nz(); my $e = eof($h); print "6 eof=$e err=", 0+$!, "\n"; $x = <$h>; print "7 read-after-eof()=", 0+$!, "\n"; close $h;
+open($h, "<", $f) or die; nz(); $n = read($h, $buf, 1); print "8 read=$n err=", 0+$!, "\n"; close $h; open($h, "<", $f) or die; nz(); $n = sysread($h, $buf, 1); print "9 sysread=$n err=", 0+$!, "\n"; close $h;
+open($h, "<", $f) or die; @a = <$h>; nz(); my $c = getc($h); print "10 getc-eof=", (defined $c ? 1 : 0), " err=", 0+$!, "\n"; close $h;
+open($h, ">>", $f) or die; nz(); $n = syswrite($h, "z"); print "11 syswrite=$n err=", 0+$!, "\n"; close $h;
+nz(); $n = truncate($f, 1); print "12 truncate=$n err=", 0+$!, "\n";
+my $s = "q\n"; open(my $m, "<", \$s) or die; nz(); @a = <$m>; print "13 in-memory=", 0+$!, "\n";
+unlink $f;
+PL
+
+# A PROGRAM FILE is read to its end by perl's lexer, so a BEGIN-time ENOENT is
+# gone when the run phase starts -- unless the file stops at __END__ (no EOF
+# read).  `do FILE` that finds its file clears $! as require does (#4166).
+both_agree(<<'PL', '#4284: a program file\'s run phase starts with $! = 0; do FILE clears it');
+BEGIN { -d "/nonexist-pcl-4284" }
+print "1 run-phase=", 0+$!, "\n";
+my $f = "/tmp/pcl-do4284-$$.pl"; open(my $w, ">", $f) or die; print $w "1;\n"; close $w;
+-d "/nonexist-pcl-4284"; do $f; print "2 do=", 0+$!, "\n"; unlink $f;
+PL
+both_agree(<<'PL', '#4284: a program that stops at __END__ keeps the BEGIN-time $!');
+BEGIN { -d "/nonexist-pcl-4284" }
+print "1 run-phase=", 0+$!, "\n";
+__END__
+tail
 PL

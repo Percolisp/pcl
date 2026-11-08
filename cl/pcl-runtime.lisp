@@ -2840,16 +2840,30 @@
         (setf *check-blocks* (append check *check-blocks*)
               *init-blocks* (append init *init-blocks*))))))
 
+(defvar *p-main-data-section* nil
+  "True once the MAIN program's `__END__` / `__DATA__` section was installed
+   (p-install-data-handle outside a unit load) -- the lexer then stopped
+   before the file's end; see p-run-compile-phase-blocks.")
+
 (defun p-run-compile-phase-blocks ()
   "The compile->run boundary of the main program: run UNITCHECK blocks
    (reverse order), then CHECK blocks (reverse order), then INIT blocks
    (source order).  Emitted once, before the first runtime section.
    Blocks registered later (a runtime require or eval) are perl's 'too
    late to run' case — they never fire.  Inside a required file it is that
-   UNIT's boundary: its UNITCHECK blocks only (see %p-load-unit)."
+   UNIT's boundary: its UNITCHECK blocks only (see %p-load-unit).
+
+   perl's LEXER READS A PROGRAM FILE TO ITS END, and that read clears $!
+   (perlio.c's EOF rule, task #4284): a BEGIN-time ENOENT -- `use lib`'s -d
+   checks -- is gone when the run phase starts (probed 5.40.3:
+   `use lib \"lib\"; print 0+$!` is 0).  Not for `-e` (the text is in memory)
+   and not when the file stops at `__END__` / `__DATA__` (no EOF read): both
+   keep the errno, as here."
   (when *p-unit-load*
     (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
     (return-from p-run-compile-phase-blocks nil))
+  (unless (or *p-main-data-section* (equal (to-string (symbol-value (quote $0))) "-e"))
+    (%p-set-errno 0))
   (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
   (setf |${^GLOBAL_PHASE}| "CHECK")
   (%p-drain-compile-blocks)
@@ -19002,6 +19016,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             ;; way p-require-file spells it, so the two agree (rule 11).
             (setf (gethash filename *p-inc-table*)
                   (sb-ext:native-namestring (pathname abs-path)))
+            ;; FOUND and opened: perl clears $! (S_require_file's
+            ;; SETERRNO(0) serves `do FILE` as it serves require, #4166's
+            ;; twin; probed 5.40.3 in task #4284's batch).
+            (%p-set-errno 0)
             (p-eval (make-p-box content)))
         (error (e)
           (box-set $@ (make-p-box (format nil "~A" e)))
@@ -19411,6 +19429,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    it is #1176's (c), the handle model, and not this task's.
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
   (setf (gethash handle *p-filehandles*) (make-string-input-stream text))
+  (unless *p-unit-load* (setf *p-main-data-section* t))
   t)
 
 ;; The stream most recently read by readline/<FH>.  Perl's argument-less `eof`
@@ -22009,6 +22028,28 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       `(%p-close-impl (%p-fh-arg ,fh))
       1))
 
+;;; A READ THAT REACHES END OF FILE CLEARS $! (task #4284): perlio.c's
+;;; PerlIOUnix_read sets PERLIO_F_EOF and SETERRNO(0,0) when read(2) answers 0,
+;;; so `-d "/nope"; my @l = <$fh>; print 0+$!` is 0 in perl.  The flag is
+;;; STICKY until a seek clears it: a second EOF read makes no read(2), and
+;;; errno is left alone (probed 5.40.3: `@a = <$h>; -d "/nope"; <$h>` keeps 2).
+;;; Only a descriptor stream has the unix layer -- an in-memory handle keeps
+;;; $! (probed).  The table holds the descriptor streams that have hit EOF;
+;;; it is touched at EOF only, never per line.
+(defvar *p-eof-seen* (make-hash-table :test 'eq :weakness :key)
+  "Descriptor streams whose last read reached end of file (perl's
+   PERLIO_F_EOF), until a seek -- see the note above.")
+
+(defun %p-note-read-eof (stream &optional keep-errno)
+  "A read from STREAM reached end of file: the first time since the last seek,
+   clear $! as perl's unix layer does (task #4284).  KEEP-ERRNO is `eof`'s
+   peek: perl's do_eof saves and restores errno around its getc, so the
+   handle enters the EOF state and $! is left alone (probed 5.40.3)."
+  (let ((s (%p-stream-target stream)))
+    (when (and (sb-sys:fd-stream-p s) (not (gethash s *p-eof-seen*)))
+      (setf (gethash s *p-eof-seen*) t)
+      (unless keep-errno (%p-set-errno 0)))))
+
 (defun %p-eof-impl (&optional fh)
   "Perl eof implementation — fh must already be a symbol or stream.
    Argument-less `eof` tests the last filehandle read (Perl semantics), so it
@@ -22034,6 +22075,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
      (if (and stream (open-stream-p stream))
          (handler-case
              (let ((ch (%p-with-input-decoding (peek-char nil stream nil :eof))))
+               (when (eq ch :eof) (%p-note-read-eof stream t))
                (if (eq ch :eof) t nil))
            ;; A perl-level die passing through is the caller's (rule 11 — the
            ;; same re-raise %p-read-impl and %p-getc-impl do).
@@ -22289,7 +22331,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (if args `(%p-tell-impl (%p-fh-arg ,(car args))) `(%p-tell-impl)))
 
 (defun %p-seek-impl (fh pos whence)
-  "Perl seek - seek to position. Whence: 0=start, 1=current, 2=end"
+  "Perl seek - seek to position. Whence: 0=start, 1=current, 2=end.
+   A successful seek clears the handle's end-of-file state (*p-eof-seen*),
+   as PerlIO_seek clears PERLIO_F_EOF."
   (let ((r (%p-fh-tie fh)))
     (when r (return-from %p-seek-impl (%p-tied-call-value r "SEEK" pos whence))))
   (let ((stream (%p-live-stream fh))
@@ -22311,7 +22355,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ;; with $! = EINVAL (#2922).
         (if (and (integerp new-pos) (minusp new-pos))
             (%p-io-errno-fail 22)
-            (and (file-position stream new-pos) 1))))))
+            (and (file-position stream new-pos)
+                 (progn (when (plusp (hash-table-count *p-eof-seen*))
+                          (remhash (%p-stream-target stream) *p-eof-seen*))
+                        1)))))))
 
 (defun %p-stream-length (stream)
   "Total length of STREAM for SEEK_END.  In-memory output streams expose their
@@ -22651,6 +22698,10 @@ would consume, so it dies naming the stream (rule 12)."
         (off (and offset (truncate (to-number offset))))
         (old (if (p-box-p buf) (to-string (unbox buf)) "")))
     (when (< n 0) (p-die "Negative length"))
+    ;; read and sysread CLEAR $! before they read (pp_sysread's SETERRNO(0,0),
+    ;; task #4284; probed 5.40.3: a read with data and one at EOF both leave
+    ;; 0); a failure below sets its own errno.
+    (%p-set-errno 0)
     (when (and off (< off 0))
       (when (< (+ (length old) off) 0) (p-die "Offset outside string"))
       (setf off (+ (length old) off)))
@@ -22781,6 +22832,9 @@ would consume, so it dies naming the stream (rule 12)."
       (return-from %p-syswrite-impl
         (apply #'%p-tied-call-value r "WRITE" data
                (or len (length (to-string data))) (and offset (list offset))))))
+  ;; syswrite CLEARS $! first (pp_syswrite's SETERRNO(0,0), probed 5.40.3;
+  ;; task #4284's family); a failure below sets its own errno.
+  (%p-set-errno 0)
   (let ((str (to-string data))
         (n (and len (truncate (to-number len))))
         (off (if offset (truncate (to-number offset)) 0)))
@@ -22824,7 +22878,10 @@ would consume, so it dies naming the stream (rule 12)."
    used to hand back '').
    A filehandle is truncated via ftruncate(fd) after flushing buffered
    output; a path string via truncate(2).  A BAREWORD filehandle (symbol) that is
-   not open FAILS — it must NOT fall back to truncating a file named after it."
+   not open FAILS — it must NOT fall back to truncating a file named after it.
+   It CLEARS $! first, as pp_truncate's SETERRNO(0,0) (probed 5.40.3, both
+   forms; task #4284's family)."
+  (%p-set-errno 0)
   (let* ((len (%pcl-to-integer (to-number size)))
          (v (if (p-box-p fh-or-file) (p-box-value fh-or-file) fh-or-file))
          ;; A CLOSED stream is not a handle to truncate (#1233: a closed
@@ -24417,7 +24474,10 @@ would consume, so it dies naming the stream (rule 12)."
     (when stream
       (handler-case
           (let ((ch (%p-with-input-decoding (read-char stream nil nil))))
-            (if ch (string ch) nil))
+            ;; getc AT END OF FILE is EBADF: pp_getc's `do_eof(gv)` exit sets
+            ;; SETERRNO(EBADF) for every handle (probed 5.40.3, task #4284's
+            ;; family; a getc that returns a character leaves $! alone).
+            (if ch (string ch) (%p-io-errno-fail 9)))
         ;; A perl-level die passing through (a tied handle, an overload) is
         ;; the caller's, not a read failure — %p-read-impl re-raises it the
         ;; same way (rule 11).
@@ -24456,14 +24516,36 @@ would consume, so it dies naming the stream (rule 12)."
      integer    = fixed-size record  else = that string, kept on the record.
    A record is a SIMPLE string: a non-simple one would be snapshotted again at
    every retaining store (the #2115 ownership chokepoints, s507p).
-   A malformed input sequence is answered, not a failure (#4624)."
+   A malformed input sequence is answered, not a failure (#4624).
+   A record read that REACHED END OF FILE clears $! (%p-note-read-eof, task
+   #4284): no record, or one the separator does not end."
   (handler-case
-      (%p-with-input-decoding (%p-read-record-1 stream sep))
+      (let ((r (%p-with-input-decoding (%p-read-record-1 stream sep))))
+        (when (%p-record-at-eof-p r sep) (%p-note-read-eof stream))
+        r)
     ;; Any stream error (e.g. reading from a directory) → nil like perl, AND
     ;; `$!` set the way perl sets it: %p-read-fail names EISDIR for a
     ;; directory handle and leaves $! alone for anything else (task #1237).
     (stream-error () (%p-read-fail stream))
     (error () (%p-read-fail stream))))
+
+(defun %p-record-at-eof-p (r sep)
+  "Did %p-read-record-1 reach end of file reading record R under SEP?  NIL R
+   is EOF; slurp always reads to the end; a fixed-size record is short; any
+   other record is EOF-terminated when SEP (paragraph mode: a blank line) does
+   not end it.  An unknown SEP shape cannot reach here: %p-read-record-1
+   dispatches on the same four."
+  (cond ((null r) t)
+        ((null sep) t)
+        ((integerp sep) (< (length r) sep))
+        ;; the per-line case ($/ = "\n"): one character compare
+        ((= (length sep) 1) (char/= (char r (1- (length r))) (char sep 0)))
+        (t (let* ((end (if (string= sep "")
+                           (load-time-value (coerce '(#\Newline #\Newline) 'string) t)
+                           sep))
+                  (n (length end))
+                  (m (length r)))
+             (or (< m n) (string/= end r :start2 (- m n)))))))
 
 (defun %p-read-record-1 (stream sep)
   "%p-read-record's record rule, with no error handling of its own."
