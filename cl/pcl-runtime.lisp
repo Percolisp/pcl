@@ -26694,19 +26694,36 @@ would consume, so it dies naming the stream (rule 12)."
         (when fh (setf *p-selected-out* (%p-select-glob-name fh)))
         prev)))
 
+(defparameter +p-forced-main-names+
+  '("_" "INC" "ENV" "SIG" "ARGV" "STDIN" "STDOUT" "STDERR" "ARGVOUT")
+  "gv.c's FORCED-MAIN identifiers (S_find_default_stash): an UNQUALIFIED
+   symbol of one of these names is main::'s from every package.  The runtime's
+   one copy of the list; the compiler's is Pl::Environment's @FORCED_MAIN
+   (forced_main_name), and Pl/t/forced-main-sub-01.t asserts the two are
+   equal.  Perl spelling, not symbol case.")
+
+(defun %p-forced-main-bare-p (bare)
+  "Does the UNQUALIFIED glob name BARE (perl spelling) resolve in main:: from
+   every package?  gv.c S_find_default_stash: one of +p-forced-main-names+, or
+   a name that does not begin like an identifier -- punctuation, a digit, a
+   control-character caret name, the empty name (task #4310, probed 5.40.3:
+   `package Foo; *{\"STDIN\"}{PACKAGE}', `*{\"!\"}{PACKAGE}' are main)."
+  (or (zerop (length bare))
+      (let ((c (char bare 0)))
+        (not (or (alpha-char-p c) (char= c #\_))))
+      (and (member bare +p-forced-main-names+ :test #'string=) t)))
+
 (defun %p-select-glob-name (fh)
   "What `select' hands back later for FH: a handle selected by its BAREWORD
    is the glob's FULL name, \"main::STDERR\" (task #2683) -- the package in
-   effect, except the names perl forces into main (perlvar: STDIN STDOUT
-   STDERR ARGV ARGVOUT ENV INC SIG).  Anything else (a lexical handle, a name
-   string, a glob) is kept as given; %p-resolve-fh accepts every one."
+   effect, except the names perl forces into main (+p-forced-main-names+).
+   Anything else (a lexical handle, a name string, a glob) is kept as given;
+   %p-resolve-fh accepts every one."
   (if (and (symbolp fh) (not (eq fh t)))
       (let ((name (to-string fh)))
         (cond
           ((search "::" name) name)
-          ((member name '("STDIN" "STDOUT" "STDERR" "ARGV" "ARGVOUT"
-                          "ENV" "INC" "SIG")
-                   :test #'string=)
+          ((member name +p-forced-main-names+ :test #'string=)
            (concatenate 'string "main::" name))
           (t (concatenate 'string *pcl-current-package* "::" name))))
       fh))
@@ -34132,11 +34149,17 @@ would consume, so it dies naming the stream (rule 12)."
    ONE reading of that rule, shared by every dynamic-glob entry point
    (p-glob-assign-dynamic, p-dynamic-typeglob, p-local-glob-dynamic): a `local`
    that resolved the name differently from the assignment beside it would save
-   one glob and write another."
+   one glob and write another.
+
+   EXCEPT the names perl forces into main (%p-forced-main-bare-p, task #4310):
+   `*{\"STDIN\"}' / `*{\"ENV\"}' / `*{\"!\"}' inside `package Foo' are main's
+   globs, the answer the static `\\*STDIN' already gets from the compiler."
   (let* ((name-str (to-string name-box))
          (sep-pos  (search "::" name-str :from-end t)))
-    (values (if sep-pos (subseq name-str 0 sep-pos) *pcl-current-package*)
-            (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))))
+    (if sep-pos
+        (values (subseq name-str 0 sep-pos) (subseq name-str (+ sep-pos 2)))
+        (values (if (%p-forced-main-bare-p name-str) "main" *pcl-current-package*)
+                name-str))))
 
 (defun %p-glob-dynamic-target (name-box)
   "The glob a dynamic designator `*{EXPR}` names, as (values package-object

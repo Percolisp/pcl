@@ -34,7 +34,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 5;
 
 sub write_pl {
     my ($code) = @_;
@@ -87,3 +87,30 @@ unshift @INC, Hk->new;
 my $ok = eval { require HkMod; 1 };
 print $ok ? "loaded " . HkMod::v() . "\n" : "err: " . ($@ =~ /Can't locate object method "INC"/ ? "no INC method" : $@) . "\n";
 PL
+
+# #4310 (s536h): a SYMBOLIC glob of a forced-main name -- or of a name that does
+# not begin like an identifier -- is main's from every package (gv.c
+# S_find_default_stash), the answer the static \*STDIN already got.  PCL built
+# Foo's glob.  The qualified `*{"Foo::STDIN"}` (a distinct glob, no IO) is
+# #1423's half and not asserted here.
+both_agree(<<'PL', 'a symbolic *{"STDIN"} / *{"ENV"} / *{"!"} inside package Foo is main\'s glob (#4310)');
+package Foo; no strict 'refs';
+print "1 ", join(" ", map { *{$_}{PACKAGE} } qw(STDIN ENV INC ARGV SIG _ STDERR STDOUT ARGVOUT main::STDIN)), "\n";
+print "2 ", join(" ", map { *{$_}{PACKAGE} } ("!", "0", "/", "Other", "stdin", "INCX")), "\n";
+print "3 ", *{"STDIN"}{NAME}, " ", "" . *{"STDIN"}, " ", "" . *{"Other"}, "\n";
+my $n = "ENV"; print "4 ", (${*{$n}{HASH}}{PATH} eq $ENV{PATH} ? "env-ok" : "env-wrong"), "\n";
+@{"ARGV"} = (7, 8); print "5 @main::ARGV\n";
+PL
+
+# The runtime's forced-main list (#4310) and the compiler's are ONE fact.
+{
+    my ($fh, $lf) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $fh '(format t "~{~A~^ ~}~%" pcl::+p-forced-main-names+)', "\n";
+    close $fh;
+    my $got = `sbcl @sbcl_rt --load $lf 2>&1`;
+    $got =~ s/^;.*\n//gm;
+    $got =~ s/^PCL Runtime loaded\n//gm;
+    { local @INC = ($project_root, @INC); require Pl::Environment; }
+    is($got, join(" ", Pl::Environment::forced_main_names()) . "\n",
+       'cl/pcl-runtime.lisp +p-forced-main-names+ == Pl::Environment forced_main_names (#4310)');
+}

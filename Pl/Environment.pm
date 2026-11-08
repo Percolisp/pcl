@@ -1023,6 +1023,17 @@ sub forced_main_name {
     return defined $name && $FORCED_MAIN{$name} ? 1 : 0;
 }
 
+=head2 forced_main_names()
+
+The list itself, in its order.  The runtime keeps the same list as
+C<+p-forced-main-names+> (C<cl/pcl-runtime.lisp>, for the symbolic glob names
+of task #4310); C<Pl/t/forced-main-sub-01.t> asserts the two are equal, so
+they are one fact in two languages, never two that drift.
+
+=cut
+
+sub forced_main_names { return @FORCED_MAIN }
+
 # The handles perl resolves in main:: whatever package names them unqualified
 # (gv.c's forced-main list, handle members -- SIG is not a handle the runtime
 # interns).  A qualifier on one of these is therefore NOT the same glob as the
