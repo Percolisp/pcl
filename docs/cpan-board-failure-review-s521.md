@@ -101,6 +101,10 @@ The USER asked for new CPAN modules (2026-10-24); Fable installed ten dists into
 
 **Half 2 (s526w2, joined 2026-10-25, measured 2026-10-31): YAML-PP, Pod-Simple, Log-Log4perl -- 193 test files, 234 blessed rows**; Template-Toolkit was censused and does NOT join (`Template::Parser` refuses on #3856, ruled s529; 98 of 121 files print no TAP, 29 of them hang = #3869).  Blessed rows per dist: YAML-PP 21 (#1040 13), Pod-Simple 121 (#3824 84, #3859 9, #2006(b) 8, #3862 6), Log-Log4perl 92 (caller fidelity #233 64, PERL-SKIP 17).  The widened board on the s526w2 tree: **480 PASS / 171 PARTIAL / 124 FAIL of 775, TOTAL passing 78,256** -- the 26 older dists read s526w1's 362 / 136 / 84 and 69,476 exactly; `--diff` 0 NEW / 8 FIXED (the #3493 flap, kept) / 0 LOST.  Nine fillers rode along (#3850 #3853 #3855 #3858 #3861 #3862-part #3863 #3866 #3867); the biggest open causes in the new rows are #3824 (Pod-Simple, 84), the caller-fidelity ruling #233 (Log-Log4perl, 64) and #1040 (YAML-PP, 13); two SILENT WRONGs were filed with everyday reach, #3870 (every Log4perl program prints its appender debug lines) and #3868 (`do { local *FH; *FH }` returns one shared glob).
 
+## 0d. Update (s536, 2026-11-08): the rounds since
+
+Every batch in §4 is merged; the queue since is the task store, read through the cause column of `baselines/cpan-board14-fails.tsv`.  The board is 30 dists / 896 files since Template-Toolkit joined (s530b).  Round s532 on MAIN-READY-63: 596 PASS / 193 PARTIAL / 40 FAIL / 67 SKIP, 105,501 ok / 1,867 not ok.  **Round s536 on MAIN-READY-74 `fcfcb5d3`: 628 PASS / 161 PARTIAL / 40 FAIL / 67 SKIP, 101,388 ok / 1,525 not ok**, taken on a loaded box: the lower ok total is ten IO-Compress files that timed out there and read as their blessed rows when re-run alone.  The one real regression was #4623 (Capture-Tiny's four tied-STDIN files), fixed in MAIN-READY-81.  Merges -75..-83 had no round board by the end of s536; the next one is owed first.
+
 ## 1. The board today
 
 From `cpan-board-s519r1.tsv` (header: 187 / 103 / 66 of 356, TOTAL passing 12,250; summing its rows gives

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536j (Opus 5.5, 2026-11-08), found probing #4701 (scratch/s536j/p/n3.pl).  PRE-EXISTING (main 3139fcb0 and the s536j tree alike).\n\n    my $y = Foo::nob; print \"$y\\n\";     # no `use strict`, no sub Foo::nob anywhere\n      perl 5.40.3:  Foo::nob\n      PCL:          dies \"Undefined subroutine &Foo::nob called\"\n\nA package-QUALIFIED bareword that names no sub is, without `strict subs`, the bareword string -- the same reading as the unqualified `my $y = nob;` -- and the spelling `- Foo::nob` / `-Foo::nob` already gets it right (the negation path asks Pl::PExpr::_bareword_callable_here, which answers 'no' for an undeclared qualified name).  The plain term path lowers the Word as a CALL regardless.  Under `use strict` perl refuses the program at compile time (\"Bareword \\\"Foo::nob\\\" not allowed\"), so only non-strict code reaches it; a CPAN-shaped instance is a class name used as a value without `->` (`my $class = Foo::Bar;`), which perl also reads as the string when no sub Foo::Bar exists.\n\nWhere: the term lowering of a bare qualified Word (ExprToCL / PExpr's bareword-call decision, #266's classifier answers 'no' here).  Probe the class-name shape and the strict refusal before fixing.\n",
+   "id" : "4762",
+   "status" : "pending",
+   "subject" : "An undeclared package-QUALIFIED bareword used as a value (`my $y = Foo::nob;`, no strict) is CALLED -- PCL dies \"Undefined subroutine &Foo::nob\"; perl reads the string \"Foo::nob\""
+}

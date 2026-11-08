@@ -2,6 +2,15 @@
 
 **What happened.** At 21:23:21 `systemd-oomd` killed GNOME Shell for memory pressure (four heavy legs had started in the same second when an exclusive bench released its slots -- load 55 -- beside a browser that had peaked at 7.9 GB on this 12 GB machine).  The terminal, the reviewing session, every agent and every heavy leg died with it.  The box did NOT reboot: `/tmp`, the worktrees and `~/.pcl-cache` are intact.  Your earlier conversation is gone; your `STOP.md` plus this file are the whole handover.  Nothing committed was lost.
 
+## UPDATE at the session end (22:1x) -- reads over the per-batch lists further down
+
+The USER ended the session at about 22:1x with all four batches still taking their legs; none had reached MERGE-READY.  This snapshot was read from the logs at 22:03.  A leg may have finished after that, or died with the session, so **the `=== heavy.sh ... END rc=` line of each log decides**.  All four are rebased on main's records (`afb56d21` or later); the HEAD shas below replace the ones further down.
+
+- **s536e `931c554e`** + one uncommitted line in `docs/session-log.md` (keep it).  NOW VALID: `refactor-check.log` (corpus IDENTICAL vs `85a59b1a`, lib 886 SAME), `gate.log` (369 / 11,990 PASS), `sweep.log` (18,795 +0, GATE clean).  QUEUED: `ir.sh` -> `ir2.log`.  OWED after: commit the docs, `bench.sh` (everyday `--record`, compile time), the history row, the numbers, MERGE-READY.  Its STOP.md is older than these legs.
+- **s536h `c43fcc87`**.  NOW VALID: `ir-conform4.log` (328 / 0 / 17 / 0).  QUEUED: `gate4.log`, `sweep4.log`.  OWED after: the session-log Bars line, commit, everyday `--record`, MERGE-READY.
+- **s536i `77f3e4f3`**.  NOW VALID: `sweep.log` (18,793 +0, GATE clean), beside the earlier `gate.log` + `ir.log`.  RUNNING: `ab.sh` -> `ab.log`.  OWED after: explain the diffs, the bench leg, the session-log section, the task DONE notes, the history row, MERGE-READY.
+- **s536j `d0fd8e7e`**.  NOW VALID: `ab-final.log` (2,053 files, only `Math/Complex.pm` differs, RCDIFF 0; lib 58 SAME).  RUNNING: `gate.sh` -> `gate-final.out` + `gate-final.log`, `final.sh` -> `final.log` (its sub-logs count only if `final.log` has its END line).  QUEUED: `board1.log`.  OWED after: the "OWED" list further down.
+
 You are an EXECUTION agent (Opus 5.5) RESUMING your batch in its EXISTING worktree.  Do not spawn subagents.  Every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path.
 
 ## Rules for all four
