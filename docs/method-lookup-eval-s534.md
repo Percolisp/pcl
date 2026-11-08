@@ -18,7 +18,21 @@ Main moved to `06a4b8ba` (s533c) while this ran; its runtime differs from the ba
 only in the generation string and a `local $a[i]` initializer (#4441), which no
 row here reaches, so the base stays `95a1de03`.
 
-__RECOMMENDATION__
+> **Recommendation (awaiting the USER): build (f) + (d) -- VALIDATE, don't
+> invalidate.**  Cache every inherited resolution, hit AND miss, per (class,
+> method), and the linearization per class, each with the links that licensed
+> it (every passed class's `@ISA` names and its own `pl-NAME` symbol), re-read
+> on every use; the overload lookup the same way plus one counter its two
+> writers bump; and guard `%p-isa-symbol`'s weak-table probe (one line).
+> Measured on the prototypes: inherited calls 3.9-7.4× -> **1.3-1.7× of perl**,
+> an inherited `bool` overload 6.3× -> 2.1×, the PPI parse 4.4× -> **2.75×**;
+> own-class calls, `json-rt`, `moo-objs` unchanged; identical to the base on
+> all 61 probe-matrix cases.  #582's original design (c) -- invalidate on every
+> `@ISA` write -- is REJECTED by measurement: an `@ISA` is not a box, so the
+> mark costs every array write (PPI +19 % slower) and a missed writer among 217
+> is a silent wrong (12 of 61 probe cases went stale with the obvious audit).
+> One runtime-only session; tasks #4523 (methods + ancestry), #4524 (overloads),
+> #4525 (the guard).
 
 ## 1. Today: the inherited rows (Q1)
 
@@ -202,7 +216,52 @@ the links exactly as for a hit.  Prototype `scratch/s534a/rt/proto-e.lisp`
 
 ## 4. The prototypes measured (Q3)
 
-__OPTIONSTABLE__
+Every number is a RUNTIME A/B of one transpile: `BENCH_RT_B=scratch/s534a/rt/proto-X.lisp
+perl tools/bench-exec.pl ...` (A = the base runtime, B = the prototype, all series
+interleaved, best of 5, through `heavy.sh s534a bench`, which waits for a quiet box);
+the PPI parse is the same tool over one row (`scratch/s534a/bench-ppi.pl`: four parses
+of `lib/Math/BigInt/Calc.pm` with `find('PPI::Token')`, token count verified against
+perl).  B/A in %, negative = faster; the control band (B = a copy of A) is about
+±8 % on the ~0.1 s rows (§1).  Logs: `scratch/s534a/out/bench-X.log`.
+
+| row | (a) walk records | (b) cache, hits | (c) generation | (d) weak guard | (e) = b + misses | **(f) = e + ancestry** |
+|---|---:|---:|---:|---:|---:|---:|
+| `methret` | -2.9 | -5.9 | +11.6 | -3.8 | +2.4 | -6.7 |
+| `methinh` | -12.6 | -65.6 | -66.5 | -18.1 | -65.5 | **-65.1** |
+| `methinh3` | -33.2 | -78.6 | -82.1 | -23.8 | -77.3 | **-77.3** |
+| `methpoly` | -8.9 | -63.7 | -64.3 | -16.3 | -63.1 | **-63.6** |
+| `ovlbool` | -3.3 | -66.6 | -73.1 | -31.5 | -66.8 | **-67.2** |
+| `ovlsub` | +1.3 | +3.2 | +0.1 | +2.3 | -1.7 | -2.4 |
+| `json-rt` | +0.7 | -4.2 | +6.8 | +1.1 | +0.1 | +2.0 |
+| `moo-objs` | -1.8 | +11.7 | +1.2 | -0.8 | -0.9 | -2.6 |
+| **PPI parse** | +2.2 | -6.6 | **+19.0** | -10.1 | -24.1 | **-37.3** |
+| run (uptime load) | 02:38, 1.5-1.9 | 02:07, 1.9-2.9 | 02:59, 1.1-2.0 | 02:43, 1.9-3.0 | 02:54, 1.1-1.9 | 03:03, 1.7-2.4 |
+
+What the rows mean in perl's terms (f, the base A column of its own run): `methinh`
+0.367 -> 0.128 s = **3.87× -> 1.35×** of perl; `methinh3` 0.700 -> 0.159 s = **7.38×
+-> 1.68×**; `methpoly` 3.45× -> 1.26×; `ovlbool` 6.34× -> 2.08×; the PPI parse
+3.06 -> 1.92 s per four parses = **4.38× -> 2.75×** of perl.  The `moo-objs` +11.7
+under (b) is one reading outside the band that no other run repeats (e and f carry
+(b)'s whole method half: -0.9, -2.6); `methret` +11.6 under (c) is the same row's
+noise next to (c)'s writer tests.
+
+**(c)'s array rows** (`out/bench-c-array.log`, 02:14, load 1.9): the mark test on
+the per-element writers -- `arrhash` +6.4, `pushloc` +7.9, `shiftq` +14.0,
+`unshiftq` +6.6, `splice0` +2.7, `arrfill` +4.9; whole-array assignment pays one
+test per assignment (`listcopy` -0.1, `sliceasgn` -0.3, `sortnum` -2.0).  And on
+real code the writer tests cost more than the generation saves: the PPI parse is
+**+19 % SLOWER** under (c) (the tokenizer pushes onto arrays all the time), while
+(c)'s dispatch rows beat (b)'s by only 1-6 points (`methinh3` 0.116 vs 0.169 s).
+
+**Where PPI's remaining time is** (`scratch/s534a/prof/ppi-base.prof`, `ppi-proto-b.prof`,
+six parses under sb-sprof): the method lookup groups are 18.4 % of the samples on
+the base (find-symbol 5.7, the weak lock 5.4, equal tables 7.1); SBCL COMPILING
+code is ~20 % (`sb-c::ir1-optimize` and friends -- `PPI::Node::find` builds its
+matcher with a STRING EVAL on every call, the cheap lever (a) of
+`docs/eval-in-cl-plan.md` §4.6, outside this evaluation); the rest is the generic
+boxed code.  That is why the PPI gain needed the MISS path (e: `->isa` through
+`_INSTANCE`) and the cached ancestry (f: `->isa`'s answer walked the whole chain
+again).
 
 ## 5. The probe matrix (Q4)
 
@@ -215,11 +274,56 @@ __MATRIX__
 
 ## 6. Recommendation
 
-__RECO__
+**Build (f) + (d), in one runtime-only batch: #4523 (the method half -- hits,
+misses, the ancestry), #4524 (the overload half), #4525 (the one-line guard).**
+
+* **Why (f), not (a) or (c).**  (a) keeps the walk and makes each step cheaper:
+  -9 to -33 % on the method rows, nothing on overloads or PPI.  (c) is (b) with a
+  counter instead of the `@ISA` comparison: 1-6 points better on the dispatch rows,
+  paid for on EVERY array write by every program (+3 to +14 % on the per-element
+  writer rows, PPI +19 %), and correct only if an audit of 217 writing definitions
+  plus the compiler's open-coded stores misses nothing -- with no loud failure when
+  it does.  (f) needs no audit because it trusts nothing it did not just re-read.
+* **Expected gain** (measured, §4): `methinh` 3.87× -> 1.35×, `methinh3` 7.38× ->
+  1.68×, `methpoly` 3.45× -> 1.26×, `ovlbool` 6.34× -> 2.08×; the PPI parse
+  -37 % (4.38× -> 2.75×) -- PPI under PCL being the gate for running the compiler
+  in the image (`docs/eval-in-cl-plan.md` P1-P2).  (d) on its own: -16 to -31 % on
+  the same rows and -10 % on PPI; inside (f) it still serves every uncached walk
+  (`can`, `SUPER::`, AUTOLOAD, the first call of each pair).
+* **Risk and guard.**  The residual inputs (a name's package, a (package, name)
+  symbol) each have ONE writer that flushes (`p-stash-assign`; the
+  `shadowing-import` arm of `p-import-perl-symbol`, whose flush also closes the
+  latent hole in the shipped own-class cache).  The guard is the probe matrix as a
+  `Pl/t` file, a CHECK MODE run once over the gate, the sweep and the board (every
+  hit also takes the full walk and dies on a disagreement), and an inverse
+  mechanism row.  The cost of a validated hit grows with the number of classes the
+  walk passed (one name compare + one `fboundp` each) -- for a wide hierarchy whose
+  method sits in the last parent that is still cheaper per class than today's walk.
+* **Cost: one session** (the prototypes are ~200 lines and run the matrix
+  already).  **Bar:** #4523's (the four inherited rows + `methret` `ovlsub`
+  `moo-objs` `json-rt` A/B with a control column, the PPI parse BEFORE -> AFTER,
+  gate + full sweep + the mro / method / universal / overload companion legs, the
+  check-mode runs, EVERYDAY).
+* **Not in this lever:** `p-call-overload`'s two fresh argument boxes per call
+  (part of `ovlbool`'s "other" in §2, not measured on its own), `SUPER::` (uncached, unchanged), and PPI's
+  string-eval matcher -- each its own measurement.
 
 ## 7. What NOT to retry
 
-__NOTRETRY__
+* **Invalidation on `@ISA` writes (#582's original design, option (c))** -- measured:
+  the mark is a hash probe per array write (an `@ISA` is a bare vector, not a box),
+  PPI +19 %, and the obvious audit left 12 of 61 probe cases stale.  Do not retry
+  unless `@ISA` stops being an ordinary vector.
+* **A side table keyed on (package, name) instead of interning** -- unnecessary:
+  an interned, unbound `pl-NAME` is invisible to every Perl-level question (§3 (a));
+  perl's own stash shows MORE after a method call.
+* **A hit-only cache** -- (b) gained 6.6 % on PPI because the hot inherited call
+  there is a MISS (`->isa`); cache misses with the same links (e).
+* **The per-call-SITE inline cache** -- still not needed (USER s444); nothing here
+  changes the reason: a per-(class, method) table answers a polymorphic site
+  (`methpoly`) as fast as a monomorphic one.
+* **(a) alone** -- a cheaper walk is worth a third of (f) on the deepest row and
+  nothing on overloads or PPI.
 
 ## 8. Found on the way (filed)
 
