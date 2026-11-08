@@ -4047,8 +4047,9 @@ sub _span_rename_scalar {
 sub _span_rewrite_stmt {
   my ($self, $stmt, $bare, $sym_new, $brace_new, $fix, $mine) = @_;
   return unless ref $stmt && $stmt->isa('PPI::Node');
-  for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-    next unless $s->symbol eq "\$$bare";
+  my @toks = @{ $stmt->find('PPI::Token') || [] };     # ONE walk (s536e)
+  for my $s (@toks) {
+    next unless $s->isa('PPI::Token::Symbol') && $s->symbol eq "\$$bare";
     next if $self->_symbol_is_declarator($s) || !$mine->($s);
     $s->set_content($sym_new);
   }
@@ -4056,12 +4057,13 @@ sub _span_rewrite_stmt {
     next unless $p->[1] eq "\$$bare" && $mine->($p->[0]);
     $p->[0]->set_content($brace_new);
   }
-  for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {   # #4545
+  for my $p (@toks) {                                    # #4545
+    next unless $p->isa('PPI::Token::Prototype') && index($p->content, $bare) >= 0;
     $self->_rename_in_proto_defaults($p, "\$$bare", $sym_new) if $mine->($p);
   }
   return unless $fix;
   my $skip = sub { !$mine->($_[0]) };
-  for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+  for my $t (@toks) {
     next unless _interp_token_candidate($t);
     _fix_interp_token($t, $fix, $skip);
   }
@@ -4129,25 +4131,28 @@ sub _span_rename_containers {
         my $cross = $segments->[$j]{pkg} ne $segments->[$di]{pkg};
         for my $stmt (@{ $segments->[$j]{stmts} }) {
           next unless ref $stmt && $stmt->isa('PPI::Node');
-          for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-            next unless $s->symbol eq $csym && $mine->($s);
+          my @toks = @{ $stmt->find('PPI::Token') || [] };     # ONE walk (s536e)
+          for my $s (@toks) {
+            next unless $s->isa('PPI::Token::Symbol') && $s->symbol eq $csym && $mine->($s);
             (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1 . $qname/e;
             $s->set_content($c);
           }
           if ($csym =~ /^\@/) {
-            for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+            for my $ai (@toks) {
+              next unless $ai->isa('PPI::Token::ArrayIndex');
               my $c = $ai->content;
               next unless $c =~ /^\$\#\Q$bare\E\b/ && $mine->($ai);
               $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
             }
           }
-          for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {   # #4545
+          for my $p (@toks) {                                    # #4545
+            next unless $p->isa('PPI::Token::Prototype') && index($p->content, $bare) >= 0;
             $self->_rename_in_proto_defaults($p, $csym, substr($csym, 0, 1) . $qname)
               if $mine->($p);
           }
           if ($cross) {
             my $skip = sub { !$mine->($_[0]) };
-            _fix_interp_token($_, $qfix, $skip) for @{ $stmt->find('PPI::Token') || [] };
+            _fix_interp_token($_, $qfix, $skip) for @toks;
           }
         }
       }
@@ -4373,14 +4378,18 @@ sub _rewrite_var_uses {
   my $interp_fix = _interp_fixer($canon, $newbare);
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
-    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-      next unless $s->symbol eq $canon;
+    # ONE token walk feeds every spelling below (Symbol, interpolated text,
+    # one-token signature, `$#x`) -- s536e: a walk per spelling made a
+    # promotion's cost grow with each spelling this function learned.
+    my @toks = @{ $stmt->find('PPI::Token') || [] };
+    for my $s (@toks) {
+      next unless $s->isa('PPI::Token::Symbol') && $s->symbol eq $canon;
       next if $within && !_elem_within($s, $within);
       next if $skip && $skip->($s);
       (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/;
       $s->set_content($c);
     }
-    for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+    for my $t (@toks) {
       # Interpolated text obeys the SAME scoping as a symbol use: a string
       # inside a shadow's scope names the shadow, not the variable being
       # renamed (s316).  $skip is position-based (_refers_to_decl asks the
@@ -4398,7 +4407,8 @@ sub _rewrite_var_uses {
     }
     # A default inside a one-token signature (Token::Prototype, #455): code in
     # the token's text (#4545).
-    for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {
+    for my $p (@toks) {
+      next unless $p->isa('PPI::Token::Prototype');
       next if $within && !_elem_within($p, $within);
       next if index($p->content, $bare) < 0;
       next if $skip && $skip->($p);
@@ -4415,7 +4425,8 @@ sub _rewrite_var_uses {
       $p->[0]->set_content($newbare);
     }
     next unless $sigil eq '@';
-    for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+    for my $ai (@toks) {
+      next unless $ai->isa('PPI::Token::ArrayIndex');
       next if $within && !_elem_within($ai, $within);
       next if $skip && $skip->($ai);
       my $c = $ai->content;
