@@ -63,7 +63,7 @@ The PPI / parser queue was the parser program (#3694) on both halves: the PPI ha
 
 **Gate at the end:** 346 files / 11,660 rows PASS; sweep 18,761 +0; EVERYDAY 116 of 122; CI green on every push.
 
-## Session s536e (Opus agent, 2026-11-08) -- file lexicals across package sections (#4547 #4541 #4543 #4545) and the embedded-`my` residue (#4641 #4642): six silent wrongs / loud refusals fixed; #4661 #4662 #4663 filed; generation v2-12900
+## Session s536e (Opus agent, 2026-11-08) -- file lexicals across package sections (#4547 #4541 #4543 #4545) and the embedded-`my` residue (#4641 #4642): six silent wrongs / loud refusals fixed; #4661 #4662 #4663 filed; generation v2-13300 (reserved; v2-12900 before the rebase over s536f)
 
 **#4547.**  `my $a = "y"; package Q; print $a` printed nothing: the span pass promoted `$a` under its OWN name (identity: one declaration file-wide, no package spelling), i.e. into the proclaimed special every package declares, and the exception rename (#296) then moved the declaration off it to `$a__excl__0` -- the later section's `$main::a` read the special.  ONE predicate `_own_name_cell_ok` (#470's `_file_pkg_global` + `Pl::GlobalPartition::is_exception_global`) for the span scalar path, the container path and the capture promoter: an exception name takes the mangle `$a__file__N`.  A later section's sort block reads the file `my $a` (perl's answer, probed: the lexical, not sort's).  An exception-named CONTAINER spanning a section (`my %ENV`) now refuses where it silently read the real environment (#4661).  Guard span-binder-01.t rows 23-26.
 

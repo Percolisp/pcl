@@ -298,7 +298,7 @@ tree).
    disagreement under it today (the rename passes ask `_rename_decl_within`,
    not the three hooked resolvers -- a SECOND dual-run point is needed here
    before porting: hook `_rename_decl_within` the same way).
-   **Done ahead of port 4 (s536e, generation v2-12900), the questions its
+   **Done ahead of port 4 (s536e, generation v2-13300), the questions its
    silent wrongs needed:** the embedded-`my` VETO asks `uses_of` of the
    declarator's binding (a use inside another named sub, plus the port-2
    eval-text rule) -- the sigil-blind text scan and its two exemption walks
