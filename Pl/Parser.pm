@@ -1063,7 +1063,10 @@ sub _wrap_anon_self_ref {
 # (p-__pcl_set_prototype, the registry p-prototype reads):
 #
 #   sub f :prototype($) ($a) { … }   →  sub f ($a) { … } __pcl_set_prototype(\&f, '$');
-#   sub :prototype($) ($a) { … }     →  __pcl_set_prototype(sub ($a) { … }, '$')
+#   sub :prototype($) ($a) { … }     →  CORE::__pcl_set_prototype(sub ($a) { … }, '$')
+#
+# (`CORE::` names the runtime's operator; a plain non-keyword spelling is a
+# SUB call, ir-spec §10-name / #1611.)
 #
 # The attribute tokens are stripped either way — an attribute between `sub`
 # and the signature otherwise derails the anon-sub signature desugar (the

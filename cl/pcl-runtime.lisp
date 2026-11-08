@@ -26825,7 +26825,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-12000"
+(defparameter *pcl-cache-generation* "v2-12300"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -36179,8 +36179,11 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun p-__pcl_set_prototype (code proto)
   "Register PROTO as the Perl prototype of the sub CODE refers to; returns CODE.
-   Perl-side spelling: __pcl_set_prototype($code, $proto) — emitted by the
-   :prototype(...) attribute desugar in Pl/Parser.pm."
+   Perl-side spelling: CORE::__pcl_set_prototype($code, $proto) — emitted by
+   the :prototype(...) attribute desugar in Pl/Parser.pm and used by the
+   Scalar::Util / Sub::Util / attributes shims; a plain spelling is a SUB call
+   (ir-spec §10-name, #1611).  PExpr's compiler-built head carries the same
+   CORE:: marker."
   (let ((fn (%p-register-prototype code proto)))
     (when fn (%p-note-sub-install fn :set-prototype)))
   code)
