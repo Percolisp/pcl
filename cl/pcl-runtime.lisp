@@ -20771,10 +20771,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defun %p-typeglob-own-symbol (glob)
   "The symbol GLOB's name has IN ITS OWN PACKAGE -- present there, never one
    the package merely inherits from :pcl -- or NIL.  Nothing is interned: a
-   READ of a handle must not create one (task #1423)."
-  (let ((pkg (p-typeglob-package glob)))
-    (when (packagep pkg)
-      (multiple-value-bind (sym status) (find-symbol (p-typeglob-name glob) pkg)
+   READ of a handle must not create one (task #1423).
+   NIL for main's standard handles (%p-main-std-handle-p, task #4623): their
+   IO lives under the :pcl symbol, and an entry under main's same-named symbol
+   is a glob-assignment's copy that `local *STDIN` neither saves nor restores
+   -- read first, it answered fd 0 inside a later `local *STDIN` (Capture::Tiny's
+   tied-STDIN captures: `fileno($dup{stdin})` came back empty)."
+  (let ((pkg (p-typeglob-package glob))
+        (name (p-typeglob-name glob)))
+    (when (and (packagep pkg) (not (%p-main-std-handle-p pkg name)))
+      (multiple-value-bind (sym status) (find-symbol name pkg)
         (and (member status '(:internal :external)) sym)))))
 
 (defun %p-install-fh (fh stream &optional (cloexec t))
@@ -34475,14 +34481,24 @@ would consume, so it dies naming the stream (rule 12)."
       (when (%p-lgf-full f) (setf (%p-lgf-opened f) stream))
       (return))))
 
+(defun %p-main-std-handle-p (pkg name)
+  "True when the glob NAME (symbol case, no sigil) in the CL package PKG is one
+   of main's standard handles -- STDIN STDOUT STDERR ARGV ARGVOUT, names perl
+   forces into main:: -- whose IO the runtime keeps in its OWN state (the :pcl
+   symbol, %p-std-local-enter, %p-local-glob-io-bindings), never under main's
+   same-named symbol.  The name is tested first: this sits on the typeglob
+   arm of %p-resolve-fh, and almost every glob there (a gensym, a DATA, a
+   user handle) fails on it."
+  (and (member name '("stdin" "stdout" "stderr" "argv" "argvout")
+               :test #'string=)
+       (eq pkg (%pcl-find-package "main"))))
+
 (defun %p-local-glob-std-p (scalar-sym)
   "The globs whose IO `local` already localizes through its own state: the
    standard handles (%p-std-local-enter) and ARGV / ARGVOUT
    (%p-local-glob-io-bindings)."
-  (and (eq (symbol-package scalar-sym) (%pcl-find-package "main"))
-       (member (%pcl-invert-case (subseq (symbol-name scalar-sym) 1))
-               '("STDIN" "STDOUT" "STDERR" "ARGV" "ARGVOUT")
-               :test #'string=)))
+  (%p-main-std-handle-p (symbol-package scalar-sym)
+                        (subseq (symbol-name scalar-sym) 1)))
 
 (defun %p-local-glob-clear-io (scalar-sym)
   "`local *NAME` emptying the WHOLE glob (kind :all): mark the scope's frame,

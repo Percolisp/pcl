@@ -17,7 +17,8 @@
 # every package's handles, so a program that loads a module with an
 # `__END__` section read the MODULE's DATA (TT t/filter.t read one newline
 # and planned 4 tests where perl plans 164).
-# Perl ($^X) is the oracle at test time; both rows FAIL on ce665621.
+# Perl ($^X) is the oracle at test time; rows 1-3 FAIL on ce665621, row 4
+# (#4623) on c8886b61.
 
 use v5.30;
 use strict;
@@ -39,14 +40,15 @@ plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 my $workdir = tempdir(CLEANUP => 1);
 
 sub both {
-    my ($tag, $body) = @_;
+    my ($tag, $body, $stdin) = @_;
+    my $in = defined $stdin ? " < $stdin" : "";
     my $src = "$workdir/$tag.pl";
     open(my $s, '>', $src) or die; print {$s} $body; close $s;
-    my $perl = `cd $workdir && $^X $src 2>&1`;
+    my $perl = `cd $workdir && $^X $src$in 2>&1`;
     my $cl_code = `cd $workdir && $pl2cl $src 2>/dev/null`;
     my $cl_file = "$workdir/$tag.lisp";
     open(my $c, '>', $cl_file) or die; print {$c} $cl_code; close $c;
-    my $pcl = `cd $workdir && sbcl @sbcl_rt --load $cl_file 2>&1`;
+    my $pcl = `cd $workdir && sbcl @sbcl_rt --load $cl_file$in 2>&1`;
     $pcl =~ s/^;.*\n//gm;
     $pcl =~ s/^PCL Runtime loaded\n//gm;
     $pcl =~ s/^\s*\n//gm;
@@ -130,5 +132,27 @@ hello world
 second line
 PL
 is($pcl, $perl, '\*DATA resolves to the glob\'s own package, not a loaded module\'s DATA');
+
+# #4623 (s532c's own regression, the round board): #1423's own-package-first
+# read must NOT apply to main's standard handles.  A glob assignment
+# (`*STDIN = *STDIN`, Capture::Tiny's `local *STDIN = *CT_ORIG_STDIN`) leaves a
+# copy of the IO under main's same-named symbol, which `local *STDIN` neither
+# saves nor restores; read first, `fileno(\*STDIN)` answered 0 inside a later
+# `local *STDIN` and Capture-Tiny's four tied-STDIN files stopped with no plan.
+# STDIN comes from /dev/null so the answer does not depend on the harness.
+($perl, $pcl) = both('stdglob', <<'PL', '/dev/null');
+sub fd { my $f = fileno($_[0]); defined $f ? $f : "undef" }
+my @r;
+*STDIN = *STDIN;
+{ local *STDIN; push @r, "a=" . fd(\*STDIN); }
+push @r, "b=" . fd(\*STDIN);
+{ local *O = *STDIN; { local *STDIN = *O; push @r, "c=" . fd(\*STDIN); } }
+{ local *STDIN; push @r, "d=" . fd(\*STDIN) . "/" . fd(*STDIN); }
+*STDOUT = *STDOUT;
+{ local *STDOUT; push @r, "e=" . fd(\*STDOUT); }
+push @r, "f=" . fd(\*STDOUT) . "/" . fd(\*STDERR);
+print "@r\n";
+PL
+is($pcl, $perl, 'a standard handle\'s glob reads its own IO inside a later `local`, never a glob-assignment copy');
 
 done_testing();
