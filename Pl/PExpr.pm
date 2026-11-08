@@ -6308,6 +6308,9 @@ sub _subscript_autoquote_text {
   my ($self, $tok, $is_array) = @_;
   my $ref = ref($tok);
   if ($ref eq 'PPI::Token::Word') {
+    # perl autoquotes an IDENTIFIER: a qualified name callable here
+    # (`$h{Foo::bar}`, `$h{-Foo::bar}`) is evaluated (#4701).
+    return undef if $self->_qualified_word_callable($tok);
     return $tok->content
       if $self->_bareword_subscript_autoquotes($tok->content, $is_array);
     return undef;      # known callable in an array subscript — evaluate it
@@ -6693,7 +6696,11 @@ sub cleanup_for_parsing {
       if (scalar(@h_ix) == 1
           && ref($h_ix[0]) eq 'PPI::Statement::Expression') {
         my(@items)    = $h_ix[0]->children;
-        if (scalar(@items) == 1 && ref($items[0]) eq 'PPI::Token::Word') {
+        # A qualified callable name is not autoquoted (#4701): perl's
+        # subscript rule, like the fat comma's, quotes an IDENTIFIER --
+        # `$h{Foo::bar}` / `$h{-Foo::bar}` call a declared Foo::bar.
+        if (scalar(@items) == 1 && ref($items[0]) eq 'PPI::Token::Word'
+            && !$self->_qualified_word_callable($items[0])) {
           my $str     = $self->_make_string_of_token_word($items[0]);
           $h_ix[0]->replace_child($items[0], $str);
         }
@@ -6719,8 +6726,14 @@ sub cleanup_for_parsing {
       # word after `->` is not one — `is $csv->module => 'M'` is
       # `is($csv->module, 'M')` in perl (#481).  Quoting it here left the arrow
       # with no word at all and dropped the whole statement.
+      # …and unless it is a QUALIFIED name that is callable here: perl's fat
+      # comma quotes an IDENTIFIER only (toke.c scans the word without its
+      # package part before it looks for `=>`), so `Foo::bar => 1` and
+      # `-Foo::bar => 1` CALL a declared Foo::bar (keys 3 / -3, probed); an
+      # undeclared one is the bareword string either way (#4701).
       if (ref($prev) eq "PPI::Token::Word"
-          && !$self->_word_is_method_name(\@no_ws, $i-1)) {
+          && !$self->_word_is_method_name(\@no_ws, $i-1)
+          && !$self->_qualified_word_callable($prev)) {
         $no_ws[$i-1] = $self->_make_string_of_token_word($prev);
       }
       # A FILETEST letter is autoquoted by the fat comma too, and the string
@@ -6758,15 +6771,20 @@ sub cleanup_for_parsing {
 # the word was quoted by the loop above (`-K => 1` is "-K").  The tokens are
 # NEW (the shared tree is never edited: a re-parse splits again) and carry the
 # source token's location, which the call-site readers ask (line, regime).
+# NAME may be package-qualified (#4701: PCL's PPI lexes `-Foo::bar` and
+# `-CORE::log(...)` as ONE Word, as perl reads one word after the minus);
+# `-Foo::` is the minus and the package-name bareword "Foo", never a call.
 sub _split_negated_call_words {
   my ($self, $tokens) = @_;
   for (my $i = 0; $i < @$tokens; $i++) {
     my $t = $tokens->[$i];
     next unless ref($t) eq 'PPI::Token::Word';
-    next unless ($t->content // '') =~ /\A-([A-Za-z_]\w*)\z/;
-    my $name = $1;
+    next unless ($t->content // '') =~ /\A-([A-Za-z_]\w*(?:::\w+)*)(::)?\z/;
+    my ($name, $pkg_word) = ($1, $2);
     my $nx = $tokens->[$i + 1];
-    next unless ($nx && ref($nx) eq 'PPI::Structure::List')
+    $name .= '::' if $pkg_word;
+    next unless $pkg_word
+             || ($nx && ref($nx) eq 'PPI::Structure::List')
              || ($self->_bareword_callable_here($name, $t) // '') eq 'yes';
     my $minus = PPI::Token::Operator->new('-');
     my $word  = PPI::Token::Word->new($name);
@@ -6778,6 +6796,15 @@ sub _split_negated_call_words {
     $i++;
   }
   return;
+}
+
+# Is the Word TOK a package-QUALIFIED name (`Foo::bar`, `-Foo::bar`; never a
+# trailing-`::` package word) that is callable here?  The fat comma's one
+# question about a qualified word (#4701).
+sub _qualified_word_callable {
+  my ($self, $tok) = @_;
+  return 0 unless ($tok->content // '') =~ /\A-?([A-Za-z_]\w*(?:::\w+)+)\z/;
+  return ($self->_bareword_callable_here($1, $tok) // '') eq 'yes' ? 1 : 0;
 }
 
 

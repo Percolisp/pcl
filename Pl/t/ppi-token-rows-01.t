@@ -137,4 +137,33 @@ both_agree(q{use feature "lexical_subs"; no warnings; my sub s { "S@_" } print s
 both_agree(q{use feature "lexical_subs"; no warnings; sub f { my sub tr { "T@_" } return tr(4) } print f(), "\n"; $_ = "abc"; { my sub m { "M@_" } print m(5), "\n"; } print "m\n" if m/b/;},
            '§43: my sub tr / m inside a block, m/b/ after it');
 
+# ---- s536j: PPI batch 8 (§62 §63 §64) -- the lowering half of each fixed row --------
+
+# §62 #4701: a negated QUALIFIED word is one Word now; PExpr::_split_negated_call_words
+# splits it like -NAME when the name is callable, and a qualified callable name is not
+# autoquoted by a fat comma or a hash subscript (perl quotes an identifier only).
+both_agree(q{sub Foo::baz { 3 } print -Foo::bar, " ", -Foo::baz, " ", -Foo::baz(), " ", -foo::bar::baz, " ", -Foo::, " ", - Foo::baz, " ", (-e::foo ? "t" : "f"), "\n";},
+           '§62: -Foo::bar (string), -Foo::baz (call), -Foo:: ("-Foo"), -e::foo (a filetest)');
+both_agree(q{my $z = 1; my $v = -CORE::log($z + CORE::sqrt(4)); printf "%.6f %d %d\n", $v, -CORE::exp(0), -CORE::abs(-2);},
+           '§62: -CORE::log(...) and -CORE::exp(0) negate the builtin (core Math::Complex 750 1081)');
+both_agree(q{sub Foo::bar { 3 } my %g = (Foo::bar => 1, Foo::qux => 2, -Foo::bar => 3, -Foo::qux => 4); my %h = ("-3" => "a", "-Foo::qux" => "b", 3 => "c", "Foo::qux" => "d"); print join(",", sort keys %g), " ", $h{-Foo::bar}, $h{-Foo::qux}, $h{Foo::bar}, $h{Foo::qux}, "\n";},
+           '§62: a fat comma and a hash subscript call a declared qualified name, quote an undeclared one');
+# Math::Complex's load sets `local $SIG{FPE}`, which PCL announces on stderr and
+# does not install (docs/not-supported.md, the SBCL-owned signals); that one
+# line is the only difference perl's run does not have, so it is taken out.
+{
+    my $code = q{use Math::Complex; printf "%.6f %.6f %.6f\n", cbrt(-8), Re(acos(2)), Im(acos(2));};
+    my $perl = `perl @{[ write_pl($code) ]} 2>&1`;
+    (my $pcl = run_cl($code)) =~ s/^PCL: %SIG: \$SIG\{FPE\} is not implemented[^\n]*\n//m;
+    is($pcl, $perl, "§62: core Math::Complex cbrt / acos run (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
+}
+
+# §63 #4542: x<digits> (and x) after a block that ends a statement is a word -- a call.
+both_agree(q{sub x3 { print "called(@_)\n"; 7 } x3(); sub x64 { print "x64(@_)\n" } x64 1; my @m = map { 1 } x3(); BEGIN { 1 } x3(); if (1) { 2 } x3(); my $r = "ab" x3; my $s = do { "c" } x3; print "$r $s @m\n";},
+           '§63: x3() after a sub body / map / BEGIN / if block is a call; after a term or a do block it repeats');
+
+# §64 #4482: __DATA__ / __END__ before a fat comma is the string; the data section after it still starts.
+both_agree(qq{our %K = (\n  __FILE__ => 1,\n  __DATA__ => 2,\n  __END__  => 3,\n);\nprint join(",", sort keys %K), "\\n";\nmy \@l = (__END__ => 3); print "\@l\\n";\nprint <DATA>;\n__DATA__\nline one\n},
+           '§64: __DATA__ => / __END__ => in a list; the real __DATA__ after it');
+
 done_testing();

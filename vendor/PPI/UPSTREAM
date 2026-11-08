@@ -1,14 +1,14 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s536j
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: 86623347061a8e99211e7a6cdaee014f2ad72b97
-lib-tree: aa9dc74f42e244e0b2a5f0a7becafbe5ee6312ce
-date: 2026-11-04
+branch: pcl-s536j
+branch-sha: ae78574f7e98f6d8f2707b7efaaf53643d985115
+lib-tree: 46acc0f0851e01d14568ef97f41c4cc94efa9311
+date: 2026-11-08
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
@@ -71,6 +71,9 @@ fix: AU §40 1ff6ccd8 Tokenizer, Lexer: a format body is one token, and the stat
 fix: AU §40 87166cf8 Tokenizer, Unknown, Whitespace: after a format body a statement starts
 fix: AU §40 800aedcb Format: a format's argument block may hold a nested format
 fix: AU §40 86623347 Whitespace, Unknown: a sub declared after a format body keeps its prototype
+fix: AV §62 ce2aaa80 DashedWord: a negated bareword takes its whole package-qualified name
+fix: AW §63 e45f69ab Tokenizer: x and x<digits> after a block that ends a statement are words
+fix: AX §64 e395a534 Word: __DATA__ and __END__ before a fat comma are words
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -190,3 +193,10 @@ commit: 10d805e3 TODO tests: a format's argument block may hold a nested format
 commit: 800aedcb Format: a format's argument block may hold a nested format
 commit: a9b7a1ac TODO tests: a sub declared after a format body keeps its prototype
 commit: 86623347 Whitespace, Unknown: a sub declared after a format body keeps its prototype
+commit: e0f12cd1 TODO tests: a negated package-qualified bareword
+commit: ce2aaa80 DashedWord: a negated bareword takes its whole package-qualified name
+commit: 845b663c TODO tests: x and x<digits> after a block that ends a statement
+commit: e45f69ab Tokenizer: x and x<digits> after a block that ends a statement are words
+commit: 36eccb52 TODO tests: __DATA__ and __END__ before a fat comma
+commit: e395a534 Word: __DATA__ and __END__ before a fat comma are words
+commit: ae78574f TODO tests: a CR in the source is lost

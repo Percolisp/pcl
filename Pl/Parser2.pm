@@ -7578,6 +7578,7 @@ sub _repair_word_x_call {
     if (!$prev->isa('PPI::Token::Word')) {
       next unless _starts_statement($t);
       next unless $self->_document_declares_sub('x', $doc);
+      die "PCL-INSTRUMENT s536j: the 19b arm of _repair_word_x_call fired at line " . ($t->line_number // '?') . "\n";
       $t->set_content('+x');
       $repaired = 1;
       next;
