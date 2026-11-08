@@ -24505,6 +24505,27 @@ would consume, so it dies naming the stream (rule 12)."
        (when (< (array-dimension ,var 0) 65536)
          (setf *p-record-scratch* ,var)))))
 
+;; Inline: it runs once per record read (s536h measured the call at ~3 % of
+;; the fhread bench row).
+(declaim (inline %p-record-at-eof-p))
+(defun %p-record-at-eof-p (r sep)
+  "Did %p-read-record-1 reach end of file reading record R under SEP?  NIL R
+   is EOF; slurp always reads to the end; a fixed-size record is short; any
+   other record is EOF-terminated when SEP (paragraph mode: a blank line) does
+   not end it.  An unknown SEP shape cannot reach here: %p-read-record-1
+   dispatches on the same four."
+  (cond ((null r) t)
+        ((null sep) t)
+        ((integerp sep) (< (length r) sep))
+        ;; the per-line case ($/ = "\n"): one character compare
+        ((= (length sep) 1) (char/= (char r (1- (length r))) (char sep 0)))
+        (t (let* ((end (if (string= sep "")
+                           (load-time-value (coerce '(#\Newline #\Newline) 'string) t)
+                           sep))
+                  (n (length end))
+                  (m (length r)))
+             (or (< m n) (string/= end r :start2 (- m n)))))))
+
 (defun %p-read-record (stream sep)
   "ONE record from STREAM under perl's $/ rule SEP — nil at EOF.
    Perl has exactly one such rule, and it is not readline's private property:
@@ -24528,24 +24549,6 @@ would consume, so it dies naming the stream (rule 12)."
     ;; directory handle and leaves $! alone for anything else (task #1237).
     (stream-error () (%p-read-fail stream))
     (error () (%p-read-fail stream))))
-
-(defun %p-record-at-eof-p (r sep)
-  "Did %p-read-record-1 reach end of file reading record R under SEP?  NIL R
-   is EOF; slurp always reads to the end; a fixed-size record is short; any
-   other record is EOF-terminated when SEP (paragraph mode: a blank line) does
-   not end it.  An unknown SEP shape cannot reach here: %p-read-record-1
-   dispatches on the same four."
-  (cond ((null r) t)
-        ((null sep) t)
-        ((integerp sep) (< (length r) sep))
-        ;; the per-line case ($/ = "\n"): one character compare
-        ((= (length sep) 1) (char/= (char r (1- (length r))) (char sep 0)))
-        (t (let* ((end (if (string= sep "")
-                           (load-time-value (coerce '(#\Newline #\Newline) 'string) t)
-                           sep))
-                  (n (length end))
-                  (m (length r)))
-             (or (< m n) (string/= end r :start2 (- m n)))))))
 
 (defun %p-read-record-1 (stream sep)
   "%p-read-record's record rule, with no error handling of its own."
