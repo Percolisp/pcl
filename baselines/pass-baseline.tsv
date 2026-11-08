@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s536f (2026-11-08, Opus, EDITED BY HAND): bop.t 487/22 -> 496/13 -- #4644 (the value of an assignment to a BOX place is the box): the nine unnamed rows 65 70 75 98 103 108 131 136 141 (`is(fetches($x), 2)` after `$x |= $y` / `&=` / `^=` on a TIED scalar, numeric and string) pass -- the compound store-back answered box-set's tie-STORE value, so `is(($x |= $y), 3)` read no second FETCH; perl FETCHes twice.  Measured: base ba7863a3 one-file sweep 487/22 with those nine failing, the tree 496/13.
 # s536b (2026-11-08, Opus, EDITED BY HAND): magic.t 158/31 -> 159/30 -- #4306 (a piped open whose program cannot be executed is undef): row 67 ($tn[5], the PVBM signal-handler child) opens `|-` on ./perl, which does not exist in perl-tests/; the open now fails as in perl, so `close` leaves $? alone and the row passes as perl would here (base ab0df658 158/31, tree 159/30, one-file runs scratch/s536b/magic-*.log).
 # s535a (2026-11-08, Opus, EDITED BY HAND): scalar.t 88/28 -> 91/25 -- rows 76-78 ("writing to refs", "writing to numeric scalar" x2) pass: the span pass (1c port 3, on the binder) promotes the expression-embedded `open my $handel` that spans the flattened bare block's `package lrcg { }` section split, so the handle is no longer closed at the first section's end; eval.t 135/25 -> 136/24 -- row 40 passes: no legacy over-promotion of the file $r, so terminal()'s string eval reads $main::r.  Both rows left fail-baseline by edit (TOTAL 18774 -> 18778).
 # s532d (2026-11-08, Opus, EDITED BY HAND): qr.t 29/8 -> 30/7 and bless.t 106/1 -> 106/0 -- #4061 (a FIRST bless of an ARRAY / CODE / qr referent is recorded on the referent): qr.t "object is blessed" (a copy taken before `bless $b`) and bless.t 105 "blessing through tied refs" PASS and left fail-baseline.tsv by edit; bless.t 107 "RT #3305: Code ref should not be blessed yet" (TODO) now FAILS as in perl (the second `sub {}` is the same CV, already blessed) -- it had passed on the wrong answer CODE, so bless.t's pass count stays 106 (sweeps: scratch/s532d/out/sweep-own.log on the s532d tree alone, TOTAL 18774 -> 18775; sweep3.log on the combined tree with s532c, 18778 -> 18779, 0 new / 0 fixed after these edits)
@@ -461,7 +462,7 @@ auto.t	OK	47	0	47
 bless.t	OK	106	0	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
-bop.t	PARTIAL	487	22	510
+bop.t	PARTIAL	496	13	510
 caller.t	OK	27	84	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
