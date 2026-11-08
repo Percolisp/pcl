@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 33;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -502,5 +502,26 @@ eval 'package CW; sub stubsub { "now" } 1' or die $@;
 print "after: ", CW::stubsub(), " ", D::copy(), " ", (defined &D::copy ? 1 : 0), (defined &$code ? 1 : 0), "\n";
 PL
 
+
+# ---- #4583 (s536b): the stash entry of a forward declaration exists from
+# the declaration's own POSITION in the compile stream -- a BEGIN / `use`
+# above it does not see it (Role::Tiny records a role's subs at `use
+# Role::Tiny` as non-methods; a stub declared after the import is a method).
+# The stub itself still resolves from the section head.  (`BEGIN` is left
+# out of the listing: perl lists the BEGIN glob, PCL does not -- unrelated.)
+both_agree('#4583 a forward declaration is in the stash from its position, not from the section head', <<'PL');
+BEGIN {
+  package P;
+  sub st; sub st2 ($); sub real { 1 }
+  BEGIN { print "1 ", join(",", sort grep !/::$|^BEGIN$/, keys %P::), "\n" }
+  sub later;
+}
+package Q; sub qs;
+BEGIN { print "2 ", join(",", sort grep !/::$|^BEGIN$/, keys %Q::), "\n" }
+sub ql;
+package main;
+print "3 ", join(",", sort grep !/::$|^BEGIN$/, keys %P::), " | ", join(",", sort grep !/::$|^BEGIN$/, keys %Q::), "\n";
+my $r = \&Q::ql; print "4 ", (defined &$r ? 1 : 0), (exists &Q::ql ? 1 : 0), "\n";
+PL
 
 done_testing();

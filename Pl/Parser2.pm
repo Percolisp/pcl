@@ -2477,13 +2477,20 @@ sub parse {
           push @def_lines, (_src_pos($child)) x @raw;
           next;
         }
-        push @decls, Pl::Parser::declare_sub_form($self->fallback_parser->_qualified_sub_to_cl($child->name),
-                                       $child->block);
+        my $cl_name = $self->fallback_parser->_qualified_sub_to_cl($child->name);
+        push @decls, ($child->block
+                      ? Pl::Parser::declare_sub_form($cl_name, $child->block)
+                      : Pl::Parser::predeclare_sub_form($cl_name));
         push @decls, $self->_detect_declare_form($child)   # #2610
           if !$child->block;
-        # Forward declaration `sub foo;` reserves the name only (no definition).
+        # Forward declaration `sub foo;`: the stub is in the decls; the stash
+        # entry (`:forward`) joins the source-ordered compile stream at the
+        # declaration's position, after a BEGIN / `use` above it (#4583).
         if ($child->block) {
           push @defs, $self->_lower_sub($child);
+          push @def_lines, _src_pos($child);
+        } else {
+          push @defs, Pl::Parser::declare_sub_form($cl_name, 0);
           push @def_lines, _src_pos($child);
         }
         next;

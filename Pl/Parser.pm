@@ -7420,14 +7420,19 @@ sub _process_sub_statement {
   # p-declare-sub is idempotent: it only creates the stub if the real
   # definition hasn't loaded yet.
   if ($name) {
+    my $form = $block ? declare_sub_form($cl_sub_name, $block)
+                      : predeclare_sub_form($cl_sub_name);
     unshift @{$self->_sections->[$self->_cur_section]{declarations}},
-            "(" . join(" ", @{ declare_sub_form($cl_sub_name, $block) }) . ")";
+            "(" . join(" ", @$form) . ")";
   }
 
   # Forward declaration: sub name; or sub name ($); or sub name : attrs;
-  # The p-declare-sub stub in declarations is sufficient; nothing more needed.
+  # The stub is in the declarations bucket; the STASH ENTRY perl makes here
+  # is the `:forward` form at the declaration's own position (#4583).
   unless ($block) {
     $self->_cur_bucket($old_bucket);
+    $self->_emit("(" . join(" ", @{ declare_sub_form($cl_sub_name, 0) }) . ")")
+      if $name;
     return;
   }
 
@@ -11807,6 +11812,16 @@ sub declare_sub_form {
   return ['p-declare-sub', $name, ':body', ":$1"]
     if $name =~ /^(.+)::([^:|]+|\|[^|]*\|)\z/s;
   return ['p-declare-sub', $name, ':body'];
+}
+
+# The section-head STUB of a bodyless `sub NAME;` (#4583): the name resolves
+# from the section's start, but it is not in the stash yet -- perl creates
+# the stub CV where the compiler reaches the declaration, so the `:forward`
+# form (declare_sub_form with no body) goes at that position in the
+# source-ordered compile stream, after any BEGIN / `use` written above it.
+sub predeclare_sub_form {
+  my ($name) = @_;
+  return ['p-declare-sub', $name];
 }
 
 1;
