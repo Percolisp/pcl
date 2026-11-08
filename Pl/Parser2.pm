@@ -4496,6 +4496,12 @@ sub _embedded_decl_candidates {
   }
   my @out;
   for my $top (@tops) {
+    # A DECLARATION's initializer carries them too (#3431; a scalar chain
+    # `my $S = my $F = 0`, #4544): the declarators its lowering let-binds.
+    if ($top->isa('PPI::Statement::Variable') && !Pl::Stmt::is_local_stmt($top)) {
+      push @out, map { [$top, $_] } _decl_init_embedded_my_syms($top);
+      next;
+    }
     next unless ref($top) eq 'PPI::Statement' || ref($top) eq 'PPI::Statement::Expression'
              || ref($top) eq 'PPI::Statement::Break';   # Pl::Stmt's plain (#4304)
     push @out, map { [$top, $_] } $self->_embedded_my_syms($top);
@@ -9854,7 +9860,13 @@ sub _lower_decl_stmt_kinds {
   no warnings q{recursion};   # an arm of _lower_block_1: it recurses through _lower_block
   my ($self, $rec, $first, $rest, $vi, $tail_ctx, $first_tail) = @_;
   my @rest = @$rest;
-  {
+  # Re-entry is bounded by the STATEMENT: inside its own let the declaration
+  # lowers on (_emb_let_open), never by "the name is let-bound" -- an
+  # embedded `my` SHADOWING an outer lexical of the same name declares a new
+  # variable (#4625: `my $in; …; { my $l = L->new(my $in) }` wrote the
+  # OUTER `$in`, IO-Compress's LexFile croaked "NO!!!!").
+  if (!$self->{_emb_let_open}{ refaddr $first }) {
+    local $self->{_emb_let_open}{ refaddr $first } = 1;
     my @emb = $self->_decl_init_embedded_my_names($first);
     if (@emb) {
       my @f = $self->_embedded_my_let($first, $vi, \@emb, sub {
@@ -10712,9 +10724,14 @@ sub _blk_expr {
     # pass's extras) binds no `let`: it publishes its package cell exactly as
     # the promoted Statement::Variable branches do, and the statement then
     # writes the cell.
+    # A name already let-bound in an ENCLOSING scope is declared again: the
+    # embedded `my` SHADOWS it (#4625: `{ open my $fh, … }` inside a scope
+    # holding a `$fh` re-opened the outer handle) -- unless the statement
+    # reads that outer variable too (`chomp(my @env = grep {…} @env)`), which
+    # the fresh let would shadow: that keeps the outer one, as before.
     my @pre = $self->_emb_promoted_cells($first);
     my @emb = grep { !$self->{_file_lex_renamed}{$_}
-                  && !$self->{_let_bound_vars}{$_} }
+                  && !($self->{_let_bound_vars}{$_} && _stmt_mentions_again($first, $_)) }
               $self->_embedded_my_names($first);
     if (@emb) {
       my @f = $self->_embedded_my_let($first, $vi, \@emb, sub {
@@ -10814,21 +10831,40 @@ sub _embedded_my_let {
 # #3404 / #3452's shape), minus names already bound here.  A name the
 # statement mentions again (`my $l = (my $x = $x + 1)`: perl reads the OUTER
 # `$x` in the initializer) is left to the old path — the let would shadow it.
+# A SCALAR declaration's chained declarator (`my $c = my $d = EXPR`, #4544)
+# is NOT excluded: the scalar arm lowers its initializer as an expression, so
+# a chained `my` there is an expression-embedded `my` and takes this let —
+# fresh per execution (a recursion / a closure per loop iteration).  The
+# DECLARATOR SYMBOLS are _decl_init_embedded_my_syms's -- the one reading the
+# capture promoter's candidates share (_embedded_decl_candidates).
 sub _decl_init_embedded_my_names {
   my ($self, $stmt) = @_;
-  my %own = map { refaddr($_) => 1 } $stmt->schildren;
-  my $text = $stmt->content;
+  return grep { !$self->{_file_lex_renamed}{$_} }
+         map  { $_->content } _decl_init_embedded_my_syms($stmt);
+}
+
+sub _decl_init_embedded_my_syms {
+  my ($stmt) = @_;
+  my @own = $stmt->schildren;
+  @own = ($own[0]) if Pl::Stmt::single_scalar_decl($stmt);
+  my %own = map { refaddr($_) => 1 } @own;
   my %seen;
-  my @n = grep { !$seen{$_}++ }
-          map  { $_->[1]->content }
-          grep { !$own{ refaddr $_->[0] } }
-          _decl_syms_under($stmt, words => 'my', plain => 1);
   return grep {
-    my $nm = $_;
-    my $uses = () = $text =~ /\Q$nm\E\b/g;
-    $uses == 1 && !$self->{_file_lex_renamed}{$nm}
-      && !$self->{_let_bound_vars}{$nm}
-  } @n;
+    my $nm = $_->content;
+    !$seen{$nm}++ && !_stmt_mentions_again($stmt, $nm)
+  } map  { $_->[1] }
+    grep { !$own{ refaddr $_->[0] } }
+    _decl_syms_under($stmt, words => 'my', plain => 1);
+}
+
+# Does STMT mention NAME again besides its declarator?  A `my` is visible only
+# after its statement, so every other mention reads the OUTER variable (`my $l
+# = (my $x = $x + 1)`, `chomp(my @env = grep {…} @env)`) -- the fresh let
+# would shadow it.  ONE predicate for the declaration and the plain arm.
+sub _stmt_mentions_again {
+  my ($stmt, $name) = @_;
+  my $uses = () = $stmt->content =~ /\Q$name\E\b/g;
+  return $uses > 1 ? 1 : 0;
 }
 
 # The same declarations, as a de-duplicated list of NAMES.

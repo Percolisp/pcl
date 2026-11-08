@@ -131,4 +131,65 @@ my @t; for my $k (1..2) { my $l = X->n(my $u); $u .= $k; push @t, sub { $u } }
 print join(",", map { $_->() } @t), "\n";
 PERL
 
+# 6. #4544: the CHAINED scalar declarator `my $c = my $d = EXPR` -- `$d` is a
+#    fresh lexical per call and per iteration (it was ONE shared cell: the
+#    recursion read 2/0, the closures 2,2), a chained container too, and the
+#    conditional and tail forms.
+test_wm('chained scalar declarator is per-call / per-iteration (#4544)', <<'PERL');
+sub f { my $n = shift; my $c = my $d = $n; f($n - 1) if $n > 0; "$c/$d" }
+print "1 ", f(2), "\n";
+my @s; for my $i (1 .. 3) { my $a2 = my $b2 = $i; push @s, sub { "$a2$b2" } }
+print "2 ", join(",", map { $_->() } @s), "\n";
+my @t; for my $i (1 .. 2) { my $p = my $q = my $r = $i * 10; push @t, sub { $p + $q + $r } }
+print "3 ", join(",", map { $_->() } @t), "\n";
+sub g { my $c = my $d = shift } print "4 ", g(7), "\n";
+my @u; for my $i (1 .. 2) { my $c = my %h = (k => $i); push @u, sub { $h{k} } }
+print "6 ", join(",", map { $_->() } @u), "\n";
+sub k { my $c = my $d = $_[0] if $_[1]; defined $d ? "d=$d" : "d=undef" }
+print "7 ", k(3, 1), " ", k(4, 0), "\n";
+my @refs; sub rr { my $c = my $d = $_[0]; push @refs, \$d } rr(1); rr(2);
+print "12 ", join(",", map { $$_ } @refs), " ", ($refs[0] == $refs[1] ? "same" : "diff"), "\n";
+PERL
+
+# 7. #4544 + #3431: a chained or embedded declarator of a DECLARATION that a
+#    NAMED sub nested after it captures is promoted to its cell (the capture
+#    promoter reads the same declarators the lowering let-binds) -- a sub body
+#    refused the file ("possibly captured by nested sub"); file level too.
+test_wm('a nested named sub capturing a chained / embedded declarator (#4544)', <<'PERL');
+sub id { $_[0] }
+sub run { my $l = id(my $t = 1); package T; sub g { ++$t } package main; T::g(); print "a $l $t\n" } run();
+sub run2 { my $S = my $F = 0; package T2; sub g2 { ++$F; ++$S } package main; T2::g2(); T2::g2(); print "b F=$F S=$S\n" } run2();
+my $l3 = id(my $t3 = 5); sub g3 { ++$t3 } g3(); print "c $l3 $t3\n";
+my $S4 = my $F4 = 0; sub g4 { ++$F4; ++$S4 } g4(); print "d $S4 $F4\n";
+PERL
+
+# 8. #4625: an expression-embedded `my` SHADOWING an outer lexical of the same
+#    name declares a NEW variable -- in a declaration's initializer and in a
+#    plain statement, in a block and in a loop.  It wrote the OUTER one
+#    (IO-Compress's `LexFile->new(my $in)` after an outer `$in = ''` croaked
+#    "NO!!!!"; an inner `open my $fh` re-opened the outer handle).
+test_wm('an embedded my shadows an outer same-name lexical (#4625)', <<'PERL');
+sub L::new { shift; foreach (@_) { print defined $_ ? "D " : "U "; $_ = "x" } bless [@_], 'L' }
+sub f {
+    my $in; $in = '';
+    { my $lex = L->new(my $in); print "1 $in\n"; }
+    print "2 [$in]\n";
+    for my $k (1 .. 2) { my $l = L->new(my $in); print "3 $k $in\n" }
+    { L->new(my $in); print "4 $in\n"; }
+    print "5 [$in]\n";
+    open my $fh, '<', '/dev/null'; my $f1 = $fh;
+    { open my $fh, '<', '/dev/null'; print "6 ", ($fh == $f1 ? "same" : "diff"), "\n"; }
+    print "7 ", ($fh == $f1 ? "same" : "diff"), "\n";
+}
+f();
+my $n = 5;
+{ my $l = L->new(my $n); print "8 $n\n" }
+print "9 $n\n";
+sub g { $_[0] }
+sub h { my $s = "a"; my @c; for my $i (1 .. 2) { push @c, sub { $s }; g(my $s = $i); push @c, sub { $s } } join ",", map { $_->() } @c }
+print "10 ", h(), "\n";
+sub m2 { my @a = (1, 2); { my $c = g(my @a = (3)); print "11 $c @a\n"; } "@a" }
+print "12 ", m2(), "\n";
+PERL
+
 done_testing();
