@@ -14640,6 +14640,11 @@ ARR may be an ELEMENT holding a reference (a chain level in argument
 position), so it asks the dereference overload first (#4305)."
   (let* ((arr (%p-deref-overload arr "@{}"))
          (a (unbox arr)))
+    ;; A chain level above the deferred one VIVIFIES (#4283): an undef
+    ;; container that is a writable place -- the box the eager accessor of
+    ;; the level above handed over -- becomes an array, as p-aref-box does.
+    (when (and (or (null a) (eq a *p-undef*)) (p-box-p arr))
+      (setf a (p-ensure-arrayref arr)))
     (if (not (and (vectorp a) (not (stringp a))))
         (if (and (p-box-p a) (%p-tielem-box-p arr))
             (p-aref-argbox a idx)
@@ -14734,6 +14739,11 @@ create the key on a read-only call, which perl does not.
   (let* ((hash (%p-deref-overload hash "%{}"))
          (h (unbox hash))
          (k (to-string key)))
+    ;; A chain level above the deferred one VIVIFIES (#4283): an undef
+    ;; container that is a writable place becomes a hash, as p-gethash-box
+    ;; does; the KEY stays deferred.
+    (when (and (or (null h) (eq h *p-undef*)) (p-box-p hash))
+      (setf h (p-ensure-hashref hash)))
     (if (not (hash-table-p h))
         ;; undef container / special markers / symbolic-ref strings:
         ;; keep plain value semantics, no aliasing.  A BLESSED hash is NOT in

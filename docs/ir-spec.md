@@ -2614,10 +2614,14 @@ run 3 / 2 times as in perl.
 
 **An element CHAIN in a lazy slot vivifies every level above the last
 (normative, s536i, #4283).**  Under the argument's defelem (`-argbox`) or a
-//g match target's cell, only the LAST level is deferred; its container is
-generated as the rvalue chain is, with the `p-viv-container` marks of §3.2c
-(`ExprToCL::_elem_container_form`), never as another lazy cell:
-`my $d; f($d->[0]{a}{b})` leaves `$d` as `[{a => {}}]` and passes one undef.
+//g match target's cell, only the LAST level is deferred: its container is
+generated as an eager place (the `-box` accessors, `ExprToCL::_elem_container_form`),
+never as another lazy cell, and the lazy accessor (`p-gethash-argbox` /
+`p-aref-argbox`) vivifies the undef box it is handed, as `p-gethash-box` /
+`p-aref-box` do: `my $d; f($d->[0]{a}{b})` leaves `$d` as `[{a => {}}]` and
+passes one undef.  (Not the rvalue chain's `p-viv-container` marks: they
+expand inline at every site, and one large sub with 36 of them exhausted
+SBCL's heap at compile time.)
 
 **A dereferenced BLESSED hash spreads like any hash (normative, s536i,
 #4683).**  In every list builder -- `p-flatten-args` / `p-map-flat`

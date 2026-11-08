@@ -2339,14 +2339,19 @@ my %ELEM_ACCESS_NODE = map { $_ => 1 } qw(a_acc h_acc a_ref_acc h_ref_acc);
 # target's cell ('matchcell') -- only the LAST level is deferred: perl
 # vivifies every level above it, so `f($d->[0]{a}{b})` leaves $d as
 # [{a => {}}] and passes a fresh undef element.  The container is therefore
-# generated as the RVALUE chain is (its vivifying p-viv-container mark), never
-# as another lazy cell, which handed the outer accessor a defelem and died in
-# SBCL's gethash (#4283).  In plain lvalue context the chain stays a place.
+# generated as an EAGER place (lvalue context: the `-box` accessors, which
+# vivify each level at run time), never as another lazy cell, which handed the
+# outer accessor a defelem and died in SBCL's gethash (#4283); the lazy
+# accessor vivifies the undef box it is handed (p-gethash-argbox /
+# p-aref-argbox).  Not the rvalue chain's p-viv-container mark: it expands
+# inline at every site, and Pod::Simple::BlackBox's largest sub exhausted
+# SBCL's heap compiling 36 of them.  In plain lvalue context the chain stays
+# a place as it is.
 sub _elem_container_form {
   my ($self, $kid_id, $want) = @_;
   my $lv = $self->lvalue_context;
   my $lazy = defined $lv && ($lv eq 'argbox' || $lv eq 'matchcell');
-  $self->lvalue_context(0) if $lazy;
+  $self->lvalue_context(1) if $lazy;
   my $form = $self->_viv_container_form($kid_id, $self->gen_node_form($kid_id), $want);
   $self->lvalue_context($lv) if $lazy;
   return $form;
