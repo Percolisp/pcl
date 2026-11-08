@@ -869,7 +869,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-find-overload` | function | `(val op-str)` | — | — | — | — | — | — | — |
 | `p-overload-strval` | function | `(obj)` | — | — | — | — | — | — | — |
 | `p-overloaded` | function | `(obj)` | — | — | — | — | — | — | — |
-| `p-register-overloads` | function | `(pkg pairs-vec)` | — | — | — | — | — | — | — |
+| `p-register-overloads` | function | `(pkg pairs-vec &optional (stash t))` | — | — | — | — | — | — | — |
 
 ## pack (2)
 
