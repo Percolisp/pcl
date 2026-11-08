@@ -127,4 +127,25 @@ sub FETCHSIZE { scalar @{$_[0]} } sub STORESIZE { $#{$_[0]} = $_[1] - 1 } sub EX
 PL
 is($pcl, $perl, 'an assignment to a TIED element is the element: @_ aliases it, =~ s/// and ++ edit it (#4644)');
 
+# #4681 (s536i): `++` / `--` on an ASSIGNMENT evaluates the assignment ONCE and
+# increments the box it answers -- the four incdec macros re-emitted the
+# operand in their read and their store, so `($x += f())++` called f() three
+# times (5, where perl says 3), and a tied element's FETCH / STORE ran 5 / 4
+# times (perl 3 / 2).  FAILS on 0ac58419.
+($perl, $pcl) = both('incdec-assign', <<'PL');
+my $c = 0; sub f { $c++; 1 }
+my %h = (v => 1); ($h{v} += f())++; print "1 $h{v} $c\n";
+my $x = 1; ($x += f())++; print "2 $x $c\n";
+my @a = (1); ++($a[0] += f()); print "3 $a[0] $c\n";
+($h{w} = f())--; print "4 $h{w} $c\n";
+my $y = 5; my $o = ($y .= "a")++; print "5 $y $o\n";
+my $z = 2; my $p = --($z = 7); print "6 $z $p\n";
+tie my %t, 'TH'; $t{v} = 1; ($TH::fe, $TH::st) = (0, 0);
+($t{v} += 1)++; print "7 $t{v} $TH::fe $TH::st\n";
+my $q = 3; my $r = ($q *= 2)--; print "8 $q $r\n";
+package TH; our ($fe, $st) = (0, 0);
+sub TIEHASH { bless {}, shift } sub STORE { $st++; $_[0]{$_[1]} = $_[2] } sub FETCH { $fe++; $_[0]{$_[1]} }
+PL
+is($pcl, $perl, '++ / -- on an assignment evaluates it once and increments its box (#4681)');
+
 done_testing();

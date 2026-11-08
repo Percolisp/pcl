@@ -12537,7 +12537,20 @@ per element."
      NEW-FORM may mention PLACE and is evaluated once in whichever branch runs."
     (if (symbolp place)
         `(if (p-box-p ,place) (box-set ,place ,new-form) (setf ,place ,new-form))
-        `(box-set ,place ,new-form))))
+        `(box-set ,place ,new-form)))
+
+  (defun %p-incdec-once-form (macro place)
+    "PLACE evaluated ONCE when it is an EXPRESSION rather than a place the four
+     ++/-- macros read and write by name -- an assignment, a compound
+     assignment (`($x += f())++'): its value is the assigned BOX (#4644), so
+     MACRO runs on that box held in a temporary, and f() runs once as in perl
+     (#4681).  NIL for a symbol, a box accessor, a p-cast-$ or an accessor
+     place (%p-accessor-place-p), which the macros' own arms take."
+    (when (and (consp place)
+               (not (member (car place) '(p-aref-box p-gethash-box p-cast-$)))
+               (not (%p-accessor-place-p place)))
+      (let ((tmp (gensym "PLACE")))
+        `(let ((,tmp ,place)) (,macro ,tmp))))))
 
 (defmacro p-pre++ (place)
   "Perl prefix ++ - works on boxed values, hash/array elements, and derefs.
@@ -12546,22 +12559,23 @@ per element."
   (let ((real-place (if (and (listp place) (eq (car place) 'vector) (= (length place) 2))
                         (cadr place)
                         place)))
-    (cond
-      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
-      ((and (listp real-place)
-            (member (car real-place) '(p-aref-box p-gethash-box)))
-       (let ((box (gensym "BOX")))
-         `(let* ((,box ,real-place))
-            (box-set ,box (perl-increment ,box)))))
-      ;; Traditional setf-able places (p-aref, p-gethash, etc)
-      ((and (listp real-place)
-            (%p-accessor-place-p real-place))
-       (let ((tmp (gensym "TMP")))
-         `(let ((,tmp (perl-increment ,real-place)))
-            (setf ,real-place ,tmp)
-            ,tmp)))
-      ;; Boxed scalar — or a RAW slot: %p-incdec-store-form decides.
-      (t (%p-incdec-store-form real-place `(perl-increment ,real-place))))))
+    (or (%p-incdec-once-form 'p-pre++ real-place)
+        (cond
+          ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
+          ((and (listp real-place)
+                (member (car real-place) '(p-aref-box p-gethash-box)))
+           (let ((box (gensym "BOX")))
+             `(let* ((,box ,real-place))
+                (box-set ,box (perl-increment ,box)))))
+          ;; Traditional setf-able places (p-aref, p-gethash, etc)
+          ((and (listp real-place)
+                (%p-accessor-place-p real-place))
+           (let ((tmp (gensym "TMP")))
+             `(let ((,tmp (perl-increment ,real-place)))
+                (setf ,real-place ,tmp)
+                ,tmp)))
+          ;; Boxed scalar — or a RAW slot: %p-incdec-store-form decides.
+          (t (%p-incdec-store-form real-place `(perl-increment ,real-place)))))))
 
 (defmacro p-post++ (place)
   "Perl postfix ++ - returns old value.
@@ -12572,43 +12586,44 @@ per element."
                          place))
          (old (gensym "OLD"))
          (box (gensym "BOX")))
-    (cond
-      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
-      ;; undef (nil) is treated as 0 for post-increment, matching Perl's numeric coercion
-      ((and (listp real-place)
-            (member (car real-place) '(p-aref-box p-gethash-box)))
-       `(let* ((,box ,real-place)
-               (,old (let ((v (%p-incdec-old ,box))) (if (or (null v) (eq v *p-undef*)) 0 v))))
-          (box-set ,box (perl-increment ,box))
-          ,old))
-      ;; p-cast-$ (scalar deref): may return a mutable box (chain ref→box→value).
-      ;; Capture the VALUE before mutation so post-increment returns the old value,
-      ;; not the box that was later mutated.  e.g. ${$_[0]}++ where $o = bless \$x, ...
-      ((and (listp real-place) (eq (car real-place) 'p-cast-$))
-       `(let* ((,box ,real-place)
-               (,old (if (p-box-p ,box) (p-box-value ,box) ,box)))
-          (setf ,real-place (perl-increment ,box))
-          ,old))
-      ;; Traditional setf-able places (p-aref, p-gethash, etc)
-      ((and (listp real-place)
-            (%p-accessor-place-p real-place))
-       `(let ((,old ,real-place))
-          (setf ,real-place (perl-increment ,real-place))
-          ,old))
-      ;; Boxed scalar - return the original value (string or number).
-      ;; When value is nil (Perl undef), return 0 — Perl's undef++ returns 0
-      ;; because ++ treats undef as 0 in numeric context.
-      ;; `%p-incdec-old' above IS the place's read; `%p-read-operand' hands that
-      ;; value to `perl-increment' instead of the place, so a tied scalar's
-      ;; FETCH fires once as perl's does (#1813) — and a blessed box, where the
-      ;; `++'/`+' handlers live, still goes through as the box.
-      (t (let ((val (gensym "VAL")))
-           `(let* ((,val (%p-incdec-old ,real-place))
-                   (,old (if (or (null ,val) (eq ,val *p-undef*)) 0 ,val)))
-              ,(%p-incdec-store-form
-                real-place
-                `(perl-increment (%p-read-operand ,real-place ,val)))
-              ,old))))))
+    (or (%p-incdec-once-form 'p-post++ real-place)
+        (cond
+          ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
+          ;; undef (nil) is treated as 0 for post-increment, matching Perl's numeric coercion
+          ((and (listp real-place)
+                (member (car real-place) '(p-aref-box p-gethash-box)))
+           `(let* ((,box ,real-place)
+                   (,old (let ((v (%p-incdec-old ,box))) (if (or (null v) (eq v *p-undef*)) 0 v))))
+              (box-set ,box (perl-increment ,box))
+              ,old))
+          ;; p-cast-$ (scalar deref): may return a mutable box (chain ref→box→value).
+          ;; Capture the VALUE before mutation so post-increment returns the old value,
+          ;; not the box that was later mutated.  e.g. ${$_[0]}++ where $o = bless \$x, ...
+          ((and (listp real-place) (eq (car real-place) 'p-cast-$))
+           `(let* ((,box ,real-place)
+                   (,old (if (p-box-p ,box) (p-box-value ,box) ,box)))
+              (setf ,real-place (perl-increment ,box))
+              ,old))
+          ;; Traditional setf-able places (p-aref, p-gethash, etc)
+          ((and (listp real-place)
+                (%p-accessor-place-p real-place))
+           `(let ((,old ,real-place))
+              (setf ,real-place (perl-increment ,real-place))
+              ,old))
+          ;; Boxed scalar - return the original value (string or number).
+          ;; When value is nil (Perl undef), return 0 — Perl's undef++ returns 0
+          ;; because ++ treats undef as 0 in numeric context.
+          ;; `%p-incdec-old' above IS the place's read; `%p-read-operand' hands that
+          ;; value to `perl-increment' instead of the place, so a tied scalar's
+          ;; FETCH fires once as perl's does (#1813) — and a blessed box, where the
+          ;; `++'/`+' handlers live, still goes through as the box.
+          (t (let ((val (gensym "VAL")))
+               `(let* ((,val (%p-incdec-old ,real-place))
+                       (,old (if (or (null ,val) (eq ,val *p-undef*)) 0 ,val)))
+                  ,(%p-incdec-store-form
+                    real-place
+                    `(perl-increment (%p-read-operand ,real-place ,val)))
+                  ,old)))))))
 
 (defmacro p-pre-- (place)
   "Perl prefix -- - works on boxed values, hash/array elements, and derefs"
@@ -12616,29 +12631,30 @@ per element."
   (let ((real-place (if (and (listp place) (eq (car place) 'vector) (= (length place) 2))
                         (cadr place)
                         place)))
-    (cond
-      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
-      ((and (listp real-place)
-            (member (car real-place) '(p-aref-box p-gethash-box)))
-       (let ((box (gensym "BOX")))
-         `(let* ((,box ,real-place))
-            (box-set ,box (perl-decrement ,box)))))
-      ;; Traditional setf-able places (p-aref, p-gethash, etc).  Same shape as
-      ;; p-pre++'s arm, deliberately: `(decf place)` expands to `(- place 1)`,
-      ;; and these readers do NOT always hand back a number — p-cast-$ returns
-      ;; the referent BOX for a hard ref, p-gethash returns *p-undef* for an
-      ;; absent key, and any of them can hold a numeric STRING.  perl numifies
-      ;; first, so perl-decrement's to-number is the read.  (Unreachable until
-      ;; #463 item 2 let `--$$r` / `--${"name"}` parse at all: it died
-      ;; "#S(p-box …) is not of type number".)
-      ((and (listp real-place)
-            (%p-accessor-place-p real-place))
-       (let ((tmp (gensym "TMP")))
-         `(let ((,tmp (perl-decrement ,real-place)))
-            (setf ,real-place ,tmp)
-            ,tmp)))
-      ;; Boxed scalar — or a RAW slot: %p-incdec-store-form decides.
-      (t (%p-incdec-store-form real-place `(perl-decrement ,real-place))))))
+    (or (%p-incdec-once-form 'p-pre-- real-place)
+        (cond
+          ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
+          ((and (listp real-place)
+                (member (car real-place) '(p-aref-box p-gethash-box)))
+           (let ((box (gensym "BOX")))
+             `(let* ((,box ,real-place))
+                (box-set ,box (perl-decrement ,box)))))
+          ;; Traditional setf-able places (p-aref, p-gethash, etc).  Same shape as
+          ;; p-pre++'s arm, deliberately: `(decf place)` expands to `(- place 1)`,
+          ;; and these readers do NOT always hand back a number — p-cast-$ returns
+          ;; the referent BOX for a hard ref, p-gethash returns *p-undef* for an
+          ;; absent key, and any of them can hold a numeric STRING.  perl numifies
+          ;; first, so perl-decrement's to-number is the read.  (Unreachable until
+          ;; #463 item 2 let `--$$r` / `--${"name"}` parse at all: it died
+          ;; "#S(p-box …) is not of type number".)
+          ((and (listp real-place)
+                (%p-accessor-place-p real-place))
+           (let ((tmp (gensym "TMP")))
+             `(let ((,tmp (perl-decrement ,real-place)))
+                (setf ,real-place ,tmp)
+                ,tmp)))
+          ;; Boxed scalar — or a RAW slot: %p-incdec-store-form decides.
+          (t (%p-incdec-store-form real-place `(perl-decrement ,real-place)))))))
 
 (defmacro p-post-- (place)
   "Perl postfix -- - returns old value"
@@ -12648,37 +12664,38 @@ per element."
                          place))
          (old (gensym "OLD"))
          (box (gensym "BOX")))
-    (cond
-      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it.
-      ;; Return the RAW old value: unlike ++, postfix -- on undef returns undef
-      ;; (Perl: `$x--` with $x undef yields undef, then sets $x to -1).
-      ((and (listp real-place)
-            (member (car real-place) '(p-aref-box p-gethash-box)))
-       `(let* ((,box ,real-place)
-               (,old (%p-incdec-old ,box)))
-          (box-set ,box (perl-decrement ,box))
-          ,old))
-      ;; p-cast-$ (scalar deref): may return a mutable box — capture VALUE before mutation
-      ((and (listp real-place) (eq (car real-place) 'p-cast-$))
-       `(let* ((,box ,real-place)
-               (,old (to-number (if (p-box-p ,box) (p-box-value ,box) ,box))))
-          (setf ,real-place (perl-decrement ,box))
-          ,old))
-      ;; Traditional setf-able places (p-aref, p-gethash, etc)
-      ((and (listp real-place)
-            (%p-accessor-place-p real-place))
-       `(let ((,old ,real-place))
-          (setf ,real-place (perl-decrement ,real-place))
-          ,old))
-      ;; Boxed scalar — return the RAW old value (string or number).  Postfix --
-      ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
-      ;; One read of the place, as in p-post++ (#1813).
-      (t (let ((val (gensym "VAL")))
-           `(let ((,val (%p-incdec-old ,real-place)))
-              ,(%p-incdec-store-form
-                real-place
-                `(perl-decrement (%p-read-operand ,real-place ,val)))
-              ,val))))))
+    (or (%p-incdec-once-form 'p-post-- real-place)
+        (cond
+          ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it.
+          ;; Return the RAW old value: unlike ++, postfix -- on undef returns undef
+          ;; (Perl: `$x--` with $x undef yields undef, then sets $x to -1).
+          ((and (listp real-place)
+                (member (car real-place) '(p-aref-box p-gethash-box)))
+           `(let* ((,box ,real-place)
+                   (,old (%p-incdec-old ,box)))
+              (box-set ,box (perl-decrement ,box))
+              ,old))
+          ;; p-cast-$ (scalar deref): may return a mutable box — capture VALUE before mutation
+          ((and (listp real-place) (eq (car real-place) 'p-cast-$))
+           `(let* ((,box ,real-place)
+                   (,old (to-number (if (p-box-p ,box) (p-box-value ,box) ,box))))
+              (setf ,real-place (perl-decrement ,box))
+              ,old))
+          ;; Traditional setf-able places (p-aref, p-gethash, etc)
+          ((and (listp real-place)
+                (%p-accessor-place-p real-place))
+           `(let ((,old ,real-place))
+              (setf ,real-place (perl-decrement ,real-place))
+              ,old))
+          ;; Boxed scalar — return the RAW old value (string or number).  Postfix --
+          ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
+          ;; One read of the place, as in p-post++ (#1813).
+          (t (let ((val (gensym "VAL")))
+               `(let ((,val (%p-incdec-old ,real-place)))
+                  ,(%p-incdec-store-form
+                    real-place
+                    `(perl-decrement (%p-read-operand ,real-place ,val)))
+                  ,val)))))))
 
 ;;; ------------------------------------------------------------
 ;;; Compound Assignment Operators
