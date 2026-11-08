@@ -1096,10 +1096,15 @@ alias — the box already in play is passed through:
   already passed its box).  A TIED element too (`f($t{k} = V)`, `f($t{k} .= V)`,
   s536f, task #4644).
 - `scalar(SCALAR)` (`f(scalar($x))`, `f(scalar($h{k}))`, `f(scalar($$r))`):
-  the operand itself, as the bare argument passes it (s536f, task #4323).  Not
-  yet in the OTHER aliasing consumers (`for (scalar($x))`, `map { } scalar($x)`,
-  `\scalar($x)` -- #4685).
-- a LIST SLICE argument (`w((@a)[1])`) still passes a copy (#4682).
+  the operand itself, as the bare argument passes it (s536f, task #4323); the
+  OTHER aliasing consumers too -- `for (scalar($x))`, `map { } scalar($x)`,
+  `\scalar($x)` (s536i, task #4685).
+- a LIST SLICE argument (`w((@a)[1])`, `w(($x, 1)[0])`): the selected
+  elements themselves, and so in a foreach / map / grep list (s536i, task
+  #4682).
+- an element CHAIN through an undef scalar (`f($d->[0]{a}{b})`): every level
+  above the last vivifies, the last is the lazy defelem (s536i, task #4283).
+- a dereferenced blessed hash (`f(%$obj)`) spreads its pairs (s536i, #4683).
 
 **Plain `my` lexicals: CLOSED for KNOWN callees (task #189, s330).**  A sub
 whose body writes through `@_` is detected where the fact lives — the callee's
