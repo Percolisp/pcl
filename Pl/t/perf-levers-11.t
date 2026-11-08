@@ -233,4 +233,58 @@ MORE
 19 pos($h{u}): U
 END_EXP
 
+# ─────────────────────────────────────────────────────────────────────────────
+# #3830 (s532d) a read that asks only "defined? / a reference?" does not
+# snapshot a private-buffer cell: `defined` (%pcl-definedp, and an ELEMENT
+# through the same %p-peek-* compiler macro as length), the REF test of a
+# scalar ref to one (%scalar-holds-ref-p), and p-scalar -- every `($)`
+# prototype slot -- which answers the box itself, as it does a dualvar.
+# IO::Uncompress's read loop asks all three per chunk, which made a 16 MB
+# inflate quadratic and exhausted the heap.  MECHANISM: the peek spelling of
+# `defined $h{K}`, and the runtime's answers on a :strbuf box without the
+# getter (the snapshot slot stays NIL).
+like(lisp_out(q{(let ((*print-pretty* nil)) (print (funcall (compiler-macro-function (quote p-defined)) (quote (p-defined (p-gethash h "u"))) nil)) (let ((b (make-p-box ""))) (%p-append-box b (make-string 300 :initial-element #\x)) (let ((sb (%p-strbuf-of (p-box-value b)))) (print (list (and sb t) (%pcl-definedp b) (eq (p-scalar b) b) (%scalar-holds-ref-p b) (p-strbuf-snap sb))))))}),
+     qr/\Q(p-defined (%p-peek-helem h "u")) \E\n\Q(t t t nil nil) \E/,
+     '#3830: defined of an element peeks; defined / p-scalar / the REF test answer a :strbuf box without its snapshot');
+
+answers(<<'END_SRC', <<'END_EXP', '#3830 answers: defined, ref, readonly and scalar() of :strbuf / :memfh scalars; scalar() aliases its argument like perl');
+use strict; use warnings;
+use Scalar::Util qw(readonly);
+my $big = 'x' x 300;
+my %h = (b => ''); $h{b} .= $big;
+print "1 ", (defined $h{b} ? 1 : 0), " ", length($h{b}), "\n";
+$h{b} = undef; print "2 ", (defined $h{b} ? 1 : 0), "\n";
+my @a = (''); $a[0] .= $big; print "3 ", (defined $a[0] ? 1 : 0), "\n";
+our $g = ''; $g .= $big; $g .= 'y'; print "4 ", (defined $g ? 1 : 0), " ", length($g), "\n";
+my $s = ''; my $r = \$s; $$r .= $big; print "5 ", (defined $$r ? 1 : 0), " ", ref($r), " ", ref(\$r), "\n";
+print "6 ", (readonly($$r) ? 1 : 0), "\n";
+sub app { $_[0] .= "Z" } app(scalar($$r)); print "7 ", substr($s, -2), "\n";
+my $copy = scalar($$r); $$r .= "W"; print "8 ", length($copy), " ", length($s), "\n";
+my @kept = (scalar($h{none} // 'u'), scalar($$r)); $$r .= "V"; print "9 ", length($kept[1]), "\n";
+open my $fh, '>', \my $mem or die; print $fh $big; print "10 ", (defined $mem ? 1 : 0), " ", length($mem), "\n";
+close $fh; print "11 ", (defined $mem ? 1 : 0), "\n";
+my $o = ''; open my $fh2, '>>', \$o or die; print "12 ", (defined $o ? 1 : 0), "\n"; close $fh2;
+my $u; my $ru = \$u; print "13 ", (defined $$ru ? 1 : 0), " ", ref($ru), "\n";
+$g = undef; print "14 ", (defined $g ? 1 : 0), "\n";
+my $rr = \$h{c}; $h{c} = ''; $$rr .= $big; print "15 ", (defined $h{c} ? 1 : 0), " ", ref(\$h{c}), "\n";
+my $sc = scalar($$r) . "!"; print "16 ", length($sc), "\n";
+END_SRC
+1 1 300
+2 0
+3 1
+4 1 301
+5 1 SCALAR REF
+6 0
+7 xZ
+8 301 302
+9 302
+10 1 300
+11 1
+12 1
+13 0 SCALAR
+14 0
+15 1 SCALAR
+16 304
+END_EXP
+
 done_testing();

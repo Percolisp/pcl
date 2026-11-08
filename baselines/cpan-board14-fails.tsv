@@ -195,6 +195,7 @@
 #   unattributed.  RE-CAUSED -- TT unicode.t 1-20 -> #1389, parser.t 35 -> #4302, zz-error-exception-gh-373.t 4 -> NS:ns-b, dom.t *PLAN* -> #4305.
 # EDITED (s532d, 2026-11-08; one-file runs compile1 -> compile2 and compile4 -> compile5 on the tree): #4165 + #4321 -- Template-Toolkit compile2.t 9 + compile5.t 8 12 LEFT (the source SIZE joins the
 #   module cache mtime test; utime @t, $f with the TIMES spread from an array set nothing, so the hacked .ttc was recompiled from source); compile2 15 + compile5 14 stay.
+# EDITED (s532d): HTTP-Message message-decode-zipbomb.t *PLAN* re-keyed #3830 -> #4322 (the heap, measured: 9/9 on tree and base at 1800 MB).
 Class-Inspector-1.36-0	class_inspector__devel_hide.t	0	*FILE*	1..0 # SKIP test requires Devel::Hide (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "test requires Devel::Hide")
 Class-Method-Modifiers-2.15-0	060-caller.t	2	parent with modifiers sees 'main' as caller # TODO caller magic not implemented yet			PERL-FAILS (perl: not ok # TODO "caller magic not implemented yet", the oracle s531b) -- NS:caller() fidelity [DEFERRED, USER s488] + #233 (a modifier must not appear as the caller)
 Class-Method-Modifiers-2.15-0	140-lvalue.t	1	around on an lvalue attribute is maintained	undef	'1'	NS:ns-lvalue-subs -- #930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
@@ -1692,7 +1693,7 @@ HTTP-Message-7.01-0	message-brotli.t	0	*FILE*	1..0 # SKIP Need IO::Compress::Bro
 HTTP-Message-7.01-0	message-charset.t	39		'å'	'�'	#1389 (no UTF-8 flag: lc() of a decoded Latin-1 string follows the byte rule where perl's flagged string lowercases \xC3 to \xE3 -- s526w1)
 HTTP-Message-7.01-0	message-decode-brotlibomb.t	0	*FILE*	1..0 # SKIP Need IO::Compress::Brotli, IO::Uncompress::Brotli (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Need IO::Compress::Brotli, IO::Uncompress::Brotli")
 HTTP-Message-7.01-0	message-decode-bzipbomb.t	0	*FILE*	no TAP rows (rc=0)	10 row(s)	NS:ns-xs (Compress::Raw::Bzip2 is XS and has no PCL build; the file dies at load)
-HTTP-Message-7.01-0	message-decode-zipbomb.t	0	*PLAN*	ran 5 of 9, rc 1	9 row(s)	#3830 (every defined() read materializes the growing :str-buffer: gunzip of the 16 MB bomb exhausts the 1 GB heap -- s526w1)  [s532 round on MAIN-READY-63: the file now produces 5 of perl's 9 rows and dies -- the *FILE* row became this *PLAN* row BY EDIT; #3830 unchanged]
+HTTP-Message-7.01-0	message-decode-zipbomb.t	0	*PLAN*	ran 5 of 9, rc 1	9 row(s)	#4322 (s532d: the 1 GB default heap holds too few 64 MB copies of the 16 MB strings -- SBCL characters are 4 bytes; 9/9 at PCL_DYNAMIC_SPACE_MB=1800 on the tree AND the base; #3830's quadratic snapshot fixed s532d, not what holds this file)
 HTTP-Message-7.01-0	message.t	0	*PLAN*	ran 151 of 208, rc 1	208 row(s)	NS:ns-xs (no Compress::Raw::Bzip2, so the file takes its else branch: skip() outside a SKIP block, where perl dies too) + #1746 (PCL dies with a Lisp THROW error, not "Label not found")
 HTTP-Message-7.01-0	message.t	95		''	to match: ^Modification of a read-only value	#1391 (a LITERAL is not read-only: \"foo" as content_ref, then content("bar") writes where perl dies)
 HTTP-Message-7.01-0	message.t	101		undef	'foo'	#3828 (MIME::QuotedPrint's decode_qp is missing from the MIME::Base64 shim: quoted-printable decoding yields undef -- s526w1)

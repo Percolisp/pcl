@@ -3132,6 +3132,21 @@
   (kind nil)
   (data nil))
 
+(declaim (inline %p-private-buffer-box-p))
+(defun %p-private-buffer-box-p (val)
+  "Is VAL a box whose value is a PRIVATE-BUFFER cell -- a :strbuf (#2115, the
+   in-place `.=' buffer) or a :memfh (#2111, an in-memory filehandle's
+   scalar)?  Such a box always holds a STRING: defined, never a reference.  A
+   reader that asks only that answers here, WITHOUT the getter, whose snapshot
+   copies the whole buffer after every append -- the quadratic copy that made
+   IO::Uncompress's `defined $$out' / `ref $out' loop exhaust the heap on a
+   16 MB inflate (#3830)."
+  (and (p-box-p val)
+       (let ((c (p-box-value val)))
+         (and (p-magic-cell-p c)
+              (member (p-magic-cell-kind c) '(:strbuf :memfh))
+              t))))
+
 (declaim (inline unbox))
 (defun unbox (val)
   "Extract value from a box, or return val if not boxed.
@@ -5660,6 +5675,9 @@
 ;;; Internal predicate — returns CL nil/t (for use in CL if/unless/when/and/or).
 ;;; Use p-defined for the Perl-value result of defined() expressions.
 (defun %pcl-definedp (val)
+  ;; A private-buffer box is defined, answered without its snapshot (#3830).
+  (when (%p-private-buffer-box-p val)
+    (return-from %pcl-definedp t))
   (let ((v (unbox val)))
     (and (not (null v)) (not (eq v *p-undef*)))))
 
@@ -13878,8 +13896,7 @@ per element."
 ;;; macros, for p-refgen-list's reason: the consumers are functions.
 (defun %p-slot-live-length (slot)
   "The live length of a slot BOX holding a private-buffer cell; NIL else."
-  (and (p-box-p slot)
-       (p-magic-cell-p (p-box-value slot))
+  (and (%p-private-buffer-box-p slot)
        (%p-cell-live-length (p-box-value slot))))
 
 (defun %p-peek-helem (hash key)
@@ -13916,6 +13933,12 @@ per element."
 (define-compiler-macro p-length (&whole form val)
   (let ((peek (%p-peek-form val)))
     (if peek `(p-length ,peek) form)))
+
+;; `defined $h{K}' / `defined $a[I]': a private-buffer box is defined
+;; without its snapshot (%pcl-definedp; #3830).
+(define-compiler-macro p-defined (&whole form val)
+  (let ((peek (%p-peek-form val)))
+    (if peek `(p-defined ,peek) form)))
 
 ;; substr's EXTRACTION only (2 or 3 arguments): the 4-argument form writes.
 (define-compiler-macro p-substr (&whole form str &rest args)
@@ -32292,8 +32315,10 @@ would consume, so it dies naming the stream (rule 12)."
   "True when REFERENT (a scalar box that some reference points at) itself holds
    a reference value — i.e. ref(\\referent) is \"REF\", not \"SCALAR\".
    Non-recursive: only looks one unbox deep, so a self-referential scalar ref
-   ($x = \\$x) does not loop."
+   ($x = \\$x) does not loop.  A private-buffer box holds a string, asked
+   without its snapshot (#3830)."
   (and (p-box-p referent)
+       (not (%p-private-buffer-box-p referent))
        (let ((u (unbox referent)))
          (or (and (vectorp u) (not (stringp u)))   ; holds an array ref
              (hash-table-p u)                       ; holds a hash ref
@@ -35844,6 +35869,14 @@ would consume, so it dies naming the stream (rule 12)."
 (defun p-scalar (&rest args)
   "Perl scalar function - returns length for arrays, value for scalars.
    With multiple args (comma expr), returns the last value."
+  ;; A PRIVATE-BUFFER box (a :strbuf / :memfh cell) IS the scalar, like the
+  ;; dualvar below: answered as itself, without the snapshot of its whole
+  ;; buffer -- every `($)' prototype slot is a p-scalar, and IO::Uncompress's
+  ;; read() asks `Scalar::Util::readonly(${ $_[0] })' per call (#3830).  A
+  ;; consumer that keeps it copies it (box-set reads the getter).
+  (let ((last (car (last args))))
+    (when (%p-private-buffer-box-p last)
+      (return-from p-scalar last)))
   (let* ((val (car (last args)))
          (v (unbox val)))
     (cond

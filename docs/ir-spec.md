@@ -1563,7 +1563,12 @@ arguments) and a single `m//` without `/g` read a `:strbuf` cell's buffer in
 place — the match record keeps a DISPLACED view of the scanned prefix, which
 is immutable because the buffer only grows; an element reaches them as its
 slot box through `%p-peek-helem` / `%p-peek-aelem` (compiler macros on
-`p-length`, `p-substr`, `p-=~`).  Every other reader takes the snapshot.  A
+`p-length`, `p-substr`, `p-=~`).  The readers that ask only WHAT the scalar
+is answer without a snapshot too (normative, s532d, task #3830): `defined` is
+true (a compiler macro on `p-defined` peeks an element), a reference to it is
+SCALAR and never REF, and `scalar()` -- every `($)` prototype slot -- answers
+the box itself, which aliases it as perl's `scalar` does (`sub f { $_[0] .=
+"Z" } f(scalar $$r)` appends to `$$r`).  Every other reader takes the snapshot.  A
 shorter result is the plain concatenation.  perl's order holds: the place's
 index / key operand is read FIRST (once — a variable as a value snapshot when the
 right side could change it: `$a[$i] .= ++$i` appends to `$a[0]`), then the right
