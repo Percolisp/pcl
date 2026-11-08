@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536d (Opus 5.5, 2026-11-08) from the #4622 edge probes (scratch/s536d/pr/c3.pl in the s536d worktree).  PRE-EXISTING (base 84a2e6ec answers the same).\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    sub setit { $_[0] = \"via-alias\" }\n    tie my %t, 'TH'; $t{k} = \"orig\"; setit($t{k}); print \"1 $t{k}\\n\";\n    setit($t{j} = \"orig\"); print \"2 $t{j}\\n\";\n    package TH; sub TIEHASH { bless {}, shift } sub STORE { $_[0]{$_[1]} = $_[2] } sub FETCH { $_[0]{$_[1]} }\n\nperl: `1 via-alias` / `2 via-alias`.   PCL (s536d tree): `1 via-alias` / `2 orig`.\n\nWHY (read, not fixed): s536d's #4622 generates an element assignment in a user-sub argument slot in lvalue context, so the emission is `(pl-setit (p-setf (p-gethash-box %t \"j\") \"orig\"))`; for an untied hash p-setf of the box place answers that box, for a tied one (p-gethash-box -> %p-tie-elem-box) the value p-setf answers is not the tie element box (the plain element argument `setit($t{k})` passes `(p-gethash-argbox %t \"k\")` = the tie element box and aliases).  Same family as #4303's `($t{k} = V) =~ s///` on a tied hash -- probe that too.\nWHERE TO START: cl/pcl-runtime.lisp `p-setf`'s arm for a `p-gethash-box` / `p-aref-box` place over a tied container; the store should answer the tie element box it stored through.\n",
+   "id" : "4644",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an assignment to a TIED hash element used as a user-sub argument (`setit($t{k} = \"x\")`, `$_[0] = …` in the callee) leaves the element unchanged -- the p-setf of the tie element box answers a copy (the untied twin is #4622, fixed s536d)"
+}
