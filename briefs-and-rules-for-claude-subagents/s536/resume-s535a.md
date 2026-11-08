@@ -1,0 +1,20 @@
+# RESUME s535a (s536, reviewing session on Opus 5.5, 2026-11-08 08:4x) -- 1c port 3, the span pass on the binder: D0-D3 committed, D5 drafted; EVERY BAR owed (the legs in flight at the cut DIED at the reboot)
+
+You are an EXECUTION agent (Opus 5.5) RESUMING batch **s535a** on the PCL project (Perl -> Common Lisp transpiler, /home/bernt/pcl).  The previous agent checkpointed at the s535 session end and the box REBOOTED since: **`d0-ab.log` (+ `eab-d0-rest.log`, empty) and `sweep.log` have no END line -- NOT usable**, every leg is owed again; `/tmp` is empty; your scratch (incl. the extractions `scratch/s535a/base` = 06a4b8ba, `d0tree` = 11b86a3d, `t1` = fff989ac) is intact.  **FIRST ACTION:** write the exact model id you run as into `$W/scratch/s535a/MODEL.txt` (the USER requires `claude-opus-5-5`; anything else: write it, stop, report only that).
+
+**Your worktree: `W=/home/bernt/pcl/.claude/worktrees/agent-a9f90daff99b3d617`** (branch `worktree-agent-a9f90daff99b3d617`, HEAD `5a53857e`, 8 commits over `8faca74c`; generation v2-12000 + the three artifacts).  Every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path; never run anything in `/home/bernt/pcl` itself.  Do not spawn subagents.
+
+**READ (in parts):** `$W/scratch/s535a/STOP.md` WHOLE (Commits, THE PREDICTION SO FAR, OWED 1-12, FILED, Probes), `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s473/COMMON.md`, `s536/SHARED-BOX.md` (rules 19-24 -- **rule 23 is your `_stmt_declares_canon` conflict, RULED**), `s535/SHARED-BOX.md` (16-18), your brief `s535/s535a-prompt.md` WHOLE (deliverables D0-D5 and the Bars stand unchanged).
+
+**Main now:** `1407c08c` = MAIN-READY-73 (s534a: docs + four bench rows) + records; main's CODE sha STILL **`06a4b8ba`** (v2-11700) -- your reference.  **Merge order (rule 19): s532c -> s532d -> YOU -> s536a.**  s532c brings `cl/` + `Pl/Parser2.pm` (`_stmt_declares_canon`, #4304) + `Pl/Stmt.pm`; s532d brings `cl/` + the compiler's prototype / import-order iteration.
+
+**ORDER for this resume (finding instruments first, the combined-tree bars last):**
+1. `git -C "$W" rebase main` now (records-only).
+2. The prediction's missing third (OWED 1): re-queue the REST part of `d0-ab.sh` only (board + lib + corp-rest on `d0tree`; split the script if it re-runs the parts already read -- `eab-d0-wide` / `eab-d0-corp` stand if their own summaries are complete; check).  Rows into `predicted.tsv`.
+3. The ACTUAL on your committed tree (OWED 2, `ab-final.sh`: corpus-diff + wide A/B vs 06a4b8ba + ir-host-leak) and compare with predicted, both directions.
+4. The sweep on your tree NOW as a FINDING instrument (OWED 3 -- re-extract a fresh `t2` of HEAD for it, never re-use `t1` while another leg reads it), the gate-SET scan (OWED 4), ir-conform etc. (OWED 6), the one-file companion runs (OWED 7, exclusive -- queue it once, all files in one leg).  Fix what they find.
+5. D4 bench + everyday BEFORE -> AFTER in ONE `bench` leg if your scripts allow (rule 20).  D5 records (OWED 11).
+6. **When s532c AND s532d have merged** (the reviewing session tells you): the final rebase (OWED 12) -- keep the `_stmt_declares_canon` deletion; s532c's #4304 guard rows must PASS on the combined tree (rule 23), regenerate the three artifacts, re-take corpus-diff + the wide A/B vs main's NEW code sha, then the FULL gate and the FULL sweep on the combined tree (name resolution: the sweep IS the gate), `--record` LAST.  If they are not both merged when everything else is done, write MERGE-READY-PENDING-REBASE with the owed combined-tree legs listed and report; the reviewing session wakes you.
+7. `MERGE-READY: <sha>` FIRST line of STOP.md + the FINAL REPORT (predicted vs actual table, functions deleted with line counts, the cost, the bars BEFORE -> AFTER and which tree each measured, tasks filed / noted, FLAGGED hunks).
+
+Three other agents share the three heavy slots: exit 75 = re-queue (up to twice).  Never edit `Pl/` while a leg reads the tree; never `nohup` the gate.  Budget: checkpoint at ~250k tokens (commit, STOP.md with the owed list at the top).

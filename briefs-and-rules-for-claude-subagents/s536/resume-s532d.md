@@ -1,0 +1,18 @@
+# RESUME s532d (s536, reviewing session on Opus 5.5, 2026-11-08 08:4x) -- #4061 #4165 #3830 #3961 #4041 all DONE in code with guards; owed: the seedpop population bar, the sweep, everyday, the rebase, the records
+
+You are an EXECUTION agent (Opus 5.5) RESUMING batch **s532d** on the PCL project (Perl -> Common Lisp transpiler, /home/bernt/pcl).  The previous agent checkpointed at the s535 session end and the box REBOOTED since: **the seedpop leg that was in flight DIED** (`scratch/s532d/out/seedpop.log` has no END line -- not usable); `/tmp` is empty; your scratch is intact.  **FIRST ACTION:** write the exact model id you run as into `$W/scratch/s532d/MODEL.txt` (the USER requires `claude-opus-5-5`; anything else: write it, stop, report only that).
+
+**Your worktree: `W=/home/bernt/pcl/.claude/worktrees/agent-ab60b3bfb6438446c`** (branch `worktree-agent-ab60b3bfb6438446c`, HEAD `0f7442b1`, 5 commits over `9176bcfe`; generation v2-11900 + the three artifacts).  Every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path; never run anything in `/home/bernt/pcl` itself.  Do not spawn subagents.
+
+**READ (in parts):** `$W/scratch/s532d/STOP.md` WHOLE (OWED 1-6, BARS ON DISK, MEMBERS, the s534a interaction), `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s473/COMMON.md`, `s536/SHARED-BOX.md` (rules 19-24), `s535/SHARED-BOX.md` (16-18), your brief `s532/s532d-prompt.md` + fill `s535/s532d-fill.md`.  Every deliverable, bar and rule stands.
+
+**Main now:** `1407c08c` = MAIN-READY-73 (s534a: docs + four bench rows, `tools/bench-exec.pl` only) + records; main's CODE sha STILL **`06a4b8ba`** (v2-11700).  **s532c merges BEFORE you** (rule 19: it owes only its bars) -- it brings `cl/pcl-runtime.lisp` + `Pl/Parser2.pm` / `Pl/Stmt.pm` changes and v2-11800; your v2-11900 stays above it.
+
+**ORDER for this resume:**
+1. `git -C "$W" rebase main` now (records-only; keep both sides of a records conflict, newest first).
+2. Re-queue the **seedpop** leg (OWED 1: `heavy.sh s532d leg $W/scratch/s532d/out/seedpop.log $W/scratch/s532d/seedpop.sh`; give the log a fresh name or truncate it first so the dead run's lines cannot be read as this one's).  Every NONDET line = a second #3961 site: fix it the same way or FILE it (IDs 4325-4339).
+3. While it runs: insert the drafted records (OWED 5; `decided.txt` above `## s533c` in DECIDED, `sessionlog.txt` above `## Session s533c` in the session log -- newest Opus first; `SEEDPOP_LINE` / `BARS_LINE` filled later).
+4. **When s532c has merged** (the reviewing session tells you; or `git -C "$W" log -1 --format=%h main -- Pl cl lib vendor` != `06a4b8ba`): rebase, regenerate the three artifacts on the rebased tree, re-take corpus-diff + `emission-ab --ref <main's new code sha> --shapes --list` (lib) + the wide A/B, then the FULL gate, the FULL sweep (s532c's `cl/` makes it owed regardless -- rule 17) and everyday BEFORE -> AFTER in ONE `bench` leg if your scripts allow (rule 20), `--record` LAST on the clean committed tree.  If s532c is still not merged when everything else is done, take gate + sweep + everyday on your current tree and say which tree in the report -- the reviewing session then decides whether the combined-tree re-take is needed.
+5. `MERGE-READY: <sha>` FIRST line of STOP.md + the FINAL REPORT (s529a's shape + the bench tables; FLAG #4061's INFO rows: arrobj-new 1.9x, refarr-x 2.3x once any array is blessed -- the USER rules on that, not you).
+
+Three other agents share the three heavy slots: exit 75 = re-queue (up to twice).  Never edit `Pl/` or `cl/` while a leg reads the tree; never `nohup` the gate.  Budget: checkpoint at ~200k tokens (commit, STOP.md with the owed list at the top).
