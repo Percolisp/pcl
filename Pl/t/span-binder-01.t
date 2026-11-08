@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 22;
+plan tests => 35;
 
 sub write_pl {
     my ($code) = @_;
@@ -314,3 +314,115 @@ PL
     like($err, qr/^PCL internal: the span rename of \$x left a use unrenamed at line 3: \$x/,
          'rule 12: a spanning use the rewrite missed dies naming it');
 }
+
+# ── 23-35 (s536e): file lexicals across package sections.  Rows 23-26
+#    #4547 (an EXCEPTION-partition name -- `my $a` / `my $b` -- promoted under
+#    its own name was the proclaimed special, and the exception rename then
+#    moved the declaration off it: the later section read `main::$a`, empty);
+#    27-29 #4541 (a file-level `state` cell is a global of the DECLARING
+#    package -- read in another package it was another variable); 30-32 #4543
+#    (a container inside a LIST `my` was never offered to the span renamer:
+#    refused "spans a package boundary"); 33-35 #4545 (a default inside a
+#    one-token signature, Token::Prototype #455, is code in the token's TEXT:
+#    the span pass refused, the capture promoter refused, an `our` alias was
+#    not requalified there).  Every row but 26 (a control) fails on the base
+#    c8886b61; every expected text is perl 5.40.3's own output.
+is(run_cl(<<'PL'), "4 a=y\ny\n", '#4547: a file `my $a` read in a later section (and by an eval there)');
+my $a = "y";
+package Q;
+print "4 a=$a\n";
+print eval('$a'), "\n";
+PL
+is(run_cl(<<'PL'), "f=AB A B\nAx f=AxB\nm Ax B\n", '#4547: `my $a` / `my $b` read and written by a later section and its sub, back in main');
+my $a = "A"; my $b = "B";
+package Q;
+sub f { "f=$a$b" }
+print f(), " $a $b\n";
+$a .= "x"; print "$a ", f(), "\n";
+package main;
+print "m $a $b\n";
+PL
+is(run_cl(<<'PL'), "1 b=x\nx\n", '#4547: a bare block holding a block-form `package P { }`, a named sub reading `$b`');
+{ my $b = "x"; package P { } print "1 b=$b\n"; sub h { $b } }
+print h(), "\n";
+PL
+is(run_cl(<<'PL'), "1 2 3 | 7 7 7 | 7\n", '#4547: a later section\'s sort block reads the file `my $a`, not sort\'s (control: an exception-rename blocker kept the base right here)');
+my $a = 7;
+package Q;
+my @seen;
+my @s = sort { push @seen, $a; $Q::a <=> $Q::b } (3, 1, 2);
+print "@s | @seen[0 .. 2] | $a\n";
+PL
+is(run_cl(<<'PL'), "st=1\ng=2\ng=3\nst=3\n", '#4541: a file `state` read and incremented by a later section\'s sub, twice');
+use feature "state"; state $st = 1;
+package Foo;
+print "st=$st\n";
+sub g { $st++; "g=$st" }
+print g(), "\n"; print g(), "\n";
+print "st=$st\n";
+PL
+is(run_cl(<<'PL'), "n=11\nn=12\nn=13\nin=5\nc=7\n", '#4541: a `state` read after an in-block `package` and from a `package NAME { }` block');
+use feature "state";
+for my $i (1 .. 3) { state $n = 10; $n++; package Foo; print "n=$n\n"; }
+state $c = 5;
+package Bar { sub inc { $c++ } print "in=$c\n"; }
+Bar::inc(); Bar::inc();
+print "c=$c\n";
+PL
+is(run_cl(<<'PL'), "r=bz bz\n123\n", '#4541: an in-block and a section package write it; a named sub\'s state across an in-sub `package` (control)');
+use feature "state";
+state $st;
+{ package Bar; $st .= "b"; }
+package Baz;
+$st .= "z";
+sub r { "r=$st" }
+package main;
+print Baz::r(), " $st\n";
+sub mk { state $k = 0; package Q; return ++$k }
+print mk(), mk(), mk(), "\n";
+PL
+is(run_cl(<<'PL'), "u=1\nv=2 3 4 2\n", '#4543: `my ($u, @v)` -- the list\'s container read and written in a later section');
+my ($u, @v) = (1, 2, 3); print "u=$u\n";
+package Foo;
+push @v, 4; print "v=@v $#v\n";
+PL
+is(run_cl(<<'PL'), "a2,b3 r=1 p=7 q=1\n", '#4543: `my ($r, %s)` beside an `our ($p, @q)` list, the hash written in a later section');
+our ($p, @q) = (7, 8, 9);
+my ($r, %s) = (1, a => 2);
+package Foo;
+$s{b} = 3; @q = (1);
+print join(",", map {"$_$s{$_}"} sort keys %s), " r=$r p=$p q=@q\n";
+PL
+is(run_cl(<<'PL'), "3 1 5 | 2\n2 6 3\n", '#4543: `my (@a, @b)` read by a later section\'s sub; a loop pushes, a slice reads');
+my (@a, @b);
+@a = (1); @b = (2);
+package Foo;
+sub f { push @a, 5; scalar(@a) + scalar(@b) }
+print f(), " @a | @b\n";
+my ($n, @w) = (0);
+for (1 .. 3) { push @w, $_ * 2 }
+print "@w[0,2] ", scalar(@w), "\n";
+PL
+is(run_cl(<<'PL'), "f=FILE 2 <FILE> \$p\nf=x 9 s t\n", '#4545: one-token signature defaults read file lexicals across a section (a single-quoted text is not a use)');
+my $p = "FILE"; my @v = (1, 2);
+package Foo;
+use feature 'signatures'; no warnings; sub f ($q = $p, $n = scalar(@v), $s = "<$p>", $t = '$p') { "f=$q $n $s $t" }
+print f(), "\n"; print f("x", 9, "s", "t"), "\n";
+PL
+is(run_cl(<<'PL'), "f=FILE FILE|f=A A|f=A B\nf=K\n", '#4545: a parameter named like the lexical -- its own default reads the file lexical, a later one the parameter; a hash element default');
+my $p = "FILE"; my %h = (k => "K");
+package Foo;
+use feature 'signatures'; no warnings; sub f ($p = $p, $q = $p) { "f=$p $q" }
+print f(), "|", f("A"), "|", f("A", "B"), "\n";
+use feature 'signatures'; no warnings; sub g ($q = $h{k}) { "f=$q" }
+print g(), "\n";
+PL
+is(run_cl(<<'PL'), "f=FILE\nf=m\n", '#4545: the capture promoter\'s mangle and the `our` requalifier rewrite a one-token default too');
+my $p = "FILE"; { my $p = "inner"; }
+use feature 'signatures'; no warnings; sub f ($q = $p) { "f=$q" }
+print f(), "\n";
+our $t = "m";
+package A;
+use feature 'signatures'; no warnings; sub f ($x = $t) { "f=$x" }
+print f(), "\n";
+PL

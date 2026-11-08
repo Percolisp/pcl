@@ -3331,6 +3331,48 @@ sub _signature_part_defaults {
   return @out;
 }
 
+# #4545: a signature PPI handed over as ONE token (Token::Prototype -- the
+# feature pragma on the sub's own line, #455) keeps its DEFAULTS as code
+# inside the token's TEXT, where no Symbol-token rewrite reaches, so a rename
+# of a variable a default reads rewrites the text: each part's default (never
+# a parameter NAME), up to the part that declares the name itself (a later
+# default sees that parameter -- Binder::_proto_params' `%left`), the default
+# re-parsed as a fragment so that a Symbol, a `${x}` brace and interpolated
+# text follow the rename and a single-quoted string does not.  Only a token
+# that IS a signature where it stands (the binder's reading, head_is_signature);
+# the caller decides that the default's name is the binding it renames.
+# Returns the number of tokens rewritten (0 = the text is unchanged).
+sub _rename_in_proto_defaults {
+  my ($self, $proto, $old, $new) = @_;
+  my $text = $proto->content;
+  return 0 unless index($text, substr($old, 1)) >= 0;
+  return 0 unless $proto->parent && $proto->parent->isa('PPI::Statement::Sub')
+    && $self->fallback_parser->head_is_signature($text, $proto->parent);
+  my ($open, $close) = $text =~ /\A(\s*\(\s*).*?(\s*\)\s*)\z/s or return 0;
+  my $interp_fix = _interp_fixer($old, substr($new, 1));
+  my $none = sub { 0 };
+  my ($n, @out) = (0);
+  my $mine = 1;
+  for my $part (_signature_parts($text)) {
+    my ($head, $default) = $part =~ m{\A(\s*[\$\@\%]\w+\s*(?://=|\|\|=|=)\s*)(.*)\z}s;
+    if ($mine && defined $default && length $default) {
+      my $frag = Pl::Parser::fragment_doc($default)
+        or die "PCL internal: cannot re-parse the signature default `$default`\n";
+      my $before = $frag->serialize;
+      _rename_use_token($_, $old, $new, $interp_fix, $none) for $frag->tokens;
+      for my $p (@{ _brace_name_refs($frag) }) {
+        $p->[0]->set_content(substr($new, 1)) if $p->[1] eq $old;
+      }
+      my $after = $frag->serialize;
+      if ($after ne $before) { $part = $head . $after; $n++ }
+    }
+    $mine = 0 if $part =~ /\A\s*\Q$old\E\b/;
+    push @out, $part;
+  }
+  $proto->set_content($open . join(',', @out) . $close) if $n;
+  return $n;
+}
+
 sub _is_signature_node {
   my ($n) = @_;
   return ref($n) && ($n->isa('PPI::Structure::Signature')
@@ -3705,6 +3747,21 @@ sub _scan_pkg_global_spellings {
   return \%pg;
 }
 
+# May a file lexical promoted to a package cell keep its OWN name (the
+# identity cell)?  Not when the file also spells the package variable of that
+# canon (#470, `_file_pkg_global`), and never for an EXCEPTION-partition name
+# (`$a` `$b` `@ARGV` `%ENV` ..., Pl::GlobalPartition): that symbol is the
+# proclaimed special every package declares, which the sort lowering and the
+# runtime bind by name -- and the exception rename (#296) then moves the
+# declaration off it, so the identity cell's later-section uses read the
+# special (#4547).  The ONE reading for the span renamer (scalars and
+# containers) and the capture promoter.
+sub _own_name_cell_ok {
+  my ($self, $canon) = @_;
+  return 0 if $self->{_file_pkg_global}{$canon};
+  return Pl::GlobalPartition::is_exception_global($canon) ? 0 : 1;
+}
+
 # The last segment index in the same flattened-block run as segment $di (its
 # blk tag), i.e. the extent a block-scoped `my` from $di stays live over.  For
 # a file-level decl (no blk) the extent is all later segments.
@@ -3943,16 +4000,13 @@ sub _span_rename_scalar {
   # A chained / embedded declarator takes the mangle: its statement lowers its
   # cell through _emb_promoted, and an identity cell would be the veto path's.
   my $id_ok = $lead && (($cf->{decl_count}{$bare} // 0) == 1)
-    && !$self->{_file_pkg_global}{"\$$bare"};
+    && $self->_own_name_cell_ok("\$$bare");
   my $unique = $id_ok && $self->_program_unit;
   my $hi = _blk_extent($segments, $di);
   return if !$multi && !$span_of->{ refaddr $b } && $refuse->('does not cross the boundary');
   return if $segments->[$di]{blockform} && $refuse->('blockform decl segment');
-  # A use inside a signature PPI handed over as ONE TOKEN (a Token::Prototype --
-  # the feature pragma on the sub's own line, #455) has no Symbol to rename:
-  # refuse, as the capture promoter does (the checker then says so).
-  return if (grep { $_->{tok}->isa('PPI::Token::Prototype') } $bd->uses_of($b))
-    && $refuse->('a use in an unrewritable Token::Prototype');
+  # (A use inside a one-token signature's DEFAULT -- a Token::Prototype, #455 --
+  # is rewritten in the token's text since #4545: _rename_in_proto_defaults.)
   my $newbare = $unique ? $bare : $bare . '__file__' . $self->{_file_lex_counter}++;
   $self->_filecell_note('span', "\$$bare", $unique ? 'identity' : 'mangle') if $id_ok;
   my $mine = sub { $self->_refers_to_decl($_[0], "\$$bare", $sym) };
@@ -3992,6 +4046,9 @@ sub _span_rewrite_stmt {
   for my $p (@{ _brace_name_refs($stmt) }) {
     next unless $p->[1] eq "\$$bare" && $mine->($p->[0]);
     $p->[0]->set_content($brace_new);
+  }
+  for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {   # #4545
+    $self->_rename_in_proto_defaults($p, "\$$bare", $sym_new) if $mine->($p);
   }
   return unless $fix;
   my $skip = sub { !$mine->($_[0]) };
@@ -4036,7 +4093,11 @@ sub _span_rename_containers {
     my @cinst;
     for my $i (0 .. $#$segments) {
       my $top = $segments->[$i]{stmts};
-      for my $cd (@{ $sf->[$i]{container_decl}{$bare} || [] }) {
+      # a single-container `my @a` and a container inside a LIST declaration
+      # (`my ($u, @v)`, #4543: [stmt, canon] -- the name of the same list's
+      # scalar is the scalar path's)
+      for my $cd (@{ $sf->[$i]{container_decl}{$bare} || [] },
+                  grep { $_->[1] =~ /^[\@\%]/ } @{ $sf->[$i]{mlist_decl}{$bare} || [] }) {
         push @cinst, [$i, $cd] if grep { $top->[$_] == $cd->[0] } 0 .. $#$top;
       }
     }
@@ -4044,14 +4105,13 @@ sub _span_rename_containers {
       my ($di, $cd) = @$ci;
       my ($decl, $csym) = @$cd;
       next unless ($f->{canon_decl_count}{$csym} // 0) == 1;
-      next if $self->{_file_pkg_global}{$csym};
+      next unless $self->_own_name_cell_ok($csym);
       my ($dsym) = grep { $_->content eq $csym } @{ $decl->find('PPI::Token::Symbol') || [] };
       my $b = $dsym && $bd->decl_binding($dsym) or next;
       next unless $span_of->{ refaddr $b };
       next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
       next if $segments->[$di]{blockform};
       next if $self->{_file_lex_renamed}{$csym};
-      next if grep { $_->{tok}->isa('PPI::Token::Prototype') } $bd->uses_of($b);   # #455, as above
       my $hi = _blk_extent($segments, $di);
       my $qname = $segments->[$di]{pkg} . '::' . $bare;
       my $qfix  = _interp_fixer($csym, $qname);
@@ -4071,6 +4131,10 @@ sub _span_rename_containers {
               next unless $c =~ /^\$\#\Q$bare\E\b/ && $mine->($ai);
               $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
             }
+          }
+          for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {   # #4545
+            $self->_rename_in_proto_defaults($p, $csym, substr($csym, 0, 1) . $qname)
+              if $mine->($p);
           }
           if ($cross) {
             my $skip = sub { !$mine->($_[0]) };
@@ -4322,6 +4386,14 @@ sub _rewrite_var_uses {
       next unless _interp_token_candidate($t);
       next if $within && !_elem_within($t, $within);
       _fix_interp_token($t, $interp_fix, $skip);
+    }
+    # A default inside a one-token signature (Token::Prototype, #455): code in
+    # the token's text (#4545).
+    for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {
+      next if $within && !_elem_within($p, $within);
+      next if index($p->content, $bare) < 0;
+      next if $skip && $skip->($p);
+      $self->_rename_in_proto_defaults($p, $canon, $sigil . $newbare);
     }
     # The same use spelled `${x}` / `@{x}` / `%{x}` / `$#{x}` in CODE: a Word
     # inside a Cast's Block, invisible to the Symbol loop -- the ONE helper the
@@ -4650,7 +4722,7 @@ sub _promote_captured {
   # unit-unique number; identity is only the FALLBACK where the mangle path
   # below would refuse — so nothing that promotes today stops promoting.
   my $id_ok = !$extent && ($self->{_file_decl_count}{$bare} // 0) == 1
-    && !$self->{_file_pkg_global}{$canon};
+    && $self->_own_name_cell_ok($canon);
   my $identity = sub {
     # An embedded decl here is already right on the veto path (one cell under
     # the original name, which is what identity means) — keep its emission.
@@ -4676,20 +4748,11 @@ sub _promote_captured {
     _caprefuse($canon, $why);
     return;
   };
-  # From here on the promotion RENAMES, and a signature that PPI handed over
-  # as ONE TOKEN (Token::Prototype — the feature pragma on the sub's own
-  # line, #455) carries no Symbol for `_rewrite_var_uses` to rename: a
-  # capture through such a signature's DEFAULT would keep reading the old
-  # name, silently.  Refuse instead, exactly like the `${x}` deref-block text
-  # shape below.  The identity branch above renames nothing, so it is safe
-  # for both PPI spellings (the program has already taken it; a non-program
-  # unit falls back to it here).
-  for my $psub (@psubs) {
-    my ($proto) = grep { $_->isa('PPI::Token::Prototype') } $psub->schildren;
-    next unless $proto;
-    return $refuse->('signature default in an unrewritable Token::Prototype')
-      if $self->_binder_captures_name($proto, $bare, { $canon => 1 });
-  }
+  # From here on the promotion RENAMES.  A capture through the DEFAULT of a
+  # signature PPI handed over as ONE TOKEN (Token::Prototype -- the feature
+  # pragma on the sub's own line, #455) is renamed in the token's text by
+  # `_rewrite_var_uses` (`_rename_in_proto_defaults`, #4545); it refused here
+  # before.
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
   # Compound head like `foreach my $x`), blocks the rename.  Every canon
@@ -7930,6 +7993,7 @@ sub _state_rewrite_routes {
     my $flag = "${cell}__init";
     _reg_rename($sym->content, $cell, ':state-cell');
     $self->_rename_decl_within($root, $sym, $cell);
+    $self->_state_qualify_foreign_uses($sym, $cell) if $route->{route} ne 'anon';
     my $nx = $sym->snext_sibling;
     my $has_init = $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=';
     if ($has_init) {
@@ -7956,6 +8020,43 @@ sub _state_rewrite_routes {
     $fin->set_content('} }');
   }
   return 1;
+}
+
+# #4541: an unwrapped state cell (`$x__state__N`, no `my`: the file CV or a
+# named sub) is a global of the DECLARING package -- it is defined where the
+# declaration sits -- while the CL reader homes a bare name in the package of
+# the code that reads it.  So a use the binder places in ANOTHER package (a
+# later `package NAME;` section, a `package NAME { }` block, an in-block
+# `package` statement) is spelled qualified with the declaring package:
+# `state $st = 1; package Foo; print $st` read `Foo::$st__state__0`, an empty
+# variable.  Exactly the binding's uses (the binder built for this pass);
+# Symbols and interpolated text -- a `${x}` brace never reaches here
+# (_state_rw_blocker refuses it).
+sub _state_qualify_foreign_uses {
+  my ($self, $sym, $cell) = @_;
+  my $bd = $self->{_binder}
+    or die "PCL internal: the state prepass has no binder\n";
+  my $b = $bd->decl_binding($sym)
+    or die "PCL internal: the binder holds no declaration for state `$cell` at line "
+         . ($sym->line_number // '?') . "\n";
+  my $home = $b->{perl_package};
+  die "PCL internal: state `$cell` has no declaring package\n" unless defined $home;
+  (my $cbare = $cell) =~ s/^\$//;
+  my $q   = "${home}::$cbare";
+  my $fix = _interp_fixer($cell, $q);
+  my %done;
+  for my $r ($bd->uses_of($b)) {
+    next if !defined $r->{pkg} || $r->{pkg} eq $home;
+    my $t = $r->{tok};
+    next if $done{ refaddr $t }++;
+    if ($t->isa('PPI::Token::Symbol')) {
+      (my $c = $t->content) =~ s/^\$\Q$cbare\E\b/\$$q/ or next;
+      $t->set_content($c);
+    } else {
+      _fix_interp_token($t, $fix);
+    }
+  }
+  return;
 }
 
 # state in a NAMED sub (the common case): `state $x [= INIT];` at block level
