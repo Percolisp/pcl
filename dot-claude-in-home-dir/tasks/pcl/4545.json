@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s535a (Opus 5.5, 2026-11-08) from a span-port probe (scratch/s535a/pr/p20.pl).  The base 06a4b8ba was SILENTLY wrong; since s535a the file is REFUSED loudly (the span pass sees the use and cannot rewrite it).\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my $p = \"FILE\";\n    package Foo;\n    use feature 'signatures'; no warnings; sub f ($q = $p) { \"f=$q\" }\n    print f(), \"\\n\";\n\nperl:          f=FILE\nbase 06a4b8ba: f=            (SILENT WRONG: the default read $Foo::p)\ns535a:         Parser2 TODO: my-lexical 'p' (canon $p) spans a package boundary\n\nWHY: with the feature pragma on the sub's OWN line PPI hands the signature over as ONE Token::Prototype (#455), whose text holds the default `$p`; the binder reads the default's uses (Binder::_proto_params), so the span pass knows `$p` crosses into section Foo -- but a one-token signature has no Symbol to rename, so the promotion refuses (the capture promoter's own rule for the same spelling, 'signature default in an unrewritable Token::Prototype') and the checker refuses the file.\n\nFIX DIRECTION: rewrite the default's variable inside the Prototype token's TEXT when every `$p` the token spells is the same binding (the binder's per-token answer), or re-parse such a signature as a Structure::Signature once the feature is known to be in force (the #455 boundary).  Rare: needs the pragma and the sub on one line plus a default naming a file lexical across a package switch.",
+   "id" : "4545",
+   "status" : "pending",
+   "subject" : "A signature DEFAULT naming a file lexical, in a one-token signature (Token::Prototype: the feature pragma on the sub's own line, #455) after a `package` switch -- the base read the wrong package's variable silently; since s535a the span pass refuses the file (it cannot rename inside the token)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s532d (Opus 5.5, 2026-11-08), found by #3830's probes.  PRE-EXISTING (base 06a4b8ba the same).\n\nperl's scalar() only imposes scalar context: it returns the SV, so an aliasing consumer (a sub's @_, foreach) sees the variable itself.  PCL's p-scalar returns the VALUE (`(stringp v) v`), so the alias is lost:\n    sub app { $_[0] .= \"Z\" } my $x = \"a\"; app(scalar($x)); print \"$x\\n\";            # perl aZ, PCL a\n    my %h = (k => \"b\"); app(scalar($h{k})); print \"$h{k}\\n\";                          # perl bZ, PCL b\n(probe scratch/s532d/pr/sc.pl in the s532d worktree).  s532d made p-scalar answer a PRIVATE-BUFFER box (:strbuf / :memfh) as itself, so that one shape aliases like perl now (ir-spec \"in-place .=\", #3830); a dualvar box already did.  Every `($)` prototype slot is a p-scalar, so a user sub with a `$` prototype that writes $_[0] is the shape that matters.  FIX SHAPE (not designed): return the box for any scalar BOX that is not a reference wrapper when the consumer aliases; the copy for a value consumer is what box-set already does.  Measure the `($)`-slot rows (Pl/t grep `proto`) first: returning the box changes what a `($)` callee's @_ holds.\n",
+   "id" : "4323",
+   "status" : "pending",
+   "subject" : "scalar(EXPR) copies a plain scalar where perl passes the SV itself: `sub f { $_[0] .= \"Z\" } my $x = \"a\"; f(scalar($x)); print $x` is aZ in perl, a in PCL (also a hash element) -- silent wrong, rare"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s535a (Opus 5.5, 2026-11-08) from a span-port probe (scratch/s535a/pr/p15.pl in the s535a worktree).  PRE-EXISTING: main 06a4b8ba and the s535a tree print the same wrong answer -- the span pass never sees it.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    use feature \"state\"; state $st = 1;\n    package Foo;\n    print \"st=$st\\n\";\n\nperl:              st=1\nmain / s535a:      st=        -- SILENT WRONG\n\nWHY (read): a FILE-level `state` is outside _rename_state_vars' classic subset, so the state source prepass (_rewrite_state_prepass -> _state_rewrite_routes) rewrites it BEFORE the binder is built: the decl becomes a guarded init of fresh cells `$st__state__0` / `..__init`, and every later use is renamed to the cell.  Those cells are left UNDECLARED on purpose (\"become defvar'd package globals via _forward_global_decls\"), i.e. a global of the SECTION package: the main section defcells `$st__state__0`, the Foo section's read is `Foo::$st__state__0` -- another variable.  The span pass cannot help: by the time it runs the name is a package global, not a lexical.\n\nFIX DIRECTION (not designed): the prepass's file-CV cells are the declaring section's: spell the post-section uses package-qualified (`$main::st__state__0`), the way the span renamer qualifies a promoted lexical's later-section uses -- or declare the cells and let the span pass see the state binding (the binder records kind `state`).  Name-resolution change: the sweep is the gate.",
+   "id" : "4541",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a FILE-level `state $x` read in a later top-level `package` section reads an EMPTY variable -- the state prepass's fresh cells are globals of the SECTION package (pre-existing, not the span pass)"
+}

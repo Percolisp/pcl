@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s535a (Opus 5.5, 2026-11-08) from a span-port probe (scratch/s535a/pr/p16.pl).  PRE-EXISTING and LOUD on both main 06a4b8ba and the s535a tree.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my ($u, @v) = (1, 2, 3);\n    package Foo;\n    print \"u=$u v=@v\\n\";\n\nperl:              u=1 v=2 3\nmain / s535a:      Transpile failed: Parser2 TODO: my-lexical 'v' (canon @v) spans a package boundary\n\nWHY: the span renamer promotes a CONTAINER only from a single-container declaration (`my @v` / `my %h`, the facts' container_decl, identity-only W10-ext-3); a container inside a LIST declaration is never offered, so it stays unpromoted and the checker (now Pl::Binder::spans' answer, s535a) refuses the file.  The scalar of the same list (`$u`) is promoted.  The same holds for a container in a chained declaration (`my @c = my @d = (1)`) and an embedded one -- since s535a those are refused LOUDLY (before s535a the chained / embedded ones were a SILENT wrong: the old checker never saw them).\n\nFIX DIRECTION: offer list-declaration containers (the facts' mlist_decl entries with an @/% canon) to the container path, identity-only as today; the mixed renamed/unrenamed list-decl lowering already exists (the promoter's mlist path).  Measure first: 0 files in the gate-SET populations die with this message today.",
+   "id" : "4543",
+   "status" : "pending",
+   "subject" : "A container inside a LIST (or chained / embedded) `my` declaration used in a later `package` section is refused LOUDLY (\"spans a package boundary\") -- the span renamer offers only single-container declarations (pre-existing)"
+}
