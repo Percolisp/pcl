@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536g (Opus 5.5, 2026-11-08) as #4603's residue.  #4603 made the call-site NAMING and the implicit-`$_` operand ask `Pl::Parser::gated_keyword_at`; the OPERAND GRAMMAR of a paren-less call still reads the builtin's facts (`fc` is a named unary in Config: `is_named_unary`, `collapse_extra_unary_params`, the [1,-2] spec).\n\n    sub fc { \"U(\" . join(\" \", @_) . \")\" }\n    my @r = (fc 1, 2);\n    print scalar(@r), \" $r[0]\\n\";\n      perl 5.40.3:  1 U(1 2)        -- no feature: `fc` is the user's list operator\n      PCL (s536g):  2 U(1)          -- the named-unary operand stops at the comma\n\nWith parens (`fc(1, 2)`) it is right.  The fix: the named-unary readers in PExpr (is_named_unary / collapse_extra_unary_params / the known_no_of_params spec at the operand site) ask the same `_gated_keyword_is_sub` the `$_` default asks, so a gated keyword that is a sub here parses by its prototype record (`no_params_of_sub` already reads the record first).  Probe `say` (a list operator either way; its `:fh` slot `say STDERR \"x\"` with a user sub is indirect-object syntax in perl), `isa` (infix with the feature), `evalbytes`.\n",
+   "id" : "4703",
+   "status" : "pending",
+   "subject" : "#4603 residue: where a feature-gated keyword is a USER sub (`sub fc {...}` without the feature), its paren-less call still takes the builtin's named-unary operand -- `(fc 1, 2)` is (fc(1), 2) where perl calls fc(1, 2)"
+}

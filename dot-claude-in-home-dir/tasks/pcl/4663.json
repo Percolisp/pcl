@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536e (Opus 5.5, 2026-11-08) from a #4641 probe (scratch/s536e/pr/m5h.pl in the s536e worktree).  PRE-EXISTING: base c8886b61 and the s536e tree give the same answer.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my @w; for my $i (1 .. 2) { foo(my $q = 0); push @w, sub { ++$q }; $w[-1]->() for 1 .. $i; sub peek { $q } }\n    print join(\",\", map { $_->() } @w), \" p=\", peek(), \"\\n\";\n    sub foo { $_[0] }\n\nperl:  2,3 p=2      (peek closes over the FIRST iteration's $q; the anon closures each over their own)\nPCL:   3,4 p=4      (one shared cell: the veto keeps the package cell because the named sub uses the binding)\n\nWHY: the file-level embedded-`my` veto (`_embedded_my_veto_names`, binder-keyed since s536e #4641) is RIGHT that the named sub needs a cell outside the `let`s; it models that by making the declaration THE cell for every execution.  perl's model: the named sub captures the pad entry of the first execution of its enclosing block; each later execution of the block allocates a new one (\"Variable \"$q\" will not stay shared\").\n\nFIX DIRECTION (not designed): bind a fresh let per execution AND, on the first execution only, alias the named sub's cell to it (a once-flag around the publication) -- the statement-level `my` in a loop with a capturing named sub has the same shape; measure how often it occurs before designing (it warns in perl).",
+   "id" : "4663",
+   "status" : "pending",
+   "subject" : "A NAMED sub inside a LOOP body that captures an expression-embedded `my` of the body shares ONE cell with every iteration (the file-level veto) -- perl binds the named sub to the FIRST iteration's variable (\"will not stay shared\"), later iterations get fresh ones (pre-existing)"
+}

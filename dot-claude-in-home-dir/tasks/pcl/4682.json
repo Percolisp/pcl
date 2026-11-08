@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536f (Opus 5.5, 2026-11-08) while fixing #4341 (scratch/s536f/p/m1g.pl in the s536f worktree).  PRE-EXISTING: main c8886b61 answers the same.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my @a = (1,2,3); my %h = (k => 5); my $x = 7;\n    for ((@a)[0]) { $_ = 9 } print \"1 @a\\n\";\n    for ((@a, $x)[3]) { $_ = 8 } print \"2 $x\\n\";\n    for ((%h)[1]) { $_ = 6 } print \"3 $h{k}\\n\";\n    for ((($x, 1), 2)[0]) { $_ = 4 } print \"4 $x\\n\";\n    sub w { $_[0] .= \"w\" } w((@a)[1]); print \"5 @a\\n\";\n    w(((@a), 1)[2]); print \"6 @a\\n\";\n\nperl: `1 9 2 3` / `2 8` / `3 6` / `4 4` / `5 9 2w 3` / `6 9 2w 3w`.   PCL: `1 9 2 3` / `2 7` / `3 5` / `4 7` / `5 9 2 3` / `6 9 2 3`.\n\nWHY (read, not fixed): two halves.  (a) a raw-slot `my $x` in the list is lowered as its VALUE -- `(p-aref-deref (vector @a $x) 3)` -- so there is no box to alias; the foreach / argument veto (VarAnnotator `_ev_foreach_alias_list`, the arg-to-writer event) does not look inside a list slice.  (b) a single-index list slice is `(p-aref-deref LIST i)`, which answers the element's VALUE (p-aref); a sub argument / foreach slot needs the element CELL (as `(p-aref-deref-box ...)`, which since s536f #4341 reads a VECTOR index as the slice whose elements are already the slots' cells).  Row 1 works because the one-array list unwraps to the array itself.\nBAR: the reproducer as a guard row beside #4341's in Pl/t/list-slice-01.t.\n",
+   "id" : "4682",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a list slice in an ALIASING consumer gives copies -- `for ((@a, $x)[3]) { $_ = 8 }` leaves $x, `w((@a)[1])` with `$_[0] .= \"w\"` leaves @a (perl's pp_lslice hands on the list's own SVs)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536f (Opus 5.5, 2026-11-08), the residue of #4581 (scratch/s536f/p/m2.pl row 4, p/m2b.pl rows 4-5 in the s536f worktree).  PRE-EXISTING: main c8886b61 answers the same.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my $x = \"x\"; my $v = \"vw\"; my @b = (1, 2);\n    for ($x, substr($v,1), @b) { $_ .= \"+\" } print \"1 $x $v @b\\n\";\n    my $w = \"ww\"; my $y = \"yy\";\n    for (substr($w, 0, 1), substr $y, 1) { $_ = \"M\" } print \"2 $w $y\\n\";\n    my $p = \"pp\"; my $q = \"qq\"; $p =~ /p/g; $q =~ /q/g;\n    for (pos $p, pos $q) { $_ = 0 } print \"3 \", pos($p), pos($q), \"\\n\";\n\nperl: `1 x+ vw+ 1+ 2+` / `2 Mw yM` / `3 00`.   PCL: `1 x+ vw 1+ 2+` / `2 ww yy` / `3 11`.\n\nWHY (read): s536f's #4581 lets a magic-lvalue call be one element of the `(vector ...)` foreach shape -- the shape for lists whose every element is ONE value (Pl::Parser::_foreach_scalar_elements).  Row 1 holds an array, so the list goes through the run-time flattener (`p-flatten-args`), where the substr is lowered as a value; the per-element alias rewrite would have to reach the element inside the flattened list (a magic CELL is a box the flattener keeps as one element, so swapping the head there is enough -- the mapping from elements to the lowered list's arguments is the work).  Rows 2-3: the shared #138 comma splitter (`lowprec_split_safe`) declines a run that starts with a Word before a comma (the paren-less list operator may swallow it), so the whole list declines; a paren-less `substr` / `vec` would have to take the REST of the list as its one element.\n",
+   "id" : "4684",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (residue of #4581): a magic-lvalue call in a foreach list that also holds an ARRAY -- `for ($x, substr($v,1), @b) { $_ .= \"+\" }` -- or a PAREN-LESS `substr $x, 1` / `vec ...` among several elements still writes a copy"
+}

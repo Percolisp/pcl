@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536h (Opus 5.5, 2026-11-08) while writing the #4284 guard row.  PRE-EXISTING (base ba7863a3 identical).  LOW: mixing buffered and unbuffered reads on one handle is documented as unwise in perlfunc sysread.\n\n    open(my $h, \"<\", $f);   # $f holds \"a\\nb\\n\"\n    read($h, my $buf, 1); my $n = sysread($h, $buf, 1); print \"$n\\n\";\n  perl 5.40.3: 0 (PerlIO's first fill read all 4 bytes; read(2) on the fd is at EOF)      PCL: 1\n\nPCL's sysread (%p-sysread-impl -> %p-read-impl with %p-read-available) reads the same SBCL fd-stream buffer the buffered read filled.  An exact model needs sysread to read the descriptor directly (sb-unix:unix-read on the fd) past the CL buffer, which then also makes a later buffered read return the CL buffer's bytes first -- perl's order.  Decide whether to model it (perlfunc: \"mixing reads and sysreads ... can cause confusion\") or register it in docs/not-supported.md.  Probe: the first draft of Pl/t/errno-magic-01.t row 9 (s536h) -- it used one handle for read and sysread.",
+   "id" : "4722",
+   "status" : "pending",
+   "subject" : "sysread after a BUFFERED read on the same handle reads PCL's shared CL buffer; perl's sysread reads the descriptor (bypasses PerlIO's buffer): `read($h,$b,1); sysread($h,$b,1)` on a 4-byte file is 0 in perl (the buffer took the rest), 1 in PCL"
+}

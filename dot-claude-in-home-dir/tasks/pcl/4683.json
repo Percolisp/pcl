@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536f (Opus 5.5, 2026-11-08) while fixing #4341 (scratch/s536f/p/m1i.pl row 3 in the s536f worktree).  PRE-EXISTING: main c8886b61 answers the same.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    sub c { scalar(@_) . \":\" . join(\",\", @_) }\n    my $o = bless {a => 1}, 'X';\n    print c(%$o), \"\\n\";\n\nperl: `2:a,1`.   PCL: `1:HASH(0x1)`.\n\nWHY (read, not fixed): `%p-flatten-arg-into` (cl/pcl-runtime.lisp, the per-argument rule of p-flatten-args and p-map-flat) spreads a hash table only when it has no :__class__ key -- \"NOT blessed objects (which have :__class__) -- those stay as-is\".  But `%$o` hands the walker the REFERENT table (blessing lives in the table as :__class__), so the dereferenced hash of an object is passed whole; a reference to an object arrives as a BOX, never as a raw table, so the exclusion protects nothing that is still emitted (to be measured).  s536f factored the spreading into `%p-flatten-hash-into`, which already skips the :__class__ key, so the fix is the predicate (`(hash-table-p arg)` alone) -- measure first which callers hand a raw blessed table on purpose (grep `:__class__` around p-flatten-args / p-map-flat; the list-slice walk spreads it already).\nBAR: the reproducer + `map { ... } %$o` + `push @l, %$o` as guard rows.\n",
+   "id" : "4683",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a BLESSED hash dereferenced into a sub's argument list is passed as ONE argument -- `sub c { scalar(@_) } my $o = bless {a=>1}, 'X'; c(%$o)` is 2 in perl, 1 (a HASH ref) in PCL (the argument walker skips a hash table carrying :__class__)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536f (Opus 5.5, 2026-11-08), the residue of #4323 (scratch/s536f/p/m4.pl rows 5, 13, 15 in the s536f worktree).  PRE-EXISTING: main c8886b61 answers the same.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my $x = \"x\"; for (scalar($x)) { $_ .= \"F\" } print \"1 $x\\n\";\n    my $u = \"u\"; my $ref = \\scalar($u); $$ref .= \"R\"; print \"2 $u\\n\";\n    my $m = \"m\"; map { $_ .= \"X\" } scalar($m); print \"3 $m\\n\";\n\nperl: `1 xF` / `2 uR` / `3 mX`.   PCL: `1 x` / `2 u` / `3 m`.\n\nWHY (read): perl's scalar() returns the operand's SV, so `scalar(SCALAR)` is the scalar itself in every slot.  s536f routed the three ARGUMENT slots (named / method / coderef user calls) through `Pl::ExprToCL::_scalar_noop_operand`, so they lower the operand exactly as the bare argument; every other slot still lowers `(p-scalar E)`, a value.  The foreach list is decided on PPI tokens (`Pl::Parser::_foreach_single_scalar_p` / `_foreach_alias_rewrite` + VarAnnotator's veto `_ev_foreach_alias_list`), so it needs the same unwrap at the token level; `\\` and map's list are ExprToCL slots that could ask the same helper.  A general rewrite `scalar(SCALAR) -> SCALAR` everywhere is exact in perl's semantics but moves every value-context `(p-scalar $x)` in the corpus (a tied scalar's FETCH moves to the consumer) -- measure first.\n",
+   "id" : "4685",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (residue of #4323): `scalar(SCALAR)` in the OTHER aliasing consumers still copies -- `for (scalar($x)) { $_ .= \"F\" }`, `map { $_ .= \"X\" } scalar($m)`, `\\scalar($u)` (perl: all three reach the variable)"
+}

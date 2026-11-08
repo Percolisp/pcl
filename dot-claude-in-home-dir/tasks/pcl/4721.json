@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536h (Opus 5.5, 2026-11-08) while fixing #4263.  PRE-EXISTING (base ba7863a3 identical).  SILENT (output goes to a file perl never creates).\n\n    chdir \"/tmp/x\"; open(my $o, \">-:raw\") or die; print fileno($o), \"\\n\"; print \"file? \", (-e \"-:raw\" ? 1 : 0), \"\\n\";\n  perl 5.40.3: 1 / file? 0        PCL: 5 / file? 1   (a file \"-:raw\" is created)\n\nperl doio.c (the 2-arg '>' and '<' branches): `if (*type == IoTYPE_STD && (!type[1] || isSPACE(type[1]) || type[1] == ':'))` -> fp = PerlIO_stdout() / PerlIO_stdin(), IoTYPE_STD, and the layers after the `:` apply to THAT PerlIO (i.e. to the standard stream itself).  PCL's %p-open-parse-2arg leaves \"-:raw\" as the file name, and %p-open-impl's `-` arm (s536h: an %p-fdopen-alias with STD) matches the exact name \"-\" only.  Fix shape: in the 2-arg parse, a name \"-\" followed by `:LAYERS` is the STD handle with those layers (binmode of the standard stream) -- probe what `binmode` of an alias does to STDOUT's own layer first.  Probe: scratch/s536h/p/m1b.pl (row a4) in the s536h worktree.",
+   "id" : "4721",
+   "status" : "pending",
+   "subject" : "2-arg `open(F, \">-:raw\")` (a `-` followed by a layer) opens a FILE named \"-:raw\" in PCL; perl opens STDOUT and applies the layer (doio.c: `-` followed by NUL, space or `:` is IoTYPE_STD)"
+}

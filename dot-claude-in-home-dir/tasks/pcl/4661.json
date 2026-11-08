@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536e (Opus 5.5, 2026-11-08) beside #4547 (scratch/s536e/pr/m1g.pl in the s536e worktree).\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    my %ENV = (k => 1); package Q; print join(\",\", keys %ENV), \"\\n\";\n\nperl:              k\nbase c8886b61:     the whole process environment (LESSOPEN,PERLBREW_VERSION,...)  -- SILENT WRONG\ns536e:             Transpile failed: Parser2 TODO: my-lexical 'ENV' (canon %ENV) spans a package boundary   -- LOUD\n\nWHY: the span pass's container half (W10-ext-3, `_span_rename_containers`) promotes a container under its OWN name only (identity); for an exception-partition name that symbol is the runtime's special (%ENV, @ARGV ...), and the exception rename (#296) then moved the declaration off it, so the later section's qualified `%main::ENV` read the real environment.  s536e's `_own_name_cell_ok` (the one identity predicate) now refuses identity for an exception name, so the container is not promoted and the checker refuses.\n\nFIX DIRECTION: give the container span path the MANGLE the scalar path has (`%ENV__file__N`: rename the declarator with `_rename_decl_within`, the declaring segment's later uses bare, the later segments' qualified), so an exception-named or #470-named container spanning a section promotes.  Rare (a file-level `my %ENV` across a `package` statement).  Name-resolution change: the sweep is the gate.",
+   "id" : "4661",
+   "status" : "pending",
+   "subject" : "A FILE-level `my` of an EXCEPTION-partition CONTAINER (`my %ENV`, `my @ARGV`, `my %SIG` ...) used in a later `package` section is REFUSED \"spans a package boundary\" since s536e -- before it the later section silently read the REAL %ENV"
+}

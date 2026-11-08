@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536g (Opus 5.5, 2026-11-08) while probing #4222 (`-Later * 2`).  PRE-EXISTING (ba7863a3).\n\n    sub L { \"L(\" . scalar(@_) . \")\" }\n    my @r = (L * 2, 7);\n    print \"@r\\n\";\n      perl 5.40.3:  L(2)          -- L(*2, 7): the `*` after a list operator is a glob sigil (toke.c: XTERM after a LISTOP)\n      PCL:          0 7           -- L() * 2, 7\n\nThe parse decision is PExpr's handle_subcalls: a bareword known as a sub without prototype is a list operator, and what follows it is a TERM position, where `*` is the glob sigil (as `%` is a hash, `&` a code sigil, `<` a readline).  PCL treats a following `*` as the binary multiplication (the binary-operator branch: \"Function followed by binary-only operator - treat as zero params\").  Probe the inverse before changing it: `time * 2` (a builtin TERM: multiplication), `K * 2` with `sub K () {..}` (a constant: multiplication), `L * 2` with `sub L ($) {..}` (named unary: perl?), `print L * 2` vs `print L *2`.  Rare in real code (a list operator followed by a spaced `*`), so low priority; it is the operator-vs-term question #3344's family settles per token, and the fix belongs in the ONE place handle_subcalls asks \"does an operator follow\".\n",
+   "id" : "4702",
+   "status" : "pending",
+   "subject" : "After a known sub with NO prototype (a list operator), `*` starts a GLOB argument in perl -- `L * 2, 7` is L(*2, 7) -- and PCL multiplies: `(L * 2, 7)` is (\"L(0)\"*2, 7) (silent wrong)"
+}
