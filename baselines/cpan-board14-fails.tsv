@@ -200,6 +200,10 @@
 #   #135 Role-Tiny overload.t 12 rows out (14 ok / 1 not ok), row 4 -> #1915; stub.t 2 4 + role-tiny-with.t 5 -> #4561; concrete-methods
 #   *FILE* -> #4562; #4104 YAML-PP 37 54 *PLAN* -> #1611; #4181 Text-CSV 80_diag 229 out (warn returns PL_sv_yes); #4183 76_magic 12 out
 #   (#1814 a tied scalar copied into an array), 70_rt 464 -> #1389 (emulated); #4182 JSON-PP 119 rows 6 15 17 -> #1494.
+# EDITED (s536, the reviewing session, 2026-11-08; the ROUND BOARD on MAIN-READY-74 fcfcb5d3 + SERIAL one-file re-runs ~/pcl-agent-scratch/s536/round/rerun/ + bisects round/bis/):
+#   YAML-Tiny 11_read_string *PLAN* + row 4 "No tests run" OUT (#3834 fixed: the file runs since -66/-67) -> its row 4 "invalid UTF-8" IN under NEW #4624 (a :utf8 read of
+#   invalid UTF-8 answers undef); Data-Dumper dumper.t 112 IN under NS:ns-b (fails back to -63; `$@` holds the B::Deparse refusal); TT leak.t 7 11 IN under NS:ns-destroy-gc
+#   (scope-exit DESTROY; the file runs all 11 rows since s532c, it ran 3 at -72).  NOT edited: Capture-Tiny 15 22 23 24 *PLAN* = #4623 (a REGRESSION, s532c 40b09ef5 -- to be fixed, not blessed).
 Class-Inspector-1.36-0	class_inspector__devel_hide.t	0	*FILE*	1..0 # SKIP test requires Devel::Hide (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "test requires Devel::Hide")
 Class-Method-Modifiers-2.15-0	060-caller.t	2	parent with modifiers sees 'main' as caller # TODO caller magic not implemented yet			PERL-FAILS (perl: not ok # TODO "caller magic not implemented yet", the oracle s531b) -- NS:caller() fidelity [DEFERRED, USER s488] + #233 (a modifier must not appear as the caller)
 Class-Method-Modifiers-2.15-0	140-lvalue.t	1	around on an lvalue attribute is maintained	undef	'1'	NS:ns-lvalue-subs -- #930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
@@ -1690,8 +1694,6 @@ HTTP-Message-7.01-0	message.t	101		undef	'foo'	#3828 (MIME::QuotedPrint's decode
 HTTP-Message-7.01-0	response.t	66		'=?US-ASCII?Q?foo.txt?='	'foo.txt'	#3828 (MIME::QuotedPrint's decode_qp is missing from the MIME::Base64 shim: a Q-encoded Content-Disposition filename stays encoded -- reached once #3824 let the file run to its end, s529a)
 YAML-Tiny-1.74	10_read.t	4	latin1.yml			#221 (no warnings model: YAML::Tiny reads under `use warnings FATAL => 'utf8'` and perl's "does not map to Unicode" never fires -- s526w1)
 YAML-Tiny-1.74	10_read.t	5	utf_16_le_bom.yml			#221 (no warnings model: YAML::Tiny reads under `use warnings FATAL => 'utf8'` and perl's "does not map to Unicode" never fires -- s526w1)
-YAML-Tiny-1.74	11_read_string.t	0	*PLAN*	ran 4 of no plan, rc 2	a plan	#3834 (2-arg open does not strip the leading space of TestUtils' `open(FILE, " $file")`: the subtest dies at open -- s526w1)
-YAML-Tiny-1.74	11_read_string.t	4	No tests run for subtest "invalid UTF-8"			#3834 (2-arg open does not strip the leading space of TestUtils' `open(FILE, " $file")`: the subtest dies at open -- s526w1)
 YAML-Tiny-1.74	86_fail.t	1	Comments in literal scalars # TODO Failing tests for things YAML::Tiny does wrong			PERL-FAILS (the dist marks it "Failing tests for things YAML::Tiny does wrong"; perl: not ok # TODO)
 Data-Dumper-2.183-0	bugs.t	12	GVs with UTF8 names (or not, depending on perl version)	'GLOB(0x60)'	'GLOB(0x5e)'	NS:ns-use-bytes -- #3837 + NS:use bytes (the dumped \*{"::\400"} is octal and its "::" name is not main::, so eval gives another glob -- s526w1)
 Data-Dumper-2.183-0	bugs.t	13	GVs with UTF8 and nulls	'GLOB(0x63)'	'GLOB(0x61)'	NS:ns-use-bytes -- #3837 + NS:use bytes (the dumped \*{"::\400"} is octal and its "::" name is not main::, so eval gives another glob -- s526w1)
@@ -1980,3 +1982,7 @@ Template-Toolkit-3.106-0	zz-pod-kwalitee.t	0	*FILE*	1..0 # SKIP Author tests not
 Template-Toolkit-3.106-0	zz-process-leak.t	0	*FILE*	1..0 # SKIP Developer test (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Developer test")
 Template-Toolkit-3.106-0	zz-stash-xs-leak.t	0	*FILE*	1..0 # SKIP Internal test for developer, add the --dev flag to run (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Internal test for developer, add the --dev flag to run")
 Template-Toolkit-3.106-0	zz-url2.t	0	*FILE*	1..0 # SKIP We can't agree on the right joint for the URL plugin (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "We can't agree on the right joint for the URL plugin")
+YAML-Tiny-1.74	11_read_string.t	4	invalid UTF-8			#4624 (a :utf8 read of Latin-1 bytes answers UNDEF where perl's lax layer returns a utf8-flagged string utf8::valid rejects, so read_string never sees invalid UTF-8 -- s536 round)
+Data-Dumper-2.183-0	dumper.t	112	Deparse 1: Indent 2; Dump() set $@	'B::Deparse is not supported by PCL (it decompiles perl's op tree, which PCL does not have; see docs/not-supported.md "B")	''	NS:ns-b (Deparse => 1 asks B::Deparse for a code ref; PCL refuses and the refusal stays in $@ -- fails back to MAIN-READY-63, s536 round)
+Template-Toolkit-3.106-0	leak.t	7	template text 2 did not match expected			NS:ns-destroy-gc + #2370 (PARKED, USER s495) -- "first destroyed" needs DESTROY at scope exit; the file runs all 11 rows since s532c (3 at -72), s536 round
+Template-Toolkit-3.106-0	leak.t	11	template text 4 did not match expected			NS:ns-destroy-gc + #2370 (PARKED, USER s495) -- "list destroyed" needs DESTROY at scope exit; the file runs all 11 rows since s532c (3 at -72), s536 round
