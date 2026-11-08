@@ -372,6 +372,18 @@ print ref $v;             # ARRAY
 print reftype $v;         # one FETCH
 ```
 
+**8. A COPY OF A TIED SCALAR INTO AN AGGREGATE IS ITS VALUE, FETCHED ONCE**
+(normative, s536a, tasks #1814 / #2601).  `[$t]`, `@a = ($t)`, `push` /
+`unshift` / `splice` store what ONE FETCH returned; the element is not tied and
+does not alias `$t` (the array construction arm `%p-array-store-scalar` reads a
+tie proxy as the list assignment does, `(unbox (%p-tie-fetch ...))`).
+
+```perl
+tie my $t, 'T'; $t = "one";
+my @a = ($t); $t = "two";    # one FETCH; $a[0] is "one", not tied
+$a[0] = "Z";                 # no STORE into $t
+```
+
 ### 2.3 Arrays
 
 A Perl array is an **adjustable vector with a fill pointer** (growable,
@@ -1971,6 +1983,9 @@ never is.
   `exists`, `isa`, `xor`, `!~`, `builtin::true`/`false`/`is_bool`/
   `is_weak`, `re::is_regexp`, scalar `stat`.  Example: `is_bool(1 == 1)`
   is true, `is_bool((1 == 1) + 0)` false.  `p-<=>`/`p-cmp` return -1/0/1.
+  **`warn` returns `+p-yes+`** whatever happens to its text -- a handler, an
+  IGNORE, a closed STDERR (pp_warn returns PL_sv_yes; normative, s536a, task
+  #4181) -- so `sub f { ... warn "x\n" }` returns 1.
 - **Logical operators** `p-&&`, `p-||`, `p-//` return the deciding
   *operand's value* (Perl's `$a || $default` idiom): `p-&&` returns the
   first operand if false, else the second; `p-||` symmetrically; `p-//`
@@ -1991,6 +2006,18 @@ never is.
   3. the class's **`nomethod`** handler, called with a **fourth**
      argument naming the operator (`handler($self,$other,$swapped,$op)`);
   4. the ordinary non-overloaded semantics.
+
+  **The overload table is the STASH, in both directions** (normative, s518e
+  #3396 + s536a #135): a glob write under an overload name (`*{"P::(OP"} =
+  CODE`, `${"P::()"}` the fallback, `\&overload::nil` + the method NAME in
+  `${"P::(OP"}`, in either order, or a whole-glob copy of such an entry)
+  registers the handler, and `use overload` / `overload::import` WRITE those
+  entries as overload.pm does (`P::((`, `P::(OP`, `P::()` + `$P::()`), so
+  `keys %P::` lists them and code that copies a class's `(`-entries (Role::Tiny
+  composing a role) copies its overloading.  Dispatch reads
+  `*p-overload-table*`; the entries are the stash fact beside it.  Example:
+  `package R; use overload '0+' => 'as_num';` makes `\&{"R::(0+"} ==
+  \&overload::nil` and `${"R::(0+"} eq "as_num"`.
 
   The **third** argument is three-valued and every state is observable:
   `""` (defined, false) for an ordinary call, `1` when the operands were
@@ -3875,6 +3902,11 @@ same one `local` asks BEFORE it clears, so the two can never disagree:
 
     sub f { local *_ = \my $x;  scalar(@_) }   f(1,2)   # 2 — @_ untouched
     { local *Pkg::m = sub { 42 };  Pkg::m() }            # $Pkg::m, @Pkg::m intact
+
+**The RHS is read ONE way, whatever spells it** (normative, s536a, #135;
+`%p-glob-rhs-inner`): a variable holding `\$s` names the referent `$s`, as the
+bare `\$s` does (`my $r = \$s; *y = $r` ALIASES `$y` to `$s`), and a reference
+to a scalar HOLDING a glob is that GLOB (`$g = *x; *y = \$g` is `*y = \*x`).
 
 This is what makes core `File::Find`'s `find()` work at all (`_find_opt`
 opens with `local *_ = \my $a;` and then loops over `@_`) and what makes the

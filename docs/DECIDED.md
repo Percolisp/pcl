@@ -22,6 +22,13 @@ not-supported.md → only then probe.*
 - **The binder runs in PRODUCTION since MAIN-READY-67** (s533b): built once per document in `Parser2::parse`; a build failure dies the transpile even where no switched region asks -- measured 0 build errors over the four populations + sweep + gate, ACCEPTED at review.
 - **String eval with no perl subprocess = `docs/eval-in-cl-plan.md` (#4480), a PLAN**: PCL transpiles its own compiler + its vendored PPI into the saved core at install time; bar = byte-identical emission vs the perl-hosted compiler over the four populations + a stage-2 fixed point; prerequisite = hash-order determinism (#3961); XS: only `Params::Util` needs a new (tiny) shim, everything else XS in the 177-file closure is shimmed, has its own pure-Perl half, or is never loaded.  Open USER questions in its §7 (Moo out of the compiler; ~3x slower uncached evals; timing).
 
+## s536a (2026-11-08, Opus) -- the handed-back board hunts: #135 (Role-Tiny overloads) #4181 (warn's value) #4183 (#1814 a tied copy) fixed; #4104 -> #1611, #4182 -> #1494, the rest re-keyed; runtime-only, no generation
+- **`use overload` WRITES THE STASH** (#135): p-register-overloads also writes overload.pm's entries (`P::((`, `P::(OP`, `P::()` + `$P::()`, a method-name handler as `\&overload::nil` + the name in `${"P::(OP"}`); a glob copy of such an entry registers; dispatch still reads `*p-overload-table*` -- no cache (compatible with #4524) -- ir-spec §3.4 overload protocol.
+- **ONE reading of a glob-assignment RHS** (`%p-glob-rhs-inner`, #135): a variable holding `\$s` names `$s` (`my $r = \$s; *y = $r` aliases -- it made `$y` a REF, a silent wrong), a ref to a glob-holding scalar is the GLOB -- ir-spec §7.2.
+- **`warn` returns PL_sv_yes** whatever happens to its text (#4181; p-warn answered NIL, so a sub ending in a warn returned undef) -- ir-spec §3.4.
+- **A tied scalar copied into an aggregate is its FETCHed value, once** (#1814 #2601; `%p-array-store-scalar` reads the proxy as `%p-assign-snapshot` does; unshift / splice PEEK) -- ir-spec §2.2b rule 8.
+- **Re-keyed by probe**: YAML-PP 37 / 54 *PLAN* -> #1611 (Test::Deep's RUN-TIME-installed `hash` lowers to the runtime's p-hash); JSON-PP 119 rows 6 15 17 -> #1494 (`\N{BULLET}` unresolved; row 6 is NOT #1389); Text-CSV 70_rt 464 -> #1389 (emulated); Role-Tiny overload 4 -> #1915.  Filed #4561 (perl stubs vs the stash view) #4562 (`use constant` in a block's package) #4563 (HARNESS is_deeply of a tied scalar).
+
 ## s532d (2026-11-08, Opus) -- the measured items: #4061 (first bless on the referent) #4165 (+ #4321 utime) #3830 #3961 #4041 (+ #3180); generation v2-11900
 - **A FIRST bless of an ARRAY / CODE / qr referent is recorded on the referent too** (#4061, as RULED s532): every bless writes `*p-rebless-stash*` + sets `*p-aggregate-blessed*`; the UNBLESSED path (`%p-first-bless-class`, after every slot read is NIL) asks it and caches a hit into the box; the ruling's four bench rows within noise -> kept; INFO rows: an array-object constructor 1.9x, ref() of an unblessed [] in a program that blessed one 2.3x (SBCL weak tables are synchronized: ~220 ns per write) -> FLAGGED, ir-spec 2.6.
 - **The module cache's validity test compares the source's SIZE beside its mtime** (#4165, RULED s532): a `size` line in the manifest, one stat; no line = invalid; a same-size same-mtime rewrite is `ns-cache-same-size-rewrite`; warm start-up unmoved -> ir-spec 9.2b.
@@ -30,6 +37,7 @@ not-supported.md → only then probe.*
 - **A cached prototype record reads back as the walked one** (#3961): the nondeterminism was CACHE STATE, not hash order -- JSON::PP decoded the walk's core booleans as objects and the same-prototype re-registration rule compared them unequal; `_json` sets `boolean_values(!!0, !!1)`.
 - **`use M ()` imports nothing into the importing scope** (#3961): `_merge_module_prototypes(none => 1)` from `Pl::Parser::use_imports_nothing` (the literal empty list only; `use M qw()` still imports); the stash facts stay; `require NAME`'s flat merge is #4324.
 - **A served pl2cl request carries the caller's -I list** (#4041, closes #3180): the client appends @INC to the request, the per-request child splices the caller's -I entries in perl's order and re-derives the program @INC; the two `PCL_XSERVER=` workarounds in Pl/t are deleted.
+
 
 ## s532c (2026-11-05 .. 11-08, Opus; resumed in s534 + s535 + s536) -- CPAN board hunts: #4301 #4303 #4304 #4308 #4502 (new) + #1486 #1423 (read half) fixed; #4087 #3835 #4221 reduced; #4305 #4306 #4307 #4309 filed; #4104 #4181 #4182 #4183 #135 handed back; generation v2-11800 (reserved; main v2-11700)
 - `defined *{EXPR}` / `defined *$x` = does the glob EXIST; `(p-glob-defined X)` creates nothing (not the glob, not the package); a name is defined by p-stash's per-symbol rule or as one of perl's from-the-outset main:: names -> ir-spec (after `p-coderef-defined-p`), #4301, guard `Pl/t/glob-defined-01.t`.
@@ -44,6 +52,7 @@ not-supported.md → only then probe.*
 - a pipe open whose program cannot be exec'd answers the child pid (perl: undef, ENOENT through my_popen's errno pipe); the child `_exit`s, so the #4502 belt holds -> #4306.
 - a pipe `close` interrupted by a signal whose handler RETURNS does not reap its child in PCL (perl restarts the waitpid on EINTR); io/pipe.t row 25 now fails honestly under it -- its old pass came from #4502's runaway child copy -> #4307, `baselines/perl-suite-fails.tsv` EDITED (s532c).
 - TT unicode.t 1-20 = #1389 (real perl with Encode::is_utf8 forced to 1 answers the same 20 values); TT parser.t 35 = #4302 (PPI rewrites CR LF in the source); TT zz-error-exception-gh-373.t 4 = NS:ns-b (B::Deparse inside a `""` overload) -> `baselines/cpan-board14-fails.tsv` EDITED (s532c).
+
 
 ## s534a (2026-11-08, Opus) -- method lookup EVALUATED (the USER's ask); recommendation awaiting the USER
 
