@@ -364,7 +364,13 @@ print greeter("World"), "-", greeter("Perl"), "\n";
 
 # ============ BUILT-IN FUNCTIONS ============
 
+# `getcwd` is Cwd's, not a perl builtin: run_perl's prelude imports Cwd, so
+# the PCL side's program says `use Cwd;` too -- before #1611 (s536c) a plain
+# getcwd() was hijacked to the runtime's operator and the import was not
+# needed; now a non-keyword call is a SUB call, as in perl (`perl -e
+# 'getcwd()'` dies "Undefined subroutine &main::getcwd").
 test_transpile("builtin: getcwd returns string", '
+use Cwd;
 my $cwd = getcwd();
 if (length($cwd) > 0) { print "ok\n"; } else { print "fail\n"; }
 ');
@@ -394,6 +400,7 @@ if (mkdir($dir)) {
 ');
 
 test_transpile("builtin: chdir and getcwd", '
+use Cwd;
 my $orig = getcwd();
 chdir("/tmp");
 my $tmp = getcwd();

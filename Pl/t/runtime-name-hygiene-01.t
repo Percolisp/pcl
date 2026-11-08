@@ -234,7 +234,7 @@ P
 # known-harmless detector line on stderr (docs/detector-measurement-s513d.md).
 SKIP: {
     skip 'Test::Fatal / Test::Deep not installed', 1
-        unless eval { require Test::Fatal; require Test::Deep; 1 };
+        unless eval { require Test::Fatal; 1 } && eval { require Test::Deep; 1 };
     my $src = write_pl(<<'P');
 use strict; use warnings;
 use Test::Fatal;
