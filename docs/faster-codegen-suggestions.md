@@ -26,7 +26,7 @@ Tier 1 is half done:
 |---|---|---|
 | **S1 + N1** — string buffer, raw numerics | #62 | **done.**  `str-buffer` killed the O(n²) append class (`strcat` 756× → 5.7×); `raw-numeric`/`raw-slot` put the counting loops and `collatz` *ahead of perl*.  See the re-measured [§0.1 table](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut). |
 | **verdict COVERAGE** — where N1's machinery fires | #758–#761 | **done (s456af).**  Not new shapes: four vetoes narrowed, so real code reaches the raw machinery.  **Both losing loop rows now beat perl** — `intloop+=` 2.02× → **0.28×**, `intloop=` 4.83× → **0.29×**, `arrhash` 2.17× → **1.45×**.  [§13.1](#131-all-four-shipped-s456af-round-13--and-what-they-cost) and the [§0.2b table](#02b-after-the-verdict-coverage-work-s456af-758761). |
-| **M1** — method dispatch | #73 | **done, cache-free.**  The per-call-site inline cache was *rejected* (USER, s444): profiling showed the ~15× was mostly `finalize-inheritance` running on every call, not the lookup.  The own-package fast path plus the stash/`pl-NAME` memos took a monomorphic loop to **2.62× of perl** and an inherited one to **4.74×** (`ovlsub` 3.44×).  Two further steps measured 7 % and 0 % and were closed unshipped — [§7](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) has the table.  One lever remains: a per-CLASS cache (#582), blocked on `@ISA`-write invalidation. |
+| **M1** — method dispatch | #73 | **done, cache-free.**  The per-call-site inline cache was *rejected* (USER, s444): profiling showed the ~15× was mostly `finalize-inheritance` running on every call, not the lookup.  The own-package fast path plus the stash/`pl-NAME` memos took a monomorphic loop to **2.62× of perl** and an inherited one to **4.74×** (`ovlsub` 3.44×).  Two further steps measured 7 % and 0 % and were closed unshipped — [§7](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) has the table.  **Own-class vs INHERITED, measured s534a (bench rows, best of 5, base `95a1de03`):** `methret` (own class, #582's own-class cache) **1.23×** of perl; `methinh` (one `@ISA` level) **3.98×**, `methinh3` (three levels) **7.85×**, `methpoly` (one site, four classes) **3.74×**, `ovlbool` (inherited `bool` overload) **6.53×** -- "par with perl" is true of the own-class shape only.  The remaining lever is the inherited half of #582; its invalidation blocker is AVOIDABLE (validate the cached chain on every hit instead) -- evaluated with prototypes in `docs/method-lookup-eval-s534.md`. |
 | **P1** — `sprintf` / `pack` | #74 | **open**, and now the largest single loss on the board. |
 
 ## How the numbers were taken
@@ -1817,6 +1817,19 @@ code and the highest-value OO change.
 > **The one remaining lever on inherited dispatch is a per-CLASS method
 > cache — task #582, whose blocker is invalidation on `@ISA` writes, not the
 > cache.**
+>
+> **Own-class vs inherited, measured s534a (2026-11-08; `tools/bench-exec.pl`,
+> best of 5, base `95a1de03`, load 2.0-2.4, control column +-7.6 %):** the
+> own-class half of #582 (s473s) put `methret` at **1.23×** of perl, and that
+> is the only method shape the table had.  The four rows s534a added say what
+> an INHERITED call costs: `methinh` **3.98×**, `methinh3` **7.85×** (three
+> `@ISA` levels -- PPI's depth), `methpoly` **3.74×** (one call site, four
+> classes -- PPI's shape), `ovlbool` **6.53×** (a `bool` overload two levels
+> up).  An inherited call re-walks `@ISA` by name every time: `find-symbol`
+> 32 %, an UNGUARDED weak-table lookup in `%p-isa-symbol` 19 % (#4501's lock),
+> the equal tables 20 %, the walk's bookkeeping 13 % of `methinh3`.  The
+> `@ISA`-write blocker turned out to be avoidable -- validate the cached chain
+> on every hit rather than invalidate it -- see `docs/method-lookup-eval-s534.md`.
 
 ### Suggestions
 - **M1. Polymorphic inline cache.** At each `$o->m` call site, cache
