@@ -2390,6 +2390,59 @@ sub _is_elem_arg {
 # left side as an LVALUE, so a write through `$_[0]` in the callee lands in
 # the element (#4622; the same fact #4303 routes for `=~ s///` and `OP=`).
 # A scalar-variable assignment already answers its box.  Anything else: $else.
+# `scalar(E)` of a SCALAR operand -- a `$` variable, an element (named or
+# through a reference), a nested `scalar(...)` or a parenthesised one of them
+# -- is E ITSELF: perl's scalar() imposes scalar context and returns the
+# operand's SV, so @_ aliases the variable (`f(scalar($x))` with
+# `$_[0] .= "Z"` writes $x, #4323).  Answers the operand's node id, or KID_ID
+# unchanged.  Asked at the ALIASING slots only -- a user-sub, method or coderef
+# argument -- so the argument then takes exactly the path the bare operand
+# takes there (an element's lazy argbox included); a value consumer keeps its
+# `p-scalar' read.
+sub _scalar_noop_operand {
+  my ($self, $kid_id) = @_;
+  my $xo = $self->expr_o;
+  my $id = $kid_id;
+  while (1) {
+    my $n = $xo->get_a_node($id);
+    return $kid_id unless $xo->is_internal_node_type($n)
+                       && ($n->{type} // '') eq 'funcall';
+    my $k = $xo->get_node_children($id) || [];
+    return $kid_id unless @$k == 2;
+    my $w = $xo->get_a_node($k->[0]);
+    return $kid_id unless Scalar::Util::blessed($w) && $w->isa('PPI::Token::Word')
+                       && $w->content =~ /^(?:CORE::)?scalar$/;
+    my $op = $k->[1];
+    # a parenthesised operand: `scalar(($v))`
+    while (1) {
+      my $on = $xo->get_a_node($op);
+      last unless $xo->is_internal_node_type($on) && ($on->{type} // '') eq 'tree_val';
+      my $ok = $xo->get_node_children($op) || [];
+      last unless @$ok == 1;
+      $op = $ok->[0];
+    }
+    return $op if $self->_scalar_lvalue_node_p($op);
+    $id = $op;        # `scalar(scalar($x))`
+  }
+}
+
+# A SCALAR LVALUE by its shape: a `$` variable, an element (named or through
+# a reference), a scalar deref `$$r` / `${$r}`.  The `$`-prototype slot asks
+# it too (#2860: such an argument is already a scalar and is never wrapped in
+# p-scalar, which passed a COPY -- `pp($$r)` missed $z, #4323).
+sub _scalar_lvalue_node_p {
+  my ($self, $id) = @_;
+  my $xo = $self->expr_o;
+  my $on = $xo->get_a_node($id);
+  return 1
+    if (ref($on) eq 'PPI::Token::Symbol' || ref($on) eq 'PPI::Token::Magic')
+       && $on->content =~ /^\$/ && !@{ $xo->get_node_children($id) || [] };
+  return 1 if $self->_is_elem_lvalue_target($id);
+  return 0 unless $xo->is_internal_node_type($on) && ($on->{type} // '') eq 'prefix_op';
+  my $c = $xo->get_a_node(($xo->get_node_children($id) || [])->[0]);
+  return (ref($c) eq 'PPI::Token::Cast' && $c->content eq '$') ? 1 : 0;
+}
+
 sub _user_arg_lvalue_context {
   my ($self, $kid_id, $else) = @_;
   return 'argbox' if $self->_is_elem_arg($kid_id);
@@ -3293,11 +3346,15 @@ sub gen_funcall_form {
   my @args;
   for my $i (1 .. $#$kids) {
     my $param_idx = $i - 1;
+    # `scalar($x)` / `scalar($h{k})` in a USER-SUB argument slot is the operand
+    # itself, aliased by @_ (#4323, _scalar_noop_operand).
+    my $kid = (!$needs_lvalue && index($cl_func, q(pl-)) >= 0)
+            ? $self->_scalar_noop_operand($kids->[$i]) : $kids->[$i];
     my $impose_scalar = ($may_impose_scalar
                          && $param_idx < @ref_params
                          && defined $ref_params[$param_idx]
                          && $ref_params[$param_idx] eq '$');
-    $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
+    $self->expr_o->set_node_context($kid, SCALAR_CTX) if $impose_scalar;
 
     # open(FH, DUP-MODE, BAREWORD): the THIRD argument of a DUP open is a
     # filehandle DESIGNATOR, not a filename, so a bareword there is a handle
@@ -3320,15 +3377,15 @@ sub gen_funcall_form {
     # (#4622).  Decided ONCE: the imposed-scalar wrap below asks the same
     # answer (#2860).
     my $arg_lv = (!$needs_lvalue && index($cl_func, 'pl-') >= 0)
-               ? $self->_user_arg_lvalue_context($kids->[$i], undef) : undef;
+               ? $self->_user_arg_lvalue_context($kid, undef) : undef;
     my $elem_argbox = defined $arg_lv && $arg_lv eq 'argbox';
     if    ($needs_lvalue)   { $self->lvalue_context(1) }
     elsif (defined $arg_lv) { $self->lvalue_context($arg_lv) }
-    my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kids->[$i]);
+    my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kid);
     $self->lvalue_context($saved_lvalue);
     # A SLICE argument of a USER SUB vivifies its missing slots (task #1010) —
     # the aliasing half of the question `_is_elem_arg` answers for elements.
-    $arg = $self->_alias_slice_arg($kids->[$i], $arg)
+    $arg = $self->_alias_slice_arg($kid, $arg)
       if index($cl_func, 'pl-') >= 0;
 
     # Write slot 3 of the #873 family, and the one perl makes CONDITIONAL:
@@ -3344,7 +3401,7 @@ sub gen_funcall_form {
     }
 
     if ($impose_scalar) {
-      my $an = $self->expr_o->get_a_node($kids->[$i]);
+      my $an = $self->expr_o->get_a_node($kid);
       my $r = ref($an);
       # A `$` slot imposes scalar CONTEXT and nothing else: an element or a
       # scalar assignment is already a scalar LVALUE, and wrapping it in
@@ -3354,11 +3411,13 @@ sub gen_funcall_form {
       # does for an unprototyped call.
       my $already_scalar =
            $elem_argbox
-        || (index($cl_func, 'pl-') >= 0 && $self->_is_scalar_assign_arg($kids->[$i]))
+        || (index($cl_func, 'pl-') >= 0 && $self->_is_scalar_assign_arg($kid))
         || $r eq 'PPI::Token::Number'
         || $r =~ /^PPI::Token::Quote\b/
         || ($r eq 'PPI::Token::Symbol' && $an->content() =~ /^\$/)
         || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/)
+        # a deref element / `$$r` is one as well (#4323)
+        || (index($cl_func, 'pl-') >= 0 && $self->_scalar_lvalue_node_p($kid))
         # a substr/vec write-through cell (#3141) is a scalar LVALUE too
         || (index($cl_func, 'pl-') >= 0 && _form_head($arg) =~ /-lvalue-cell\z/);
       $arg = ['p-scalar', $arg] unless $already_scalar;
@@ -3373,12 +3432,12 @@ sub gen_funcall_form {
     if ($param_idx < @ref_params) {
       my $param_type = $ref_params[$param_idx];
       if (($param_type // '') eq '\\&') {
-        my $amp_ref = $self->_backslash_amp_ref_form($kids->[$i]);
+        my $amp_ref = $self->_backslash_amp_ref_form($kid);
         $arg = $amp_ref if defined $amp_ref;
       }
       elsif ($param_type =~ /^\\([@%\$])$/) {
         my $expected_sigil = $1;
-        my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
+        my $arg_node = $self->expr_o->get_a_node($kid);
         if (ref($arg_node) eq 'PPI::Token::Symbol') {
           my $arg_sigil = substr($arg_node->content(), 0, 1);
           if ($arg_sigil eq $expected_sigil) {
@@ -3870,7 +3929,8 @@ sub _copy_back_args {
   for my $k (0 .. $#$kid_ids) {
     my $pos = $first + $k;
     last if $pos > $#$call;
-    my $an = $self->expr_o->get_a_node($kid_ids->[$k]);
+    # `scalar($x)` is passed as $x itself (#4323), so it is copied back too
+    my $an = $self->expr_o->get_a_node($self->_scalar_noop_operand($kid_ids->[$k]));
     next unless ref($an) eq 'PPI::Token::Symbol';
     my $name = $an->content;
     next unless $name =~ /\A\$\w+\z/;
@@ -4025,10 +4085,11 @@ sub gen_methodcall_form {
   # element assignment, #4622): _user_arg_lvalue_context.
   my $saved_lvalue_mc = $self->lvalue_context;
   my @args = map {
+    my $k = $self->_scalar_noop_operand($kids->[$_]);   # #4323
     $self->lvalue_context(
-      $self->_user_arg_lvalue_context($kids->[$_], $saved_lvalue_mc));
+      $self->_user_arg_lvalue_context($k, $saved_lvalue_mc));
     # a SLICE argument vivifies instead — task #1010, the other half
-    $self->_alias_slice_arg($kids->[$_], $self->gen_node_form($kids->[$_]));
+    $self->_alias_slice_arg($k, $self->gen_node_form($k));
   } 2 .. $#$kids;
   $self->lvalue_context($saved_lvalue_mc);
 
@@ -4077,10 +4138,11 @@ sub gen_ref_funcall_form {
   # tail in gen_funcall_form: _user_arg_lvalue_context.
   my $saved_lvalue = $self->lvalue_context;
   my @args = map {
+    my $k = $self->_scalar_noop_operand($kids->[$_]);   # #4323
     $self->lvalue_context(
-      $self->_user_arg_lvalue_context($kids->[$_], $saved_lvalue));
+      $self->_user_arg_lvalue_context($k, $saved_lvalue));
     # a SLICE argument vivifies instead — task #1010, the other half
-    $self->_alias_slice_arg($kids->[$_], $self->gen_node_form($kids->[$_]));
+    $self->_alias_slice_arg($k, $self->gen_node_form($k));
   } 1 .. $#$kids;
   $self->lvalue_context($saved_lvalue);
   my $call = ['p-funcall-ref', $ref, @args];

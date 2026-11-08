@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub transpile {
     my ($code) = @_;
@@ -172,3 +172,20 @@ ok(!exists $h{zz}, "and it was not created");
 $tap =~ s/^warning: redefining .*\n//gm;
 is($tap, "1..3\nok 1 - missing element is undef\nok 2 - missing hash element is undef\nok 3 - and it was not created\n",
    'a $-prototyped TAP `is` reads a missing element (its defelem argbox) as undef');
+
+# #4323 (s536f): `scalar(E)` of a SCALAR operand is E itself -- perl's scalar()
+# only imposes scalar context and returns the operand's SV -- so in a user-sub,
+# method or coderef argument slot @_ aliases the variable / the element (its
+# lazy argbox: a written missing key is created, a read one is not); a `$`
+# slot passes a scalar deref `$$r` as itself too.  Rows 6 are value controls.
+# Expected text probed under perl 5.40.3.  FAILS on c8886b61.
+is(run_cl(q{sub app { $_[0] .= "Z" } sub pp ($) { $_[0] .= "P" } sub p2 ($$) { $_[1] .= "2" }
+my $x = "a"; app(scalar($x)); my %h = (k => "b"); app(scalar($h{k})); my @a = ("c"); app(scalar($a[0])); our $g = "d"; app(scalar($g)); print "1 $x $h{k} $a[0] $g\n";
+my %m; app(scalar($m{zz})); my @e; app(scalar($e[3])); sub rd { my $v = $_[0]; 1 } rd(scalar($m{yy}));
+print "2 ", (exists $m{zz} ? "[$m{zz}]" : "missing"), " ", scalar(@e), " ", (exists $m{yy} ? "yy" : "no-yy"), "\n";
+my $z = "z"; my $r = \$z; app(scalar($$r)); pp($$r); pp(${$r}); my $v = "v"; app(scalar(($v))); print "3 $z $v\n";
+my $w = "w"; my $o = bless {}, "O"; sub O::m { $_[1] .= "M" } $o->m(scalar($w)); my $s = "s"; my $cr = \&app; $cr->(scalar($s)); &$cr(scalar $s); print "4 $w $s\n";
+my ($p, $q) = ("p", "q"); sub two { $_[0] .= 1; $_[1] .= 2 } two(scalar($p), scalar $q); pp(scalar($p)); p2(1, scalar($q)); print "5 $p $q\n";
+my @b = (1, 2); app(scalar(@b)); my $t = "t"; app(scalar($t . "x")); print "6 @b $t\n";
+}), "1 aZ bZ cZ dZ\n2 [Z] 4 no-yy\n3 zZPP vZ\n4 wM sZZ\n5 p1P q22\n6 1 2 t\n",
+   'scalar(SCALAR) in an argument slot is the scalar itself: @_ aliases it (#4323)');
