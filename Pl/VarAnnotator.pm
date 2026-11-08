@@ -1526,6 +1526,14 @@ sub _ev_foreach_alias_list {
       _ev($ctx, $slot[0]->content, 'foreach-alias-list')
         if @slot == 1 && $slot[0]->isa('PPI::Token::Symbol')
         && $slot[0]->content =~ /^\$\w+$/;
+      # A LIST SLICE `(LIST)[I]` aliases the list's own elements (#4682), and
+      # so does a nested paren group (a list is flat), so their slots are
+      # aliasing slots too -- the same veto, one level in.
+      _ev_foreach_alias_list($ctx, [$slot[0]])
+        if @slot && $slot[0]->isa('PPI::Structure::List')
+        && (@slot == 1
+            || (@slot == 2 && $slot[1]->isa('PPI::Structure::Subscript')
+                && $slot[1]->content =~ /^\[/));
       @slot = ();
       next;
     }

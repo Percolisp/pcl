@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 22;
 
 sub run_cl {
     my ($code) = @_;
@@ -247,3 +247,21 @@ test_perl_oracle("#4341 a list slice flattens nested lists, hashes and empty lis
         ((sort { $a <=> $b } 3, 1, 2), 9)[1, 3], " | ", (%hh, (@a))[2, 3], "\n";
       for (((1, 2), 3)[0, 1]) { print "$_\n" }
       my $x = ((1, 2), 3)[1]; my $hr = {q => 1}; my @i = (%$hr)[0]; print "$x @i\n";});
+# #4682 (s536i): a list slice in an ALIASING consumer (a foreach list, a map
+# list, a user sub's argument) is the selected elements themselves (perl's
+# pp_lslice hands on the list's own SVs): `for ((@a, $x)[3]) { $_ = 8 }` left
+# $x alone and `w((@a)[1])` with `$_[0] .= "w"` left @a; a read of `(@b)[8]`
+# in a foreach grew @b; `for ((\@b, $x)[0])` iterated @b's elements.
+test_perl_oracle("#4682 a list slice in an aliasing consumer aliases the list's elements",
+    q{my @a = (1,2,3); my %h = (k => 5); my $x = 7;
+      for ((@a)[0]) { $_ = 9 } print "1 @a\n";
+      for ((@a, $x)[3]) { $_ = 8 } print "2 $x\n";
+      for ((%h)[1]) { $_ = 6 } print "3 $h{k}\n";
+      for ((($x, 1), 2)[0]) { $_ = 4 } print "4 $x\n";
+      sub w { $_[0] .= "w" } w((@a)[1]); print "5 @a\n";
+      w(((@a), 1)[2]); print "6 @a\n";
+      my $p = "p"; for (($p, 1)[0], (@a)[0]) { $_ .= "F" } print "7 $p @a\n";
+      my $q = "q"; my $r = \(($q, 1)[0]); $$r .= "R"; print "8 $q\n";
+      my @b = (1,2,3); for ((@b)[8]) { } for ((\@b, $x)[0]) { print "9 ", ref($_), "\n" }
+      my ($y, $z) = (1, 2); for (($y), $z) { $_ .= "s" } print "10 $y $z ", scalar(@b), "\n";
+      sub two { return ($y, $z) } for ((two())[1]) { print "11 $_\n" }});

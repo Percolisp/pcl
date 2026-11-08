@@ -2507,8 +2507,25 @@ sub _alias_slice_arg {
   my $an = $self->expr_o->get_a_node($kid_id);
   return $form unless $self->expr_o->is_internal_node_type($an);
   my $t = $an->{type} // '';
-  return ($t eq 'slice_a_acc' || $t eq 'slice_h_acc')
+  # A LIST SLICE `(LIST)[I]` hands on the list's own elements (#4682): the
+  # same marker, whose one rewrite rule (%p-aliasing-slice-form) reads it as
+  # the selected CELLS -- `w((@a)[1])` with `$_[0] .= "w"` writes $a[1].
+  return ($t eq 'slice_a_acc' || $t eq 'slice_h_acc'
+          || $self->_is_list_slice_node($kid_id))
        ? ['p-viv-slice', $form] : $form;
+}
+
+# A LIST SLICE `(LIST)[I]` (`(@a)[1]`, `(f())[0]`, `($x, 1)[0]`): an array
+# subscript whose base is a parenthesised list -- the shape gen_array_ref_access_form
+# lowers over a list container and `_strict_elem_marker` never marks (#4682).
+sub _is_list_slice_node {
+  my ($self, $id) = @_;
+  my $xo = $self->expr_o;
+  my $an = $xo->get_a_node($id);
+  return 0 unless $xo->is_internal_node_type($an) && ($an->{type} // '') eq 'a_ref_acc';
+  my $b = $xo->get_a_node(($xo->get_node_children($id) || [])->[0]);
+  return ($xo->is_internal_node_type($b)
+          && ($b->{type} // '') =~ /^(?:tree_val|progn)$/) ? 1 : 0;
 }
 
 # The same question for an LVALUE TARGET (`$x =~ s///` / `=~ tr///`), where

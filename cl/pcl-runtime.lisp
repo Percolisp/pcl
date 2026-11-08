@@ -10156,6 +10156,16 @@ per element."
       (cons (if (eq (car form) 'p-aslice) '%p-aslice-copy '%p-hslice-copy)
             (cdr form))))
 
+  (defun %p-list-slice-base-form-p (c)
+    "True when C, the container form of a `p-aref-deref', is a LIST -- the
+     emitted base of a list slice `(LIST)[I]': a literal `(vector ...)', a
+     call's `(p-list-ctx ...)', or an ARRAY symbol (`(@a)[I]' unwraps to
+     @a).  A deref `$r->[I]' has a scalar or a value form there, never one
+     of these (#4682)."
+    (or (and (consp c) (member (car c) '(vector p-list-ctx)))
+        (and (symbolp c) (plusp (length (symbol-name c)))
+             (char= (char (symbol-name c) 0) #\@))))
+
   (defun %p-aliasing-slice-form (form)
     "FORM rewritten to the VIVIFYING slice read when it IS an rvalue slice, and
      NIL otherwise (task #1010) — the twin of %p-copying-slice-form above, and
@@ -10179,11 +10189,21 @@ per element."
      slot, taken by the box accessor the slice readers themselves call
      (p-aref-box / p-gethash-box, and the -deref twins), so `for ($_[0],
      \"lit\") { s/x/z/ }` writes the caller's argument as `for (@_[0], …)`
-     already did."
+     already did.
+
+     A LIST SLICE `(LIST)[I]' is the selected elements THEMSELVES (perl's
+     pp_lslice hands on the list's own SVs, #4682): `for ((@a, $x)[3])' and
+     `w((@a)[1])' reach $x / $a[1].  Its emitted shape is the deref head over
+     a LIST container -- a `(vector ...)', a `(p-list-ctx ...)' or the bare
+     `@a' of the one-array list -- and it becomes %p-lslice-aliases, never
+     the eager element box (which grew @a for `for ((@a)[8])')."
     (cond
       ((and (consp form) (member (car form) '(p-aslice p-hslice)))
        (cons (if (eq (car form) 'p-aslice) '%p-aslice-viv '%p-hslice-viv)
              (cdr form)))
+      ((and (consp form) (= (length form) 3) (eq (car form) 'p-aref-deref)
+            (%p-list-slice-base-form-p (second form)))
+       (cons '%p-lslice-aliases (cdr form)))
       ((and (consp form) (= (length form) 3)
             (member (car form) '(p-aref p-gethash p-aref-deref p-gethash-deref))
             ;; An ELEMENT only: its container is a variable or an element
@@ -16004,6 +16024,17 @@ which is one of #1140's escape spellings (probed)."
   (if (and (vectorp idx) (not (stringp idx)))
       (p-aref-deref ref idx site)
       (p-aref-box (p-ensure-arrayref ref) idx)))
+
+(defun %p-lslice-aliases (list idx)
+  "A LIST SLICE `(LIST)[IDX]' in an ALIASING consumer -- a foreach list, a
+   map / grep list, a user sub's argument (#4682): the selected elements as
+   a vector of their own CELLS (%p-alias-aelem through p-aref-deref's slice
+   arm), so a write through the alias reaches the variable or the array slot
+   the list was built from.  One index or a list of them: a scalar IDX is a
+   one-index slice.  A missing element is a lazy alias over the list and
+   creates nothing, as perl's read of `(@a)[8]' grows nothing.  Emitted only
+   by %p-aliasing-slice-form."
+  (p-aref-deref list (if (and (vectorp idx) (not (stringp idx))) idx (vector idx))))
 
 ;;; The KEY / INDEX list of a slice or slice-delete, flattened (#387 family
 ;;; 21, s413 — six functions spelled this loop, and the three that DISAGREED
@@ -27272,7 +27303,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-13500"
+(defparameter *pcl-cache-generation* "v2-13700"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
