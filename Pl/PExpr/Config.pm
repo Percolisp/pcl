@@ -415,6 +415,26 @@ sub is_core_keyword {
   return $CORE_KEYWORD{$name} = ($ok ? 1 : 0);
 }
 
+# THE FEATURE THAT MAKES A KEYWORD ONE, or undef for a keyword that always is
+# (#4603).  Measured, never listed, like is_core_keyword: a perl keyword whose
+# own name is a FEATURE of the running perl's feature.pm (`say`, `fc`, `isa`,
+# `evalbytes`, `state`, `try`, `defer`, `class`) is a keyword only where that
+# feature is in force -- anywhere else it is an ordinary identifier, so
+# `sub say {...} say("x")` calls the sub (probed 5.40.3).  `CORE::NAME` names
+# the keyword unconditionally (the callers' marker).  The keywords gated by a
+# feature of ANOTHER name (`__SUB__` = current_sub, `break` = switch) are not
+# read here: __SUB__ has its own rewrite (#2691) and no call site asks for
+# `break`.
+my %KEYWORD_FEATURE;
+sub keyword_feature {
+  my $name = shift;
+  return undef if !defined $name || !length $name;
+  return $KEYWORD_FEATURE{$name} if exists $KEYWORD_FEATURE{$name};
+  require feature;
+  return $KEYWORD_FEATURE{$name} =
+    (is_core_keyword($name) && exists $feature::feature{$name}) ? $name : undef;
+}
+
 # Ask the running perl for a builtin's prototype.  Not a keyword at all =>
 # perl dies ("Can't find an opnumber for"); a keyword with no prototype (`if`,
 # `print`, `sort`, …) => undef.  Both mean "this table has nothing to say".

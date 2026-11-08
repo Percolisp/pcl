@@ -4814,6 +4814,24 @@ sub handle_subcalls {
 
 # Add implicit $_ or @_ parameter to functions that default to it
 # Call this after creating a funcall node
+# Is the funcall NODE_ID of the feature-gated keyword NAME a call of the
+# USER'S sub here (#4603)?  The one answer (Pl::Parser::gated_keyword_at), read
+# at the call's head token; `CORE::NAME` (the _core_qualified mark) is the
+# keyword always.
+sub _gated_keyword_is_sub {
+  my ($self, $name, $node_id) = @_;
+  my $feature = Pl::PExpr::Config::keyword_feature($name) // return 0;
+  my $kids = $self->get_node_children($node_id) || [];
+  my $tok = @$kids ? $self->get_a_node($kids->[0]) : undef;
+  return 0 if ref($tok) && $tok->{_core_qualified};
+  require Pl::Parser;   # at run time: a compile-time `use` is circular, and a
+                        # caller may have loaded PExpr alone (s438f)
+  return Pl::Parser::gated_keyword_at(
+           $self->has_parser ? $self->parser->lex_home : undef,
+           $self->has_environment ? $self->environment : undef,
+           $tok, $feature, $name) ? 0 : 1;
+}
+
 sub add_implicit_default_param {
   my $self      = shift;
   my $func_name = shift;
@@ -4828,6 +4846,9 @@ sub add_implicit_default_param {
 
   my $param_spec = $self->known_no_of_params->{$func_name};
   return unless defined $param_spec;
+  # A feature-gated keyword (`fc`, `say`) where it is NOT one is the user's
+  # sub, which takes no implicit operand (#4603, Pl::Parser::gated_keyword_at).
+  return if $self->_gated_keyword_is_sub($func_name, $node_id);
 
   # Check if function uses $_ as default (-2) or @_ as default (-3)
   my @specs = ref($param_spec) eq 'ARRAY' ? @$param_spec : ($param_spec);

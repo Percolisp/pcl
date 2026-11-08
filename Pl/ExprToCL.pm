@@ -195,10 +195,18 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # `CORE::` marker (PExpr::_runtime_op_word) and is never asked this.  Read by
 # cl_name and by Pl::Parser2::_rewrite_bareword_stmt (`study;` / `reset;` keep
 # their builtin call), so the two cannot disagree.
+# A FEATURE-GATED keyword (`say` `fc` `isa` `evalbytes`, Config::keyword_feature)
+# is one only where its feature is in force (#4603): GATED_HERE, the call
+# site's answer (ExprToCL::_gated_keyword_here), decides it; without a site the
+# keyword answer stands.
 sub source_call_is_builtin {
-  my $name = shift // '';
+  my ($name, $gated_here) = @_;
+  $name //= '';
   return 0 if !exists $RUNTIME_NAMES{$name};
-  return Pl::PExpr::Config::is_core_keyword($name) ? 1 : 0;
+  return 0 if !Pl::PExpr::Config::is_core_keyword($name);
+  my $feature = Pl::PExpr::Config::keyword_feature($name);
+  return 1 if !defined $feature || !$gated_here;
+  return $gated_here->($feature, $name) ? 1 : 0;
 }
 
 # Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
@@ -400,6 +408,9 @@ sub cl_name {
   # the user's" rule caught `sub cwd { CORE::cwd() }` in lib/Cwd.pm and made it
   # call ITSELF.
   my $force_builtin = shift // 0;
+  # The call site's head TOKEN, when the caller has one: a feature-gated
+  # keyword asks where it stands (#4603, source_call_is_builtin).
+  my $site_tok = shift;
 
   # Guard against undefined input
   return 'p-UNDEFINED' unless defined $perl_name && length($perl_name);
@@ -461,7 +472,8 @@ sub cl_name {
   # `$force_user` (the `&NAME(...)` sigil) already bypassed the table.
   if (!$force_user && exists $RUNTIME_NAMES{$perl_name}
       && ($force_builtin || !$for_funcall
-          || source_call_is_builtin($perl_name))) {
+          || source_call_is_builtin($perl_name, $site_tok
+               ? sub { $self->_gated_keyword_here($site_tok, @_) } : undef))) {
     return "p-$perl_name";
   }
   # Inside a non-main package, qualify user-defined sub calls so SBCL's reader
@@ -2782,7 +2794,7 @@ sub gen_funcall_form {
   my $core_qualified = (ref($head_node) && $head_node->{_core_qualified}) ? 1 : 0;
   my $cl_func = defined $override_pkg
                   ? $self->cl_name("${override_pkg}::${func_name}", 1, 1, $core_qualified)
-                  : $self->cl_name($func_name, 1, $force_user, $core_qualified);
+                  : $self->cl_name($func_name, 1, $force_user, $core_qualified, $head_node);
   # The call IS the user's sub whenever cl_name lowered it to `pl-NAME' --
   # including a DECLARED or imported sub whose name is also a runtime
   # operator (#2100: Test::Fatal's `exception').  Both tail decisions below
@@ -3445,7 +3457,10 @@ sub gen_funcall_form {
   # Bare print/say/printf defaults to $_ (a `:fh …` marker is not a list
   # arg).  The text emitter's regex runs on arg text; to_flat gives the
   # same text for form args (a form never starts with ':fh').
-  if ($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf') {
+  # (Not for a USER sub of the name: a feature-gated `say` where it is no
+  # keyword is called with what it was given, #4603.)
+  if (($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf')
+      && !$user_call) {
     push @args, '$_'
       unless grep { Pl::CLForm::to_flat($_) !~ /^:fh\b/ } @args;
   }
@@ -4553,6 +4568,15 @@ sub _lexical_region_here {
     }
   }
   return $lh->{"${key}_stmt"} ? 1 : 0;
+}
+
+sub _gated_keyword_here {
+  my ($self, $tok, $feature, $name) = @_;
+  my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
+                && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+  require Pl::Parser;   # at run time (s438f: ExprToCL may be loaded alone)
+  return Pl::Parser::gated_keyword_at($parser ? $parser->lex_home : undef,
+                                      $self->environment, $tok, $feature, $name);
 }
 
 # The PARENT of each node of the current expression tree, built once per tree

@@ -1745,6 +1745,15 @@ sub parse {
   unshift @{ $self->fallback_parser->lex_home->{_unicode_strings_regions} },
     [[0, 0], [1e9, 1e9], 1, 1]
     if grep { $_ eq 'unicode_strings' } @{ $self->eval_features // [] };
+  # The regions of a keyword's FEATURE (#4603: `say` / `fc` / `isa` /
+  # `evalbytes` are keywords only where it is in force), by the same clock and
+  # document key, computed on first ask: a gated-keyword call site is rare.
+  {
+    my (%regions_of, $fdoc);
+    $fdoc = $doc;     # THIS document, the one _strict_refs_doc names
+    $self->fallback_parser->lex_home->{_feature_regions} =
+      sub { $regions_of{ $_[0] } //= Pl::Parser::feature_regions_of($fdoc, $_[0]) };
+  }
 
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
   # comparator counts: "Can't goto out of a pseudo block") — when no such

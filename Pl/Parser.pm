@@ -8251,8 +8251,10 @@ sub unicode_strings_regions_of { return feature_regions_of($_[0], "unicode_strin
 # (task #2691).  One reader, so the spellings above cannot drift between the
 # features that ask.  SINCE is the lowest NUMBERED perl bundle holding the
 # feature, read off %feature::feature_bundle (5.40.3): unicode_strings 5.11,
-# current_sub 5.15.  A feature not in the table DIES (rule 12).
-our %FEATURE_SINCE = (unicode_strings => 11, current_sub => 15, module_true => 37);
+# current_sub 5.15; the keyword features of #4603: say 5.10, fc and evalbytes
+# 5.15, isa 5.35.  A feature not in the table DIES (rule 12).
+our %FEATURE_SINCE = (unicode_strings => 11, current_sub => 15, module_true => 37,
+                      say => 10, fc => 15, evalbytes => 15, isa => 35);
 sub feature_regions_of {
   my ($doc, $feature) = @_;
   my $since = $FEATURE_SINCE{$feature}
@@ -8280,7 +8282,9 @@ sub feature_regions_of {
       $val = $type eq 'use' ? 1 : 0;
     }
     else { next }
-    push @regions, [ [ $loc->[0], $loc->[1] ], _open_region_end($stmt), $val, 1 ];
+    # [4]: what spoke -- a `feature` pragma or a `use VERSION` bundle (#4603).
+    push @regions, [ [ $loc->[0], $loc->[1] ], _open_region_end($stmt), $val, 1,
+                     $v ne '' ? 'version' : 'feature' ];
   }
   return \@regions;
 }
@@ -8290,6 +8294,65 @@ sub unicode_strings_at { return strict_refs_at(@_) }
 
 # Is the feature of a feature_regions_of answer in force at LOC?  The same rule.
 sub feature_at { return strict_refs_at(@_) }
+
+# The same question with a THIRD answer kept apart (#4603): 1 = on; 0 = a
+# `no feature` pragma turned it off here (perl: an ordinary identifier, for
+# certain); undef = the file's own feature pragmas did not say -- no region
+# holds LOC, or the latest is a `use VERSION` bundle without it, after which
+# code the compiler cannot read (an import, a BEGIN-time `feature->import`,
+# Search::Dict's spelling) may still have turned it on.
+sub feature_state_at {
+  my ($regions, $loc) = @_;
+  return undef unless $regions && $loc;
+  my $r;
+  for my $x (@$regions) {
+    next unless _loc_lt($x->[0], $loc) && _loc_lt($loc, $x->[1]);
+    $r = $x if !$r || _loc_lt($r->[0], $x->[0]);
+  }
+  return undef if !$r;
+  return 1 if $r->[2];
+  return ($r->[4] // '') eq 'feature' ? 0 : undef;
+}
+
+# IS THE FEATURE-GATED KEYWORD NAME A KEYWORD AT THIS CALL SITE (#4603)?  THE
+# one answer: the call-site NAMING (ExprToCL::source_call_is_builtin) and the
+# PARSE's `$_` default (PExpr::add_implicit_default_param) both ask it.  LH is
+# the lex_home Parser2 published the feature regions on, TOK the call's head
+# token: a token of THIS document is placed by its own location, any other
+# (a fragment re-parse, a synthesized Word) by the statement's.  perl's three
+# answers (feature_state_at):
+#   on                -- the keyword (1);
+#   `no feature` off  -- an ordinary identifier: the sub call, declared or not
+#                        (`no feature 'fc'; fc("x")` dies "Undefined
+#                        subroutine &main::fc" in perl) (0);
+#   unsaid            -- the default set, but code the compiler cannot read
+#                        may have turned it on (Search::Dict's BEGIN-time
+#                        `'feature'->import('fc')`, an import's effects), so
+#                        the keyword stands unless a sub of that name is
+#                        KNOWN: declared in this package (below the site too:
+#                        perl calls a word followed by `(`), or imported.
+sub gated_keyword_at {
+  my ($lh, $env, $tok, $feature, $name) = @_;
+  $lh //= {};
+  my $rf = $lh->{_feature_regions};
+  my $loc;
+  if (Scalar::Util::blessed($tok) && $tok->can('top') && $tok->can('location')) {
+    my $top = $tok->top;
+    $loc = $tok->location
+      if $top && Scalar::Util::refaddr($top) == ($lh->{_strict_refs_doc} // -1);
+  }
+  if (!$loc && $env && (my $site = $env->parse_site)) {
+    $loc = $site->{pos} ? [ @{ $site->{pos} } ] : undef;
+  }
+  my $state = ($rf && $loc) ? feature_state_at($rf->($feature), $loc) : undef;
+  return 1 if $state;
+  return 0 if defined $state;
+  return 1 if !$env;
+  return 0 if defined $env->declared_sub_at_site($name, $env->current_package // 'main');
+  my $rec = $env->get_prototype($name);
+  return 0 if ref($rec) eq 'HASH' && !$env->is_builtin_seed_record($name, $rec);
+  return 1;
+}
 
 # Process use/require statements
 sub _process_include_statement {

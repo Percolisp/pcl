@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 20;
 
 # ---- the names, derived from the TABLE THAT DECIDES ------------------------
 # `%RUNTIME_NAMES` in Pl/ExprToCL.pm is what routes a plain call to `p-NAME`,
@@ -297,4 +297,47 @@ my $d = cwd();
 my @p = (cwd, 1);
 print "3 ", (cwd . "/x" eq "$d/x" ? "ok" : "no"), " ", (cwd eq $d ? "ok" : "no"), " ", scalar(@p),
   " ", ((cwd 1, 2) eq $d ? "ok" : "no"), " ", (getcwd eq $d ? "ok" : "no"), " ", (Cwd::cwd() eq $d ? "ok" : "no"), "\n";
+P
+
+# #4603 (s536g): a FEATURE-GATED keyword (`say` `fc` `isa` `evalbytes`,
+# measured from feature.pm) is one only where its feature is in force.
+# Without the feature a user sub of the name is called (it printed `x`,
+# lowercased, answered nothing); under `no feature` the word is an ordinary
+# identifier even with no sub (perl dies "Undefined subroutine"); where the
+# file's own pragmas say nothing and no sub of the name is known, the keyword
+# stands (a BEGIN-time `feature->import` the compiler cannot read).
+both_agree(<<'P', '#4603 a user sub named like a feature-gated keyword is called without the feature');
+sub say { print "MYSAY(@_)\n" } say("x");
+sub fc  { "MYFC(@_)" }  print fc("AB"), "\n";
+sub isa { "MYISA(@_)" } print isa(1,2), "\n";
+sub evalbytes { "MYEB(@_)" } print evalbytes("1+1"), "\n";
+print CORE::fc("AB"), "\n";
+{ use feature 'say'; say "builtin-say"; }
+say "back";
+{ use feature 'fc'; print fc("CD"), "\n"; }
+P
+
+both_agree(<<'P', '#4603 no feature = an ordinary identifier; an unread feature import keeps the keyword; a sub declared below is called');
+BEGIN { require feature; 'feature'->import('fc'); }
+print "1 ", fc("AB"), "\n";
+print "2 ", say_it(), "\n";
+sub say_it { say("later") }
+sub say { "MYSAY(@_)" }
+{ no feature 'fc'; local $@; eval { fc("eeyup") }; print "3 ", ($@ =~ /Undefined subroutine &main::fc/ ? "died" : "no-die"), "\n"; }
+use feature 'say';
+say "4 builtin";
+{ no feature 'say'; print "5 ", say("x"), "\n"; }
+my $o = bless {}, 'Foo';
+{ use feature 'isa'; print "6 ", ($o isa Foo ? 1 : 0), "\n"; }
+print "7 ", CORE::say("core"), "\n";
+P
+
+both_agree(<<'P', '#4603 a user say / fc where they are no keyword take no implicit $_');
+sub say { print "n=", scalar(@_), "\n"; 5 }
+$_ = "topic";
+say;
+my $r = say();
+print "r=$r\n";
+sub fc { "MYFC(@_)" }
+print "fc=", fc, "\n";
 P
