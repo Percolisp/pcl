@@ -726,8 +726,8 @@ fresh(); other();};
   my $cl;
   {
     no warnings 'redefine';
-    my $orig = \&Pl::Parser2::_ref_shadowed;
-    local *Pl::Parser2::_ref_shadowed = sub { $calls++; $orig->(@_) };
+    my $orig = \&Pl::Parser2::_refers_to_decl;
+    local *Pl::Parser2::_refers_to_decl = sub { $calls++; $orig->(@_) };
     $cl = eval { Pl::Parser2->parse_code($code) };
   }
   is($@, '', '#184: padded capture-promotion file still parses');
@@ -763,8 +763,8 @@ print "B=\$tmpx\\n";};
   my $cl;
   {
     no warnings 'redefine';
-    my $orig = \&Pl::Parser2::_ref_shadowed;
-    local *Pl::Parser2::_ref_shadowed = sub { $calls++; $orig->(@_) };
+    my $orig = \&Pl::Parser2::_refers_to_decl;
+    local *Pl::Parser2::_refers_to_decl = sub { $calls++; $orig->(@_) };
     $cl = eval { Pl::Parser2->parse_code($code) };
   }
   is($@, '', '#184/W10: padded spanning-lexical file still parses');

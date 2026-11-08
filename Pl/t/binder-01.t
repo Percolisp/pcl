@@ -4,21 +4,24 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
-# binder-01.t -- the BINDER (Pl::Binder, perl's pad model) and its dual-run
-# hooks in Pl::Parser2 (s525q; docs/binder-dual-run-s525.md).
+# binder-01.t -- the BINDER (Pl::Binder, perl's pad model; s525q, production
+# since s533b; docs/binder-dual-run-s525.md).
 #
 # Each program is transpiled by ./pl2cl under PCL_BINDER_CHECK=die through
-# `tools/binder-check.pl --dump`: the transpile must not die (the binder
-# agrees with the three legacy resolvers on it) and the ref -> binding
-# listing must give perl's answer for each shape (pad.c intro_my /
-# pad_findlex; toke.c S_pending_ident).  The last row is the INVERSE guard:
-# PCL_BINDER_INJECT inverts the binder's answer and the hook must DIE with
-# both verdicts.  PPI + perl only -- no SBCL: a fast file.
+# `tools/binder-check.pl --dump`: the transpile must not die (a binder error
+# dies in that mode) and the ref -> binding listing must give perl's answer
+# for each shape (pad.c intro_my / pad_findlex; toke.c S_pending_ident).  The
+# last row is RULE 12 for the shadow question every rename pass asks
+# (_refers_to_decl, 1c port 3): a declaration the answering table does not
+# hold DIES naming it.  (Until s535a that row inverted the binder's answer at
+# the last dual-run hook, _ref_shadowed, which left with the port.)  PPI +
+# perl only -- no SBCL: a fast file.
 use strict;
 use warnings;
 use Test::More;
 use FindBin qw($RealBin);
 use File::Temp qw(tempdir);
+use lib "$RealBin/../..";
 
 my $root = "$RealBin/../..";
 my $dir  = tempdir(CLEANUP => 1);
@@ -53,7 +56,7 @@ my @a = (1); my $k = 0; print "$a[$k]\n";
 my $cap = 5; sub g { $cap }
 PERL
 my ($out, $rc) = dump_of($prog);
-is($rc, 0, 'PCL_BINDER_CHECK=die: no disagreement on the shapes program') or diag $out;
+is($rc, 0, 'PCL_BINDER_CHECK=die: the binder builds on the shapes program') or diag $out;
 ok(binds($out, '2:11', '$x', 'my', '$x', '1:4'),  'an initializer sees the OUTER binding (intro_my: visible from the next statement)');
 ok(binds($out, '2:25', '$x', 'my', '$x', '2:6'),  'the next statement sees the inner `my`');
 ok(binds($out, '3:29', '$y', 'my', '$y', '3:15'), 'a same-scope redeclaration opens a new binding');
@@ -71,18 +74,26 @@ ok(binds($out, '10:31', '$k', 'my', '$k', '10:17') && binds($out, '10:31', '@a',
    'an interpolated "$a[$k]" binds both names');
 ok(binds($out, '11:22', '$cap', 'my', '$cap', '11:4'), 'a named sub reads (captures) the outer `my`');
 
-# INVERSE: an injected wrong answer must DIE at the hook with both verdicts.
-my $inj = "$dir/inj.pl";
-# (s533b: the requalifier's binding_at hook is GONE; s533d: the capture
-# scan's block_captures hook is GONE too -- both ask the binder themselves --
-# so the inverse row inverts ref_shadowed, the last dual-run hook: promoting
-# the captured block `my $c` (block extent: the MANGLED path) asks, for each later use, whether a shadow scopes
-# it; the use in `r` is NOT shadowed, legacy=0, the injected binder says 1.)
-open my $ifh, '>', $inj or die;
-print $ifh "{ my \$c = 1; sub r { \$z = \$c; } }\nr();\n"; close $ifh;
-my $err = `PCL_BINDER_CHECK=die PCL_BINDER_INJECT=ref_shadowed $^X $root/pl2cl $inj 2>&1 >/dev/null`;
-my $irc = $? >> 8;
-ok($irc != 0 && $err =~ /PCL binder: ref_shadowed disagrees at \S+ line 1 col \d+ `\$c` \(\$c\): legacy=0 binder=1 \[\w+\]/,
-   'PCL_BINDER_INJECT: a disagreement DIES naming both verdicts') or diag "rc=$irc\n$err";
+# RULE 12 (1c port 3, s535a): the rename passes' shadow question -- "is this
+# token a use of the variable that declarator makes?" -- asked about a
+# declaration the answering binder does not hold (here: a use in ANOTHER
+# document) DIES naming it, never a silent "not a use" that would leave the
+# token un-renamed.  In-process, from a real binder.
+{
+  require Pl::VendorPPI;
+  require Pl::Parser2;
+  require Pl::Binder;
+  my $src = "my \$q = 1; print \$q;\n";
+  my $doc = PPI::Document->new(\$src);
+  my $parser = bless {}, 'Pl::Parser2';
+  $parser->{_binder} = Pl::Binder->new($doc, parser => $parser)->bind;
+  my ($decl) = grep { $_->content eq '$q' } @{ $doc->find('PPI::Token::Symbol') };
+  my $osrc = "print \$q;\n";
+  my $other = PPI::Document->new(\$osrc);
+  my ($use) = @{ $other->find('PPI::Token::Symbol') };
+  my $err = eval { $parser->_refers_to_decl($use, '$q', $decl); 1 } ? '' : $@;
+  like($err, qr/^PCL internal: the binder holds no record of `\$q` \(asked about \$q, declared by `\$q` at line 1\)/,
+       'rule 12: the shadow question dies on a declaration the answering table does not hold');
+}
 
 done_testing();

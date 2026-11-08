@@ -4,9 +4,12 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
-# binder-check.pl -- run the BINDER's dual-run (Pl::Binder, PCL_BINDER_CHECK)
+# binder-check.pl -- run the BINDER's measurement (Pl::Binder, PCL_BINDER_CHECK)
 # over files or a named population and merge its log rows (s525q;
-# docs/binder-dual-run-s525.md).
+# docs/binder-dual-run-s525.md).  The dual-run D rows (a legacy resolver vs
+# the binder) ended with the last hook, 1c port 3 (s535a): what stays are the
+# build / rebuild / query-count / error rows -- the cost and the rebuild-0
+# invariant the ports rest on -- and --dump.
 #
 # INERT: each file is transpiled by this tree's ./pl2cl (a `.pm` with
 # --module) with PCL_BINDER_CHECK=log; the emitted CL is discarded.
@@ -22,7 +25,7 @@
 #
 # Log rows (TSV, first column = row kind):
 #   S file refs= bindings= kinds= via= captures= fragments= build_ms= tokens= eval=
-#   D file line col token resolver legacy binder kind note pass
+#   D file line col token resolver legacy binder kind note pass   (until s535a)
 #   R file why pass resolver tokens= build_ms=        (a rebuild)
 #   C file <resolver>=<calls>... rebuilds=            (per transpile)
 #   E file line col token resolver legacy - - error   (a binder error)

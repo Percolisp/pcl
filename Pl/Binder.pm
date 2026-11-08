@@ -15,18 +15,17 @@ package Pl::Binder;
 # PRODUCTION CONSUMER (1c port 1, s533b): the block-package requalifier asks
 # requalify_home for every token it might rewrite (docs/binder-dual-run-s525.md
 # §6 item 1); the capture gate, the promoter and the nested-sub hoist ask
-# captures_name (1c port 2, s533d, §6 item 2).  STILL IN DUAL-RUN (ports 3-4):
-# the hook on _ref_shadowed compares its verdict with the legacy one under
-# PCL_BINDER_CHECK and returns the legacy verdict unchanged.
+# captures_name (1c port 2, s533d, §6 item 2); the span pass, the flatten
+# refusal and every rename pass's "is this use the declaration's variable"
+# ask spans / binding_after / refers_to_decl (1c port 3, s535a, §6 item 3 --
+# the last dual-run hook, _ref_shadowed, left with it).
 #
-#   PCL_BINDER_CHECK=die   a disagreement dies, one line, both verdicts
-#   PCL_BINDER_CHECK=log   a disagreement appends one TSV row to
-#                          $PCL_BINDER_LOG (STDERR when unset) and continues;
-#                          a binder ERROR is logged too, never fatal
+#   PCL_BINDER_CHECK=log   the MEASUREMENT rows (S per build, R per rebuild,
+#                          C query counts per transpile, E per binder error)
+#                          go to $PCL_BINDER_LOG (STDERR when unset); a
+#                          binder error is logged, not fatal, there (the
+#                          consumer then dies naming the missing binder)
 #   PCL_BINDER_TRACE=1     print every reference with its binding (STDERR)
-#   PCL_BINDER_INJECT=R    self-test: invert the binder's answer for resolver
-#                          R (ref_shadowed) so
-#                          the die path can be exercised (Pl/t/binder-01.t)
 #
 # THE TABLE (one record per binding, perl's PADNAME + COP_SEQ_RANGE):
 #   id            counter, 1.. in document order (globals get ids lazily)
@@ -84,7 +83,11 @@ package Pl::Binder;
 #       ->captures_name($n, $bare, $canons, eval => 1)  the capture question (s533d)
 #       ->has_string_eval($cv), ->eval_sees($b)  the string-eval CV fact (s533d)
 #       Pl::Binder::for_captures($p2, $n)  the binder answering the capture question
-#       Pl::Binder::check(...)         the dual-run comparison (the ref_shadowed hook)
+#       ->spans($ranges, $skip, kinds => {...})  "does B have a ref in segment j" (s535a)
+#       ->uses_of($b), ->text_uses_in($b, $lo, $hi)  a binding's uses; its eval-text uses
+#       ->refers_to_decl($tok, $canon, $decl)  the shadow question (s535a)
+#       ->binding_after($node, $canon), ->decl_binding($tok), ->ord_range($a, $z)
+#       Pl::Binder::for_span($p2, $n)  the binder answering the span / shadow question
 
 use strict;
 use warnings;
@@ -625,21 +628,6 @@ sub _resolve_cur {
   return $self->_resolve_ord($ord, $asked, $pkg, 1);
 }
 
-# What $canon at $node names now: the node's own declaration when it is one,
-# else _resolve_cur at its position.
-sub _binding_cur {
-  my ($self, $node, $canon) = @_;
-  my $a = refaddr $node;
-  if (my $own = $self->{decl_bind}{$a}) {
-    return $own if _live_canon($own) eq $canon;
-  }
-  my $ord = $self->_first_ord($node);
-  return undef unless defined $ord;
-  my $list = $self->{refs}{$a};
-  my $pkg = $list && @$list ? $list->[0]{pkg} : $self->_pkg_at($node);
-  return $self->_resolve_cur($ord, $canon, $pkg);
-}
-
 # The interpolating texts of a token: [text, 'dq'|'regex'|'code'].  Raw
 # heredocs, single-quote delimiters (m'' s''' qr'' qx'') and tr/// do not
 # interpolate.  An s///e replacement is CODE.
@@ -1014,7 +1002,8 @@ sub decl_binding {
 sub _use_binding {
   my ($self, $tok, $canon) = @_;
   my $a = refaddr $tok;
-  my $list = $self->{refs}{$a} or return undef;
+  return undef unless defined $self->{ord}{$a};   # not in the table at all
+  my $list = $self->{refs}{$a} or return 0;       # in it, but no variable use
   (my $orig = $canon) =~ s/$RENAME_SUFFIX//;
   if (_tok_sig($tok) eq ($self->{sig}{$a} // '')) {
     for my $r (@$list) { return $r->{binding} if $r->{canon} eq $orig }
@@ -1060,9 +1049,10 @@ sub _trace {
 sub _short { my $s = shift; $s =~ s/\s+/ /g; return length($s) > 40 ? substr($s, 0, 37) . '...' : $s }
 
 # ===========================================================================
-# THE DUAL-RUN (the hooks in Pl::Parser2 call check(); nothing it computes
-# reaches the caller).
-my %SEEN;
+# THE MEASUREMENT ROWS (PCL_BINDER_CHECK=log, tools/binder-check.pl): one S
+# row per build, an R row per rebuild, a C row of query counts per transpile,
+# an E row per binder error.  Nothing here reaches the caller.  (The D rows
+# of the s525q dual-run left with its last hook, 1c port 3.)
 
 sub _log_fh {
   my $f = $ENV{PCL_BINDER_LOG};
@@ -1137,7 +1127,7 @@ sub _binder_for {
   $nb->{file} = $main->{file};
   $main->{rebuilds}++;
   _row('R', $main->{file}, $why, $caller, $which, 'tokens=' . ($nb->{last} + 1),
-       'build_ms=' . $nb->{stats}{build_ms}) if $main->{mode} eq 'log';
+       'build_ms=' . $nb->{stats}{build_ms}) if ($main->{mode} // '') eq 'log';
   if ($key == refaddr($main->{doc})) { %$main = (%$main, %$nb, file => $main->{file}, mode => $main->{mode}, others => $main->{others}, sorted => undef, by_binding => undef, textc => undef, held => undef) }
   else { $main->{others}{$key} = $nb }
   return $key == refaddr($main->{doc}) ? $main : $nb;
@@ -1178,8 +1168,6 @@ sub ord_range {
   return (defined $lo && defined $hi) ? [$lo, $hi] : undef;
 }
 
-sub _verdict_str { my $v = shift; return defined $v ? $v : 'undef' }
-
 sub _rec_str {
   my ($b) = @_;
   return '-' unless $b;
@@ -1187,91 +1175,7 @@ sub _rec_str {
   return "$b->{kind} $b->{name}" . ($d ? ' decl=' . ($d->line_number // '?') . ':' . ($d->column_number // '?') : '');
 }
 
-# THE COMPARISON.  $which: ref_shadowed (binding_at was the requalifier's,
-# block_captures the capture gate's; they ask the binder directly since s533b /
-# s533d).
-sub check {
-  my ($parser, $which, $legacy, @args) = @_;
-  local ($!, $@);                           # inert: never leak errno / $@ to the parser
-  my $mode = $ENV{PCL_BINDER_CHECK} // '';
-  my ($node) = @args;
-  my $pass = _pass_name();                   # the pass that asked the resolver
-  my $res = eval {
-    my $b = _binder_for($parser, $node, $which, $pass) or return;
-    $parser->{_binder}{calls}{$which}++;
-    my ($mine, $kind, $note) = $which eq 'ref_shadowed' ? $b->_q_ref_shadowed(@args)
-                             : die "PCL binder: unknown resolver `$which`\n";
-    $mine = _invert($which, $mine) if ($ENV{PCL_BINDER_INJECT} // '') eq $which;
-    my $same = !!$legacy == !!$mine;
-    return [1] if $same;
-    [0, $b, $mine, $kind, $note];
-  };
-  if (!$res) {
-    my $err = $@ or return;
-    die $err if $mode ne 'log';
-    _row('E', ($parser->{_binder} || {})->{file} // _file_of($parser), _line($node), _col($node),
-         _short(eval { $node->content } // ''), $which, _verdict_str($legacy), '', '', $err);
-    return;
-  }
-  return if $res->[0];
-  my (undef, $b, $mine, $kind, $note) = @$res;
-  my $extra = $args[1] // '';
-  my $key = join "\0", $b->{file}, $which, refaddr($node), $extra, _verdict_str($legacy), _verdict_str($mine);
-  return if $SEEN{$key}++;
-  my @row = ('D', $b->{file}, _line($node), _col($node), _short($node->content), $which,
-             _verdict_str($legacy), _verdict_str($mine), $kind, "asked=$extra $note", $pass // q{?});
-  if ($mode eq 'die') {
-    die sprintf("PCL binder: %s disagrees at %s line %s col %s `%s` (%s): legacy=%s binder=%s [%s] %s\n",
-                $which, $b->{file}, $row[2], $row[3], $row[4], $extra,
-                $row[6], $row[7], $kind, $note);
-  }
-  _row(@row);
-}
-
-# The first three NAMED frames above the resolver (closures and the shared
-# rewriter are skipped): which pass asked.
-sub _pass_name {
-  my @n;
-  for (my $i = 3; $i < 40 && @n < 3; $i++) {
-    my $s = (caller($i))[3] // last;
-    next if $s =~ /__ANON__|^Pl::Binder::|::_rewrite_var_uses$|::_fix_interp_token$|\(eval\)/;
-    $s =~ s/^Pl::Parser2:://;
-    push @n, $s unless @n && $n[-1] eq $s;
-  }
-  return join '<', @n;
-}
-
-sub _invert {
-  my ($which, $v) = @_;
-  return $v ? 0 : 1;
-}
-
 sub _line { my $n = shift; my $t = $n->isa('PPI::Token') ? $n : $n->first_token; return $t ? ($t->line_number // 0) : 0 }
-sub _col  { my $n = shift; my $t = $n->isa('PPI::Token') ? $n : $n->first_token; return $t ? ($t->column_number // 0) : 0 }
-
-# _ref_shadowed's question: does this use resolve to a binding DECLARED
-# between the segment boundary and the use -- i.e. inside $seg_parent, at its
-# top level only by one of the segment's own statements @$stmts?
-sub _q_ref_shadowed {
-  my ($self, $sym, $canon, $stmts, $seg_parent) = @_;
-  my $b = $self->_binding_cur($sym, $canon);
-  return (0, $b ? $b->{kind} : '-', _rec_str($b) . ' (undeclared)')
-    unless $b && $b->{decl_node} && $b->{kind} ne 'outer';
-  my $d = $b->{decl_node};
-  if (!defined $seg_parent) {
-    my $file_level = $b->{scope_node} && $b->{scope_node}->isa('PPI::Document');
-    return ($file_level ? 0 : 1, $b->{kind}, _rec_str($b) . ($file_level ? ' (file level)' : ''));
-  }
-  my $c = $d;
-  $c = $c->parent while $c && $c->parent && refaddr($c->parent) != refaddr($seg_parent);
-  return (0, $b->{kind}, _rec_str($b) . ' (declared outside the segment parent)')
-    unless $c && $c->parent && refaddr($c->parent) == refaddr($seg_parent);
-  return (1, $b->{kind}, _rec_str($b)) if grep { refaddr($_) == refaddr($c) } @{ $stmts || [] };
-  my $u = $sym;
-  $u = $u->parent while $u && $u->parent && refaddr($u->parent) != refaddr($seg_parent);
-  return (1, $b->{kind}, _rec_str($b) . ' (same top statement)') if $u && refaddr($u) == refaddr($c);
-  return (0, $b->{kind}, _rec_str($b) . ' (another segment)');
-}
 
 # THE CAPTURE QUESTION (1c port 2): does $node (a sub body, a whole
 # Statement::Sub -- its signature included -- or any block) read the bare
