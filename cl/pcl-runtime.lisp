@@ -1582,7 +1582,10 @@
    those reads, and a name the package only inherits from :pcl (a TAP or
    runtime function: explain, run_perl ...) would read as pcl's there.  A
    bodyless `sub foo ($@);` reserves nothing: perl-tests/t/test.pl declares
-   the TAP layer's ok / is that way and must keep reading them.  PKG (a
+   the TAP layer's ok / is that way and must keep reading them.  BODY
+   :forward is that bodyless declaration as the FILE wrote it -- the nil arm
+   plus the stash-view record (#4561); the nil arm alone is a pre-declaration
+   (a cross-section call stub).  PKG (a
    package designator) names the package of a QUALIFIED name written in
    another package's section (`sub E::explain` in main): the reservation
    happens there, as the name's own prefix says."
@@ -1594,6 +1597,14 @@
         (unless (fboundp ',name)
           (defun ,name (&rest args)
             (%p-call-of-undefined-sub ',name args)))))
+    ;; The file's OWN bodyless `sub NAME;` (#4561): perl's forward
+    ;; declaration IS a stash entry -- a CV with no body -- so beside the stub
+    ;; it is recorded for the stash view (p-stash), which hides the nil arm's
+    ;; pre-declarations of subs the file defines later.
+    (:forward
+     `(progn
+        (p-declare-sub ,name)
+        (setf (gethash ',name *p-forward-subs*) t)))
     (:body
      (let ((reserve (if pkg
                         `(let ((*package* (%p-declare-sub-package ,pkg)))
@@ -1603,7 +1614,7 @@
           (eval-when (:compile-toplevel :load-toplevel :execute)
             ,reserve)
           (%p-declare-sub-stub ,reserve))))
-    (t (error "p-declare-sub: BODY must be NIL or :BODY, not ~S" body))))
+    (t (error "p-declare-sub: BODY must be NIL, :FORWARD or :BODY, not ~S" body))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-declare-sub-package (designator)
@@ -1854,6 +1865,13 @@
 ;;; or :was-defined (was defined, now undef'd).
 (defvar *p-declared-subs* (make-hash-table :test 'eq)
   "Perl sub existence tracking for exists &sub and defined &sub")
+
+(defvar *p-forward-subs* (make-hash-table :test 'eq)
+  "Sub symbols a PERL forward declaration made -- the file's own bodyless `sub
+   NAME;` (p-declare-sub :forward).  perl has these in the stash with no body;
+   the stash view lists them, unlike PCL's pre-declarations of later-defined
+   subs (#4561).  (`*X = \\&stub` installs the late-bound ref as a CODE slot,
+   listed as any install is; `defined &X` asks %p-lazy-stub-p.)")
 
 (defun %p-no-answer (&optional (wantarray (eq *wantarray* t)))
   "What a LIST builtin that found nothing answers (#3412): perl's EMPTY LIST in
@@ -16812,9 +16830,14 @@ which is one of #1140's escape spellings (probed)."
         ;; (Moo::Role's make_role via _all_subs) see subs that are only
         ;; *declared*, not yet defined — exactly the bug in
         ;; docs/declaration-ordering-fix-plan.md.  A real definition flips the
-        ;; entry to :defined, so this only hides pure stubs.
+        ;; entry to :defined, so this only hides pure stubs.  A PERL forward
+        ;; declaration (`sub NAME;`, `*X = \&stub`) is a stash entry with no
+        ;; body and is listed (#4561: Role::Tiny skips a class's own stub and
+        ;; composes a role's).
         (when (and (eq (symbol-package sym) pkg)
-                   (%p-sub-has-body-p sym))
+                   (or (%p-sub-has-body-p sym)
+                       (and (gethash sym *p-forward-subs*)
+                            (%p-live-sub-p sym))))
           (let* ((name (symbol-name sym))
                  (n (length name)))
             ;; PL-xxx → Perl sub "xxx".  Reverse the :invert reader transform
@@ -35254,12 +35277,24 @@ would consume, so it dies naming the stream (rule 12)."
                              (or (gethash sym *p-declared-subs*)
                                  (fboundp sym)))))))
 
+(defun %p-lazy-stub-p (fn)
+  "True when FN is a LATE-BOUND code ref (p-backslash-sub's trampoline for a
+   stub, or its fallback for a never-declared name) whose target has no body
+   now.  perl's `\\&stub` IS the stub CV, so a glob given it holds a sub that
+   exists and is not defined until the target gets a body (#4561: `*X =
+   \\&stub` -- Role::Tiny composes a role's stub that way).  The ONE reading
+   `defined &NAME` and `defined &$code` share."
+  (let ((lazy (gethash fn *p-lazy-coderef-target*)))
+    (and lazy (not (eq (gethash lazy *p-declared-subs*) :defined)))))
+
 (defun %p-sub-defined-1 (pkg-str name-str after-delete)
-  "p-sub-defined's run-time half; AFTER-DELETE as %p-sub-deleted-at-load."
+  "p-sub-defined's run-time half; AFTER-DELETE as %p-sub-deleted-at-load.
+   A CODE slot holding a late-bound ref to a stub is not defined (#4561)."
   (let ((sym (%p-sub-reflect-symbol pkg-str name-str)))
     (if (and sym
              (not (and after-delete (%p-stash-deleted-p sym)))
-             (eq (gethash sym *p-declared-subs*) :defined))
+             (eq (gethash sym *p-declared-subs*) :defined)
+             (not (and (fboundp sym) (%p-lazy-stub-p (symbol-function sym)))))
         (make-p-box 1)
         (make-p-box nil))))
 
@@ -35336,9 +35371,9 @@ would consume, so it dies naming the stream (rule 12)."
        ;; can only ever be seen here for defun-defined (imported) subs.
        (let ((lazy (gethash v *p-lazy-coderef-target*)))
          (if lazy
-             (if (eq (gethash lazy *p-declared-subs*) :defined)
-                 (make-p-box 1)
-                 (make-p-box nil))
+             (if (%p-lazy-stub-p v)
+                 (make-p-box nil)
+                 (make-p-box 1))
              (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
                     (status (and (symbolp fname)
                                  (gethash fname *p-declared-subs*))))

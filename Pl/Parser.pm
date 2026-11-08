@@ -11791,7 +11791,9 @@ sub _compile_default_expr {
 # 11): this v1 path and Pl::Parser2's two.
 sub declare_sub_form {
   my ($name, $has_body) = @_;
-  return ['p-declare-sub', $name] unless $has_body;
+  # A bodyless `sub NAME;` is perl's forward declaration: a stash entry with
+  # no body (`:forward`, #4561), never the bare pre-declaration stub.
+  return ['p-declare-sub', $name, ':forward'] unless $has_body;
   return ['p-declare-sub', $name, ':body', ":$1"]
     if $name =~ /^(.+)::([^:|]+|\|[^|]*\|)\z/s;
   return ['p-declare-sub', $name, ':body'];

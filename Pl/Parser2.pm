@@ -2789,7 +2789,7 @@ sub parse {
       my $earlier = join "\n", @earlier;
       (my $prefix = $self->fallback_parser->_cl_pkg_designator($sec->{pkg})) =~ s/^://;
       for my $line (@{ $sec->{decls} }, @{ $sec->{captured} }) {
-        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)(?:\s+:body(?:\s+\S+)?)?\)\s*$/;
+        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)(?:\s+(?::body(?:\s+\S+)?|:forward))?\)\s*$/;
         my $name = $1;
         (my $bare = $name) =~ s/^.*:://;
         next unless index($earlier, $bare) >= 0;
@@ -10501,7 +10501,7 @@ sub _lower_named_sub_stmt {
     $self->_hoist_nested_sub($first);
   } else {
     push @{ $self->{_hoisted_decls} },
-      ['p-declare-sub', $self->_sub_name_for_emission($rec->{name})];
+      Pl::Parser::declare_sub_form($self->_sub_name_for_emission($rec->{name}), 0);
   }
   return $self->_lower_block(\@rest, $vi, $tail_ctx);
 }

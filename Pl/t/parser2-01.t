@@ -480,9 +480,10 @@ my $em = eval { Pl::Parser2->parse_code(q{my $r = 0; my $v = $r->eval();}) };
 ok(!$@, 'eval as a method call does not gate') or diag($@);
 
 # Bodyless forward declaration `sub foo;` — v1 emits (p-declare-sub); v2 must
-# too (not crash on $sub->block), with NO definition.
+# too (not crash on $sub->block), with NO definition.  The declaration is
+# perl's stash entry with no body: the :forward arm (#4561, s536b).
 my $fwd = Pl::Parser2->parse_code(q{sub t1; sub u; print "hi\n";});
-like($fwd, qr/\(p-declare-sub pl-t1\)/, 'forward-declared sub emits p-declare-sub');
+like($fwd, qr/\(p-declare-sub pl-t1 :forward\)/, 'forward-declared sub emits p-declare-sub :forward');
 unlike($fwd, qr/\(p-sub pl-t1\b/, 'forward declaration emits no definition');
 
 # W3 regression: a foreach loop variable must be SCOPED to the loop body.  If it
