@@ -142,6 +142,20 @@ itself carries no host-specific semantics beyond them.
   sort lowering binds the pair its comparator reads, #287). Sub definitions, `*glob`
   installs and bareword calls in such a region never had the problem —
   they resolve through the package stack at lowering time.
+  **Three more region shapes take the same rewrite (normative, s535a).**
+  (1) A block-form `package X { … }` that is not a section of its own — in a
+  sub body or any block lowered in place, inside another package block, or a
+  string eval's collapsed region — is a region of X (#4421: `sub run {
+  package P { $x = 5 } }` writes `$P::x`); a block form at the top level or
+  directly in a flattened top-level bare block is its own section and needs
+  nothing.  (2) An `our` DECLARATOR whose statement's own lowering does not
+  qualify it — a `for our $x` loop head, `local our $x`, an `our` inside an
+  expression — is spelled in its declaring package like its uses (#4440,
+  #4422: `sub f { package Z; for our $o (7) { … } }` aliases `$Z::o`); a plain
+  `our $x …;` statement qualifies itself.  (3) A FILE-level `our` alias read
+  in a LATER top-level section of another package is spelled in the
+  declaring package (#475: `our $t = "m"; package A; $t .= "A"` appends to
+  `$main::t`) — the binder's spans, kind `our`.
 
 ## 2. The data model
 
@@ -1516,6 +1530,22 @@ counts as a use of L exactly when some string eval (`eval EXPR`, `s///ee`)
 runs inside L's visible range -- the text may reach that eval, which can
 see L.  Example: `my $w = 2; sub src { '$w + 1' } sub run { eval $_[0] }`
 promotes `$w` (src mentions it, run's eval sees it), so `run(src())` is 3.
+
+**What "a lexical spans a section" means (normative, s535a, 1c port 3).**
+A `my` binding (any declarator position: a statement's lead, a chained `my
+$S = my $F`, an expression-embedded `open my $fh`) declared in one top-level
+section is promoted to a `__file__` cell (`:spanning`) exactly when a use of
+THAT binding — perl's pad, positional, interpolation, heredoc bodies and
+`${x}` included — lies in a later section, or when a literal text there names
+it under the string-eval rule above (`Pl::Binder::spans`).  The rename then
+rewrites exactly the binding's uses (`Pl::Binder::refers_to_decl`): a nested
+shadow, a loop-head `for my $x`, a later same-scope `my $x`, an `our $x` and
+a signature parameter keep their own names.  A spanning binding the renamer
+does not promote (a `state`, a container in a list / chained / embedded
+declaration — #4543) refuses the file (`_check_my_spanning`), and a use the
+rewrite did not reach dies (rule 12).  Example: `my $S = my $F = 0; package
+T; sub g { ++$F }` promotes `$F` too (#4425), so `T::g()` increments the
+file's `$F`.
 
 ## 3. Coercion — the heart of Perl semantics
 
