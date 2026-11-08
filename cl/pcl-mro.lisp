@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-12000
+;;; pcl: pipeline=v2 gen=v2-12300
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -8,8 +8,7 @@
 (p-defpackage :main)
 (in-package :main)
 (pcl::p-eval-always (pcl::p-detect-table "lib/mro.pm"
- '(("mro" "%" 73 "unknown")
-   ("mro" "_c3_linearize" 37 "list-call")
+ '(("mro" "_c3_linearize" 37 "list-call")
    ("mro" "_c3_linearize" 63 "list-call")
    ("mro" "_c3_linearize" 83 "list-call")
    ("mro" "defined" 105 "builtin")
