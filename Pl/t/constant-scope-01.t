@@ -113,16 +113,16 @@ sub write_pl {
 # at its `use` with the program's @INC, so the `require` inside it finds
 # C3870::B and B's prototypes are merged.  A bare pl2cl + sbcl load does not
 # reach that merge (measured: the bug did not reproduce there).
-# PCL_XSERVER= (empty) keeps the gate's transpile server out of it: the
-# runtime hands the module transpile its @INC as `perl -I DIR pl2cl --module`,
-# and a SERVED request does not carry perl's -I switches (task #4041) -- under
-# the server the require inside the module did not find C3870::B, so the row
-# passed on the unfixed tree.
+# The gate's transpile server serves that module transpile too: the runtime
+# hands it the program's @INC as `perl -I DIR pl2cl --module`, and since task
+# #4041 a SERVED request carries perl's -I list -- before it, the require
+# inside the module did not find C3870::B under the server, so this row ran
+# with `PCL_XSERVER=` (it passed on the unfixed tree otherwise).
 sub both_agree {
     my ($code, $desc) = @_;
     my $pl   = write_pl($code);
     my $perl = `perl $pl 2>&1 </dev/null`;
-    my $pcl  = `PCL_XSERVER= $pcl_bin $pl 2>&1 </dev/null`;
+    my $pcl  = `$pcl_bin $pl 2>&1 </dev/null`;
     is($pcl, $perl, "$desc (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
 }
 

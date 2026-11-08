@@ -171,6 +171,34 @@ PL
     is($sc, $pc, '... and so is its exit status');
     ok(length($so) > 100, 'the comparison was not two empty strings');
 
+    # THE -I LIST TRAVELS (task #4041).  The runtime transpiles a module as
+    # `perl -I DIR ... pl2cl --module -- FILE` under the inherited socket, and
+    # the request dropped perl's -I: XsA's `use XsB` -- a `use lib` sibling
+    # only DIR holds -- resolved from the SERVER's @INC, so pr() lost its ($)
+    # and the gate compiled XsA differently from a user (the detector row read
+    # "unknown").  perl 5.40.3: XsA::go() is "B:2", the ($) slot counts @a.
+    mkdir "$dir/xlib" or die "mkdir $dir/xlib: $!";
+    $write_pl->('xlib/XsB.pm', <<'PM');
+package XsB;
+use Exporter 'import';
+our @EXPORT = qw(pr);
+sub pr ($) { return "B:$_[0]" }
+1;
+PM
+    my $xsa = $write_pl->('xlib/XsA.pm', <<'PM');
+package XsA;
+use XsB;
+my @a = (5, 6);
+sub go { return pr(@a) }
+1;
+PM
+    my $xcmd = "perl -I $dir/xlib $pl2cl";
+    my ($mo) = $run->(cmd => $xcmd, args => "--module -- $xsa");
+    my ($mp) = $run->(cmd => $xcmd, args => "--module -- $xsa", spawn => 1);
+    is($mo, $mp, '#4041 a served module transpile keeps the caller\'s -I: byte-identical to the spawned one');
+    like($mo, qr/\("XsA" "pr" 4 "proto:\$"\)/,
+         '#4041 ... and the use-lib sibling\'s ($) prototype reached the call');
+
     # Without this row every comparison here could pass with the server never
     # used at all.
     ok($ENV{PCL_NO_SERVER} ? !defined $from_core

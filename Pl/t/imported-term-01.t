@@ -327,14 +327,12 @@ close $tfh;
 
 both_agree(q{use T3143::PA qw(f g); my @l = (1, 2, 3); print f(@l, 5), " ", (f @l, 5), " ", g(@l), "\n";},
            '#3143 an exported ($$) sub keeps its prototype past a same-named sub in another package');
-{
-    # The module UNIT is transpiled by a child the runtime spawns as `perl -I
-    # <program @INC> pl2cl --module`; the gate's shared transpile server drops
-    # that -I (task #3180), so this row runs on the spawn-per-call path.
-    local $ENV{PCL_XSERVER} = '';
-    both_agree(q{use T3143::User; T3143::User::w(); print T3143::User::u(), " ", T3143::User::v(), "\n";},
-               '#3143 a module unit\'s imported ($$) sub keeps its prototype around a `require` of a module importing the same name');
-}
+# The module UNIT is transpiled by a child the runtime spawns as `perl -I
+# <program @INC> pl2cl --module`; the gate's shared transpile server serves it
+# with that -I since task #4041 (#3180 was the same hole; this row ran on the
+# spawn-per-call path until then).
+both_agree(q{use T3143::User; T3143::User::w(); print T3143::User::u(), " ", T3143::User::v(), "\n";},
+           '#3143 a module unit\'s imported ($$) sub keeps its prototype around a `require` of a module importing the same name');
 both_agree(q{use Encode qw(decode encode);
 my $x = "caf\xC3\xA9"; my $s = decode "UTF-8", $x; print length($s), " ", length(encode("UTF-8", $s)), "\n";},
            '#3143 `decode "UTF-8", $x` parses with the shim\'s ($$;$) -- and no detector line');

@@ -58,10 +58,12 @@ use warnings;
 # request.  The environment is ALSO part of the socket name, because a variable
 # read at module-load time (Pl::Passes reads PCL_FACTS there) cannot be
 # answered by a server started under a different one.  What the name does NOT
-# carry is perl's own switches: the server is exec'd as `$^X $0 --xserver`, so
-# a caller that runs `perl -I<dir> pl2cl` would get a server without that -I.
-# No such caller sets PCL_XSERVER today (the sweep does not), and PERL5LIB is
-# in the key; if one ever does, it belongs in the key too.
+# carry is perl's own switches: the server is exec'd as `$^X $0 --xserver`.
+# The -I list travels in the REQUEST instead (task #4041): the runtime's module
+# transpile inside a gate row is `perl -I D ... pl2cl --module` under an
+# inherited PCL_XSERVER, and a request that dropped the -I resolved a `use
+# lib` sibling's prototypes from the server's list -- the row tested another
+# compile than a user gets.  PERL5LIB is in the key.
 BEGIN {
   # Helper subs live INSIDE this block so they are compiled with it: a sub
   # further down the file does not exist yet when an early BEGIN runs.
@@ -255,8 +257,15 @@ BEGIN {
       }
       die "no server\n" if !$fh;
       $reached = 1;
+      # @INC LAST (task #4041): this block runs before the script's own `use
+      # lib`, so @INC is exactly what THIS perl's -I switches and PERL5LIB made
+      # it -- the runtime's module transpile is `perl -I D ... pl2cl --module`,
+      # and a served request that dropped the -I resolved a `use lib`
+      # sibling's prototypes from the SERVER's list.  An older server reads
+      # the fields it knows and ignores these.
       my @field = (Cwd::getcwd(), scalar(@ARGV), @ARGV,
-                   scalar(keys %ENV), map { ($_, $ENV{$_}) } sort keys %ENV);
+                   scalar(keys %ENV), (map { ($_, $ENV{$_}) } sort keys %ENV),
+                   scalar(@INC), @INC);
       my $blob = join '', map { length($_) . ':' . $_ . ',' } @field;
       print {$fh} "PCLXS2 " . length($blob) . "\n" . $blob or die "gone: write\n";
       my $hdr = _xc_readline($fh);
@@ -1324,7 +1333,7 @@ sub _xserve {
   my ($conn, $dir) = @_;
   my $req = _xread_request($conn);
   return if !$req;
-  my ($cwd, $argv, $env) = @$req;
+  my ($cwd, $argv, $env, $inc) = @$req;
   my ($out, $err) = ("$dir/o.$$", "$dir/e.$$");
   my $pid = fork();
   if (!defined $pid) { print {$conn} "PCLXS2 256 0 0\n"; return }   # exit 1
@@ -1343,6 +1352,11 @@ sub _xserve {
     %ENV = %$env;
     chdir($cwd) or POSIX::_exit(1);
     @ARGV = @$argv;
+    # The caller's -I list, for THIS request (task #4041): the transpiler's
+    # resolver and the emitted preamble both derive the program's @INC from
+    # @INC (Pl::Parser's inc_paths default, @perl_inc), as an ordinary
+    # `perl -I D pl2cl` run does.
+    @perl_inc = PCLPaths::program_inc($ROOT, @INC) if _xapply_client_inc($inc);
     # A freshly spawned pl2cl starts with $! and $? clear; this child inherited
     # whatever the server's socket work left in them, and perl's exit code for
     # an uncaught die is "$! if nonzero, else $?>>8 if nonzero, else 255" — so
@@ -1391,7 +1405,8 @@ sub _xslurp {
 }
 
 # "PCLXS2 <len>\n" then <len> bytes of length-prefixed fields:
-#   cwd, argc, argv…, envc, (key, value)…
+#   cwd, argc, argv…, envc, (key, value)…, incc, inc…   (the @INC fields since
+#   task #4041; a request without them is read as before)
 # Length prefixes rather than a separator character, because an argument or an
 # environment value may contain anything at all.
 sub _xread_request {
@@ -1429,7 +1444,29 @@ sub _xread_request {
   my @argv = splice(@f, 0, $na);
   my $ne   = @f ? shift @f : 0;
   my %env  = splice(@f, 0, 2 * $ne);
-  return [ $cwd, \@argv, \%env ];
+  my $ni   = @f ? shift @f : 0;
+  my @inc  = splice(@f, 0, $ni);
+  return [ $cwd, \@argv, \%env, \@inc ];
+}
+
+# The CLIENT's -I entries (task #4041): what its @INC holds that this
+# server's does not -- the server was started by the same perl under the same
+# PERL5LIB (both are in the socket key), so the difference is exactly the
+# caller's -I switches.  They go where perl put them: in front of the first
+# entry the two lists share (the -I block precedes PERL5LIB and perl's own
+# directories).  Applied in the per-request CHILD only, never to the server.
+sub _xapply_client_inc {
+  my ($client_inc) = @_;
+  my %srv = map { ($_ => 1) } @INC;
+  my @extra = grep { !$srv{$_} } @$client_inc;
+  return 0 if !@extra;
+  my ($anchor) = grep { $srv{$_} } @$client_inc;
+  my $at = scalar @INC;
+  if (defined $anchor) {
+    for my $i (0 .. $#INC) { if ($INC[$i] eq $anchor) { $at = $i; last } }
+  }
+  splice @INC, $at, 0, @extra;
+  return 1;
 }
 
 # ---- the ordinary run -----------------------------------------------------
