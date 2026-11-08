@@ -2388,9 +2388,14 @@ package E; sub a { explain() } sub explain { "E" }   # E::a() is "E"
 **The file's own bodyless `sub NAME;` is `(p-declare-sub pl-NAME
 :forward)` (normative, s536b, #4561):** perl's forward declaration IS a stash
 entry -- a CV with no body -- so `keys %Pkg::` lists it, `exists &NAME` is
-true and `defined &NAME` false; the bare `(p-declare-sub pl-NAME)` (a
-cross-section call stub) and the `:body` pre-declaration of a later-defined
-sub stay HIDDEN from the stash view, as perl has no entry for them yet.  A
+true and `defined &NAME` false; the bare `(p-declare-sub pl-NAME)` (the
+section-head stub every forward declaration also gets, and the cross-section
+call stub) and the `:body` pre-declaration of a later-defined sub stay HIDDEN
+from the stash view, as perl has no entry for them yet.  The `:forward` form
+sits at the declaration's POSITION in the source-ordered compile stream, so a
+BEGIN / `use` written above it does not list it (#4583; the name still
+resolves from the section head).  `\&stub == \&stub`: one late-bound ref per
+name.  A
 glob given a late-bound reference to a stub (`*X = \&stub`) holds that stub:
 `exists &X` true, `defined &X` false until the target gets a body
 (`%p-lazy-stub-p`, the reading `defined &$code` shares).
