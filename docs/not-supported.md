@@ -610,6 +610,16 @@ diverge from Perl in several respects:
   OCTET COUNT so a program that uses the return value gets a number of the
   right shape, but a subsequent `is_utf8` still says 1 either way.
 
+  > **A MALFORMED string (s536d, task #4624).**  perl's lax `:utf8` input
+  > layer does not validate: invalid octets arrive as a utf8-flagged MALFORMED
+  > buffer (`length` counts by the lead byte, `utf8::valid` is false, every
+  > use warns "Malformed UTF-8 character").  A PCL string cannot be malformed,
+  > so each bad byte arrives as its own character (`"caf\xE9: x\n"` is 8
+  > characters in PCL, 6 in perl) and `utf8::valid` stays 1 -- YAML::Tiny's
+  > "invalid UTF-8 string" check (`is_utf8 && !valid`) cannot fire
+  > (YAML-Tiny t/11_read_string.t row 4).  Before s536d the whole read was
+  > LOST (undef).  The `:encoding(UTF-8)` layer is exact (perl's `\xHH`).
+
   > **Case mapping of chars 128-255 (s494u, task #2092; ir-spec §3.2h).**
   > perl maps them by REGIME.  Under `unicode_strings` (`use v5.12`+, `use
   > feature 'unicode_strings'`) every string gets Unicode rules — PCL is exact
@@ -1079,6 +1089,12 @@ alias — the box already in play is passed through:
   read-only callee never vivifies; the first write through `$_[N]`
   creates the key / extends the array).  Named subs, coderef calls
   (`$c->(...)`, `&$c(...)`), and method calls.
+- an ASSIGNMENT to an element (`f($h{k} = V)`, `f($a[i] .= "x")`,
+  `f($r->{k} = V)`, any assignment operator, parenthesised or not): the
+  element's box after the store -- perl's assignment returns its left side as
+  an lvalue (s536d, task #4622; a scalar-variable assignment `f($x = V)`
+  already passed its box).  Not yet: an assignment to a TIED hash element
+  (`f($t{k} = V)` passes a copy, #4644).
 
 **Plain `my` lexicals: CLOSED for KNOWN callees (task #189, s330).**  A sub
 whose body writes through `@_` is detected where the fact lives — the callee's

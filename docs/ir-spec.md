@@ -1301,7 +1301,7 @@ forced promotion of an oversized extent (F6) takes the same test.
 | `my $x = INIT;` (raw slot, §2.2) | `(let (($x INIT)) …rest…)` |
 | `my $i = $i + 1;` (self-ref init) | `(let (($i (p-box-init $i))) …)` — CL `let` inits evaluate in the *outer* environment, matching Perl's "RHS sees the outer variable" rule |
 | `my @a; my %h;` | `let` binding to a fresh vector / hash table |
-| an expression-embedded `my` (`open(my $fh, …)`, `f(my $t)`) — in a plain statement OR in a declaration's initializer (`my $l = X->n(my $t)`, #3431) OR in the modifier condition of a `return` / `next` / `last` (`return X if (my $t = f())->[0] eq 'r'`, #4304 -- before it the name was ONE package global shared by every sub that spelled it) | `(p-let (($t :box (make-p-box nil))) <the statement> …rest…)` — let-bound around the statement and the block remainder, so it is FRESH each time the block runs (each loop iteration).  A name the declaration mentions a second time keeps the older path (#3490) |
+| an expression-embedded `my` (`open(my $fh, …)`, `f(my $t)`) — in a plain statement OR in a declaration's initializer (`my $l = X->n(my $t)`, #3431) OR in the modifier condition of a `return` / `next` / `last` (`return X if (my $t = f())->[0] eq 'r'`, #4304 -- before it the name was ONE package global shared by every sub that spelled it) | `(p-let (($t :box (make-p-box nil))) <the statement> …rest…)` — let-bound around the statement and the block remainder, so it is FRESH each time the block runs (each loop iteration).  A name the declaration mentions a second time keeps the older path (#3490).  A SCALAR declaration's CHAINED declarator (`my $c = my $d = EXPR`) is one of these (s536d, #4544): `$d` is fresh per execution, and a named sub capturing it is promoted like any other.  An embedded `my` whose name is a lexical of an ENCLOSING scope declares a NEW variable (normative, s536d, #4625 / #3493: `my $in = ""; { my $l = L->new(my $in) }` hands `L->new` an undef `$in`, the outer one stays `""`) -- except when the statement also reads that outer name (`chomp(my @env = grep {…} @env)`), which keeps the outer variable (#4642) |
 | `our $g = V;` | `(p-defcell $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place (`defvar` instead for an exception-set name). `our` shadowing a `my` gates to v1 |
 | `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(p-defcell $n__state__K (make-p-box nil))` + raw once-flag `(p-defcell $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
 | undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
@@ -2637,6 +2637,18 @@ a lexical handed to a callee the scan cannot identify (coderef call,
 method dispatch, cross-file sub — the runtime's "Cannot modify non-boxed
 value" warning is the backstop there) and deref-element args
 (`f($ref->{k})`).  See `docs/not-supported.md` §`@_` argument aliasing.
+
+**An ASSIGNMENT to an element in an argument slot passes the ELEMENT (normative,
+s536d, task #4622):** perl's assignment returns its left side as an lvalue, so
+`f($h{k} = V)` / `f($a[i] .= V)` / `f($r->{k} = V)` -- any assignment operator,
+parenthesised or not, to a user sub by name, method or coderef -- hands `@_`
+the element itself: the argument is generated in lvalue context, its place is
+the element's box (`(p-setf (p-gethash-box %h "k") V)` answers that box), the
+same fact #4303 gives `=~ s///` and `OP=`.  ONE predicate,
+`ExprToCL::_user_arg_lvalue_context`, answers for the three call shapes (an
+element: its argbox; an element assignment: the box).  Example: `sub s { $_[0]
+= "a" } my %h; s($h{k} = "o")` leaves `$h{k}` = `a`.  Residue: a TIED hash
+element (#4644).
 
 **A `$` prototype slot does not copy (normative, s513a, task #2860):** a `$`
 prototype slot imposes scalar context on the argument EXPRESSION; a scalar
@@ -4776,6 +4788,20 @@ octets and does not warn.  A host without an SV flag reads that rule as **"does
 any character exceed 255"**, which agrees with perl on every probed shape.
 `syswrite` is the exception: perl makes it FATAL (`Wide character in syswrite`,
 trappable) because an unbuffered write has nowhere to put the upgrade.
+
+**A MALFORMED input sequence is answered, never a lost read (normative, s536d,
+task #4624).**  Every reader of a decoding handle -- readline (each `$/` mode,
+list context, slurp), `read`, `getc`, `eof` -- runs inside
+`%p-with-input-decoding`: SBCL's stream-decoding-error is answered one BYTE at
+a time (its `use-value` restart; `input-replacement` would resync and drop the
+stray continuation bytes).  Under an `:encoding(...)` layer the byte becomes
+perl's PERLQQ text `\xHH` and a character cut off by END OF FILE is dropped
+(perl's STOP_AT_PARTIAL) -- PCL's text is perl's (the warning is
+warnings-gated, #221); under the lax `:utf8` layer the byte is its own
+character.  perl's lax read keeps the octets in a MALFORMED buffer (`length`
+counts by the lead byte's skip, `utf8::valid` is false); a PCL string cannot
+be malformed (#1389), so that buffer is approximated, never lost.  Example:
+`"a\xE9b\n"` through `:encoding(UTF-8)` reads `a\xE9b\n` (7 characters).
 
 **`PerlIO::get_layers FH` answers the layers PCL APPLIES, and nothing it does
 not** (s521b, task #3326 = #139 part (b), ruled s521): bottom first, the base
