@@ -7,7 +7,10 @@ unset the binder module is not even loaded, and with it set nothing reads its
 answers -- each hook compares, the legacy verdict is what the resolver returns.
 **Since s533b (1c port 1, §6 item 1) the binder is built in PRODUCTION and the
 block-package requalifier reads it; the `binding_at` hook is gone and
-`PCL_BINDER_CHECK` arms the two remaining hooks only.**
+`PCL_BINDER_CHECK` arms the two remaining hooks only.  Since s535a (1c port
+3, §6 item 3) NO dual-run hook is left: the span pass and every rename pass's
+shadow test read the binder, and `PCL_BINDER_CHECK=log` logs only the
+measurement rows (S build / R rebuild / C query counts / E errors).**
 
 | file | what it is |
 |---|---|
@@ -248,6 +251,41 @@ tree).
    (:3003), `_loop_scope_of` (:7659), the bare-name `%spanning` text
    pre-filter (which is how write.t's `%e` made `$e` a candidate); rename
    reason `__file__` (:spanning).  Under it: **#3803**.
+   **DONE (s535a, the commits "s535a D1" + "s535a D2", 2026-11-08; generation
+   v2-12000).**  The span pass asks the binder: `Pl::Binder::spans` answers
+   which my/state bindings have a use (or, under port 2's string-eval rule,
+   a literal text) in a later segment -- every declarator a binding of its
+   own, so a chained `my $S = my $F` (#4425) and an expression-embedded
+   `open my $fh` span too; a span made only of possible (text) uses promotes
+   but never refuses.  The renamer promotes each and rewrites exactly the
+   binding's uses (`refers_to_decl`); a use the rewrite missed dies (rule
+   12); the checker dies for a spanning binding left unpromoted; the flatten
+   refusal asks `binding_after` / `uses_of`.  Every rename pass's shadow test
+   (the promoter's, `_rename_decl_within`'s, the state prepass's with a
+   binder of its own document) asks `refers_to_decl`, so `_ref_shadowed` --
+   the LAST dual-run hook -- is gone, and with it the D rows.  D0 compared
+   the consumer's FINAL answer (the emission, switch on vs off over 3,263
+   files): 14 predicted rows; the actual vs `06a4b8ba` matched in both
+   directions, plus the D2-only `our` diffs (#475) and #3961's base flip.
+   The sweep found what the D0 reading missed: two blessed scalar.t rows
+   that were the embedded-`my` span bug (mis-caused #1446) and an eval.t row
+   that was the legacy over-promotion (#1455's instance).  Deleted:
+   `_ref_shadowed`, `_ref_shadowed_0`, `_stmt_binding`, `_stmt_declares_canon`,
+   `_signature_binds`, `_signature_left_params`, `_symbol_is_signature_param`,
+   `_canon_refs_in`, `_collect_lexical_canon`, `_lex_referenced_after`, the
+   `%spanning` text pre-filter, `%pre_my` (Parser2); `check()`,
+   `_q_ref_shadowed`, `_pass_name`, `_invert`, `_binding_cur`,
+   `PCL_BINDER_INJECT` (Binder).  STAY (other readers, so not retired as
+   this item guessed): `_flattenable_pkg_block` (the segment builder's
+   flatten decision -- its loop asks about loop-control targets, not
+   bindings), `_loop_scope_of` (loop control), `_pkg_in_effect_at` /
+   `_pkg_stmt_in_effect_at` / `_pkg_region_at` (PExpr's sort pair, the `our`
+   rename).  Beside it (same family, the requalifier): #4421 #4440 #4422
+   #475.  Found: #4546 (fixed: the promoter's rewrite renamed a C-style
+   `for (my $i ...)` in a sub -- core Math::Complex::root), #4541 #4543
+   #4544 #4545 #4547 (filed).  Port 4 asks for a dual-run point at
+   `_rename_decl_within` first; the hook machinery left with this port, so
+   port 4 adds its own if it wants one (the S/R/C/E log stays).
 4. **state / cond / shadow / emb / exception** (`_rename_state_vars` :9357,
    `_state_rewrite_routes` :9210, `_rename_exception_mys` :9471,
    `_gate_seam_my_shadow` :15234, `_cond_mys_closure_captured` :12853,
