@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536b (Opus 5.5, 2026-11-08) from a #4521 probe.  PRE-EXISTING on main 0affbe86 and c950ad43 (SILENT WRONG).\n\nREPRODUCER (scratch/s536b/p/u3.pl in the s536b worktree; perl 5.40.3):\n\n    package Q::FS; use parent \"File::Spec\";\n    package main; print Q::FS->catfile(\"a\", \"b\"), \" \", File::Spec->catfile(\"a\",\"b\"), \"\\n\";\n\nperl: `a/b a/b`.   PCL: `Q::FS/a/b a/b`.\n\nMECHANISM: lib/File/Spec.pm (PCL's shim) decides whether its first argument is the invocant with `shift if @_ > 0 && !ref($_[0]) && $_[0] eq 'File::Spec'` (catfile line 42; the sibling methods are likely the same).  perl's File::Spec is File::Spec::Unix, whose methods ALWAYS shift self (they are only ever called as methods), so any subclass invocant -- `use parent 'File::Spec'`, File::Spec::Unix, an object -- is the invocant.  Layer: the lib/ shim (rule 9a).  Fix shape: shift the invocant when it is a class name that ->isa('File::Spec') (or always, if the function form `File::Spec::catfile(...)` is not a supported spelling -- check lib/File/Spec/Functions.pm, which calls File::Spec->catfile(@_)).\nBAR: the reproducer; every method of the shim with the same test; a guard row.\n",
+   "id" : "4582",
+   "status" : "pending",
+   "subject" : "lib/File/Spec.pm shim: a SUBCLASS invocant is not shifted -- `package Q::FS; use parent \"File::Spec\"; Q::FS->catfile(\"a\", \"b\")` answers \"Q::FS/a/b\" (perl: \"a/b\"); the shim's invocant test is `$_[0] eq 'File::Spec'`"
+}

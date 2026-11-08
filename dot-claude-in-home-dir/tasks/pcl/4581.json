@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536b (Opus 5.5, 2026-11-08) while fixing #4309.  PRE-EXISTING on main 0affbe86 and c950ad43.\n\nREPRODUCER (scratch/s536b/p/f2.pl in the s536b worktree; perl 5.40.3):\n\n    my @a = (\"XYZ\"); my %h = (k => \"hQC\");\n    for my $c (substr($a[0], 0, 1), substr($h{k}, 0, 1)) { $c = lc $c } print \"8 $a[0] $h{k}\\n\";\n    my $s = \"AB\"; my $t = \"CD\"; for (substr($s,0,1), substr($t,1)) { $_ = \"z\" } print \"$s $t\\n\";\n\nperl: `8 xYZ hQC` / `zB Cz`.   PCL (base and tree): `8 XYZ hQC` / `AB CD` -- no error, the writes vanish.\n\nMECHANISM (read, not fixed): the k>1 foreach path in Parser2 (_lower_foreach_stmt, `my @el = Pl::Parser::_foreach_scalar_elements(...)`) takes per-element alias verdicts only when EVERY element is a single-scalar operand; a substr / pos / vec CALL element is not one, so the whole list goes through the run-time flattener and each window is a copied value.  The single-element case aliases since #4308 / #4309 (_magic_lvalue_call_head + _alias_box_form -> ExprToCL::_write_through_form).  Shape of a fix: let _foreach_scalar_elements accept a magic-lvalue call element (the same predicate, _magic_lvalue_call_head), so each element is lowered once and swapped by _alias_box_form -- the k=1 rule IS the k=k rule (s369).  Probe the mixed list `for ($x, substr($s,0,1), @a)` too (stays on the flattener; @a's elements alias there).\nBAR: the reproducer; a guard row beside #4309's in Pl/t/lvalue-ref-01.t.\n",
+   "id" : "4581",
+   "status" : "pending",
+   "subject" : "A foreach list of SEVERAL magic-lvalue calls -- `for (substr($s,0,1), substr($t,1)) { $_ = \"z\" }` -- does not alias them: the writes are lost (SILENT WRONG; perl writes both)"
+}

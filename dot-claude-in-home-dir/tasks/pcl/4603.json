@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536c (Opus 5.5, 2026-11-08) while building #1611's guard rows.  PRE-EXISTING (c950ad43); #1611 kept the keyword half of the call-site rule unchanged on purpose.\n\n`Pl::PExpr::Config::is_core_keyword` asks `prototype(\"CORE::NAME\")`, which answers for `say`, `fc`, `isa`, `evalbytes`, `break`, `__SUB__` ... whether or not the FEATURE that makes them keywords is in force at the call site.  Without `use feature 'say'` (or a `use v5.10`+ bundle) `say` is an ordinary identifier in perl, so a user sub of that name is called:\n\n    sub say { print \"MYSAY(@_)\\n\" } say(\"x\");\n    sub fc  { \"MYFC(@_)\" }  print fc(\"AB\"), \"\\n\";\n    sub isa { \"MYISA(@_)\" } print isa(1,2), \"\\n\";\n      perl 5.40.3:  MYSAY(x) / MYFC(AB) / MYISA(1 2)\n      PCL:          x / ab / (an empty line)\n\nFIX SHAPE (not built): the keyword answer for a feature-gated name must also ask whether the feature is enabled at the site -- the lexical feature state Parser2 already tracks for `signatures` / `try` (`_signatures_enabled_at`'s scope walk, #455) is the reading to reuse, not a second one.  The set of gated names is perl's own (`feature.pm`'s `%feature`), measured from the running perl like `is_core_keyword`, never listed.  Both the call-site naming (`Pl::ExprToCL::source_call_is_builtin`) and the parse (PExpr's arity table) read it.\n",
+   "id" : "4603",
+   "status" : "pending",
+   "subject" : "A user sub named like a FEATURE-GATED keyword (`say`, `fc`, `isa`, ...) is never called without the feature: `sub say {...} say(\"x\")` prints x, `sub fc` lowercases, `sub isa {...} isa(1,2)` prints nothing (silent wrong)"
+}
