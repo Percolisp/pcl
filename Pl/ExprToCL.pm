@@ -2382,6 +2382,21 @@ sub _is_elem_arg {
       && ($an->{type} eq 'a_acc' || $an->{type} eq 'h_acc');
 }
 
+# THE lvalue context an argument of a USER SUB is generated in -- the named
+# call, the method call and the coderef call ask this one question: an
+# ELEMENT is passed as its lazy argbox (perl's defelem, #131), an ASSIGNMENT
+# to an element (`f($h{k} = V)`, `f($a[0] .= "x")`, `f($r->{k} = V)`,
+# parenthesised or not) as the element's BOX -- perl's assignment returns its
+# left side as an LVALUE, so a write through `$_[0]` in the callee lands in
+# the element (#4622; the same fact #4303 routes for `=~ s///` and `OP=`).
+# A scalar-variable assignment already answers its box.  Anything else: $else.
+sub _user_arg_lvalue_context {
+  my ($self, $kid_id, $else) = @_;
+  return 'argbox' if $self->_is_elem_arg($kid_id);
+  return 1 if $self->_elem_assign_target_p($kid_id);
+  return $else;
+}
+
 # A SCALAR assignment used as an argument (`f(my $c = $x)`, `f($n .= "x")`):
 # its value is the assigned scalar LVALUE, which a user sub's @_ aliases.  An
 # `=` whose target is a list / array / hash is a list assignment (a COUNT in
@@ -3301,12 +3316,14 @@ sub gen_funcall_form {
 
     my $saved_lvalue = $self->lvalue_context;
     # An ELEMENT argument of a USER SUB is passed as its lazy argbox -- the
-    # @_ alias, perl's defelem.  Decided ONCE: the imposed-scalar wrap below
-    # asks the same answer (#2860).
-    my $elem_argbox = !$needs_lvalue && index($cl_func, 'pl-') >= 0
-                      && $self->_is_elem_arg($kids->[$i]);
-    if    ($needs_lvalue) { $self->lvalue_context(1) }
-    elsif ($elem_argbox)  { $self->lvalue_context('argbox') }
+    # @_ alias, perl's defelem; an element ASSIGNMENT as the element's box
+    # (#4622).  Decided ONCE: the imposed-scalar wrap below asks the same
+    # answer (#2860).
+    my $arg_lv = (!$needs_lvalue && index($cl_func, 'pl-') >= 0)
+               ? $self->_user_arg_lvalue_context($kids->[$i], undef) : undef;
+    my $elem_argbox = defined $arg_lv && $arg_lv eq 'argbox';
+    if    ($needs_lvalue)   { $self->lvalue_context(1) }
+    elsif (defined $arg_lv) { $self->lvalue_context($arg_lv) }
     my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
     # A SLICE argument of a USER SUB vivifies its missing slots (task #1010) —
@@ -4004,12 +4021,12 @@ sub gen_methodcall_form {
   }
 
   # --- arguments ---
-  # Method args alias through @_ like any user-sub call (defelem, #131);
-  # 'argbox' only when the arg itself is an element access.
+  # Method args alias through @_ like any user-sub call (defelem, #131; an
+  # element assignment, #4622): _user_arg_lvalue_context.
   my $saved_lvalue_mc = $self->lvalue_context;
   my @args = map {
     $self->lvalue_context(
-      $self->_is_elem_arg($kids->[$_]) ? 'argbox' : $saved_lvalue_mc);
+      $self->_user_arg_lvalue_context($kids->[$_], $saved_lvalue_mc));
     # a SLICE argument vivifies instead — task #1010, the other half
     $self->_alias_slice_arg($kids->[$_], $self->gen_node_form($kids->[$_]));
   } 2 .. $#$kids;
@@ -4056,12 +4073,12 @@ sub gen_ref_funcall_form {
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
   # A coderef call is always user code — element args alias through @_
-  # (defelem, #131), same as the named-user-sub tail in gen_funcall_form;
-  # 'argbox' only when the arg itself is an element access.
+  # (defelem, #131; an element assignment, #4622), same as the named-user-sub
+  # tail in gen_funcall_form: _user_arg_lvalue_context.
   my $saved_lvalue = $self->lvalue_context;
   my @args = map {
     $self->lvalue_context(
-      $self->_is_elem_arg($kids->[$_]) ? 'argbox' : $saved_lvalue);
+      $self->_user_arg_lvalue_context($kids->[$_], $saved_lvalue));
     # a SLICE argument vivifies instead — task #1010, the other half
     $self->_alias_slice_arg($kids->[$_], $self->gen_node_form($kids->[$_]));
   } 1 .. $#$kids;
