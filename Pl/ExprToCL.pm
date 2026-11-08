@@ -2443,6 +2443,23 @@ sub _scalar_lvalue_node_p {
   return (ref($c) eq 'PPI::Token::Cast' && $c->content eq '$') ? 1 : 0;
 }
 
+# The AGGREGATE kind of a builtin's FIRST prototype slot, as `&CORE::NAME`
+# reads it (#4383): 'array' for `\@` (`;\@` -- pop / shift), 'hash' for `\%`,
+# 'aggr' for `\[%@]` / `\[@%]`; undef for anything else.  Perl's own answer
+# (`prototype("CORE::NAME")`, the authority Pl::PExpr::Config reads), never a
+# hand list; only the leading slot -- every builtin with an aggregate slot
+# has it first.
+sub _core_amp_aggr_kind {
+  my ($name) = @_;
+  (my $bare = $name // '') =~ s/\ACORE:://;
+  my $p = eval { prototype("CORE::$bare") };
+  return undef unless defined $p;
+  return 'array' if $p =~ /\A;?\\\@/;
+  return 'hash'  if $p =~ /\A;?\\%/;
+  return 'aggr'  if $p =~ /\A;?\\\[(?:%\@|\@%)\]/;
+  return undef;
+}
+
 sub _user_arg_lvalue_context {
   my ($self, $kid_id, $else) = @_;
   return 'argbox' if $self->_is_elem_arg($kid_id);
@@ -3455,6 +3472,18 @@ sub gen_funcall_form {
       }
     }
     push @args, $arg;
+  }
+
+  # `&CORE::NAME(REF, ...)` follows the builtin's PROTOTYPE (perldoc CORE): an
+  # aggregate first slot (`\@` push / unshift / splice / pop / shift, `\[%@]`
+  # keys / values / each) takes the aggregate as a REFERENCE, which the
+  # runtime checks and dereferences -- the plain call took the reference as
+  # the array and died "Experimental push on scalar" or a raw type error
+  # (#4383).  The arity half is #1577's.
+  if ($node->{amp_core} && @args) {
+    my $kind = _core_amp_aggr_kind($func_name);
+    (my $bare = $func_name) =~ s/\ACORE:://;
+    $args[0] = ['p-core-amp-aggr', $args[0], qq{"$bare"}, ":$kind"] if $kind;
   }
 
   # Bare print/say/printf defaults to $_ (a `:fh …` marker is not a list

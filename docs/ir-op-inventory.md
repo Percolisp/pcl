@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **768**
+* names exported: **769**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 768
+* with a machine-readable `Contract:` tail: **71** of 769
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -955,7 +955,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-alias-hash-target` | function | `(ref)` | — | — | — | — | — | — | — |
 | `p-alias-scalar-target` | function | `(ref)` | — | — | — | — | — | — | — |
 
-## reference (22)
+## reference (23)
 
 *No ir-spec §10 row.*  reference construction, deref casts, lvalue cells — ir-spec §2.5
 
@@ -972,6 +972,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-cast-$` | function | `(val &optional site)` | — | — | — | — | — | — | — |
 | `p-cast-%` | function | `(val &optional site)` | — | — | — | — | — | — | — |
 | `p-cast-@` | function | `(val &optional site)` | — | — | — | — | — | — | — |
+| `p-core-amp-aggr` | function | `(ref name kind)` | — | — | — | — | — | — | — |
 | `p-get-coderef` | function | `(name-val)` | — | — | — | — | — | — | — |
 | `p-isweak` | function | `(ref)` | — | — | — | — | — | — | — |
 | `p-pos-lvalue-cell` | function | `(var)` | — | — | — | — | — | — | — |

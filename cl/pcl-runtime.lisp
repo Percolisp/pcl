@@ -322,6 +322,7 @@
    #:p-join #:p-split #:p-funcall-ref #:p-bareword-value
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$ #:p-cast-$-box
+   #:p-core-amp-aggr          ; `&CORE::push(\@a, ...)` -- an aggregate REF slot (#4383)
    #:p-symref-site           ; the `symref-const' emission's per-site cache
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
@@ -32004,6 +32005,30 @@ would consume, so it dies naming the stream (rule 12)."
       ;; %$scalarref — see p-ensure-hashref's arm (#163's referent rule).
       ((%p-scalar-referent-p val) (%p-not-a-ref "HASH"))
       (t v))))
+
+(defun p-core-amp-aggr (ref name kind)
+  "The FIRST argument of `&CORE::NAME(REF, ...)' when the builtin's prototype
+   slot there is an AGGREGATE (perldoc CORE: `&CORE::push(\\@a, 1)'): REF must
+   be a reference to that kind -- KIND :array (`\\@'), :hash (`\\%') or :aggr
+   (`\\[%@]') -- and the answer is the container it references, which the
+   builtin then reads as it reads `@$r' / `%$r'.  Anything else is perl's
+   fatal \"Type of arg 1 to &CORE::NAME must be ... reference\" (#4383)."
+  ;; A RAW vector / table here is an aggregate SPREAD into the argument list
+  ;; (`&CORE::push(@a, 1)'): its first element is the argument, never a
+  ;; reference to it -- perl dies on that shape (its first element is not a
+  ;; reference; the rare one that is would be the target there).
+  (let ((rt (if (or (and (vectorp ref) (not (stringp ref)))
+                    (hash-table-p ref) (%p-hash-marker-p ref))
+                nil
+                (p-reftype ref))))
+    (cond
+      ((and (equal rt "ARRAY") (member kind '(:array :aggr))) (p-cast-@ ref))
+      ((and (equal rt "HASH") (member kind '(:hash :aggr))) (p-cast-% ref))
+      (t (p-die (format nil "Type of arg 1 to &CORE::~A must be ~A reference"
+                        name (ecase kind
+                               (:array "array")
+                               (:hash "hash")
+                               (:aggr "hash or array"))))))))
 
 (defun %p-cast-%-symbolic (name site)
   "p-cast-%'s symbolic arm: a name ending in \"::\" is a STASH reference

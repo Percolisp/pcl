@@ -277,7 +277,7 @@ my %FAMILY;
                      p-backslash-list p-arylen-ref p-substr-ref p-pos-ref
                      p-vec-ref p-substr-lvalue-cell p-pos-lvalue-cell
                      p-vec-lvalue-cell p-arylen-lvalue-cell p-refgen-list
-                     p-box-for-local p-get-coderef p-cast-@ p-cast-% p-cast-$
+                     p-box-for-local p-get-coderef p-cast-@ p-cast-% p-cast-$ p-core-amp-aggr
                      p-weaken p-isweak)],
   'introspection' => [qw(p-ref p-reftype p-bless p-caller p-can p-isa
                          p-prototype p-__pcl_set_prototype p-stash p-sub-exists

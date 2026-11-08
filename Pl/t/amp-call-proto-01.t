@@ -52,6 +52,25 @@ print eval { &CORE::ucfirst(1,2); 1 } ? "nodie" : "die", "\n";
 my @u = &CORE::ucfirst("q"); print scalar(@u), " ", &CORE::ucfirst("ab"), "\n";
 sub f ($) { scalar(@_) } my @two = (1, 2); print "f:", &f(@two), " ", &f(1, 2), "\n";
 }],
+  # #4383 (s536f): `&CORE::NAME(REF, ...)` follows the builtin's prototype --
+  # an aggregate first slot (`\@` push / unshift / splice / pop / shift,
+  # `\[%@]` keys / values / each) takes a REFERENCE; anything else dies perl's
+  # "Type of arg 1 ..." (push died "Experimental push on scalar", unshift
+  # with a raw Lisp type error).  `\&CORE::push` as a code ref is #1577's.
+  ['core-amp-aggr', q{
+my @st = (1, 2);
+my $n = &CORE::push(\@st, 3); print "1 $n @st\n";
+$n = &CORE::unshift(\@st, 0); print "2 $n @st\n";
+my $p = &CORE::pop(\@st); my $s = &CORE::shift(\@st); print "3 $p $s @st\n";
+my @sp = &CORE::splice(\@st, 0, 1, 9, 8); print "4 @sp | @st\n";
+my %h = (a => 1, b => 2);
+print "5 ", join(",", sort(&CORE::keys(\%h))), " ", join(",", sort(&CORE::values(\%h))), " ", join(",", &CORE::keys(\@st)), "\n";
+my @e = &CORE::each(\%h); print "6 ", scalar(@e), "\n";
+for my $c (sub { &CORE::push(\%h, 1) }, sub { &CORE::push(@st, 1) }, sub { &CORE::keys(\"s") }, sub { &CORE::pop(1) }) {
+  eval { $c->() }; print "7 ", ($@ =~ /^(Type of arg 1 to &CORE::\w+ must be [\w ]+ reference)/ ? $1 : "no: $@"), "\n";
+}
+print "8 @st\n";
+}],
   ['context', q{
 sub L { return (7,8) }
 sub g ($) { print "g [@_]\n" }
