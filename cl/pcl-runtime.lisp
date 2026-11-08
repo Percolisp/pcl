@@ -34488,9 +34488,16 @@ would consume, so it dies naming the stream (rule 12)."
         ((string= slot-s "CODE")
          (let ((sym (find-sym "PL-")))
            (when (%p-live-sub-p sym) (make-p-box (fdefinition sym)))))
+        ;; A glob's SCALAR slot always EXISTS in perl: `*x{SCALAR}` is a
+        ;; reference to the (possibly undef) package scalar, created on
+        ;; demand as gv_fetchpv's GV_ADD makes the SV slot -- for a name
+        ;; nothing used, and for a gensym glob (#4604: YAML::PP's
+        ;; represent_glob derefs it).  ARRAY / HASH / CODE stay undef until
+        ;; used, as in perl.
         ((string= slot-s "SCALAR")
          (let ((sym (find-sym "$")))
-           (when (boundp sym) (make-p-box (symbol-value sym)))))
+           (unless (boundp sym) (setf (symbol-value sym) (make-p-box nil)))
+           (make-p-box (symbol-value sym))))
         ;; ARRAY/HASH return \@foo / \%foo — a reference (box containing the
         ;; vector / hash-table).  A slot a glob CLEAR removed reads as ABSENT
         ;; while its container is still the registered empty one (task #1117):

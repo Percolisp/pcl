@@ -59,7 +59,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub write_pl {
     my ($code) = @_;
@@ -194,4 +194,20 @@ my $h = *gso_x{HASH}; print $h->{a}, "\n";
 print *gso_x{HASH}{a}, " ", *gso_x{ARRAY}[1], " ", ${*gso_x{HASH}}{a}, "\n";
 sub gso_f { 42 } my $c = *main::gso_f{CODE}; print $c->(), "\n";
 print defined(*gso_x{CODE}) ? "def\n" : "undef\n";
+PL
+
+# ---- #4604 (s536g): a glob's SCALAR slot always EXISTS -- `*x{SCALAR}` is a
+# reference to the (possibly undef) package scalar, made on demand, for a name
+# nothing used and for a gensym / lexical-handle glob; ARRAY / HASH / CODE stay
+# undef until used.  It answered undef, and YAML::PP's represent_glob died
+# dereferencing it (54.glob.t `ioscalar`).
+
+both_agree(<<'PL', '#4604 *NAME{SCALAR} of an unused name, a gensym and a handle glob is a SCALAR ref');
+use Symbol;
+our $gso_s;
+print "1 ", ref(*{\*main::gso_s}{SCALAR}), " ", ref(*{\*main::gso_never}{SCALAR}), " ", ref(*main::gso_none{SCALAR}), "\n";
+my $g = gensym; my $v = *{$g}{SCALAR}; print "2 ", ref($v), " [", (defined $$v ? $$v : "undef"), "]\n";
+print "3 [", join("][", map { defined *main::gso_empty{$_} ? "def" : "undef" } qw(ARRAY HASH CODE)), "]\n";
+my $s = *main::gso_fresh{SCALAR}; $$s = 9; print "4 ", ${"main::gso_fresh"}, " ", (*main::gso_same{SCALAR} == *main::gso_same{SCALAR} ? "same" : "diff"), "\n";
+open my $fh, "<", "/etc/passwd" or die; print "5 ", ref(*$fh{SCALAR}), " ", ref(*STDOUT{SCALAR}), "\n";
 PL
