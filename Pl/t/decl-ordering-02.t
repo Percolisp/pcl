@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 32;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -474,5 +474,32 @@ BEGIN { my $x = 5; package Q; print Q->can("qf") ? "qcan\n" : "qcannot\n"; sub q
 print P->orig, " ", Q->qf, "\n";
 BEGIN { print main->can("later") ? "can2\n" : "cannot2\n"; } sub later { 1 }
 PL
+
+# ---- #4561 (s536b, Role-Tiny stub.t / role-tiny-with.t): a perl forward
+# declaration `sub NAME;` IS a stash entry with no body -- listed by `keys
+# %Pkg::` (PCL's pre-declarations of LATER-defined subs stay hidden, the
+# invariant above), exists and not defined; `*X = \&stub` gives X that stub
+# (exists, not defined until the target gets a body).
+both_agree('#4561 a forward declaration is a bodyless stash entry; a glob given \\&stub holds a stub', <<'PL');
+package CW;
+sub stubsub;
+sub later { 1 }
+sub laterdef;
+sub laterdef { 2 }
+package main;
+no strict 'refs';
+print "keys: ", join(" ", sort grep !/::$/, keys %{"CW::"}), "\n";
+print "exists stub: ", (exists &CW::stubsub ? 1 : 0), " defined: ", (defined &CW::stubsub ? 1 : 0), "\n";
+*{"D::copy"} = \&CW::stubsub;
+my $code = \&{"CW::stubsub"}; *{"E::copy2"} = $code;
+print "D: ", (exists &D::copy ? 1 : 0), (defined &D::copy ? 1 : 0), " E: ", (exists &E::copy2 ? 1 : 0), (defined &E::copy2 ? 1 : 0), " c: ", (defined &$code ? 1 : 0), "\n";
+print "Dkeys: ", join(" ", sort grep !/::$/, keys %{"D::"}), "\n";
+*{"F::real"} = \&CW::later; print "F: ", (exists &F::real ? 1 : 0), (defined &F::real ? 1 : 0), "\n";
+my $r = eval { D::copy(); 1 } ? "lived" : ($@ =~ /^(Undefined subroutine &CW::stubsub called)/)[0];
+print "callD: $r\n";
+eval 'package CW; sub stubsub { "now" } 1' or die $@;
+print "after: ", CW::stubsub(), " ", D::copy(), " ", (defined &D::copy ? 1 : 0), (defined &$code ? 1 : 0), "\n";
+PL
+
 
 done_testing();
