@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -411,3 +411,48 @@ is(run_cl(<<'PL'), "0\n0\n0\n0\n0\n0\n0\n0\n1\n0\n", '#1010 NEGATIVE: a slice in
 { my @a=(1); my @c = @a[0,3];                    print scalar(@a), "\n"; }
 { my %h=(a=>1); my $n = @h{'a','zz'};            print +(exists $h{zz}?1:0), "\n"; }
 PL
+
+# #4283 (s536i): an element CHAIN in a LAZY element slot -- a user sub's
+# argument (perl's defelem) or a //g match target -- vivifies every level
+# ABOVE the last and defers only the last: `f($d->[0]{a}{b})` leaves $d as
+# [{a => {}}] and passes one undef.  The containers were generated as lazy
+# cells too, so the outer accessor got a defelem and SBCL's gethash died on NIL
+# (YAML-PP t/32.cyclic-refs.t, `is($data->[0]->{link}->{link}, undef)`).  The
+# dumper reads without vivifying.  Expected text probed under perl 5.40.3.
+is(run_cl(<<'PL'), <<'OUT', '#4283 an element chain in an argument / match-target slot vivifies every level above the last');
+sub dd { my $v = shift; return 'undef' unless defined $v;
+  return '[' . join(',', map { dd($_) } @$v) . ']' if ref $v eq 'ARRAY';
+  return '{' . join(',', map { "$_=>" . dd($v->{$_}) } sort keys %$v) . '}' if ref $v eq 'HASH';
+  return "'$v'" }
+sub f { print scalar(@_), defined $_[0] ? "d" : "u", " " }
+my $d; f($d->[0]{a}{b}); print "1 ", dd($d), "\n";
+my $e; f($e->[0]->{a});  print "2 ", dd($e), "\n";
+my $g; f($g->{a}{b});    print "3 ", dd($g), "\n";
+my %n; f($n{a}{b});      print "4 ", dd(\%n), "\n";
+my @o; f($o[2][1]);      print "5 ", dd(\@o), "\n";
+my $p; f($$p{a}{b});     print "6 ", dd($p), "\n";
+my $q = {}; f($q->{x}[0]{y}); print "7 ", dd($q), "\n";
+sub st { $_[0] = "S" }
+my $k; st($k->[0]->{a}->{b}); print "8 ", dd($k), "\n";
+my @r; st($r[0]{a}); print "9 ", dd(\@r), "\n";
+my $u; f(@{$u->{a}}); print "10 ", dd($u), "\n";
+my $m; $m->{a}{b} =~ /x/g; print "11 ", dd($m), "\n";
+my %h = (a => {b => "xx"}); $h{a}{b} =~ /x/g; print "12 ", pos($h{a}{b}), "\n";
+my @a; $a[1]{k} =~ /x/g; print "13 ", dd(\@a), "\n";
+my $t; print "14 ", f($t->[1][2]), " ", dd($t), "\n";
+PL
+1u 1 [{a=>{}}]
+1u 2 [{}]
+1u 3 {a=>{}}
+1u 4 {a=>{}}
+1u 5 [undef,undef,[]]
+1u 6 {a=>{}}
+1u 7 {x=>[{}]}
+8 [{a=>{b=>'S'}}]
+9 [{a=>'S'}]
+0u 10 {a=>[]}
+11 {a=>{}}
+12 1
+13 [undef,{}]
+1u 14 1 [undef,[]]
+OUT

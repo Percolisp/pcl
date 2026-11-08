@@ -2334,6 +2334,24 @@ sub _deref_elem_accessor {
 # node types, and that test does not have to know how each of them lowers.
 my %ELEM_ACCESS_NODE = map { $_ => 1 } qw(a_acc h_acc a_ref_acc h_ref_acc);
 
+# The CONTAINER of an element access, generated and marked.  Under a LAZY
+# element context -- a user-sub argument's defelem ('argbox') or a //g match
+# target's cell ('matchcell') -- only the LAST level is deferred: perl
+# vivifies every level above it, so `f($d->[0]{a}{b})` leaves $d as
+# [{a => {}}] and passes a fresh undef element.  The container is therefore
+# generated as the RVALUE chain is (its vivifying p-viv-container mark), never
+# as another lazy cell, which handed the outer accessor a defelem and died in
+# SBCL's gethash (#4283).  In plain lvalue context the chain stays a place.
+sub _elem_container_form {
+  my ($self, $kid_id, $want) = @_;
+  my $lv = $self->lvalue_context;
+  my $lazy = defined $lv && ($lv eq 'argbox' || $lv eq 'matchcell');
+  $self->lvalue_context(0) if $lazy;
+  my $form = $self->_viv_container_form($kid_id, $self->gen_node_form($kid_id), $want);
+  $self->lvalue_context($lv) if $lazy;
+  return $form;
+}
+
 sub _viv_container_form {
   my ($self, $kid_id, $form, $want) = @_;
   # In LVALUE context the whole chain is a place: `p-setf` runs the same
@@ -4485,7 +4503,10 @@ sub gen_array_access_form {
   my $arr_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($arr_node) eq 'PPI::Token::Symbol'
              || ref($arr_node) eq 'PPI::Token::Magic';
-  my $arr = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
+  # `$h{a}[0]` / `$a[0][1]` — a nested container is a subscripted PLACE and
+  # is dereferenced (_elem_container_form marks it).
+  my $arr = $is_bare ? $self->gen_node($kids->[0])
+                     : $self->_elem_container_form($kids->[0], q(@));
   my $idx = $self->gen_node_form($kids->[1]);
   if ($is_bare) {
     $arr = $self->_bare_container_sym($arr_node, $arr, q(@));
@@ -4496,10 +4517,6 @@ sub gen_array_access_form {
       my $renames = $self->environment->state_var_renames;
       $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
     }
-  }
-  else {
-    # `$h{a}[0]` / `$a[0][1]` — the container is a subscripted PLACE.
-    $arr = $self->_viv_container_form($kids->[0], $arr, q(@));
   }
   my $func = $self->_elem_accessor('p-aref');
   return [$func, $arr, $idx];
@@ -5100,7 +5117,10 @@ sub gen_hash_access_form {
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol'
              || ref($hash_node) eq 'PPI::Token::Magic';
-  my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
+  # `$h{a}{b}` — a nested container is a subscripted PLACE and is
+  # dereferenced (_elem_container_form marks it).
+  my $hash = $is_bare ? $self->gen_node($kids->[0])
+                      : $self->_elem_container_form($kids->[0], q(%));
 
   my $key = $self->_hash_key_form($kids->[1]);
 
@@ -5112,10 +5132,6 @@ sub gen_hash_access_form {
       my $renames = $self->environment->state_var_renames;
       $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
     }
-  }
-  else {
-    # `$h{a}{b}` — the container is a subscripted PLACE and is dereferenced.
-    $hash = $self->_viv_container_form($kids->[0], $hash, q(%));
   }
   my $func = $self->_elem_accessor('p-gethash');
   return [$func, $hash, $key];
@@ -5154,15 +5170,13 @@ sub gen_array_ref_access_form {
   # two-line fix, which was tried here and backed out: it also flips a NESTED
   # `p-aref-deref` base to the live-box `-deref-box` accessor (4 corpus files),
   # a widening that needs its own sweep leg.
+  # `${ $h{k} }[0]` / `$a[0]->[1]`: the REF operand is a subscripted place and
+  # is dereferenced, so it vivifies (#1241, _elem_container_form).  A plain
+  # `$r` base is NOT an element node and keeps today's answer — the
+  # single-level deref root is task #1350.
   my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
-            : $self->gen_node_form($kids->[0]);
-  # `${ $h{k} }[0]` / `$a[0]->[1]`: the REF operand is a subscripted place and
-  # is dereferenced, so it vivifies (#1241).  A plain `$r` base is NOT an
-  # element node and keeps today's answer — the single-level deref root is
-  # task #1350.
-  $ref = $self->_viv_container_form($kids->[0], $ref, q(@))
-    if !$paren_scalar_base;
+            : $self->_elem_container_form($kids->[0], q(@));
   my $idx = $self->gen_node_form($kids->[1]);
   my $func = $self->_deref_elem_accessor('p-aref-deref');
   my $form = [$func, $ref, $idx, $self->_strict_elem_marker($func, $kids)];
@@ -5188,13 +5202,11 @@ sub gen_hash_ref_access_form {
   my ($self, $node, $node_id, $kids) = @_;
   # The base is NOT an lvalue here — see gen_array_ref_access_form (#753).
   my $paren_scalar_base = $self->_is_paren_scalar_base($kids->[0]);
+  # See gen_array_ref_access_form: `${ $h{k} }{b}` dereferences an element
+  # place, so the element vivifies (#1241, _elem_container_form).
   my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
-            : $self->gen_node_form($kids->[0]);
-  # See gen_array_ref_access_form: `${ $h{k} }{b}` dereferences an element
-  # place, so the element vivifies (#1241).
-  $ref = $self->_viv_container_form($kids->[0], $ref, q(%))
-    if !$paren_scalar_base;
+            : $self->_elem_container_form($kids->[0], q(%));
   my $key = $self->_hash_key_form($kids->[1]);
   my $func = $self->_deref_elem_accessor('p-gethash-deref');
   return [$func, $ref, $key, $self->_strict_elem_marker($func, $kids)];
