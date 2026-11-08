@@ -191,44 +191,14 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # a non-keyword word followed by `(` is a sub call in perl whether or not the
 # compiler saw the sub declared -- Test::Deep installs `hash` through a
 # COMPUTED glob write, which no declaration scan sees, and `hash($data)` must
-# reach it.  Nodes the COMPILER builds (`__pcl_set_prototype`, ...) carry the
-# `runtime_op` mark and are never asked this.  Read by cl_name and by
-# Pl::Parser2::_rewrite_bareword_stmt (`study;` / `reset;` keep their builtin
-# call), so the two cannot disagree.
+# reach it.  A head the COMPILER builds (`__pcl_set_prototype`, ...) carries the
+# `CORE::` marker (PExpr::_runtime_op_word) and is never asked this.  Read by
+# cl_name and by Pl::Parser2::_rewrite_bareword_stmt (`study;` / `reset;` keep
+# their builtin call), so the two cannot disagree.
 sub source_call_is_builtin {
   my $name = shift // '';
   return 0 if !exists $RUNTIME_NAMES{$name};
   return Pl::PExpr::Config::is_core_keyword($name) ? 1 : 0;
-}
-
-# S536C MEASUREMENT ONLY (deleted before MERGE-READY): one line per cl_name
-# answer for a %RUNTIME_NAMES entry.
-our $S536C_HEAD;
-sub _s536c_log {
-  my ($self, $name, $for_funcall, $force_builtin) = @_;
-  my $kw   = Pl::PExpr::Config::is_core_keyword($name) ? 1 : 0;
-  my $rec  = $self->environment ? $self->environment->get_prototype($name) : undef;
-  my $decl = ($rec && defined $rec->{min_params}) ? 1 : 0;
-  my $file = ($self->environment && $self->environment->source_file) // '-';
-  $file = $ENV{PCL_S536C_FILE} if $file eq '-' && $ENV{PCL_S536C_FILE};
-  my (undef, undef, $cline) = caller(1);
-  my $h = $S536C_HEAD;
-  my ($hp, $hl, $hc, $hs) = ('-', '-', '-', '-');
-  if (ref $h && eval { $h->isa('PPI::Element') }) {
-    $hp = $h->parent ? 'parent' : 'noparent';
-    my $loc = eval { $h->location };
-    $hl = $loc ? $loc->[0] : '-';
-    $hc = $h->content // '-';
-    $hs = $h->{_s536c_synth} ? 'synth' : '-';
-  }
-  my @c = caller(2);
-  my $sub2 = $c[3] // '-';
-  if (open my $fh, '>>', $ENV{PCL_S536C_LOG}) {
-    print $fh join("\t", $file, $name, "ff=$for_funcall", "fb=$force_builtin",
-                   "kw=$kw", "decl=$decl", "site=$cline", "via=$sub2",
-                   $hp, "hl=$hl", "hc=$hc", $hs), "\n";
-    close $fh;
-  }
 }
 
 # Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
@@ -489,8 +459,6 @@ sub cl_name {
   # wins over a declared sub, because that is what perl does (`sub reverse
   # {…}; reverse(…)` calls the builtin unless imported or `use subs`).
   # `$force_user` (the `&NAME(...)` sigil) already bypassed the table.
-  _s536c_log($self, $perl_name, $for_funcall, $force_builtin)
-    if $ENV{PCL_S536C_LOG} && !$force_user && exists $RUNTIME_NAMES{$perl_name};
   if (!$force_user && exists $RUNTIME_NAMES{$perl_name}
       && ($force_builtin || !$for_funcall
           || source_call_is_builtin($perl_name))) {
@@ -2771,7 +2739,6 @@ sub gen_funcall_form {
   # A head the COMPILER built (PExpr::_runtime_op_word) carries the same
   # marker, so it names the runtime's operator too (#1611).
   my $core_qualified = (ref($head_node) && $head_node->{_core_qualified}) ? 1 : 0;
-  local $S536C_HEAD = $head_node;
   my $cl_func = defined $override_pkg
                   ? $self->cl_name("${override_pkg}::${func_name}", 1, 1, $core_qualified)
                   : $self->cl_name($func_name, 1, $force_user, $core_qualified);

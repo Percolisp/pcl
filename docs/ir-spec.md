@@ -5947,15 +5947,28 @@ s492b) and it is inherent: perl pays it too.
 
 ### 10-name. The `p-` vocabulary is NOT reachable from a Perl identifier (normative, s492b, task #2100)
 
-The `p-*` / `%p-*` names are the IR's own vocabulary, and a Perl program that
-happens to DECLARE a sub of the same name must reach ITS sub — `sub flatten
-{…}; flatten(1,2)` is `(pl-flatten …)`, never `(p-flatten …)`.  Only a perl
-KEYWORD may lower to the runtime's operator, and "is it a keyword" is MEASURED
+The `p-*` / `%p-*` names are the IR's own vocabulary.  A call the PROGRAM
+spells -- `NAME(...)`, `NAME LIST`, `sort NAME LIST` -- lowers to the
+runtime's `p-NAME` only when NAME is a perl KEYWORD; any other word is a SUB
+CALL `pl-NAME`, resolved in the package like every sub call, whether or not
+the compiler saw the sub declared (s536c, task #1611).  That is perl's rule
+for a non-keyword word followed by `(` or used as a list operator: a sub that
+a computed glob write installs at BEGIN time is as reachable as a declared
+one, so `BEGIN { *{"main::hash"} = sub {…} } hash(1)` is `(pl-hash 1)`, never
+`(p-hash 1)` (Test::Deep installs its `hash` that way), and `sub flatten {…};
+flatten(1,2)` is `(pl-flatten …)` (#2100).  "Is it a keyword" is MEASURED
 rather than listed: `prototype("CORE::NAME")` dies for a non-keyword, so the
-die is the discriminator.  `CORE::NAME` names the builtin unconditionally and
-travels as its own flag, so a shim's `sub cwd { CORE::cwd() }` does not call
-itself.  A host adding an operator therefore adds no hazard: the rule is
-keyed on the perl side of the name, not on the runtime's symbol list.
+die is the discriminator (`Pl::ExprToCL::source_call_is_builtin`, the one
+reading of the name table).  Three spellings name the runtime's operator
+unconditionally: an OPERATOR (`+`, `!`, `x`, …); `CORE::NAME`, which travels
+as its own flag (so a shim's `sub cwd { CORE::cwd() }` does not call itself)
+and is how PCL's own Perl text reaches a non-keyword operator
+(`CORE::__pcl_set_prototype` in the shims and the `:prototype` desugar); and
+a call the COMPILER builds, whose head carries the same `CORE::` marker.  A
+keyword keeps the builtin even with a user sub of its name (`sub length {…};
+length($x)`), unless a `use subs` / import / `CORE::GLOBAL::` override
+displaces it (#732).  A host adding an operator therefore adds no hazard: the
+rule is keyed on the perl side of the name, not on the runtime's symbol list.
 
 ### 10-db. The system-database builtins answer in perl's two SHAPES (normative, s495f, task #2093)
 
