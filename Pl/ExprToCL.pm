@@ -774,7 +774,7 @@ sub _negated_call_form {
   return undef unless ref($word) eq 'PPI::Token::Word';
   return undef unless ($word->content // '') =~ /\A-([A-Za-z_]\w*)\z/;
   my $name = $1;
-  return undef if source_call_is_builtin($name);
+  return undef if exists $RUNTIME_NAMES{$name};
   my $nx = $word->snext_sibling;
   return undef if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
   my $known = ($nx && $nx->isa('PPI::Structure::List'))

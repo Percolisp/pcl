@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 15;
 
 # ---- the names, derived from the TABLE THAT DECIDES ------------------------
 # `%RUNTIME_NAMES` in Pl/ExprToCL.pm is what routes a plain call to `p-NAME`,
@@ -162,3 +162,117 @@ show(exception { 1 }, "x");
 show(hash(1), hash());
 my $s = hash(); my @l = (hash()); print "$s @l\n";
 P
+
+# ---- #1611: the sub nobody DECLARED -----------------------------------------
+# #2100 made a DECLARED (or imported) sub of a runtime-internal name win; a sub
+# installed by a COMPUTED glob write is declared nowhere the compiler can see,
+# and its call still lowered to the runtime operator.  Test::Deep builds
+# `hash` / `array` / ... that way, so `Test::Deep::wrap` called the runtime's
+# hash constructor and every second cmp_deeply of a hash died.  perl's rule:
+# a word that is not a keyword, followed by `(` or used as a list operator,
+# is a SUB CALL whether or not the sub was seen (Pl::ExprToCL::
+# source_call_is_builtin; docs/ir-spec.md §10-name).
+my $glob_prog = "BEGIN { no strict 'refs'; for my \$n (qw(@names)) "
+              . "{ *{\"main::\$n\"} = sub { \"g-\$n(\@_)\" } } }\n"
+              . join('', map { "print \"$_=\", $_(1,2), \"\\n\";\n" } @names);
+both_agree($glob_prog, 'a sub a computed glob write installs is called by its plain name (#1611)');
+
+both_agree(<<'P', 'the other call spellings of an undeclared runtime-name sub (#1611)');
+BEGIN { no strict 'refs'; for my $n (qw(hash flatten exception box)) { *{"main::$n"} = sub { "g-$n(@_)" } } }
+print "list-op ", hash 3, 4;
+print "\nlist-op ", flatten 5, 6;
+print "\nlist-op ", exception 7;
+print "\n";
+package Foo;
+BEGIN { no strict 'refs'; *{"Foo::box"} = sub { "Foo-box(@_)" } }
+print "pkg ", box(10), "|", Foo::box(11), "|", main::box(12), "\n";
+package main;
+print "qual ", Foo::box(13), "|", main::hash(14), "\n";
+my @s = sort hash 3, 1, 2;
+print "sort @s\n";
+hash;
+print "neg ", -hash(4), "\n";
+print "meth ", main->hash(5), "\n";
+print "amp ", &hash(6), "\n";
+P
+
+# The CONTROLS: a perl keyword keeps the builtin even with a user sub of its
+# name declared before or after the call, and PCL's own shims reach the
+# runtime's operators through the `CORE::` spelling (lib/Scalar/Util.pm,
+# lib/Sub/Util.pm and the `:prototype` desugar -> CORE::__pcl_set_prototype;
+# lib/File/Spec.pm -> CORE::cwd) -- a plain spelling there is a sub call now.
+both_agree(<<'P', 'keywords stay builtins; the shims reach the runtime by CORE:: (#1611 controls)');
+print "1 ", length("abc"), " ", uc("ab"), " ", join("-", 1, 2), " ", scalar(reverse("ab")), "\n";
+my %h = (k => 1);
+print "2 ", join(",", keys %h), " ", ref([]), " ", (defined(undef) ? "d" : "u"), "\n";
+sub length { "MYLEN" }
+sub uc { "MYUC" }
+sub join { "MYJOIN" }
+sub keys { "MYKEYS" }
+sub ref { "MYREF" }
+print "3 ", length("abcd"), " ", uc("cd"), " ", join("+", 3, 4), " ", ref({}), "\n";
+require Scalar::Util;
+sub f1 { 1 }
+Scalar::Util::set_prototype(\&f1, q($$));
+print "4 ", prototype(\&f1), "\n";
+require Sub::Util;
+Sub::Util::set_prototype('$;@', \&f1);
+print "5 ", prototype(\&f1), "\n";
+my $c1 = sub ($$) { 1 };
+my $c2 = sub :prototype(\@) { 1 };
+print "6 ", prototype($c1), " ", prototype($c2), "\n";
+require File::Spec;
+require Cwd;
+my $d = Cwd::cwd();
+print "7 ", (File::Spec->rel2abs("x") eq "$d/x" ? "ok" : "BAD"), " ",
+      File::Spec->abs2rel("$d/a/b"), "\n";
+P
+
+# The real modules the bug was found in (#1611: Test::Deep's `hash`; Test::Fatal's
+# `exception`, the s481b filing).  Neither is on CI's stock machine, so the row
+# skips there.  STDOUT only: Test::Deep::Cache::Simple's `weaken` sites print a
+# known-harmless detector line on stderr (docs/detector-measurement-s513d.md).
+SKIP: {
+    skip 'Test::Fatal / Test::Deep not installed', 1
+        unless eval { require Test::Fatal; require Test::Deep; 1 };
+    my $src = write_pl(<<'P');
+use strict; use warnings;
+use Test::Fatal;
+use Test::Deep qw(cmp_deeply);
+use Test::More tests => 5;
+like(exception { die "boom\n" }, qr/^boom/, 'exception { die } returns the error');
+is(exception { 1 }, undef, 'exception { 1 } is undef');
+is(ref(Test::Deep::wrap({ pi => 1 })), 'Test::Deep::Hash', 'wrap of a hash is a Test::Deep::Hash');
+cmp_deeply({ pi => 1 }, { pi => 1 }, 'cmp_deeply of a hash');
+cmp_deeply({ pi => 1, x => [1, 2] }, { pi => 1, x => [1, 2] }, 'a second cmp_deeply of a hash');
+P
+    my $perl = `perl $src 2>/dev/null`;
+    my $cl_code = PCLCore::transpile("$pl2cl $src");
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code;
+    close $cl_fh;
+    my $pcl = `sbcl @sbcl_rt --load $cl_file 2>/dev/null`;
+    $pcl =~ s/^;.*\n//gm;
+    $pcl =~ s/^PCL Runtime loaded\n//gm;
+    is($pcl, $perl, 'Test::Fatal exception {} and Test::Deep cmp_deeply of hashes, as perl (#1611)');
+}
+
+# SHAPES: what reaches `p-` and what does not.
+{
+    my $cl = PCLCore::transpile("$pl2cl " . write_pl(<<'P'));
+my $c = sub ($$) { 1 };
+my $d = sub :prototype($) { 1 };
+my $e = sub :lvalue { 1 };
+sub length { 1 }
+print length("x");
+BEGIN { *{"main::hash"} = sub { 1 } }
+print hash(1);
+P
+    like($cl, qr/\(pl-hash 1\)/,    'an undeclared non-keyword call is the sub `(pl-hash 1)`');
+    unlike($cl, qr/\(p-hash 1\)/,   '... and never the runtime operator');
+    like($cl, qr/\(p-length "x"\)/, 'a perl keyword with a user sub of its name stays the builtin');
+    my $protos = () = $cl =~ /\(p-__pcl_set_prototype\s/g;
+    is($protos, 2, 'both anonymous-sub prototype registrations reach the runtime (compiler-built head + CORE:: text)');
+    like($cl, qr/\(p-__pcl_set_attributes\s/, 'the anonymous-sub attribute registration reaches the runtime');
+    unlike($cl, qr/pl-__pcl_set_/,  'no compiler-built registration became a sub call');
+}
