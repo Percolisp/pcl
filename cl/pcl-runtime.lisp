@@ -20395,6 +20395,60 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (multiple-value-bind (sp found) (gethash target *p-layer-spelling*)
     (if found sp (%p-ef-spelling (stream-external-format target)))))
 
+;;; A MALFORMED byte sequence on a decoding input handle (task #4624).  perl
+;;; never loses the read: the lax `:utf8` layer hands the octets over as a
+;;; malformed string, and `:encoding(...)` (PerlIO::encoding's PERLQQ
+;;; fallback) substitutes the text `\xHH`.  SBCL signals a
+;;; stream-decoding-error instead, and the readers' catch-all answered it as a
+;;; read FAILURE -- the whole record (a slurp: the whole file) was undef.
+
+(defun %p-strict-decode-layer-p (stream)
+  "Does STREAM decode through an `:encoding(...)` layer (strict, PERLQQ) rather
+   than the lax `:utf8` one?  The recorded layer spelling says (task #3515)."
+  (and (some #'%p-encoding-layer-name-p
+             (%p-layer-spelling (%p-stream-target stream)))
+       t))
+
+(defun %p-input-decoding-replace (c)
+  "Answer the decoding error C for its FIRST octet and go on with the next
+   byte: under `:encoding(...)` perl's `\\xHH` text -- its warning is
+   warnings-gated (docs/not-supported.md, #221) -- and under the lax `:utf8`
+   layer the byte as its own character.  perl keeps a lax read's octets in a
+   malformed buffer that `utf8::valid` rejects; a PCL string cannot be
+   malformed (#1389), so that buffer is approximated, never lost.  The restart
+   is SBCL's USE-VALUE of stream-decoding-error-and-handle, which advances ONE
+   byte (its input-replacement restart resyncs, and the resync DROPS the stray
+   continuation bytes after a bad lead: `\\xC0\\xAF` lost the AF).  No such
+   restart (not an fd-stream): decline, the reader's own handler answers."
+  (let ((resync (find-restart 'sb-impl::input-replacement c))
+        (oct (sb-int:character-decoding-error-octets c)))
+    (when (and resync (find-restart 'use-value c) (plusp (length oct)))
+      (let ((b (aref oct 0))
+            (strict (%p-strict-decode-layer-p (stream-error-stream c))))
+        (cond ((and strict (%p-utf8-truncated-p oct))
+               ;; a character cut off by END OF FILE: perl's encoding layer
+               ;; drops it (STOP_AT_PARTIAL); the resync skips its tail
+               (invoke-restart resync ""))
+              (strict (invoke-restart 'use-value (format nil "\\x~2,'0X" b)))
+              (t (invoke-restart 'use-value (string (code-char b)))))))))
+
+(defun %p-utf8-truncated-p (oct)
+  "Are the octets OCT a UTF-8 lead byte plus continuation bytes, fewer than
+   the lead announces -- the shape SBCL reports for a character cut off by
+   the end of the input?"
+  (let* ((b (aref oct 0))
+         (need (cond ((<= #xC2 b #xDF) 2) ((<= #xE0 b #xEF) 3)
+                     ((<= #xF0 b #xF4) 4) (t 1))))
+    (and (< (length oct) need)
+         (every (lambda (x) (<= #x80 x #xBF)) (subseq oct 1)))))
+
+(defmacro %p-with-input-decoding (&body body)
+  "BODY, with a malformed input sequence answered and never signalled (#4624):
+   every reader of a character stream -- readline / slurp, read, getc, eof --
+   runs inside it."
+  `(handler-bind ((sb-int:stream-decoding-error #'%p-input-decoding-replace))
+     ,@body))
+
 (defun %p-layer-list (stream)
   "PerlIO::get_layers' answer for the OPEN stream STREAM, bottom first (task
    #3326, RULED s521: the layers PCL APPLIES and nothing it does not): an
@@ -21876,7 +21930,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (p-bool
      (if (and stream (open-stream-p stream))
          (handler-case
-             (let ((ch (peek-char nil stream nil :eof)))
+             (let ((ch (%p-with-input-decoding (peek-char nil stream nil :eof))))
                (if (eq ch :eof) t nil))
            ;; A perl-level die passing through is the caller's (rule 11 — the
            ;; same re-raise %p-read-impl and %p-getc-impl do).
@@ -22500,7 +22554,7 @@ would consume, so it dies naming the stream (rule 12)."
     (handler-case
         (let* ((stream (%p-live-stream fh))
                (tmp (make-string n))
-               (got (funcall reader tmp stream))
+               (got (%p-with-input-decoding (funcall reader tmp stream)))
                (data (subseq tmp 0 got)))
           (when (p-box-p buf)
             (if off
@@ -24259,7 +24313,7 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((stream (if fh (%p-live-stream fh) *standard-input*)))
     (when stream
       (handler-case
-          (let ((ch (read-char stream nil nil)))
+          (let ((ch (%p-with-input-decoding (read-char stream nil nil))))
             (if ch (string ch) nil))
         ;; A perl-level die passing through (a tied handle, an overload) is
         ;; the caller's, not a read failure — %p-read-impl re-raises it the
@@ -24298,81 +24352,86 @@ would consume, so it dies naming the stream (rule 12)."
      nil        = slurp             \"\"  = paragraph
      integer    = fixed-size record  else = that string, kept on the record.
    A record is a SIMPLE string: a non-simple one would be snapshotted again at
-   every retaining store (the #2115 ownership chokepoints, s507p)."
+   every retaining store (the #2115 ownership chokepoints, s507p).
+   A malformed input sequence is answered, not a failure (#4624)."
   (handler-case
-      (cond
-        ;; Slurp mode: $/ = undef - read entire file
-        ((null sep)
-         (let ((content (make-array 4096 :element-type 'character
-                                    :adjustable t :fill-pointer 0)))
-           (loop for char = (read-char stream nil nil)
-                 while char
-                 do (vector-push-extend char content))
-           (if (zerop (length content)) nil (subseq content 0))))
-
-        ;; Record mode: $/ = \N - read exactly N characters per record.
-        ((integerp sep)
-         (let* ((buf (make-string sep))
-                (got (read-sequence buf stream)))
-           (if (zerop got) nil (subseq buf 0 got))))
-
-        ;; Paragraph mode: $/ = "" - read until blank line
-        ((string= sep "")
-         (let ((lines nil)
-               (seen-content nil)
-               (last-missing-nl nil))
-           (loop
-            (multiple-value-bind (line missing-nl) (read-line stream nil nil)
-              (cond
-                ((null line)
-                 ;; EOF: rebuild the record.  Only append the final newline
-                 ;; if the last content line actually had one — a file whose
-                 ;; last line lacks a trailing newline keeps it that way
-                 ;; (Perl does not invent one).
-                 (return
-                   (if lines
-                       (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
-                         (if last-missing-nl
-                             body
-                             (concatenate 'string body (string #\Newline))))
-                       nil)))
-                ((string= line "")
-                 (if seen-content
-                     (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
-                     nil))  ; Skip leading blank lines
-                (t
-                 (setf seen-content t
-                       last-missing-nl missing-nl)
-                 (push line lines)))))))
-
-        ;; Single character separator (common case, optimized)
-        ((= (length sep) 1)
-         (%p-with-record-buffer (result)
-                                (let ((sep-char (char sep 0)))
-                                  (loop for char = (read-char stream nil nil)
-                                        while char
-                                        do (vector-push-extend char result)
-                                        when (char= char sep-char)
-                                        do (loop-finish))
-                                  (if (zerop (length result)) nil (subseq result 0)))))
-
-        ;; Multi-character separator
-        (t
-         (%p-with-record-buffer (result)
-                                (let ((sep-len (length sep)))
-                                  (loop for char = (read-char stream nil nil)
-                                        while char
-                                        do (vector-push-extend char result)
-                                        when (and (>= (length result) sep-len)
-                                                  (string= result sep
-                                                           :start1 (- (length result) sep-len)))
-                                        do (loop-finish))
-                                  (if (zerop (length result)) nil (subseq result 0))))))
+      (%p-with-input-decoding (%p-read-record-1 stream sep))
     ;; Any stream error (e.g. reading from a directory) → nil like perl, AND
     ;; `$!` set the way perl sets it: %p-read-fail names EISDIR for a
     ;; directory handle and leaves $! alone for anything else (task #1237).
     (stream-error () (%p-read-fail stream))
     (error () (%p-read-fail stream))))
+
+(defun %p-read-record-1 (stream sep)
+  "%p-read-record's record rule, with no error handling of its own."
+  (cond
+    ;; Slurp mode: $/ = undef - read entire file
+    ((null sep)
+     (let ((content (make-array 4096 :element-type 'character
+                                :adjustable t :fill-pointer 0)))
+       (loop for char = (read-char stream nil nil)
+             while char
+             do (vector-push-extend char content))
+       (if (zerop (length content)) nil (subseq content 0))))
+
+    ;; Record mode: $/ = \N - read exactly N characters per record.
+    ((integerp sep)
+     (let* ((buf (make-string sep))
+            (got (read-sequence buf stream)))
+       (if (zerop got) nil (subseq buf 0 got))))
+
+    ;; Paragraph mode: $/ = "" - read until blank line
+    ((string= sep "")
+     (let ((lines nil)
+           (seen-content nil)
+           (last-missing-nl nil))
+       (loop
+        (multiple-value-bind (line missing-nl) (read-line stream nil nil)
+          (cond
+            ((null line)
+             ;; EOF: rebuild the record.  Only append the final newline
+             ;; if the last content line actually had one — a file whose
+             ;; last line lacks a trailing newline keeps it that way
+             ;; (Perl does not invent one).
+             (return
+               (if lines
+                   (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
+                     (if last-missing-nl
+                         body
+                         (concatenate 'string body (string #\Newline))))
+                   nil)))
+            ((string= line "")
+             (if seen-content
+                 (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
+                 nil))  ; Skip leading blank lines
+            (t
+             (setf seen-content t
+                   last-missing-nl missing-nl)
+             (push line lines)))))))
+
+    ;; Single character separator (common case, optimized)
+    ((= (length sep) 1)
+     (%p-with-record-buffer (result)
+                            (let ((sep-char (char sep 0)))
+                              (loop for char = (read-char stream nil nil)
+                                    while char
+                                    do (vector-push-extend char result)
+                                    when (char= char sep-char)
+                                    do (loop-finish))
+                              (if (zerop (length result)) nil (subseq result 0)))))
+
+    ;; Multi-character separator
+    (t
+     (%p-with-record-buffer (result)
+                            (let ((sep-len (length sep)))
+                              (loop for char = (read-char stream nil nil)
+                                    while char
+                                    do (vector-push-extend char result)
+                                    when (and (>= (length result) sep-len)
+                                              (string= result sep
+                                                       :start1 (- (length result) sep-len)))
+                                    do (loop-finish))
+                              (if (zerop (length result)) nil (subseq result 0)))))))
 
 (defun %p-readline-impl (&optional fh)
   "Perl readline / diamond operator <FH> — one record from a FILEHANDLE.

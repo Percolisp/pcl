@@ -517,4 +517,48 @@ push \@r, "or=" . join(' ', PerlIO::get_layers(\$h)); close \$h;
 print join('|', \@r), "\\n";
 PL
 
+# #4624 (s536d): MALFORMED UTF-8 through a decoding layer never loses the read.
+# SBCL signals a decoding error and every reader answered it as a FAILURE --
+# the record (a slurp: the whole file) was undef.  An `:encoding(UTF-8)` layer
+# substitutes perl's PERLQQ text `\xHH` per bad byte and drops a character cut
+# off by end of file: PCL's text is perl 5.40.3's own, on every reader
+# (readline, list readline, slurp, read, getc / eof, a record $/).  The lax
+# `:utf8` layer keeps every byte (perl keeps a malformed buffer PCL cannot
+# represent, #1389: the row asserts what both agree on).  FAILS on 84a2e6ec.
+my $bad = "$dir/bad.txt";
+{
+    open my $fh, '>:raw', $bad or die "open $bad: $!";
+    print $fh "a\xe9b\n\xc3\x28c\n\xc0\xafd\nok\xc3\xa9\n\xf0\x9f";
+    close $fh;
+}
+is(run_cl(<<"PL"), <<'OUT', 'malformed UTF-8 under :encoding(UTF-8) reads as perl\'s \\xHH text (#4624)');
+open my \$fh, '<:encoding(UTF-8)', '$bad' or die;
+my \@l = <\$fh>; close \$fh;
+print "lines=", scalar(\@l), "\\n";
+print "len=", length(\$_), " ords=", join(",", map { sprintf "%X", ord } split //, \$_), "\\n" for \@l;
+open \$fh, '<:encoding(UTF-8)', '$bad' or die;
+my \$n = read(\$fh, my \$buf, 100); close \$fh;
+open \$fh, '<:encoding(UTF-8)', '$bad' or die;
+my \$c = 0; until (eof(\$fh)) { getc(\$fh); \$c++ } close \$fh;
+open \$fh, '<', '$bad' or die; binmode \$fh, ':encoding(UTF-8)';
+my \$s = do { local \$/; <\$fh> }; close \$fh;
+open \$fh, '<:encoding(UTF-8)', '$bad' or die;
+my \@r = do { local \$/ = \\5; <\$fh> }; close \$fh;
+print "read=\$n getc=\$c slurp=", length(\$s), " rec=", scalar(\@r), "\\n";
+PL
+lines=4
+len=7 ords=61,5C,78,45,39,62,A
+len=7 ords=5C,78,43,33,28,63,A
+len=10 ords=5C,78,43,30,5C,78,41,46,64,A
+len=4 ords=6F,6B,E9,A
+read=28 getc=28 slurp=28 rec=6
+OUT
+is(run_cl(<<"PL"), "def=1 head=a tail=1\nlines=5\n",'malformed UTF-8 under the lax :utf8 layer is never lost (#4624)');
+open my \$fh, '<:utf8', '$bad' or die;
+my \$s = do { local \$/; <\$fh> }; close \$fh;
+print "def=", (defined \$s ? 1 : 0), " head=", substr(\$s, 0, 1), " tail=", (\$s =~ /\\nok/ ? 1 : 0), "\\n";
+open \$fh, '<:utf8', '$bad' or die; my \@l = <\$fh>; close \$fh;
+print "lines=", scalar(\@l), "\\n";
+PL
+
 done_testing();
