@@ -50,6 +50,7 @@
 - **Perl's own t/ as bug finder**: [[project_perl_suite_survey]], [[project_suite_runner_oom_and_cond_t]], [[project_io_subprocess_features]], [[reference_box_magic_hook]]. **sb-posix**: some syms `sb-posix::`; stat-blksize/blocks/futimes ABSENT.
 
 ## User Preferences / Working Style
+- **CORRECTNESS OVER A FIX'S SPEED COST (USER s536): keep the fix, flag the cost; real-program benchmarking later (#4621)** [feedback_correctness_over_fix_cost](feedback_correctness_over_fix_cost.md)
 - **CORRECTNESS SUBTASKS WHEN THE QUEUE IS EMPTY + the codegen review after parser/runtime (USER s526)** [feedback_correctness_subtasks_when_queue_empty](feedback_correctness_subtasks_when_queue_empty.md)
 - **KEEP THE REVIEW DOC'S BATCH STATUS CURRENT at session end (USER s523)** [feedback_review_doc_batch_status](feedback_review_doc_batch_status.md)
 - **PARAPHRASE the USER's decisions in published records; quote only technical wording** [feedback_paraphrase_user_in_records](feedback_paraphrase_user_in_records.md)

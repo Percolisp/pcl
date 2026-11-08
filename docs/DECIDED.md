@@ -11,6 +11,11 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s536 (2026-11-08, the reviewing session on Opus 5.5) -- agents in parallel by the USER's word; nobody waits for a sibling; correctness over the #4061 cost
+- **USER (s536): CORRECTNESS FIRST -- #4061 (a first bless recorded on the referent) is KEPT** despite its INFO cost (arrobj-new 1.9x, `ref []` after any array bless 2.3x: SBCL weak tables are synchronized); a serious benchmarking effort on what is slow in REAL programs comes later (the USER's direction, paraphrased) -> task #4621 (unscheduled; carries the #4061 cost and the method-lookup evaluation as inputs).
+- **Nobody waits for a sibling to merge** (`s536/SHARED-BOX.md` rule 25, after the USER asked why only one agent was running): whoever is MERGE-READY first merges first; a rebase re-takes only what the move can change.  The s535/s536 "take the combined-tree bars after the agents ahead merged" wait is REVOKED -- it parked two agents for an hour.
+- **An exclusive bench waiter blocks every new bounded leg** for as long as the longest running leg (heavy.sh `excl_waiting`): one long leg + one queued bench idles the box -- s532d's last 2-minute leg waited 30+ min behind three everyday benches waiting on a 90-minute board leg.  Everyday counts only at a 1-minute load below 4 (rule 26).  heavy.sh has FOUR slots since s536 11:4x (the USER: the laptop otherwise idle).
+
 ## s533 (2026-11-03/04, the reviewing session on Opus 5.5) -- three in parallel, PPI / parser first; the eval-in-CL plan
 - **USER (s533): run three batches in parallel and give PPI / parser work priority today.** -> all three slots went to the parser program (#3694 + #3697): s532e PPI batch 7, s533a C1, s533b 1c port 1; then s533c (C2 `local`) + s533d (1c port 2).  Later the USER stopped new launches -- the running three finish; s532b / s532c / s532d stay queued.
 - **PPI pushes in a batch go to the BARE repo only** (`~/pcl-agent-scratch/ppi/PPI.git`): the fork `Percolisp/PPI`'s `pcl` branch is the head of the OPEN upstream PR #459, so a push there changes a public PR -- the reviewing session's, with the USER's word (`s533/SHARED-BOX.md` rule 12).
