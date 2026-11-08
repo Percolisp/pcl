@@ -2077,6 +2077,24 @@ never is.
   `nomethod` answers a conversion too, with the conversion's own name as
   the fourth argument. One reading: `%p-conversion-handler`.
 
+- **The dereference overloads `@{}` / `%{}` (normative, s536b, task #4305).**
+  EVERY array dereference of an object whose class (or an ancestor)
+  overloads `@{}` -- and every hash dereference under `%{}` -- dereferences
+  what the handler answers, whatever the object's referent is: a blessed
+  scalar ref, a hash object overloading `@{}`, and an ARRAY object
+  overloading `@{}` too.  perl's `amagic_deref_call` loop: call
+  `handler($obj, undef, "")` in scalar context; a non-reference answer dies
+  `Overloaded dereference did not return a reference`; an answer pointing at
+  the SAME referent stops (the native dereference -- the recursion-safe
+  handler that returns its own object); a new overloaded object is asked
+  again.  One resolver, `%p-deref-overload`, asked at every container entry
+  (element read / write, `@$x` / `%$x`, `$#$x`, slices through those,
+  exists / delete, the deref assignments, a subscript chain's intermediate
+  levels); while no class in the image has registered either handler it is
+  one fixnum test (`**p-deref-overloads**`).  Example: Mojo::DOM58 (a blessed
+  SCALAR ref) overloads `@{}` to its child nodes, so `$dom->[0]` is the
+  first child.  `&{}` is p-funcall-ref's (#3395); `${}` / `*{}` are not done.
+
 ### 3.5 `%` has TWO regimes, and the RIGHT operand picks one (normative, s473d)
 
 perl's `pp_modulo` is not "truncate both, then take the remainder"; the
@@ -2367,6 +2385,22 @@ inherited symbol (#3430).
 package E; sub a { explain() } sub explain { "E" }   # E::a() is "E"
 ```
 
+**The file's own bodyless `sub NAME;` is `(p-declare-sub pl-NAME
+:forward)` (normative, s536b, #4561):** perl's forward declaration IS a stash
+entry -- a CV with no body -- so `keys %Pkg::` lists it, `exists &NAME` is
+true and `defined &NAME` false; the bare `(p-declare-sub pl-NAME)` (a
+cross-section call stub) and the `:body` pre-declaration of a later-defined
+sub stay HIDDEN from the stash view, as perl has no entry for them yet.  A
+glob given a late-bound reference to a stub (`*X = \&stub`) holds that stub:
+`exists &X` true, `defined &X` false until the target gets a body
+(`%p-lazy-stub-p`, the reading `defined &$code` shares).
+
+```perl
+package CW; sub stubsub; package main;
+print join " ", keys %CW::;                      # stubsub
+*D::copy = \&CW::stubsub; print defined &D::copy ? 1 : 0;   # 0
+```
+
 **FACTS (normative, s469bg, task #1035 step 3)** is a plist at a FIXED
 position after the lambda list — **always present, possibly `()`** — holding
 what the compiler PROVED about this sub and used to throw away at emission.  A
@@ -2624,7 +2658,10 @@ documents never compare, so a fragment re-parse sees the record.  A string
 eval's calls are compiled at run time, when every definition exists; today an
 eval is compiled with no sub table at all (#2870).  `prototype()` at run time
 is unaffected (whole program).  Example: `print f(@a); sub f ($) { $_[0] }`
-with `@a = (10, 20, 30)` prints 10, not 3.
+with `@a = (10, 20, 30)` prints 10, not 3.  "The statement being lowered" is
+the INNERMOST one: inside a block the compiler lowers whole (a BEGIN body),
+each statement is its own site, so `BEGIN { use constant K => 4; print K }`
+prints 4 (s536b, #4562 -- the BEGIN's own site made K a string).
 
 **A sub head under the `signatures` feature is a SIGNATURE, whatever its shape
 (normative, s513f, task #2872):** where the feature is in force at the sub's
@@ -4522,6 +4559,7 @@ running.  A host whose spawn primitive SIGNALS (SBCL's `run-program` with
 | `system PROG, LIST` / `system BLOCK LIST` | returns **−1**, `$?` is **−1**, `$!` from the failed exec (ENOENT) |
 | `system EXPR` (one string) | the same −1/−1/ENOENT when perl execs directly; a string with shell metacharacters goes through `/bin/sh`, whose own exit status (`127 << 8`) is the answer |
 | `exec` | returns **undef** with `$!` set — the call that "never returns" does return here |
+| a piped `open` (`"PROG |"`, `"| PROG"`, `"-|"` / `"|-"` with a command) | returns **undef** with `$!` the child's exec errno (ENOENT), the child reaped, no handle installed — perl's my_popen exec-status pipe (close-on-exec; EOF = the exec happened); a shell command execs `/bin/sh`, which succeeds, so it answers a pid and its close reports 127 (s536b, #4306) |
 
 The consequence is bigger than the value: PCL's whole top-level form died on
 the signal, so **every statement after the failed `system` was lost** —
