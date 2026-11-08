@@ -1131,6 +1131,8 @@ rather than a constant.  Guard rows: `Pl/t/bareword-call-01.t`; canary:
 
 ### 19b. …and the same `x` STARTING a statement  [CONFIRMED 1.291, found s456ag]
 
+**FIXED on PCL's PPI branch** (s536j: group AW, commit `e45f69ab` on branch `pcl` -- §63's rule: after the `}` of a block that ends a statement perl does not expect an operator, so `x` is a word; the statement-start arm of `_repair_word_x_call` is DELETED).  §19's own row (`print x()`, after a list operator) is unchanged and keeps the first arm.
+
 A second position, the same misreading, and here there is no operator reading
 available at all: `x` is INFIX, so a statement cannot begin with it.  PPI does
 begin one with it whenever the previous token is a sub definition's closing
@@ -2822,6 +2824,107 @@ it never saw a name here: `${m{q}}` matched `/q/` against `$_` (a SILENT
 WRONG).  Task #4102.
 
 **FIXED on PCL's PPI branch** (s532e: group AT, commit `a800b8cd` on branch `pcl`, vendored as vendor/PPI -- `__current_token_is_forced_word` forces the word after the `{` of a sigil cast (`$ @ % & * $#`) when a `[` or `{` follows it, beside its rule for a word before `}`; `sub` before `{` excluded, as in perl); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AT.md`).  PCL needed no change: #3864's collapse takes the Word + Block / Constructor.  Guard `Pl/t/braced-elem-01.t` r23-r26 (FAIL on the base).
+
+---
+
+## 62. A NEGATED package-qualified bareword (`-Foo::bar`, `-CORE::log(...)`) is lexed as two Words split at the first `::`  [CONFIRMED 1.291 and PCL's branch 86623347]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `-Foo::bar -3 -2`):
+
+```perl
+sub Foo::baz { 3 } print -Foo::bar, " ", -Foo::baz, " ", -CORE::abs(-2), "\n";
+```
+
+**PPI tokens**: `Word[-Foo] Word[::bar]`, `Word[-Foo] Word[::baz]`, `Word[-CORE] Word[::abs]`.
+**Expected**: `Word[-Foo::bar]`, `Word[-Foo::baz]`, `Word[-CORE::abs]` -- perl reads the minus,
+then the WHOLE word, package part and all (toke.c `yyl_hyphen`: only a single letter before a
+non-word character is a filetest, so `-e::foo` stays the filetest on `::foo`).
+`PPI::Token::DashedWord` sucked `\w+` only.
+
+**PCL's workaround**: none -- every negated qualified word DIED ("Undefined subroutine
+&main::bar"; core Math::Complex lines 750 `-CORE::exp(...)` and 1081 `-CORE::log(...)`, so
+`cbrt` and `acos` died).  Task #4701.
+
+**FIXED on PCL's PPI branch** (s536j: group AV, commit `ce2aaa80` on branch `pcl`, vendored as vendor/PPI -- `DashedWord` reads the qualified tail with `PPI::Token::Word`'s name pattern after the filetest test); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-AV.md`).  PCL half: `Pl::PExpr::_split_negated_call_words` (s536g's `-NAME` split) accepts a qualified NAME and splits `-Foo::` into the minus and the package word; `Pl::PExpr::_qualified_word_callable` keeps the fat comma and both subscript autoquotes from quoting a qualified CALLABLE name (perl quotes an identifier only: `(Foo::bar => 1)` and `$h{-Foo::bar}` call a declared `Foo::bar`, probed).  Guard `Pl/t/ppi-token-rows-01.t` r25-r28 (FAIL on the base).
+
+---
+
+## 63. A sub named `x<digits>` (`x3`, `x64`) called right after the `}` of a block that ends a statement is lexed as the repetition operator and a number  [CONFIRMED 1.291 and PCL's branch 86623347]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `called`):
+
+```perl
+sub x3 { print "called\n" } x3();
+```
+
+**PPI tokens**: `Structure[}] Operator[x] Number[3] Structure[(] Structure[)]`.
+**Expected**: `Structure[}] Word[x3] Structure[(] Structure[)]` -- perl reads `x3` as `x 3` only
+where it expects an OPERATOR (toke.c, `yylex`: `case 'x'` tests `PL_expect == XOPERATOR`);
+after the `}` of a sub definition, a bare block, `BEGIN`, a compound statement's block or a
+`map` / `grep` / `sort` block it expects a statement or a term.  PPI's
+`_current_x_is_operator` took every `}` as the end of a term.  The same position is §19b's
+(`sub x { } x`).
+
+**PCL's workaround**: none for `x<digits>` -- `x3();` compiled to `(p-str-x (progn) 3)`, the
+empty list repeated, a SILENT WRONG; §19b's statement-start `x` had an arm of
+`Pl::Parser2::_repair_word_x_call`.  Task #4542.
+
+**FIXED on PCL's PPI branch** (s536j: group AW, commit `e45f69ab` on branch `pcl`, vendored as vendor/PPI -- `_current_x_is_operator` asks `_after_statement_block`, the rule the `-` / `/` / `<` decisions already use, and that helper learns a sub body after a prototype or attributes (`_before_sub_decorations`) and a block after the `)` of a compound statement's condition, a foreach list or a named sub's signature (`_paren_heads_statement_block`), so `if (1) { } -e $f` is a filetest too); upstream PR: pending (`PR-AW.md`).  PCL needed no change for `x3`; §19b's arm of `_repair_word_x_call` is DELETED (instrumented to die first: never fired over the wide A/B population and the gate).  Guard `Pl/t/ppi-token-rows-01.t` r29.
+
+---
+
+## 64. `__DATA__` / `__END__` followed by a fat comma starts the data section  [CONFIRMED 1.291 and PCL's branch 86623347]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `__DATA__,__END__`):
+
+```perl
+our %K = (
+  __DATA__ => 2,
+  __END__  => 3,
+);
+print join(",", sort keys %K), "\n";
+```
+
+**PPI tokens**: `Structure[(] Separator[__DATA__] Comment[ => 2,] Data[  __END__  => 3, ...]` --
+the rest of the file is one `PPI::Token::Data`.
+**Expected**: `Word[__DATA__] Operator[=>] Number[2] ... Word[__END__] Operator[=>] Number[3]` --
+perl tests for `=>` right after a word BEFORE it looks the word up as a keyword (toke.c
+`yyl_keylookup`), on the same source line; `CORE::__DATA__` / `CORE::__END__` reach the keyword
+without that test.
+
+**PCL's workaround**: none -- the statement was refused and the rest of the file lost
+(`Pl/PPIExpect.pm`'s own `%KEYWORD` table has the layout).  Task #4482.
+
+**FIXED on PCL's PPI branch** (s536j: group AX, commit `e395a534` on branch `pcl`, vendored as vendor/PPI -- `PPI::Token::Word::__TOKENIZER__commit` looks at the rest of the line for `=>` before it starts the End / Data zone); upstream PR: pending (`PR-AX.md`).  PCL needed no change: the fat comma quotes the word.  Guard `Pl/t/ppi-token-rows-01.t` r31.
+
+---
+
+## 65. Every CR LF, CR CR LF and lone CR in the SOURCE is rewritten to LF, so a CR inside a string literal or the `__DATA__` section is lost  [CONFIRMED 1.291 and PCL's branch 86623347]
+
+**Minimal repro** (valid perl; the `"c?d"` holds a real CR; perl 5.40.3 prints `13`):
+
+```perl
+print ord(substr("c\rd", 1, 1)), "\n";     # the \r stands for a CR BYTE in the source
+```
+
+**PPI tokens**: `Quote::Double["c<LF>d"]`.  **Expected**: `Quote::Double["c<CR>d"]`.
+`PPI::Tokenizer::new` runs `s/(?:\015{1,2}\012|\015|\012)/\n/g` over the source before
+splitting it into lines.  perl's rule (toke.c without `PERL_STRICT_CR`, probed): in a source
+FILE the CR before the LF at each line end INSIDE a multi-line literal or a here-doc becomes
+LF, a lone CR in a here-doc becomes LF, every other CR is kept; in a STRING EVAL (one buffer)
+literals keep every CR (`length eval "q{a\r\nb}"` is 4), here-docs still convert; the
+`__DATA__` section is read raw.
+
+**PCL's workaround**: none.  Template-Toolkit's `t/parser.t` row 35 compiles a template whose
+`replace("(\r\n){2,}", ...)` puts CR LF characters into a string EVAL; PCL's eval sees LF and
+the replace never matches.  Task #4302.
+
+**NOT FIXED (s536j measured it; task #4761)**: dropping the rewrite fails exactly one row of
+PPI's own suite, `t/06_round_trip.t` 2146 (`t/perf.t` has CR LF line ends, and the test
+normalizes its expected text with the same regex; `t/08_regression.t:270` does it too) -- the
+rewrite is PPI behaviour its tests assert, so the fix is a behaviour change or a new Document
+attribute, plus perl's CR rules in PCL's lowering (here-doc bodies in both modes, file-mode
+multi-line literals); #4761 has the design.  The report rows stay inside a PCL §65 TODO block.
 
 ---
 

@@ -798,6 +798,10 @@
 #         the ONE statement drops -- announced, a run-time die if reached -- and
 #         the file's other rows run.  Measured: ./pl2cl < t/op/for.t, one
 #         `;; PARSE ERROR:` progn.  The row leaves with #1580's lowering.
+#   s536j (2026-11-08, edited not re-blessed): board Mojo-DOM58 _Collection.pm 2 -> 0 (row LEFT) --
+#     `local (*{"${caller}::a"}, *{"${caller}::b"}) = ...` lowers since s533c (MAIN-READY-72, 06a4b8ba:
+#     the `local` statement off the v1 text seam, #4185 glob targets in a local list); one transpile
+#     each: 95a1de03 (2) vs 06a4b8ba (0), scratch/s536j/bisect-mojo.sh.  s536g saw it 0 on main first.
 #   s535 (2026-11-08, the round attribution, edited not re-blessed): t/op/write.t 1 -> 0 --
 #     the `Handle single node of unknown type` drop is gone since s532e (MAIN-READY-69, 59317afd:
 #     PPI group AU §40 #3745, `PPI::Token::Format` holds a format body and the stripper is deleted);
@@ -810,7 +814,6 @@
 #         swallowed the statement; PCL's PPI calls a lexical sub named like a
 #         keyword by its bare name (ppi-upstream-bugs.md §43, group AL, #3750).
 #         Measured: gate-set scan, t/op/lexsub.t DROP -> OK.
-board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Parser2 TODO: unsupported `local` target: *{"${caller}::a"} x2
 perl-tests/method.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$obj>','Token::Quote::Double<"a">'] x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">'] x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: ['Structure::Constructor<{ x1

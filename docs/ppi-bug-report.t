@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 372;
+use Test::More tests => 411;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2046,4 +2046,103 @@ for my $case ( [ '${\ m{q}}', 'Regexp::Match=m{q}' ], [ 'm{q};', 'Regexp::Match=
     my ( $code, $want ) = @$case;
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq $want, @t ), "$code: unchanged (control)" ) or diag "got: @t";
+}
+# §62 -- a NEGATED package-qualified bareword: perl reads the minus, then
+# the whole word, package part and all (toke.c yyl_hyphen: only a single
+# letter before a non-word character is a filetest):
+# `print -Foo::bar` prints -Foo::bar, or -3 when sub Foo::bar returns 3;
+# `-CORE::log(...)` negates the builtin.
+{
+    for my $case ( [ 'print -Foo::bar, "\n";', 'Word=-Foo::bar' ],
+                   [ 'my $v = -CORE::log(1);', 'Word=-CORE::log' ],
+                   [ 'print -foo::bar::baz;', 'Word=-foo::bar::baz' ],
+                   [ 'my %h = (-Foo::bar => 1);', 'Word=-Foo::bar' ],
+                   [ 'print -Foo::;', 'Word=-Foo::' ],
+                   [ 'f(-a::b);', 'Word=-a::b' ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: the negated qualified name is one Word" ) or diag "got: @t";
+    }
+}
+for my $case ( [ 'print -e::foo;', 'Operator=-e' ], [ 'print - Foo::bar;', 'Word=Foo::bar' ],
+               [ 'print -foo;', 'Word=-foo' ], [ '$x-Foo::bar;', 'Word=Foo::bar' ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: unchanged (control)" ) or diag "got: @t";
+}
+
+# §63 -- x and x<digits> right after the } of a block that ends a
+# statement or takes a list: perl reads x3 as the repetition operator
+# only where it expects an operator (toke.c: case 'x' tests
+# PL_expect == XOPERATOR); after a sub definition, a bare block, BEGIN,
+# a compound statement's block or a map / grep / sort block it expects a
+# statement or a term, so the word is a call:
+# `sub x3 { print "called\n" } x3();` prints called.
+{
+    for my $code ( 'sub x3 { 1 } x3();', 'sub x64 { 1 } x64 1;', 'my @m = map { 1 } x3();',
+                   'BEGIN { 1 } x3();', '{ 1 } x3();', 'if (1) { 2 } x3();',
+                   'for my $i (1) { } x3();', 'sub z :lvalue { 1 } x3();',
+                   'sub q2 ($) { 1 } x3();', 'sub g :lvalue ($x) { 1 } x3();' ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( !grep( /^Operator=x$/, @t ), "$code: the word after the block is a Word, not the x operator" ) or diag "got: @t";
+    }
+    my @t = map { short_class($_) } toks('if (1) { 2 } -e $f;');
+    ok( grep( $_ eq 'Operator=-e', @t ), 'if (1) { 2 } -e $f;: a filetest starts the next statement' )
+        or diag "got: @t";
+}
+for my $code ( '$a x3;', 'my $s = do { "a" } x3;', 'my $h = { a => 1 } x 2;', 'my $c = sub ($) { 1 } x 2;',
+               'my @l = (1, 2) x3;', '$h{a} x3;' ) {
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( /^Operator=x$/, @t ), "$code: the x operator (control)" ) or diag "got: @t";
+}
+{
+    my @t = map { short_class($_) } toks('my $v = do { 5 } -1;');
+    ok( grep( $_ eq 'Operator=-', @t ), 'my $v = do { 5 } -1;: a subtraction (control)' ) or diag "got: @t";
+}
+
+# §64 -- __DATA__ or __END__ before a fat comma is a word: perl tests for
+# => right after a word before it looks the word up as a keyword (toke.c
+# yyl_keylookup), so `our %K = ( __DATA__ => 2 )` is a hash with the key
+# __DATA__, and the rest of the file is still code.
+{
+    my $k = "our %K = (\n  __DATA__ => 2,\n  __END__  => 3,\n);\nprint 1;\n";
+    for my $case ( [ $k, 'Word=__DATA__', '__DATA__ => at the start of a line in a list' ],
+                   [ $k, 'Word=__END__', '__END__ => at the start of a line in a list' ],
+                   [ 'my @l = (__END__ => 3); print 1;', 'Word=__END__', '(__END__ => 3)' ],
+                   [ "my %h = (x => 1,\n__DATA__=>5);\n", 'Word=__DATA__', '__DATA__=> without a space' ],
+                   [ "my %h = (x => 1,\n__END__\t=> 6);\n", 'Word=__END__', '__END__ and a tab before =>' ] ) {
+        my ( $code, $want, $label ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ) && !grep( /^Separator/, @t ),
+            "$label: the word before => is a Word, not a Separator" ) or diag "got: @t";
+    }
+}
+for my $case ( [ "print 1;\n__DATA__\nx => 1\n", 'Separator=__DATA__' ],
+               [ "print 1;\n__END__ junk => 1\n", 'Separator=__END__' ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "the data section starts (control): $want" ) or diag "got: @t";
+}
+
+# §65 -- a CR in the source is a character of the program: perl reads a
+# CR inside a string literal or the __DATA__ section as itself
+# (`eval "'a\r\nb'"` has length 4), and converts only the CR LF line
+# ends inside a here-doc body or a multi-line literal of a source FILE.
+# PPI rewrites every CR LF, CR CR LF and lone CR of the source to LF
+# before it tokenizes, so no token can hold a CR.
+{
+    for my $case ( [ "my \$x = q{a\r\nb};\n", 'Quote::Literal', "q{a\r\nb}", 'a CR LF inside q{}' ],
+                   [ "my \$y = \"c\rd\";\n", 'Quote::Double', "\"c\rd\"", 'a lone CR inside ""' ],
+                   [ "print 1;\n__DATA__\nj\r\nk\n", 'Data', "j\r\nk\n", 'a CR LF in the __DATA__ section' ] ) {
+        my ( $code, $class, $want, $label ) = @$case;
+        my $doc = PPI::Document->new( \$code );
+        my ($tok) = grep { short_class(ref $_) eq $class } $doc ? $doc->tokens : ();
+        ok( $tok && $tok->content eq $want, "$label: the token keeps the CR" )
+            or diag 'got: ' . ( $tok ? join( ' ', map { sprintf '%02x', ord } split //, $tok->content ) : 'no token' );
+    }
+}
+{
+    my $doc = PPI::Document->new( \"my \$a = 1;\r\nmy \$b = 2;\r\n" );
+    my @s = $doc ? $doc->children : ();
+    ok( 2 == grep( $_->isa('PPI::Statement'), @s ), 'CR LF line ends still end lines (control)' );
 }
