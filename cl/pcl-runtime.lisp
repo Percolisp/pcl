@@ -14368,7 +14368,8 @@ per element."
    - Shrinking: truncates (adjusts fill-pointer)
    - If arr is a scalar box containing undef, auto-vivifies an array ref inside it.
    Returns new-last-index."
-  (let* ((inner (unbox arr))
+  (let* ((arr (%p-deref-overload arr "@{}"))           ; #4305
+         (inner (unbox arr))
          ;; Auto-vivify: if arr is a box with nil/undef, create an array inside it
          (a (cond
               ((and (p-box-p arr) (or (null inner) (eq inner *p-undef*)))
@@ -15686,7 +15687,7 @@ which is one of #1140's escape spellings (probed)."
          (k (to-string key)))
     (multiple-value-bind (stored found) (gethash k h)
       ;; Unbox if stored value is a box
-      (let ((val (unbox stored)))
+      (let ((val (unbox (%p-deref-overload stored "%{}"))))   ; #4305
         (cond
           ((hash-table-p val) val)
           ((or (not found) (null val) (eq val *p-undef*))
@@ -15708,7 +15709,7 @@ which is one of #1140's escape spellings (probed)."
          (k (to-string key)))
     (multiple-value-bind (stored found) (gethash k h)
       ;; Unbox if stored value is a box
-      (let ((val (unbox stored)))
+      (let ((val (unbox (%p-deref-overload stored "@{}"))))   ; #4305
         (cond
           ((and (vectorp val) (not (stringp val))) val)
           ((or (not found) (null val) (eq val *p-undef*))
@@ -15737,11 +15738,11 @@ which is one of #1140's escape spellings (probed)."
     ;; list (`("a","b",{q=>7})[2]{q}`), where extending first died where perl
     ;; simply reads.  The extend/vivify path below is unchanged.
     (when (< i (length a))
-      (let ((val (unbox (aref a i))))
+      (let ((val (unbox (%p-deref-overload (aref a i) "%{}"))))   ; #4305
         (when (hash-table-p val) (return-from p-autoviv-aref-for-hash val))))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
-    (let* ((stored (aref a i))
+    (let* ((stored (%p-deref-overload (aref a i) "%{}"))  ; #4305
            ;; Unbox if element is a box
            (val (unbox stored)))
       (cond
@@ -15767,12 +15768,12 @@ which is one of #1140's escape spellings (probed)."
     ;; READ FIRST — see p-autoviv-aref-for-hash (task #1241, read-only literal
     ;; list containers).
     (when (< i (length a))
-      (let ((val (unbox (aref a i))))
+      (let ((val (unbox (%p-deref-overload (aref a i) "@{}"))))   ; #4305
         (when (and (vectorp val) (not (stringp val)))
           (return-from p-autoviv-aref-for-array val))))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
-    (let* ((stored (aref a i))
+    (let* ((stored (%p-deref-overload (aref a i) "@{}"))  ; #4305
            ;; Unbox if element is a box
            (val (unbox stored)))
       (cond
