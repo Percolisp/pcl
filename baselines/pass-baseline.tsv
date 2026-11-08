@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s532c (2026-11-08, Opus, EDITED BY HAND): readline.t 27/7 PARTIAL -> 29/5 OK (#4301), method.t 77/22 -> 78/21 (#1486; its row 96 $pvlv_glob->method fails identically on ce665621), pos.t 19/11 -> 20/10 (#4308); magic.t stays 158/31 (#4301 exposed 22 caret rows that passed on the always-true `defined *$v`; #4308 makes them pass honestly)
 # s531a (2026-11-01, Opus, EDITED BY HAND): pack.t 5637/88 -> 5652/73 -- #3650 (a template that begins with U is U0 character mode) makes 15 more rows pass (none of them in fail-baseline.tsv); length.t 36/2 -> 34/2 (+ 2 registered) -- rows 7 + 10 (length(pack 'U', N) is 1 char) PASS and leave the skip registry, rows 8 9 11 12 (`use bytes` length / byte_utf8a_to_utf8n of a pack 'U' string) now fail: they passed on the old UTF-8-octet pack 'U', and PCL has no per-scalar UTF-8 flag for `use bytes` to read (#1389) -- registered with rows 14-23's reason.
 # s525u (2026-10-24, Opus, EDITED BY HAND): bop.t 485/24 -> 487/22 -- rows "neg UV (sic) left shift" / "right shift" pass: a shift reads its left operand as a UV (#3760); both rows left fail-baseline.tsv by edit.
 # s523d (2026-10-22, Opus, EDITED BY HAND): ref.t 203 -> 204 -- row 200 "freeing freed glob in global destruction" passes again: #3691 (the stash delete of a non-sub symbol removes the glob; no announcement on the child's stderr).
@@ -519,7 +520,7 @@ magic.t	PARTIAL	158	31	208
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
 # unrecorded pre-existing `$pvlv_glob->method`).  No fail-baseline rows leave: the four were
 # among this PARTIAL file's unrecorded churn rows, never blessed.
-method.t	PARTIAL	77	22	163
+method.t	PARTIAL	78	21	163
 min_local.t	OK	10	0	10
 # s470bs-merge (2026-09-06, the batch's OWED full sweep) -- TWO ROWS EDITED BY
 #   HAND, both MEASURED on this tree AND on a `git archive 48d8e39` extraction
@@ -557,7 +558,7 @@ or.t	OK	11	2	14
 ord.t	OK	38	0	38
 pack.t	OK	5652	73	14722
 parent.t	OK	7	2	9
-pos.t	OK	19	11	30
+pos.t	OK	20	10	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's
 #   ([perl #94476]); it left fail-baseline.tsv by EDIT in the same commit.
 postfixderef.t	PARTIAL	103	18	128
@@ -568,7 +569,7 @@ qq.t	OK	30	0	30
 qr.t	OK	29	8	37
 quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
-readline.t	PARTIAL	27	7	36
+readline.t	OK	29	5	36
 recurse.t	OK	26	2	28
 # s428 (#411 elided-arrow call): ref.t 191 -> 192 EDITED BY HAND — `(sub{})[0]()` (line 674) no longer DROPS.
 # s446j (#517): ref.t 192 -> 193 EDITED BY HAND — `ref(\&{""})` is CODE, as perl says
