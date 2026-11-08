@@ -719,6 +719,35 @@ sub _requalify_switched_regions {
   return;
 }
 
+# #4421: the region opener for a block-form `package NAME { BLOCK }` that is
+# lowered IN PLACE.  A block form at the top level (or directly in a flattened
+# top-level bare block) is its own section, whose (in-package NAME) homes the
+# bare names at read time; anywhere else -- a sub body, an `if` block, another
+# package block, a string eval's collapsed region -- the reader is still in
+# the enclosing package, and `sub run { package P { $x = 5 } }` wrote
+# $main::x.  The block's statements are a region of NAME, requalified like a
+# `package NAME;` region (the binder's positional package homes a global to
+# NAME, an `our` to its declaring package; deepest block first).
+sub _requalify_inplace_pkg_blocks {
+  my ($self, $doc, $segments) = @_;
+  my %section = map { (refaddr($_->{pkg_stmt}) => 1) }
+                grep { $_->{blockform} && $_->{pkg_stmt} } @$segments;
+  my @todo;
+  for my $st (@{ $doc->find('PPI::Statement::Package') || [] }) {
+    next if $section{ refaddr $st };
+    my ($blk) = grep { $_->isa('PPI::Structure::Block') } $st->schildren;
+    next unless $blk;
+    next if $self->fallback_parser->feature_statement_refusal($st);   # `class NAME { }`
+    my $ns = $st->namespace;
+    next unless defined $ns && $ns =~ /^\w+(?:::\w+)*$/;
+    push @todo, [scalar(_ancestors($blk)), $blk, $ns];
+  }
+  for my $e (sort { $b->[0] <=> $a->[0] } @todo) {
+    $self->_requalify_region([ $e->[1]->schildren ], $e->[2]);
+  }
+  return;
+}
+
 sub _requalify_region {
   my ($self, $stmts, $pkg) = @_;
   # Candidate names: every variable the region MENTIONS, in any of the three
@@ -2119,6 +2148,13 @@ sub parse {
     # LOWERCASE sub name, is wrong IDENTICALLY under v1 — so the fallback was
     # buying nothing.  That divergence is task #246, not a v1 dependency.)
   }
+  # #4421: a `package NAME { BLOCK }` that is NOT a section of its own -- in
+  # a sub body or any block lowered in place, inside another package block,
+  # or the collapsed region of a string eval -- is read by the CL reader in
+  # the ENCLOSING package, so its bare globals are requalified to NAME here,
+  # once the segments (which block forms ARE sections) are known.
+  $self->_requalify_inplace_pkg_blocks($doc, \@segments);
+
   # #470: which bare names the FILE also spells as a package global.  Both
   # promotion passes' identity branch (promote under the variable's OWN name)
   # asks it — a lexical promoted that way SHARES the cell with every such
@@ -2135,6 +2171,7 @@ sub parse {
     my $span = $self->_span_facts(\@segments);
     $self->_rename_spanning_lexicals(\@segments, $span);
     $self->_check_my_spanning($span);
+    $self->_requalify_spanning_ours(\@segments, $span);       # #475
   }
 
   # state in a NAMED sub: rename to a per-sub package cell `$x__state__N`
@@ -3738,7 +3775,32 @@ sub _span_facts {
     push @ranges, $r;
   }
   my %skip = map { ($_ => 1) } grep { $segments->[$_]{blockform} } 0 .. $#$segments;
-  return { binder => $bd, ranges => \@ranges, spans => [ $bd->spans(\@ranges, \%skip) ] };
+  return { binder => $bd, ranges => \@ranges, skip => \%skip,
+           spans => [ $bd->spans(\@ranges, \%skip) ] };
+}
+
+# #475: a FILE-level `our` alias used in a LATER section of another package.
+# `our $t` binds the bare name to the DECLARING package's variable for the
+# rest of its lexical scope; a later top-level `package A;` opens a new
+# section whose reader homes a bare `$t` to A, so `our $t = "m"; package A;
+# $t .= "A"` appended to $A::t.  Each such use -- exactly the alias's, the
+# binder's answer -- is spelled in the declaring package: the requalifier's
+# rewrite (_rewrite_var_uses), at a section boundary instead of a block one.
+sub _requalify_spanning_ours {
+  my ($self, $segments, $facts) = @_;
+  my $bd = $facts->{binder} or return;
+  for my $s ($bd->spans($facts->{ranges}, $facts->{skip}, kinds => { our => 1 })) {
+    my $bn = $s->{b};
+    my ($home, $canon, $decl) = @$bn{qw(perl_package canon decl_node)};
+    (my $bare = $canon) =~ s/^[\$\@\%]//;
+    next unless defined $home && $bare =~ /^[^\W\d]\w*\z/;
+    my $skip = sub { !$self->_refers_to_decl($_[0], $canon, $decl) };
+    for my $j (sort { $a <=> $b } keys %{ $s->{segs} }) {
+      next if $segments->[$j]{pkg} eq $home;
+      $self->_rewrite_var_uses($segments->[$j]{stmts}, $canon, "${home}::${bare}", undef, $skip);
+    }
+  }
+  return;
 }
 
 # Is $tok's use of $canon a use of the variable the declarator token $decl
@@ -14586,8 +14648,13 @@ sub _local_our_decls {
   my $pkg = ($self->environment ? $self->environment->current_package : undef) // 'main';
   for my $t (@$nonws[1 .. $#$nonws]) {
     next if ref($t) ne 'PPI::Token::Symbol';
-    push @{ $self->{_captured_decls} }, $p->_our_cell_decl($pkg, $t->content);
-    $self->environment->add_our_variable($pkg, $t->content) if $self->environment;
+    my ($vp, $vn) = ($pkg, $t->content);
+    # The block-package requalifier spells a `local our` declarator in a
+    # region in its DECLARING package (`local our $S::v`, #4422): that
+    # package is the cell's, and the name its bare spelling.
+    ($vp, $vn) = ($2, "$1$3") if $vn =~ /^([\$\@\%])(\w+(?:::\w+)*)::(\w+)\z/;
+    push @{ $self->{_captured_decls} }, $p->_our_cell_decl($vp, $vn);
+    $self->environment->add_our_variable($vp, $vn) if $self->environment;
   }
 }
 

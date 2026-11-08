@@ -800,13 +800,37 @@ sub requalify_home {
   my $list = $self->{refs}{ refaddr $tok } or return (undef, 'no-token');
   my ($r) = grep { $_->{canon} eq $canon } @$list;
   return (undef, 'no-ref') unless $r;
-  return (undef, 'decl') if $r->{via} eq 'decl';
+  if ($r->{via} eq 'decl') {
+    # An `our` DECLARATOR whose statement's own lowering does not qualify it
+    # -- a `for our $x` loop head, `local our $x`, an `our` inside an
+    # expression -- is spelled in its DECLARING package, as its uses already
+    # are (#4440, #4422); a plain `our $x` statement qualifies itself
+    # (Parser2::_lower_our_decl), so its declarator is left as written.
+    my $b = $r->{binding};
+    return ($b->{perl_package}, 'our-decl') if $b && $b->{kind} eq 'our' && !_leads_our_stmt($tok);
+    return (undef, 'decl');
+  }
   my $b = $r->{binding};
   my $k = $b->{kind};
   return (undef, $k) if $k =~ /^(?:my|state|param|lexsub|outer)$/;
   return ($b->{perl_package}, $k) if $k eq 'our' || $k eq 'global';
   return ('main', $k) if $k eq 'special';
   die "PCL binder: unknown binding kind `$k` for $canon\n";
+}
+
+# Is the declarator $tok's `our` word the LEADING word of an `our` statement
+# (`our $x …;`, `our ($a, $b) …;`) -- the shape _lower_our_decl lowers?
+sub _leads_our_stmt {
+  my ($tok) = @_;
+  my $w = $tok->sprevious_sibling;
+  if (!($w && $w->isa('PPI::Token::Word') && $w->content eq 'our')) {
+    my $l = $tok->parent;
+    $l = $l->parent while $l && !$l->isa('PPI::Structure::List') && !$l->isa('PPI::Statement::Variable');
+    $w = $l && $l->isa('PPI::Structure::List') ? $l->sprevious_sibling : undef;
+  }
+  return 0 unless $w && $w->isa('PPI::Token::Word') && $w->content eq 'our';
+  my $st = $w->parent;
+  return ($st && $st->isa('PPI::Statement::Variable') && refaddr($st->schild(0)) == refaddr($w)) ? 1 : 0;
 }
 
 sub binding_of {
@@ -950,12 +974,14 @@ sub text_uses_in {
 # THE SPANS.  $ranges = [ [lo, hi] | undef, ... ] the ordinal range of each
 # segment in order (undef = an empty segment), $skip = { i => 1 } the segments
 # whose declarations never span (a `package NAME { }` block's: its `my`s die
-# with the block).  Returns one record per my/state binding declared in a
+# with the block), kinds => { our => 1 } (default my + state) the binding
+# kinds asked about.  Returns one record per such binding declared in a
 # segment i and USED in a later one -- { b, di, segs => { j => 1 }, first }
 # (first = the first later segment with a use; text => 1 when only a
 # string-eval text reaches it) -- in declaration order.
 sub spans {
-  my ($self, $ranges, $skip) = @_;
+  my ($self, $ranges, $skip, %opt) = @_;
+  my $kinds = $opt{kinds} || { my => 1, state => 1 };
   # the segments are disjoint and in document order: a binary search on lo
   my @nz = grep { $ranges->[$_] } 0 .. $#$ranges;
   my $seg_of = sub {
@@ -968,7 +994,7 @@ sub spans {
   };
   my @out;
   for my $b (@{ $self->{bindings} }) {
-    next unless $b->{kind} eq 'my' || $b->{kind} eq 'state';
+    next unless $kinds->{ $b->{kind} };
     next unless $b->{decl_ord} >= 0;
     my $di = $seg_of->($b->{decl_ord});
     next if !defined $di || $skip->{$di};
