@@ -1889,6 +1889,10 @@
    the symbol's CURRENT status, exactly like perl's late-bound glob slot.
    Weak keys: an entry lives only as long as the coderef itself.")
 
+(defvar *p-stub-coderefs* (make-hash-table :test 'eq :weakness :value)
+  "Sub symbol -> the ONE lazy code ref p-backslash-sub hands out for it while
+   it has no body, so `\\&stub == \\&stub` as in perl (#4561).  Weak values.")
+
 
 ;;; THE DETECTOR (task #2610; s513d instrument, s514d production FLAG).  perl
 ;;; parses a statement after the one before it has RUN, so a sub (or a
@@ -14485,8 +14489,11 @@ the state that still counts as an array hole for exists()."
 LIVE slot box when the element exists — a write to $_[N] in the callee
 reaches the caller's array — and a lazy defelem alias (%p-defelem-box)
 when it does not.  Read-only use must never vivify or extend, which is
-why p-aref-box (the eager lvalue accessor) is wrong here."
-  (let ((a (unbox arr)))
+why p-aref-box (the eager lvalue accessor) is wrong here.
+ARR may be an ELEMENT holding a reference (a chain level in argument
+position), so it asks the dereference overload first (#4305)."
+  (let* ((arr (%p-deref-overload arr "@{}"))
+         (a (unbox arr)))
     (if (not (and (vectorp a) (not (stringp a))))
         (if (and (p-box-p a) (%p-tielem-box-p arr))
             (p-aref-argbox a idx)
@@ -14574,9 +14581,13 @@ costs TWO hash lookups, not four — a hash slice pays this per element."
 LIVE slot box when the key exists, else a lazy defelem alias — reads look
 the key up live and stay undef/non-exists, the first write through the
 alias creates the key.  p-gethash-box (the eager lvalue accessor) would
-create the key on a read-only call, which perl does not."
-  (let ((h (unbox hash))
-        (k (to-string key)))
+create the key on a read-only call, which perl does not.
+   HASH may be an ELEMENT holding a reference -- a subscript chain's level in
+   argument position, `f($coll->[0]{id})` -- so it is a container entry and
+   asks the dereference overload first (#4305: Mojo::DOM58's `%{}`)."
+  (let* ((hash (%p-deref-overload hash "%{}"))
+         (h (unbox hash))
+         (k (to-string key)))
     (if (not (hash-table-p h))
         ;; undef container / special markers / symbolic-ref strings:
         ;; keep plain value semantics, no aliasing.  A BLESSED hash is NOT in
@@ -14593,14 +14604,16 @@ create the key on a read-only call, which perl does not."
    live slot box when the key exists, a lazy alias when it does not (a failed
    match never vivifies the key, probed 5.40.3).  A ref that is not a hash
    yet reads as p-gethash-deref does, in a detached box."
-  (let ((h (unbox ref)))
+  (let* ((ref (%p-deref-overload ref "%{}"))           ; #4305
+         (h (unbox ref)))
     (if (hash-table-p h)
         (p-gethash-argbox h key)
         (make-p-box (p-gethash-deref ref key site)))))
 
 (defun p-aref-deref-argbox (ref idx &optional site)
   "$ref->[IDX] as the TARGET of a //g match: see p-gethash-deref-argbox."
-  (let ((a (unbox ref)))
+  (let* ((ref (%p-deref-overload ref "@{}"))           ; #4305
+         (a (unbox ref)))
     (if (and (vectorp a) (not (stringp a)))
         (p-aref-argbox a idx)
         (make-p-box (p-aref-deref ref idx site)))))
@@ -31642,9 +31655,15 @@ would consume, so it dies naming the stream (rule 12)."
     ;; be captured by value, so return a trampoline that re-reads symbol-function
     ;; at CALL time.  (Needed now that sub bodies stay in source order relative
     ;; to use/BEGIN — see docs/declaration-ordering-fix-plan.md.)
+    ;; ONE late-bound ref per name (#4561): perl's `\&stub` is the stub CV
+    ;; itself, so `\&stub == \&stub` -- Role::Tiny's non-method test compares
+    ;; the refs taken at import with the ones taken later.  Weak on the value:
+    ;; a ref nothing holds may go, and a later `\&stub` makes a new one.
+    ((gethash sym *p-stub-coderefs*))
     ((fboundp sym)
      (let ((tramp (lambda (&rest args) (apply (symbol-function sym) args))))
-       (setf (gethash tramp *p-lazy-coderef-target*) sym)
+       (setf (gethash tramp *p-lazy-coderef-target*) sym
+             (gethash sym *p-stub-coderefs*) tramp)
        tramp))
     ;; Not declared at all: return a lambda that, when CALLED, is a plain call
     ;; that reached no body — the same question `p-declare-sub`'s stub asks, so
@@ -31664,7 +31683,8 @@ would consume, so it dies naming the stream (rule 12)."
               (if (%p-sub-has-body-p sym)
                   (apply (symbol-function sym) args)
                   (%p-call-of-undefined-sub sym args)))))
-       (setf (gethash fallback *p-lazy-coderef-target*) sym)
+       (setf (gethash fallback *p-lazy-coderef-target*) sym
+             (gethash sym *p-stub-coderefs*) fallback)
        fallback))))
 
 (defun p-backslash-sub-ref (val)

@@ -952,6 +952,7 @@ delete $w->{a}; print "G $store{b} $ex ", join(",", sort keys %store), " ", join
 my $p = {q => 1}; my $pa = [7]; print "H $p->{q} $pa->[0] ", ref($w), "\n";
 my @el = ($a); my %he = (o => $a, h => $w); my $re = [$a];
 print "I $el[0][0] ${$el[0]}[0] $he{o}->[0] ", scalar(@{$he{o}}), " $re->[0][1] $he{h}{b}\n";
+sub args { join ",", @_ } print "J ", args($re->[0][2], $he{h}{b}, $el[0]->[1]), "\n";
 PL
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     binmode($fh, ':raw'); print $fh $prog; close $fh;

@@ -497,6 +497,7 @@ print "Dkeys: ", join(" ", sort grep !/::$/, keys %{"D::"}), "\n";
 *{"F::real"} = \&CW::later; print "F: ", (exists &F::real ? 1 : 0), (defined &F::real ? 1 : 0), "\n";
 my $r = eval { D::copy(); 1 } ? "lived" : ($@ =~ /^(Undefined subroutine &CW::stubsub called)/)[0];
 print "callD: $r\n";
+print "same: ", (\&CW::stubsub == \&CW::stubsub ? 1 : 0), (\&main::nope_zz == \&main::nope_zz ? 1 : 0), (\&{"CW::stubsub"} == $code ? 1 : 0), "\n";
 eval 'package CW; sub stubsub { "now" } 1' or die $@;
 print "after: ", CW::stubsub(), " ", D::copy(), " ", (defined &D::copy ? 1 : 0), (defined &$code ? 1 : 0), "\n";
 PL
