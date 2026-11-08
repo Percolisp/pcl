@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 25;
+plan tests => 30;
 
 sub run_pcl {
     my ($code) = @_;
@@ -157,3 +157,28 @@ like($refs, qr/^c-refaddr=1 addr$/m, 'refaddr of a tied scalar: FETCH once, an a
 like($refs, qr/^c-ref=1 K$/m,        'ref of a tied scalar: FETCH once');
 like($refs, qr/^c-copy=1$/m,         'a copy of a tied scalar: FETCH once');
 unlike($refs, qr/error|PCL:/i,       'program 3 runs clean') or diag($refs);
+
+# ---------------------------------------------------------------- program 4
+# #1814 / #2601 (s536a, Text-CSV 76_magic.t row 12): a tied scalar COPIED into
+# an aggregate -- `[$t]`, `@a = ($t)`, push / unshift / splice -- is FETCHed
+# ONCE and the element holds the VALUE: a later write to $t does not reach it
+# and a write to the element does not STORE into $t.  It held a box around the
+# tie PROXY (an alias).  Every expectation is the perl 5.40.3 line.
+my $COPIES = <<'PERL';
+our $n = 0;
+{ package T2; sub TIESCALAR { my $v; bless \$v, shift } sub FETCH { $main::n++; ${$_[0]} } sub STORE { ${$_[0]} = $_[1] } }
+tie my $t, 'T2'; $t = "one";
+$n = 0; my $g = [$t, 1]; my $f1 = $n; $t = "two";
+print "a-anon=$g->[0] fetch=$f1 tied=", (tied($g->[0]) ? 1 : 0), "\n";
+$n = 0; my @o = ($t, 1); my $f2 = $n; $t = "three"; print "a-list=@o fetch=$f2\n";
+$n = 0; my @p; push @p, $t; unshift @p, $t; splice @p, 1, 0, $t; my $f3 = $n; $t = "four"; print "a-push=@p fetch=$f3\n";
+$p[0] = "Z"; print "a-nowrite=$t\n";
+$t = [7]; my @r = ($t); $t = 0; print "a-ref=", ref($r[0]), " $r[0][0]\n";
+PERL
+
+my $copies = run_pcl($COPIES);
+like($copies, qr/^a-anon=one fetch=1 tied=0$/m, '[$tied] copies the FETCHed value once (#1814)');
+like($copies, qr/^a-list=two 1 fetch=1$/m,      '@a = ($tied, ...) copies the value once (#2601)');
+like($copies, qr/^a-push=three three three fetch=3$/m, 'push / unshift / splice copy the value, one FETCH each');
+like($copies, qr/^a-nowrite=four$/m,            'a write to the element does not STORE into the tied scalar');
+like($copies, qr/^a-ref=ARRAY 7$/m,             'a reference FETCHed into an element stays an unblessed ARRAY ref');

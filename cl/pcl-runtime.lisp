@@ -9592,6 +9592,17 @@ per element."
           ((and (p-magic-cell-p inner)
                 (not (eq (p-magic-cell-kind inner) :defelem)))
            (%p-vpush (make-p-box (funcall (p-magic-cell-getter inner))) arr))
+          ;; A TIED scalar is the same case for the same reason: perl's
+          ;; `[$t]` / `@a = ($t)` / push FETCHes ONCE and copies the VALUE.
+          ;; Storing a box around the PROXY made the element ALIAS the tied
+          ;; variable -- every later read FETCHed again and a write STOREd
+          ;; through it (#1814, #2601; Text-CSV 76_magic.t row 12).  The VALUE
+          ;; is the list assignment's own reading of a tied element
+          ;; (%p-assign-snapshot: `(unbox (%p-tie-fetch ...))`), stored by the
+          ;; raw-value arms -- never the method's result BOX, which can be the
+          ;; tie object's own referent and carry ITS class.
+          ((p-tie-proxy-p inner)
+           (%p-array-store-scalar arr (unbox (%p-tie-fetch item inner))))
           ;; A REFERENCE -- to a scalar (box-in-box, \$x or \\$x), a glob, or a
           ;; raw object (array, hash, code, qr//), blessed or not: copy the
           ;; scalar CONTAINER while keeping the SAME referent.  Perl's [$x] /
@@ -15179,7 +15190,8 @@ which is one of #1140's escape spellings (probed)."
   ;; Expand into a flat array of properly-boxed elements (preserving bless class)
   (let ((flat-arr (make-array 8 :adjustable t :fill-pointer 0)))
     (dolist (item items)
-      (let ((val (unbox item)))
+      ;; a PEEK, never unbox: the store reads a tied or magic item ONCE (#1814)
+      (let ((val (if (p-box-p item) (p-box-value item) item)))
         (cond
           ;; Flatten marker - expand its array
           ((p-flatten-marker-p val)
@@ -15255,7 +15267,8 @@ which is one of #1140's escape spellings (probed)."
     ;; Flatten replacement items (arrays get flattened in Perl)
     (let ((flat-rep (make-array 8 :adjustable t :fill-pointer 0)))
       (dolist (r replacements)
-        (let ((v (unbox r)))
+        ;; a PEEK, never unbox: the store reads a tied or magic item ONCE (#1814)
+        (let ((v (if (p-box-p r) (p-box-value r) r)))
           ;; Only spread raw (unboxed) vectors; a p-box holding a vector is an array-ref scalar
           (if (and (vectorp v) (not (stringp v)) (not (p-box-p r)))
               (loop for el across v do (%p-array-store-scalar flat-rep el))
