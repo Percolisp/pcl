@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s536a (Opus 5.5, 2026-11-08) from #4183 (Text-CSV 76_magic.t) -- HARNESS.  PRE-EXISTING on main 06a4b8ba (code sha).\n\nREPRODUCER (scratch/s536a/p/4183-3.pl, row 4):\n\n    use Test::More;\n    { package Bar; sub FETCH { ${$_[0]} } sub STORE { ${$_[0]} = $_[1] } sub TIESCALAR { my $v; bless \\$v, \"Bar\" } }\n    my $bar; tie $bar, \"Bar\"; $bar = \"#\";\n    is_deeply($bar, \"#\", \"scalar\");\n    done_testing;\n\nperl 5.40.3 (Test::More): ok 1.   PCL: `not ok 1` / got '#' / expected '#'.\n\nMECHANISM: cl/pcl-test.lisp test-deeply-equal unwraps each operand with `(if (p-box-p u) (p-box-value u) u)` -- a RAW read, so a tied scalar compares its tie PROXY (and a magic cell its cell) where Test::More compares the FETCHed value.  `unbox` is the reader that runs the tie / magic (and is the same as p-box-value for every other box).  FIX: unbox at the two unwrap points; a guard row; the harness rule of the WHAT-TO-RUN-WHEN table applies (sweep + `--all --quick` per batch).\nROWS: none on the board today (76_magic.t row 12 was #1814's, fixed s536a); found while reducing it.\n",
+   "id" : "4563",
+   "status" : "pending",
+   "subject" : "HARNESS: is_deeply on a TIED scalar operand fails -- cl/pcl-test.lisp test-deeply-equal reads the box raw (p-box-value), so `is_deeply($tied, \"x\")` compares the tie proxy where Test::More compares the FETCHed value"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-08",
+   "description" : "FILED s532d (s536 resume), found while attributing the sweep's FIXED row bless.t 105 \"blessing through tied refs\" (fixed by #4061).\n\n    my $n = 0;\n    sub TIESCALAR { bless \\(my $thing = pop), shift }\n    sub FETCH { $n++; ${$_[0]} }\n    tie $tied, main => $untied = [];\n    $n = 0;\n    eval { bless $tied, 'Q' };\n    print \"fetches: $n ref untied: \", ref $untied, \"\\n\";\n\nperl 5.40.3: `fetches: 1 ref untied: Q`\nPCL (base 06a4b8ba and the s532d tree alike): `fetches: 2 ...` (the s532d tree gets `Q` right, base said `ARRAY`).\n\n#408's diagnosis (\"PCL blesses without invoking FETCH\") was wrong: PCL does FETCH -- twice.  The class missing from $untied was #4061 (a first bless of an ARRAY referent lived on the box only).  What is left is the read count: p-bless's operand is read twice (probably once for the ref test and once for the referent).  Same family as #1813 (DECIDED: \"AN OPERATOR READS ITS OPERAND ONCE\") -- read the operand into a local once at the top of p-bless.  Probe: scratch/s532d/pr2/sw4.pl in the s532d worktree.\n",
+   "id" : "4325",
+   "status" : "pending",
+   "subject" : "`bless $tied` FETCHes a tied scalar operand TWICE where perl FETCHes it once (#1813 family: an operator reads its operand once)"
+}
