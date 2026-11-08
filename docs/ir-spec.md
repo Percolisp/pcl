@@ -4521,6 +4521,12 @@ of the package the glob names before any other; a module's `__END__` section
 (PCL gives each package its own `DATA`) never answers for `\*DATA` in `main`.
 Example: a program that loads a module with an `__END__` section and calls
 `test_expect(\*DATA)` reads its OWN data section (Template-Toolkit t/filter.t).
+The rule does not apply to main's standard handles (STDIN STDOUT STDERR ARGV
+ARGVOUT, names perl forces into `main::`; s532c, task #4623): their IO is the
+runtime's own standard-handle state, which `local *STDIN` saves and restores,
+so a glob assignment's copy under main's same-named symbol never answers for
+them.  Example: `*STDIN = *STDIN; { local *STDIN; fileno(\*STDIN) }` is undef,
+as in perl (Capture::Tiny's tied-STDIN captures).
 
 **A filehandle is an object of the handle class with no `use`.**
 `STDOUT->autoflush(1)`, `$fh->print(…)`, `$fh->getline`, `$fh->close` all work
