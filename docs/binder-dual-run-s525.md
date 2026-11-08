@@ -298,6 +298,19 @@ tree).
    disagreement under it today (the rename passes ask `_rename_decl_within`,
    not the three hooked resolvers -- a SECOND dual-run point is needed here
    before porting: hook `_rename_decl_within` the same way).
+   **Done ahead of port 4 (s536e, generation v2-12900), the questions its
+   silent wrongs needed:** the embedded-`my` VETO asks `uses_of` of the
+   declarator's binding (a use inside another named sub, plus the port-2
+   eval-text rule) -- the sigil-blind text scan and its two exemption walks
+   (`_sub_declares_name`, `_sub_freely_references_name`, `_decl_scope_block`)
+   are deleted (#4641); "does the statement mention its embedded `my` again"
+   is `Binder::mentions_in` (as spelled now), read by both embedded arms and
+   by the rename that makes the let safe (`_rename_rereading_embedded_mys`,
+   `__shadow__` / `:reread-shadow`, #4642); the state prepass qualifies a
+   cell use whose binder package is not the declaration's (#4541).  The span
+   pass's three silent wrongs: an exception-partition name never takes the
+   identity cell (#4547), a LIST declaration's container is offered (#4543),
+   a one-token signature default is renamed in the token text (#4545).
 5. Not identity (stay): `_scan_eval_site_features` (:189),
    `_rewrite_unreachable_gotos` (:261), `_classify_nested_gotos` (:307),
    `_ancestors` (:654), `_premerge_glob_const_prototypes` (:1150),
