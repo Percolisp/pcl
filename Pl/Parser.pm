@@ -7501,8 +7501,13 @@ sub _process_sub_statement {
       my $cond  = $op eq '//=' ? "(and $avail (%pcl-definedp (aref \@_ $idx)))"
                 : $op eq '||=' ? "(and $avail (p-true-p (aref \@_ $idx)))"
                 :                $avail;
+      # A supplied argument is COPIED (the parameter is its own box); a taken
+      # default is STORED the way `my $n = DEFAULT` stores (p-box-init =
+      # box-set into a fresh box): an array becomes its count, a hash its
+      # count, a reference stays a reference (#4782; ir-spec §5.2).
       push @binds,
-        "($p->{name} (p-copy-scalar-arg (if $cond (aref \@_ $idx) $p->{default_cl})))";
+        "($p->{name} (if $cond (p-copy-scalar-arg (aref \@_ $idx))"
+        . " (p-box-init $p->{default_cl})))";
       push @sig_param_names, $p->{name};
       push @local_wraps, { var => $p->{local_var}, name => $p->{name}, idx => $idx }
         if $p->{local_var};
@@ -11861,6 +11866,15 @@ sub _compile_default_expr {
     my $expr_o = $self->_expr_parser(\@parts, $doc);
 
     my $node_id = $expr_o->parse_expr_to_tree(\@parts);
+
+    # A scalar parameter's default is the RHS of a SCALAR assignment
+    # (`$n = DEFAULT`, perl's pp_argdefelem): SCALAR context, annotated over
+    # the whole tree exactly as `my $n = DEFAULT`'s RHS is -- a call runs in
+    # scalar context, `() = LIST` answers its count (#4782).  The store that
+    # turns an array into its count is the binding's (p-box-init, below).
+    # A `state $v = INIT` init inside a default is a scalar assignment's RHS
+    # too, so the one rule serves both callers.
+    $expr_o->annotate_contexts($node_id, SCALAR_CTX);
 
     my $gen = $self->_expr_generator($expr_o);
 

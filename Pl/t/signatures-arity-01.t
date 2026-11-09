@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -152,3 +152,29 @@ test_cl('||= signature default (absent/undef/false)',
     "$H\nsub f (\$x, \$y ||= 3) { \$x + \$y }\n"
   . "print f(5,4), f(5), f(4,undef), f(4,0), \"\\n\";",
     "9877\n");
+
+# ── A default is the RHS of a SCALAR assignment (#4782, s537a) ───────────────
+
+# 19: `$n = @d` binds the COUNT, `() = @d` the RHS count, `@$r` / a comma
+#     list / grep / a ternary of arrays / //= / ||= likewise -- perl compiles
+#     a scalar parameter's default as `$n = DEFAULT`.  Was: the ARRAY itself
+#     (`n=ARRAY(0x1)`), because the default was a bare value in the binding.
+test_cl('#4782: an aggregate default is stored in scalar context',
+    "$H\nour \@d = (5,6,7); our \@e = (8,9);\n"
+  . "sub f1 (\$n = \@d, \$c = () = \@d) { \"n=\$n c=\$c\" }\n"
+  . "sub f2 (\$r = \\\@d, \$n = \@\$r, \$m = (\@d, \@e)) { \"\$n \$m\" }\n"
+  . "sub f3 (\$g = grep({ \$_ > 5 } \@d), \$t = (1 ? \@e : \@d)) { \"\$g \$t\" }\n"
+  . "sub f4 (\$x //= \@d, \$y ||= \@e) { \"\$x \$y\" }\n"
+  . "print f1(), '|', f2(), '|', f3(), '|', f4(), '|', f4(undef, 0), '|', f1(1, 2), \"\\n\";",
+    "n=3 c=3|3 2|2 2|3 2|3 2|n=1 c=2\n");
+
+# 20: a call in a default runs in SCALAR context (wantarray inside it), the
+#     default's own `wantarray` is the sub's caller's, the one-line spelling
+#     (#455: the pragma on the sub's own line) and a later package section
+#     reading a file lexical array take the same store.
+test_cl('#4782: call context in a default, one-line form, package section',
+    "our \@d = (5,6,7); my \@m = (1,2,3,4);\n"
+  . "use feature 'signatures'; no warnings; sub c { print wantarray ? 'L' : defined(wantarray) ? 'S' : 'V'; (4,5,6) } sub f (\$n = c(), \$k = \@m) { \"n=\$n k=\$k\" } print f(), \"\\n\";\n"
+  . "sub w (\$n = wantarray) { defined \$n ? \"[\$n]\" : 'u' } my \@l = w(); my \$s = w(); print \"\$l[0]\$s\\n\";\n"
+  . "package P2;\nsub g (\$n = \@m, \$c = () = \@m) { \"g n=\$n c=\$c\" }\nprint g(), \"\\n\";",
+    "Sn=6 k=4\n[1][]\ng n=4 c=4\n");

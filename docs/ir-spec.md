@@ -2724,6 +2724,15 @@ assignment's construction arm (`%p-array-store-scalar` /
 `%p-make-hash-entry`), exactly as `my (@r) = @_` does: `sub f ($x, @r) {
 $r[0] = 1 } f(@a)` leaves `@a` alone, as in perl.
 
+**A scalar parameter's DEFAULT is the RHS of a scalar assignment (normative,
+s537a, #4782).**  perl compiles `$n = DEFAULT` for it: the default
+expression is evaluated in SCALAR context (a call sees `wantarray` false, `()
+= LIST` answers its count) and a TAKEN default is stored by `p-box-init` —
+`box-set` into a fresh box, the store `my $n = DEFAULT` makes — while a
+supplied argument is copied by `p-copy-scalar-arg`.  So an array default binds
+its count: `sub f ($n = @d) {…}` →
+`($n (if (p-arg-supplied-p @_ 0) (p-copy-scalar-arg (aref @_ 0)) (p-box-init @d)))`.
+
 **Flattening:** Perl has no argument structure — at every call, array and
 hash arguments splice into one flat value list (`p-flatten-args`). A hash
 flattens to key, value, key, value…
