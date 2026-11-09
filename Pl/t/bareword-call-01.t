@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 47;
+plan tests => 49;
 
 sub run_cl {
     my ($code) = @_;
@@ -341,6 +341,23 @@ test_cl('a qualified name LEFT of `=>` is still the string',
 test_cl('a qualified name with NO sub behind it is still the string',
     qq{my \@l = (No::Such::Thing, 4);\nprint "\@l\\n";},
     "No::Such::Thing 4\n");
+
+# #4762 (s537a): the same name with NOTHING after it -- the RHS of an
+# assignment, a `return` operand, the sole element of a paren list, the last
+# print argument -- was CALLED and died "Undefined subroutine &Foo::nob".
+# The no-previous-token position takes the same run-time answer: the string
+# when no sub exists, a call when one does (imported, BEGIN-installed); a sub
+# the file declares BELOW stays the string (perl does not know it yet).
+# INVERSE: main 4a39a1c7 dies at the first line.
+test_cl('#4762: an unknown qualified name with nothing after it is the string',
+    qq{no warnings;\nmy \$y = Foo::nob; print "\$y\\n";\nsub r1 { return Foo::ret } print r1(), "\\n";\n}
+  . qq{my \@i = (Foo::Bar); print "\@i\\n";\nmy \$z = Foo::late; print "\$z\\n";\nsub Foo::late { "LATE" }\n}
+  . qq{print Foo::nob;\nprint "\\n";},
+    "Foo::nob\nFoo::ret\nFoo::Bar\nFoo::late\nFoo::nob\n");
+test_cl('#4762: ... and a sub that exists at run time is still CALLED',
+    qq{$USE_EXT\nBEGIN { *Imp::run = sub { "IMP" } }\nsub Foo::early { "EARLY" }\n}
+  . qq{my \$v = Ext::yes; my \$w = Imp::run; my \$x = Foo::early;\nprint "\$v \$w \$x\\n";},
+    "Y IMP EARLY\n");
 
 # An UNQUALIFIED unknown keeps #266's string reading — the corpus depends on
 # it (`print "x=", nosuch;`, `\@ISA = (Exporter)`).

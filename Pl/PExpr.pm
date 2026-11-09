@@ -4766,10 +4766,26 @@ sub handle_subcalls {
         # reading only `_bareword_string` here let the same word be marked
         # there and then built into a funcall here (#1996).
         my $already = $now->{_bareword_string} || $now->{_bareword_runtime};
+        # A PACKAGE-QUALIFIED name the compiler cannot place, with nothing
+        # after it (`my $y = Foo::nob;`, `return Foo::nob`), is the string
+        # perl reads (#4762) -- at ANY position, the no-previous-token case
+        # included: the absence-of-knowledge worry above is about UNQUALIFIED
+        # words, and a qualified 'no' is asked of the IMAGE anyway
+        # (`_mark_unplaceable_bareword` -> `p-bareword-value`: a sub that
+        # exists at run time, imported past the export scan, is still CALLED).
+        # A word the source follows with `->` or `=>` is a class invocant / a
+        # quoted key, decided by the method-call and pair machinery from the
+        # SAME token when it reaches this branch alone (the invocant parse).
+        my $src_next = ref($now) && $now->can('snext_sibling') ? $now->snext_sibling : undef;
+        my $src_next_op = ($src_next && $src_next->isa('PPI::Token::Operator'))
+                          ? $src_next->content : '';
+        my $qualified_unknown = $callable_fb eq 'no'
+            && $sub_name =~ /::[^\W\d]\w*\z/
+            && $src_next_op ne '->' && $src_next_op ne '=>';
         my $is_op_context = $strict_subs
             ? ($prev_is_unary || $already)
             : ($prev_is_unary || $prev_is_value_op || $prev_is_separator
-               || $callable_fb eq 'not-yet' || $already);
+               || $callable_fb eq 'not-yet' || $already || $qualified_unknown);
         if ($is_op_context) {
           $self->_mark_unplaceable_bareword($now, $sub_name, $callable_fb);
           next;
