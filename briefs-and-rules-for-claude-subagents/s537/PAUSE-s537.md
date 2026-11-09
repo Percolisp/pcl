@@ -25,3 +25,8 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 * ff 13 commits.  Its bars (report): gate 369 / 11,990 PASS, sweep 18,795 +0 (each.t 64 65 by edit), corpus-diff 3 / 111, wide 11 DIFF / RCDIFF 0, refactor check identical, ir 31 / 328-0-17-0, everyday 116 + `--record`, Calc.pm -1.4 %.  On merged main I ran the three guard files + artifact-staleness (199 rows PASS) and the six probes main had failed: all = perl.
 * COMPLETED by me: #4547 #4541 #4543 #4545 #4641 #4642 #2401 #1027 #1964.  #338 stays open (half b1 = #4662).  CLAUDE.md + STATUS numbers.
 * s536h reported MERGE-READY `71a4b827` one minute later, on the PRE-merge base: told to rebase and re-take gate + sweep on the combined tree.  s536i told main moved (rule 6).  s536j LAUNCHED in the freed slot.
+
+## 00:4x -- brief `s537/s537a-prompt.md` WRITTEN for the slot s536h frees (not launched yet).
+* s537a = CALL AND SUB-BODY SHAPES: #4782 #4281 #4762 #4703 #4664+#4325 #4264; IDs 4801-4819; generation v2-13600.  All six re-probed wrong on merged main today (`~/pcl-agent-scratch/s537/review/a/m1..m5.pl`, `review/e/p4b.pl`).  Regions disjoint from s536i (ExprToCL aliasing / argument loop / element generators) and s536j (PPI, `_repair_*`).
+* NEXT brief idea (s537b, for the slot after that): the file-lexical / state follow-ups of s536e -- #314 F-F plain shapes (file-level `state @arr`, #1579), #4661, #4662 (= #338 b1), #4663, #4461.
+* s536h is re-taking gate + sweep + corpus-diff on the combined tree `1426433e` (queued behind s536i / s536j on the three slots).
