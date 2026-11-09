@@ -1870,9 +1870,11 @@ a user-sub argument (`p-viv-slice` marks it):
 - a LIST SLICE `(LIST)[I]` -- `(p-aref-deref L I)` over a LIST container (a
   `(vector …)`, a `(p-list-ctx …)`, the bare `@a` of `(@a)[I]`) -- is
   `(%p-lslice-aliases L I)`: the selected elements as their own cells (perl's
-  `pp_lslice` hands on the list's SVs); a missing element is a lazy alias
-  over the list and grows nothing (#4682).  `for ((@a, $x)[3]) { $_ = 8 }`
-  writes `$x`; `w((@a)[1])` with `$_[0] .= "w"` writes `$a[1]`.
+  `pp_lslice` hands on the list's SVs); an index past either end of the
+  flat list is a READ-ONLY undef (`%p-ro-box`, perl's `&PL_sv_undef`): a
+  read grows nothing, a write dies `Modification of a read-only value
+  attempted` (#4682).  `for ((@a, $x)[3]) { $_ = 8 }` writes `$x`;
+  `w((@a)[1])` with `$_[0] .= "w"` writes `$a[1]`; `w((@a)[9])` dies.
 - a magic-lvalue CALL -- `substr` with at most three arguments, `pos`, `vec`
   -- is its `-lvalue-cell` over its target's place (a variable, an element's
   `-box` read, `p-cast-$-box`); a target that is no place keeps the read
@@ -2622,6 +2624,17 @@ never as another lazy cell, and the lazy accessor (`p-gethash-argbox` /
 passes one undef.  (Not the rvalue chain's `p-viv-container` marks: they
 expand inline at every site, and one large sub with 36 of them exhausted
 SBCL's heap at compile time.)
+
+**An element's SUBSCRIPT is a read (normative, s536i, #4741).**  The index /
+key of an element is lowered in rvalue context whatever context the element
+itself is in -- a place under `\`, `++` / `--`, an argument or foreach slot,
+the container of `push @{…}` (`ExprToCL::_subscript_form` in the four
+element generators): perl never vivifies a subscript, so `\$r->[$j{zz}]`,
+`$n{$m{y}}++` and `f($d->[$j{zz}]{a})` create no `$j{zz}` / `$m{y}`.  A
+subscript that is itself a modifying or `\` expression keeps its own context
+(`$a[$i++]`, `$h{$k .= "x"}`, `$h{\$k{a}}` creates `$k{a}`), and a
+multi-level read subscript vivifies its intermediate levels as any rvalue
+chain does (`$x{$y{a}{b}}` creates `$y{a}`).
 
 **A dereferenced BLESSED hash spreads like any hash (normative, s536i,
 #4683).**  In every list builder -- `p-flatten-args` / `p-map-flat`
