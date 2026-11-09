@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -455,4 +455,95 @@ PL
 12 1
 13 [undef,{}]
 1u 14 1 [undef,[]]
+OUT
+
+# #4741 (s536i): an element's SUBSCRIPT is a plain READ, whatever lvalue
+# context the element itself is asked in.  The four element generators used to
+# lower the index / key under the element's own context, so under `\`, `++`,
+# `--`, an argument or foreach slot, or as the container of `push @{...}`, the
+# subscript's element took the vivifying -box accessor: `\$r->[$j{zz}]` and
+# `$n{$m{y}}++` created $j{zz} / $m{y}, which perl never does -- and #4283's
+# eager containers made `f($d->[$ff{zz}]{a})` create $ff{zz} too (row 17, lines 15-16).
+# Row 18 is the inverse: a subscript that MODIFIES (`$i++`, `.=`, `//=`, `++$i[0]`,
+# a list assignment), takes `\` itself, or reads a multi-level chain still
+# does what perl does, and the CONTAINER chain of the element still vivifies.
+# Expected text probed under perl 5.40.3 (scratch/s536i/p/rowA.pl, rowB.pl).
+is(run_cl(<<'PL'), <<'OUT', '#4741 an element subscript is a plain read: it vivifies nothing under \\ / ++ / -- / an argument slot');
+sub E { exists $_[0]->{$_[1]} ? "E" : "N" }
+my %k; my %h; $h{$k{x}} = 1;              print "1 ", E(\%k, "x"), "\n";
+my @i; my @a; $a[$i[3]] = 1;              print "2 ", scalar(@i), "\n";
+my %j; my $r = []; my $q = \$r->[$j{zz}]; print "3 ", E(\%j, "zz"), "\n";
+my %m; my %n; $n{$m{y}}++;                print "4 ", E(\%m, "y"), "\n";
+my %o; my $p = {}; $p->{$o{w}} .= "x";    print "5 ", E(\%o, "w"), "\n";
+my %s; my @t; $t[$s{q}]++;                print "6 ", E(\%s, "q"), " ", scalar(@t), "\n";
+my %u; my $v = {}; my $w = \$v->{$u{k}};  print "7 ", E(\%u, "k"), "\n";
+my %x; my @y; --$y[$x{d}];                print "8 ", E(\%x, "d"), " $y[0]\n";
+my %z; my $rr = []; $rr->[$z{e}]--;       print "9 ", E(\%z, "e"), " $rr->[0]\n";
+my @na; my @nb; my @nc; $na[$nb[$nc[0]]]++; print "10 ", scalar(@na), scalar(@nb), scalar(@nc), "\n";
+my %ph; my %pk; push @{$ph{$pk{a}}}, 1;   print "11 ", E(\%pk, "a"), "\n";
+my %sv; my $sr = {}; my $sf = \ $sr->{$sv{a}}{b}; print "12 ", E(\%sv, "a"), "\n";
+my @k9; my %h9; my $rf = \@{$h9{$k9[2]}};  print "13 ", scalar(@k9), "\n";
+my %ka; my %ha; my ($aa) = \( $ha{$ka{q}} ); print "14 ", E(\%ka, "q"), "\n";
+sub st { $_[0] = "set" }
+my %ff; my $d; st($d->[$ff{zz}]{a});      print "15 ", E(\%ff, "zz"), " ", ref($d), " $d->[0]{a}\n";
+my %gg; my $mt; $mt->[$gg{m}]{k} =~ /x/g; print "16 ", E(\%gg, "m"), " ", ref($mt), "\n";
+PL
+1 N
+2 0
+3 N
+4 N
+5 N
+6 N 1
+7 N
+8 N -1
+9 N -1
+10 100
+11 N
+12 N
+13 0
+14 N
+15 N ARRAY set
+16 N ARRAY
+OUT
+
+is(run_cl(<<'PL'), <<'OUT', '#4741 INVERSE: a subscript that modifies or takes \\ still does, and the container chain still vivifies');
+sub E { exists $_[0]->{$_[1]} ? "E" : "N" }
+my @a; my $i = 0; $a[$i++] = 1; $a[$i++] = 2; print "1 $i @a\n";
+my %h; my $k = "a"; $h{$k .= "x"}++; $h{$k .= "y"}++; print "2 $k ", join(",", map {"$_=$h{$_}"} sort keys %h), "\n";
+my @b = (1,2); my $r = \$b[$#b + 1]; $$r = 9; print "3 ", scalar(@b), " @b\n";
+my @c; my $x; $c[$x = 3] = 7; print "4 $x ", scalar(@c), " $c[3]\n";
+my $li = 1;
+sub idx :lvalue { $li }
+my @e; $e[idx()]++; print "5 ", scalar(@e), " $e[1]\n";
+our %g = (z => 1); our %m; { local $g{$m{z}} = 5; print "6 ", E(\%m, "z"), " ", join(",", map {"[$_]=$g{$_}"} sort keys %g), "\n"; } print "7 ", join(",", sort keys %g), "\n";
+my @ca = (0); my @cb = (1); my @cc; $cc[$cb[$ca[0]]]++; print "8 ", scalar(@ca), scalar(@cb), scalar(@cc), " $cc[1]\n";
+my %hh; my $rk; $hh{$rk->{k}}{x} = 1; print "9 ", ref($rk), " ", E($rk, "k"), " ", join(",", map {"[$_]" . ref($hh{$_})} keys %hh), "\n";
+my %mh; my @refs = map { \$mh{$_} } qw(a b); ${$refs[0]} = 1; print "10 ", join(",", map {"$_=" . ($mh{$_} // "u")} sort keys %mh), "\n";
+my %eh = (a => 1); my %ek; my $ex = exists $eh{$ek{q}}; my $dl = delete $eh{$ek{r}}; print "11 ", E(\%ek, "q"), E(\%ek, "r"), " ", ($ex ? 1 : 0), " ", join(",", sort keys %eh), "\n";
+my %k1; my %h1; $h1{\$k1{a}} = 1; print "12 ", E(\%k1, "a"), "\n";
+my @i2; my @a2; $a2[++$i2[0]] = 1; print "13 ", scalar(@i2), " $i2[0] ", scalar(@a2), "\n";
+my %d3; my %e3; $e3{$d3{a} //= "dd"}++; print "14 ", join(",", map {"$_=$d3{$_}"} keys %d3), "\n";
+my %y4; my %x4; $x4{$y4{a}{b}} = 1; print "15 ", E(\%y4, "a"), " ", E($y4{a}, "b"), "\n";
+my $o5; my %x5; $x5{$o5->{p}}++; print "16 ", ref($o5), "\n";
+my %k6; my @a6; $a6[$k6{n}++] = 1; print "17 ", join(",", map {"$_=$k6{$_}"} keys %k6), "\n";
+my %k7; my %h7; $h7{ ($k7{c}) = 3 }++; print "18 ", join(",", map {"$_=$k7{$_}"} keys %k7), "\n";
+PL
+1 2 1 2
+2 axy ax=1,axy=1
+3 3 1 2 9
+4 3 4 7
+5 2 1
+6 N []=5,[z]=1
+7 z
+8 112 1
+9 HASH N []HASH
+10 a=1,b=u
+11 NN 0 a
+12 E
+13 1 1 2
+14 a=dd
+15 E N
+16 HASH
+17 n=1
+18 c=3
 OUT

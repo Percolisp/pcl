@@ -2357,6 +2357,22 @@ sub _elem_container_form {
   return $form;
 }
 
+# AN ELEMENT'S SUBSCRIPT IS A PLAIN READ, whatever lvalue context the element
+# itself was asked in (#4741): perl creates no `$j{zz}` for `\$r->[$j{zz}]`,
+# `$n{$m{y}}++` or `f($a[$j{zz}]{k})`.  The subscript used to inherit the
+# context, so under `\` / `++` it took the vivifying `-box` accessor; and the
+# eager containers of _elem_container_form (#4283) must select their element
+# by READING the subscript, or that fix vivifies a key no statement wrote.
+sub _subscript_form {
+  my ($self, $kid_id, $is_key) = @_;
+  my $lv = $self->lvalue_context;
+  $self->lvalue_context(0);
+  my $form = $is_key ? $self->_hash_key_form($kid_id)
+                     : $self->gen_node_form($kid_id);
+  $self->lvalue_context($lv);
+  return $form;
+}
+
 sub _viv_container_form {
   my ($self, $kid_id, $form, $want) = @_;
   # In LVALUE context the whole chain is a place: `p-setf` runs the same
@@ -4512,7 +4528,7 @@ sub gen_array_access_form {
   # is dereferenced (_elem_container_form marks it).
   my $arr = $is_bare ? $self->gen_node($kids->[0])
                      : $self->_elem_container_form($kids->[0], q(@));
-  my $idx = $self->gen_node_form($kids->[1]);
+  my $idx = $self->_subscript_form($kids->[1]);
   if ($is_bare) {
     $arr = $self->_bare_container_sym($arr_node, $arr, q(@));
     return ['p-undef'] if $arr =~ /^@\d+$/;
@@ -5127,7 +5143,7 @@ sub gen_hash_access_form {
   my $hash = $is_bare ? $self->gen_node($kids->[0])
                       : $self->_elem_container_form($kids->[0], q(%));
 
-  my $key = $self->_hash_key_form($kids->[1]);
+  my $key = $self->_subscript_form($kids->[1], 1);
 
   if ($is_bare) {
     $hash = $self->_bare_container_sym($hash_node, $hash, q(%));
@@ -5182,7 +5198,7 @@ sub gen_array_ref_access_form {
   my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->_elem_container_form($kids->[0], q(@));
-  my $idx = $self->gen_node_form($kids->[1]);
+  my $idx = $self->_subscript_form($kids->[1]);
   my $func = $self->_deref_elem_accessor('p-aref-deref');
   my $form = [$func, $ref, $idx, $self->_strict_elem_marker($func, $kids)];
   # A LIST SLICE IN SCALAR CONTEXT YIELDS ITS LAST SELECTED ELEMENT (perl's
@@ -5212,7 +5228,7 @@ sub gen_hash_ref_access_form {
   my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->_elem_container_form($kids->[0], q(%));
-  my $key = $self->_hash_key_form($kids->[1]);
+  my $key = $self->_subscript_form($kids->[1], 1);
   my $func = $self->_deref_elem_accessor('p-gethash-deref');
   return [$func, $ref, $key, $self->_strict_elem_marker($func, $kids)];
 }
