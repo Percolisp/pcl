@@ -35,3 +35,9 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 * ff 12 commits.  Bars on the combined tree `1426433e`: gate 369 / 11,998 PASS, sweep 18,795 +0 GATE clean, corpus-diff vs e7205dde IDENTICAL; wide A/B / ir-conform / bench / everyday from the pre-merge tree (a `Pl/`-only move cannot change a `cl/` batch's A/B).  On merged main: its four guard files + artifact-staleness 81 rows PASS, check-parens balanced, my five probes = perl.
 * COMPLETED by me: #4263 #4262 #4224 #4284 #4310.  #4286 measured, open.  Filed by it: #4721 #4722.
 * s536i + s536j told (a `cl/` move: gate + sweep re-take).  **s537a LAUNCHED** in the freed slot (new isolated worktree).
+
+## 00:5x -- ROUND BOARD QUEUED on main `7284c977` (MAIN-READY-85), in SIX chunks
+* `~/pcl-agent-scratch/s537/round/`: `main-tree` (a `git archive` extraction), `lists/{a..f}.tsv` (a = the 13 small dists, b = SLU Text-CSV Getopt-Long JSON-PP HTTP-Tiny Path-Tiny, c = IO-Compress, d = TimeDate HTTP-Date URI HTTP-Message YAML-Tiny Data-Dumper YAML-PP, e = Pod-Simple Log4perl, f = Template-Toolkit), `round.sh` (each chunk its own bounded heavy leg, label s537-round; `round.status` gets a line per chunk, `ALL DONE` at the end; a background shell of this session runs it -- if the session is cut, re-run `round.sh` after deleting the finished chunks from its loop).
+* Why chunks: the s536 lesson (one 2-hour board leg + a queued exclusive bench idled the box).
+* READ when done: concatenate `board-{a..f}.rows.tsv` (header once) -> `board-main85.rows.tsv`; `tools/cpan-scoreboard.pl --diff baselines/cpan-board14-fails.tsv board-main85.rows.tsv`; the file totals from `board-{a..f}.tsv`.  A NEW row: one-file serial re-run on the same extraction first (load timeouts), then bisect over -74..-85.
+* The companion `--all --quick` (exclusive, 15-25 min; last on -63) is taken after the board, at a moment no agent has a leg queued.
