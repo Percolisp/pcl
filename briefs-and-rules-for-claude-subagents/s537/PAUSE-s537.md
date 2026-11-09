@@ -41,3 +41,7 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 * Why chunks: the s536 lesson (one 2-hour board leg + a queued exclusive bench idled the box).
 * READ when done: concatenate `board-{a..f}.rows.tsv` (header once) -> `board-main85.rows.tsv`; `tools/cpan-scoreboard.pl --diff baselines/cpan-board14-fails.tsv board-main85.rows.tsv`; the file totals from `board-{a..f}.tsv`.  A NEW row: one-file serial re-run on the same extraction first (load timeouts), then bisect over -74..-85.
 * The companion `--all --quick` (exclusive, 15-25 min; last on -63) is taken after the board, at a moment no agent has a leg queued.
+
+## 01:0x -- brief `s537/s537b-prompt.md` WRITTEN for the next free slot (not launched).
+* s537b = STATE CONTAINERS + THE CONTAINER SPAN MANGLE: #314 F-F plain shapes, #1579 (op/lvref.t 201 rows), #4661 + #4662 (= #338 b1), #4461, #4663 measure-only; IDs 4821-4839; generation v2-13700.  A name-resolution batch: sweep + gate-SET scan are its gate.
+* RUNNING now: s536i, s536j, s537a (+ my round board, chunked).
