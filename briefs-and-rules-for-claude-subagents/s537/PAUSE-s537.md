@@ -18,3 +18,5 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 ## 01:0x -- s536h PRE-REVIEWED (tree code final; it owes gate + sweep + everyday).
 * `Pl/t` diff: only the four plan counts go up; rows added to errno-magic-01, forced-main-sub-01, open-modes-01, system-block-01.
 * Probes perl -> main -> tree (`~/pcl-agent-scratch/s537/review/h/p1..p5.pl`): tree = perl on all five, main wrong on all five (p1 the `-` opens + empty file name; p2 `wait` / `waitpid` -- main leaves `$?` stale and a WNOHANG poll stores GARBAGE, 628211684; p3 `$!` across EOF / read / getc / truncate; p4 `open(*{"STDERR"}, ...)` inside a package; p5 `do FILE` clears `$!`).
+
+## 01:1x -- OWED ITEM DONE: s534a's probe matrix re-run on main `3139fcb0` (`~/pcl-agent-scratch/s537/review/matrix/`): the AUTOLOAD rows 37-38 = perl; row 49 (`use parent -norequire` with `::` names) = perl now.  Still differing, all known before: 30-31 (undef of a sub), 39-40 (c3 / next::method, ns-mro), 56 (stash alias), 60 (inherited overload fallback).  Input for the method-lookup batch (#4523-#4525) when the USER rules on it.
