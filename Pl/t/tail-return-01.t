@@ -56,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 sub run_cl {
     my ($code, %opt) = @_;
@@ -276,4 +276,41 @@ PL
     my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
     is(run_cl($prog), $perl,
        '#3402: a bare tail list spreads @_ / arrays / call values into the sub\'s list value, also when passed on as arguments (perl oracle)');
+}
+
+# #4281 (s537a): a while / until / C-style for loop that is a sub's LAST
+# statement has the value of its condition's last evaluation -- `until`'s raw
+# (true) condition, never its negation; an aggregate condition its count; a
+# `do {} while/until` likewise.  PCL answered "" for every loop.  The perl
+# oracle is live; the `last` exit (perl: the empty list) is #4801, not here.
+{
+    my $prog = <<'PL';
+no warnings;
+our $g = 2;
+sub show { my $t = shift; my @r = @_; $t . "=" . scalar(@r) . "[" . join(",", map { defined $_ ? "'$_'" : "u" } @r) . "]" }
+sub u1 { my $i = 5; until ($i > 3) { $i++ } }
+sub w1 { my $i = 0; while ($i) { 1 } }
+sub w3 { my $i = 0; while ($i < 2) { $i++ } }
+sub w7 { my @q = (1,2); while (my $x = shift @q) { 1 } }
+sub c1 { for (my $i = 3; $i; $i--) { 1 } }
+sub c2 { my $s = ""; until ($s) { $s .= "ab" } }
+sub c7 { while ($g) { $g-- } }
+sub c8 { my @a = (1); while (@a) { shift @a } }
+sub d1 { my $i = 0; do { $i++ } while ($i < 3) }
+sub d2 { my $i = 0; do { $i++ } until ($i >= 3) }
+sub m2 { my $i = 0; $i++ until $i >= 3 }
+sub ff { for my $x (1,2) { 1 } }
+sub gg { 1 } sub dy { my $i = 3; until (!$i) { $i--; gg() } }
+sub lb { my $i = 0; L1: until ($i >= 2) { $i++; next L1 } }
+for my $f (qw(u1 w1 w3 w7 c1 c2 c7 c8 d1 d2 m2 ff dy lb)) {
+  no strict 'refs'; $g = 2;
+  my $l = show($f, &$f()); $g = 2;
+  my $s = &$f(); print "$l s=", (defined $s ? "'$s'" : "u"), "\n";
+}
+$g = 2; for (c7()) { $_ = 9 } print "copy g=$g\n";
+PL
+    my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
+    is(run_cl($prog), $perl,
+       '#4281: a loop as the last statement answers its condition\'s last value (perl oracle)');
+    is(run_cl($prog, opt => 'none'), $perl, '#4281: same under PCL_OPT=none');
 }

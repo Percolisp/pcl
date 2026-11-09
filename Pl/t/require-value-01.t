@@ -60,6 +60,12 @@ my %mods = (
   TlF => "package TlF; use feature 'module_true'; { no feature 'module_true'; return 0; }\n",
   TlG => "package TlG; use feature 'module_true'; return 0; no feature 'module_true';\n",
   TlH => "package TlH; my \$x = 4; { my \$y = \$x + 1; \$y }\n",
+  # #4281: a LOOP as the last statement -- its condition's last value
+  LpA => "package LpA; my \$i = 5; until (\$i > 3) { \$i++ }\n",
+  LpB => "package LpB; my \$i = 0; while (\$i) { 1 }\n",
+  LpC => "package LpC; my \$s = ''; until (\$s) { \$s .= 'k' }\n",
+  LpD => "package LpD; my \$i = 0; do { \$i++ } until \$i >= 2\n",
+  LpE => "package LpE; my \$i = 3; while (\$i) { \$i-- }\n",
 );
 for my $m (sort keys %mods) {
   open(my $f, '>', "$workdir/mt/$m.pm") or die; print {$f} $mods{$m}; close $f;
@@ -177,5 +183,17 @@ for my $m (qw(TlA TlB TlC TlD TlE TlF TlG TlH)) {
 }
 PL
 is($pcl, $perl, 'module_true is read AT a top-level return; a tail modifier / block / if carries its value (#4168)');
+
+# #4281: a file whose last statement is a LOOP answers the condition's last
+# value -- `until` its raw (true) condition, so the require succeeds; a
+# `while` its false one, so it dies "did not return a true value".
+($perl, $pcl) = both('loopval', <<'PL');
+use lib 'mt';
+for my $m (qw(LpA LpB LpC LpD LpE)) {
+  my $rv = eval "require $m";
+  print "$m rv=", (defined $rv ? "'$rv'" : 'undef'), ($@ =~ /did not return a true value/ ? " false-value" : $@ ? " other" : ""), "\n";
+}
+PL
+is($pcl, $perl, 'a required file ending in a while / until / do-until loop answers the condition (#4281)');
 
 done_testing;

@@ -17370,13 +17370,37 @@ simply ends the block, which is the shape this macro has always emitted.
         `(block ,iter-block
            (tagbody :redo (progn ,@body) :next)))))
 
-(defmacro p-while (condition &rest body-and-keys)
-  "Perl while loop with optional :label and :continue.
-Uses tagbody/go instead of loop so that (return-from nil ...) from p-return
-inside the loop body correctly exits the enclosing function, not just the loop.
-CL's (loop) creates an implicit (block nil ...) that would intercept p-return.
-Labeled form adds (catch 'pcl::LAST-LABEL ...) so that 'last LABEL' works
-dynamically (across function calls), matching p-next/p-redo behavior."
+;;; THE VALUE OF A LOOP (#4281, s537a; ir-spec §6).  A while / until / C-style
+;;; for loop that ends by its TEST leaves the value of that test's LAST
+;;; evaluation, which is what a sub (or a required file) whose last statement
+;;; is the loop returns: `while ($i) {…}` ending at $i = 0 is 0, `while ($i <
+;;; 2)` is "", `until ($s) {…}` is $s's (true) value -- perl compiles `until`
+;;; as an `or` on the raw condition, never a negation.  The loop's value is
+;;; read only in tail position; everywhere else it is discarded, so binding
+;;; the test's value to a temporary costs nothing.  A loop left by `last`
+;;; answers nil (undef) -- perl leaves the empty list there in list context,
+;;; the residue #4801.
+(defun %p-loop-value (c)
+  "A loop test's value as the loop's (scalar) value: an AGGREGATE condition
+(`while (@a)`, `while (%h)`) is evaluated in boolean = scalar context, so the
+loop leaves its count, never the container.  Everything else is the value
+itself.  Runs once, at the loop's end."
+  (if (or (hash-table-p c) (and (vectorp c) (not (stringp c))))
+      (p-scalar c)
+      c))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-loop-test-form (condition exit-block &optional until-p)
+    "The test of a pre-test loop: CONDITION evaluated once, the loop ended by
+`return-from EXIT-BLOCK` with that VALUE when it is false (UNTIL-P: true)."
+    (let ((c (gensym "COND")))
+      `(let ((,c ,condition))
+         (,(if until-p 'when 'unless) (p-true-p ,c)
+           (return-from ,exit-block (%p-loop-value ,c)))))))
+
+(defmacro %p-while-loop (condition until-p body-and-keys)
+  "THE pre-test loop behind p-while and p-until: UNTIL-P inverts the test and
+keeps the condition's own value as the loop's (see %p-loop-test-form)."
   (multiple-value-bind (label continue-form body myp dynp) (parse-loop-keys body-and-keys)
     (declare (ignore myp))
     (let ((block-name (or label (gensym "WHILE")))
@@ -17384,7 +17408,7 @@ dynamically (across function calls), matching p-next/p-redo behavior."
       `(block ,block-name
          ,(let ((inner (%p-loop-driver
                         dynp block-name
-                        (lambda (b) `(unless (p-true-p ,condition) (return-from ,b "")))
+                        (lambda (b) (%p-loop-test-form condition b until-p))
                         (make-loop-iteration-body label body)
                         (when continue-form (list continue-form))
                         nil)))
@@ -17392,25 +17416,45 @@ dynamically (across function calls), matching p-next/p-redo behavior."
                 `(catch ',last-tag ,inner)
                 inner))))))
 
-(defmacro p-until (condition &body body)
-  "Perl until loop"
-  `(p-while (p-! ,condition) ,@body))
+(defmacro p-while (condition &rest body-and-keys)
+  "Perl while loop with optional :label and :continue.
+Uses tagbody/go instead of loop so that (return-from nil ...) from p-return
+inside the loop body correctly exits the enclosing function, not just the loop.
+CL's (loop) creates an implicit (block nil ...) that would intercept p-return.
+Labeled form adds (catch 'pcl::LAST-LABEL ...) so that 'last LABEL' works
+dynamically (across function calls), matching p-next/p-redo behavior.
+The loop's value is its condition's last value (#4281)."
+  `(%p-while-loop ,condition nil ,body-and-keys))
+
+(defmacro p-until (condition &rest body-and-keys)
+  "Perl until loop: p-while with the test inverted.  Its value is the
+CONDITION's last (true) value, never its negation (#4281)."
+  `(%p-while-loop ,condition t ,body-and-keys))
+
+(defmacro %p-do-loop (condition until-p body)
+  "THE post-test loop behind p-do-while and p-do-until.  Per perlsyn, `do {}
+while/until` takes no loop-control statements (no last/next/redo, no labels),
+so this is a plain tagbody with no (block nil ...) — a p-return from a sub
+called inside BODY propagates up unhindered.  Its value is the condition's
+last value, UNTIL-P keeping the raw (true) one (#4281)."
+  (let ((g (gensym "DOWHILE")) (c (gensym "COND")))
+    `(let ((,c nil))
+       (tagbody
+          ,g
+          (progn ,@body)
+          (setf ,c ,condition)
+          (,(if until-p 'unless 'when) (p-true-p ,c) (go ,g)))
+       (%p-loop-value ,c))))
 
 (defmacro p-do-while (condition &body body)
   "Perl post-test loop: `do BLOCK while COND` — BODY always runs at least once,
-the condition is tested afterwards.  Per perlsyn, `do {} while/until` takes no
-loop-control statements (no last/next/redo, no labels), so this is a plain
-tagbody with no (block nil ...) — a p-return from a sub called inside BODY
-propagates up unhindered."
-  (let ((g (gensym "DOWHILE")))
-    `(tagbody
-        ,g
-        (progn ,@body)
-        (when (p-true-p ,condition) (go ,g)))))
+the condition is tested afterwards (%p-do-loop)."
+  `(%p-do-loop ,condition nil ,body))
 
 (defmacro p-do-until (condition &body body)
-  "Perl post-test loop: `do BLOCK until COND` = `do BLOCK while (not COND)`."
-  `(p-do-while (p-! ,condition) ,@body))
+  "Perl post-test loop: `do BLOCK until COND` — the condition inverted, its own
+value the loop's (%p-do-loop)."
+  `(%p-do-loop ,condition t ,body))
 
 (defmacro p-for ((&optional init) (test) (&optional step) &rest body-and-keys)
   "Perl C-style for loop with optional :label.
@@ -17423,7 +17467,8 @@ Uses tagbody/go instead of loop — see p-while for rationale."
          ,init
          ,(let ((inner (%p-loop-driver
                         dynp block-name
-                        (lambda (b) `(unless (p-true-p ,test) (return-from ,b "")))
+                        ;; the loop's value is its test's last value (#4281)
+                        (lambda (b) (%p-loop-test-form test b))
                         (make-loop-iteration-body label body)
                         ;; The STEP is what a lexical `next` reaches by
                         ;; falling out of the body, so it is a post-form:

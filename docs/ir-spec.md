@@ -3244,6 +3244,17 @@ body…)`), `p-foreach ((VAR LIST) body…)` and its read-only twin
 family additionally accepts `:my t` (after `:label`, before the body) —
 see "Loop variable: lexical or localized" below.
 
+**THE VALUE OF A LOOP (normative, s537a, task #4281).**  A `p-while` /
+`p-until` / `p-for` that ends by its TEST has the value of that test's last
+evaluation — what a sub (or a required file) whose last statement is the
+loop returns.  `p-until COND` is its own head, never `(p-while (p-! COND))`:
+perl's `until` leaves the RAW condition (its true value), `while` the false
+one; an aggregate condition (`while (@a)`) leaves its count.  `p-do-while` /
+`p-do-until` (`do {} while/until`) the same.  A `foreach` leaves `""`.  A loop
+left by `last` answers undef (perl: the empty list in list context — #4801).
+Example: `sub f { my $s = ""; until ($s) { $s .= "ab" } }` returns `"ab"`;
+`sub g { my $i = 3; while ($i) { $i-- } }` returns `0`.
+
 **A foreach over `$\` or `$/` (normative, s523d, task #3612).**  The loop
 variable aliases each element as for any package variable, but `print`,
 `readline` and `chomp` keep using the separator value from BEFORE the loop

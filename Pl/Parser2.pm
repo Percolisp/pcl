@@ -11712,7 +11712,9 @@ sub _lower_while_stmt {
   # applied at the raw seam (native conds can't contain these calls).
   # v1 skips the rewrite for `until`, matching perl.
   $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
-  $cond = ['p-!', $cond] if $kw eq 'until';
+  # `until` is its own head, never `(p-while (p-! COND))`: the loop's VALUE
+  # (a sub's last statement) is the condition's last value, and perl's until
+  # leaves the RAW condition there, not its negation (#4281; ir-spec §6).
   # #3374: a condition `my` a closure in the loop captures is a FRESH
   # variable each iteration in perl -- each test starts a new box, and the
   # body rebinds the name to it, so a closure keeps its own iteration's.
@@ -11725,7 +11727,7 @@ sub _lower_while_stmt {
   my @cont = $self->_continue_keys(\@k, $vi);
   $cont[1] = _decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], $cont[1])
     if @fresh && @cont;
-  my $result = ['p-while', $cond, _label_keys($label), @dyn,
+  my $result = [($kw eq 'until' ? 'p-until' : 'p-while'), $cond, _label_keys($label), @dyn,
                 @body,
                 @cont];
   if (@cond_mys) {

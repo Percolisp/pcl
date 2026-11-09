@@ -6232,17 +6232,16 @@ sub _process_while_statement {
   #   Bare (p-each ...)             → same (sets $_ to each's return value)
   $cond_cl = $self->_auto_defined_cond($cond_cl) if $keyword ne 'until';
 
-  # Handle 'until' by negating
-  if ($keyword eq 'until') {
-    $cond_cl = "(p-not $cond_cl)";
-  }
+  # `until` is its own head (p-until), never a negated p-while: the loop's
+  # value is the RAW condition's last value (#4281), as Parser2 emits it.
+  my $head = $keyword eq 'until' ? 'p-until' : 'p-while';
 
   # Build the loop form with optional label
   my $label_arg = $label ? ' :label ' . cl_sym($label) : "";
 
   # Use common helper to wrap with declarations
   $self->_with_declarations($cond, sub {
-    $self->_emit("(p-while $cond_cl$label_arg");
+    $self->_emit("($head $cond_cl$label_arg");
     $self->indent_level($self->indent_level + 1);
     if ($block) {
       $self->_with_declarations($block, sub {
