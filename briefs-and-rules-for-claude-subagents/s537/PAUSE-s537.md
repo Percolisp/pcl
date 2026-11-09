@@ -20,3 +20,8 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 * Probes perl -> main -> tree (`~/pcl-agent-scratch/s537/review/h/p1..p5.pl`): tree = perl on all five, main wrong on all five (p1 the `-` opens + empty file name; p2 `wait` / `waitpid` -- main leaves `$?` stale and a WNOHANG poll stores GARBAGE, 628211684; p3 `$!` across EOF / read / getc / truncate; p4 `open(*{"STDERR"}, ...)` inside a package; p5 `do FILE` clears `$!`).
 
 ## 00:2x (4) -- OWED ITEM DONE: s534a's probe matrix re-run on main `3139fcb0` (`~/pcl-agent-scratch/s537/review/matrix/`): the AUTOLOAD rows 37-38 = perl; row 49 (`use parent -norequire` with `::` names) = perl now.  Still differing, all known before: 30-31 (undef of a sub), 39-40 (c3 / next::method, ns-mro), 56 (stash alias), 60 (inherited overload fallback).  Input for the method-lookup batch (#4523-#4525) when the USER rules on it.
+
+## 00:3x -- **s536e MERGED = MAIN-READY-84 `9c425a19`** (code = its tree, v2-13300)
+* ff 13 commits.  Its bars (report): gate 369 / 11,990 PASS, sweep 18,795 +0 (each.t 64 65 by edit), corpus-diff 3 / 111, wide 11 DIFF / RCDIFF 0, refactor check identical, ir 31 / 328-0-17-0, everyday 116 + `--record`, Calc.pm -1.4 %.  On merged main I ran the three guard files + artifact-staleness (199 rows PASS) and the six probes main had failed: all = perl.
+* COMPLETED by me: #4547 #4541 #4543 #4545 #4641 #4642 #2401 #1027 #1964.  #338 stays open (half b1 = #4662).  CLAUDE.md + STATUS numbers.
+* s536h reported MERGE-READY `71a4b827` one minute later, on the PRE-merge base: told to rebase and re-take gate + sweep on the combined tree.  s536i told main moved (rule 6).  s536j LAUNCHED in the freed slot.
