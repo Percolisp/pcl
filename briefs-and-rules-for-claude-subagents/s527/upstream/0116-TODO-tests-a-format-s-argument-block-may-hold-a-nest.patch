@@ -1,7 +1,7 @@
 From 10d805e3797a4927026bf7aa4393e39a36e30a26 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Tue, 3 Nov 2026 23:09:20 +0200
-Subject: [PATCH 116/119] TODO tests: a format's argument block may hold a
+Subject: [PATCH 116/127] TODO tests: a format's argument block may hold a
  nested format
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

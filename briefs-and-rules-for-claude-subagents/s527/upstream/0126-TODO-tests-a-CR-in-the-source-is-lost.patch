@@ -1,0 +1,75 @@
+From ae78574f7e98f6d8f2707b7efaaf53643d985115 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 8 Nov 2026 20:39:13 +0200
+Subject: [PATCH 126/127] TODO tests: a CR in the source is lost
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads a CR inside a string literal or the __DATA__ section as a
+character of the program, and converts only the CR LF line ends inside
+a here-doc body or a multi-line literal of a source file:
+
+    perl -e 'print length(eval "q{a\r\nb}"), " ", length(eval "\"c\rd\""), "\n"'
+    # 4 3
+
+PPI::Tokenizer rewrites every CR LF, CR CR LF and lone CR of the source
+to LF before it tokenizes, so the q{} above holds a LF, the "c\rd" a
+LF, and a __DATA__ section written with CR LF line ends comes back
+with LF.
+
+Three rows inside a new PCL §65 TODO block and one control (CR LF line
+ends still end lines).  Plan 407 -> 411.  The rows stay TODO: the
+rewrite is what t/06_round_trip.t and t/08_regression.t compare
+against, so keeping the CRs is a change of PPI's documented behaviour
+(or a new Document attribute), not a local fix.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 9e7810fb..e3e6f61f 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 407 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 411 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2139,3 +2139,27 @@ for my $case ( [ "print 1;\n__DATA__\nx => 1\n", 'Separator=__DATA__' ],
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "the data section starts (control): $want" ) or diag "got: @t";
+ }
++
++# §65 -- a CR in the source is a character of the program: perl reads a
++# CR inside a string literal or the __DATA__ section as itself
++# (`eval "'a\r\nb'"` has length 4), and converts only the CR LF line
++# ends inside a here-doc body or a multi-line literal of a source FILE.
++# PPI rewrites every CR LF, CR CR LF and lone CR of the source to LF
++# before it tokenizes, so no token can hold a CR.
++TODO: {
++    local $TODO = 'PCL §65: every CR LF and lone CR in the source is rewritten to LF';
++    for my $case ( [ "my \$x = q{a\r\nb};\n", 'Quote::Literal', "q{a\r\nb}", 'a CR LF inside q{}' ],
++                   [ "my \$y = \"c\rd\";\n", 'Quote::Double', "\"c\rd\"", 'a lone CR inside ""' ],
++                   [ "print 1;\n__DATA__\nj\r\nk\n", 'Data', "j\r\nk\n", 'a CR LF in the __DATA__ section' ] ) {
++        my ( $code, $class, $want, $label ) = @$case;
++        my $doc = PPI::Document->new( \$code );
++        my ($tok) = grep { short_class(ref $_) eq $class } $doc ? $doc->tokens : ();
++        ok( $tok && $tok->content eq $want, "$label: the token keeps the CR" )
++            or diag 'got: ' . ( $tok ? join( ' ', map { sprintf '%02x', ord } split //, $tok->content ) : 'no token' );
++    }
++}
++{
++    my $doc = PPI::Document->new( \"my \$a = 1;\r\nmy \$b = 2;\r\n" );
++    my @s = $doc ? $doc->children : ();
++    ok( 2 == grep( $_->isa('PPI::Statement'), @s ), 'CR LF line ends still end lines (control)' );
++}
+-- 
+2.53.0
+

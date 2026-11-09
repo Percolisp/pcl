@@ -1,0 +1,61 @@
+From ce2aaa808630c89a9c2575957fbf5b76c29f52d2 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 8 Nov 2026 20:31:36 +0200
+Subject: [PATCH 121/127] DashedWord: a negated bareword takes its whole
+ package-qualified name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads a minus, then the whole word (toke.c yyl_hyphen), so
+-Foo::bar is one dashed word, as -foo is, and -CORE::log(...) negates
+the builtin.  A single filetest letter before :: stays the filetest
+(-e::foo tests the file ::foo, as in perl), so the qualified tail is
+read only after the filetest test, with the same name pattern
+PPI::Token::Word uses for a bareword.
+
+Removes the TODO marker of the six PCL §62 rows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/DashedWord.pm | 9 ++++++++-
+ t/ppi_bugs_pcl.t            | 3 +--
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Token/DashedWord.pm b/lib/PPI/Token/DashedWord.pm
+index dc669c48..da7ec454 100644
+--- a/lib/PPI/Token/DashedWord.pm
++++ b/lib/PPI/Token/DashedWord.pm
+@@ -64,7 +64,14 @@ sub __TOKENIZER__on_char {
+ 		# File test operator
+ 		$t->{class} = $t->{token}->set_class( 'Operator' );
+ 	} else {
+-		# No, normal dashed bareword
++		# No, normal dashed bareword.  Like any bareword it may be
++		# package-qualified: perl reads the minus, then the WHOLE word
++		# (toke.c yyl_hyphen), so -Foo::bar and -CORE::log(...) are one
++		# token here, never -Foo followed by ::bar.
++		if ( $t->{line} =~ m/\G((?:(?:\'|(?:::)+)\w+)*(?:::)?)/gc ) {
++			$t->{token}->{content} .= $1;
++			$t->{line_cursor} += length $1;
++		}
+ 		$t->{class} = $t->{token}->set_class( 'Word' );
+ 	}
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index cb1f6825..a43d156b 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2069,8 +2069,7 @@ for my $case ( [ '${\ m{q}}', 'Regexp::Match=m{q}' ], [ 'm{q};', 'Regexp::Match=
+ # letter before a non-word character is a filetest):
+ # `print -Foo::bar` prints -Foo::bar, or -3 when sub Foo::bar returns 3;
+ # `-CORE::log(...)` negates the builtin.
+-TODO: {
+-    local $TODO = 'PCL §62: a negated qualified bareword is split at its first ::';
++{
+     for my $case ( [ 'print -Foo::bar, "\n";', 'Word=-Foo::bar' ],
+                    [ 'my $v = -CORE::log(1);', 'Word=-CORE::log' ],
+                    [ 'print -foo::bar::baz;', 'Word=-foo::bar::baz' ],
+-- 
+2.53.0
+

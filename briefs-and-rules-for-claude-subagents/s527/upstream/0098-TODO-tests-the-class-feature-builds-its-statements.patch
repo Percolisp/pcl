@@ -1,7 +1,7 @@
 From 634d8e6d7e2e097be6aa87efa079d6c99ab81200 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:07:55 +0200
-Subject: [PATCH 098/119] TODO tests: the class feature builds its statements
+Subject: [PATCH 098/127] TODO tests: the class feature builds its statements
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

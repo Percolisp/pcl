@@ -1,7 +1,7 @@
 From db02103144634a38ebdf19e4fda93559b22e5da5 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Tue, 3 Nov 2026 21:33:19 +0200
-Subject: [PATCH 112/119] TODO tests: a format body is picture text, and the
+Subject: [PATCH 112/127] TODO tests: a format body is picture text, and the
  statement ends with it
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

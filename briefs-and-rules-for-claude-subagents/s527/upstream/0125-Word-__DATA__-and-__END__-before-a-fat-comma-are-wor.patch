@@ -1,0 +1,74 @@
+From e395a53487a980ebf35dc4f6d11d83616c9589d3 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 8 Nov 2026 20:36:06 +0200
+Subject: [PATCH 125/127] Word: __DATA__ and __END__ before a fat comma are
+ words
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl tests for => right after a word before it looks the word up as a
+keyword (toke.c yyl_keylookup), so a __DATA__ or __END__ followed by =>
+on the same line is an ordinary word (the fat comma makes it the
+string) and the data section does not start there.  Only the line the
+word is on is looked at, as perl reads a source file line by line;
+CORE::__END__ and CORE::__DATA__ are unchanged (perl reaches the
+keyword through CORE:: without that test).
+
+Removes the TODO marker of the five PCL §64 rows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Word.pm | 11 +++++++++--
+ t/ppi_bugs_pcl.t      |  3 +--
+ 2 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 7be4b10a..b2021178 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -220,10 +220,17 @@ sub __TOKENIZER__commit {
+ 			: $t->{class}->__TOKENIZER__on_char($t);
+ 	}
+ 
++	# A fat comma after __END__ or __DATA__ (on the same line) makes it an
++	# ordinary word, the string "__END__": perl tests for => right after a
++	# word before it looks the word up as a keyword (toke.c yyl_keylookup),
++	# so our %K = ( __DATA__ => 1 ) is a hash, not the start of the data.
++	my $fat_comma = ( $word eq '__END__' or $word eq '__DATA__' )
++		&& substr( $t->{line}, $t->{line_cursor} ) =~ /^\s*=>/;
++
+ 	# Check for the end of the file.  CORE::__END__ ends it too: perl
+ 	# reads either spelling as the end of the code (toke.c
+ 	# yyl_data_handle), so the rest of the file is never code.
+-	if ( $word eq '__END__' or $word eq 'CORE::__END__' ) {
++	if ( !$fat_comma and ( $word eq '__END__' or $word eq 'CORE::__END__' ) ) {
+ 		# Create the token for the __END__ itself
+ 		$t->_new_token( 'Separator', $1 );
+ 		$t->_finalize_token;
+@@ -249,7 +256,7 @@ sub __TOKENIZER__commit {
+ 	}
+ 
+ 	# Check for the data section (CORE::__DATA__ is the same)
+-	if ( $word eq '__DATA__' or $word eq 'CORE::__DATA__' ) {
++	if ( !$fat_comma and ( $word eq '__DATA__' or $word eq 'CORE::__DATA__' ) ) {
+ 		# Create the token for the __DATA__ itself
+ 		$t->_new_token( 'Separator', "$1" );
+ 		$t->_finalize_token;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 5afb9230..9e7810fb 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2120,8 +2120,7 @@ for my $code ( '$a x3;', 'my $s = do { "a" } x3;', 'my $h = { a => 1 } x 2;', 'm
+ # => right after a word before it looks the word up as a keyword (toke.c
+ # yyl_keylookup), so `our %K = ( __DATA__ => 2 )` is a hash with the key
+ # __DATA__, and the rest of the file is still code.
+-TODO: {
+-    local $TODO = 'PCL §64: __DATA__ / __END__ before => starts the data section';
++{
+     my $k = "our %K = (\n  __DATA__ => 2,\n  __END__  => 3,\n);\nprint 1;\n";
+     for my $case ( [ $k, 'Word=__DATA__', '__DATA__ => at the start of a line in a list' ],
+                    [ $k, 'Word=__END__', '__END__ => at the start of a line in a list' ],
+-- 
+2.53.0
+

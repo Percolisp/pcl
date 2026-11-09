@@ -1,7 +1,7 @@
 From 41cf15583868f5663b69f0575daf29a57b674958 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 31 Oct 2026 10:02:29 +0200
-Subject: [PATCH 097/119] Lexer: defer BLOCK is a compound statement of its own
+Subject: [PATCH 097/127] Lexer: defer BLOCK is a compound statement of its own
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

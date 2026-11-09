@@ -1,0 +1,37 @@
+From c2f21706b30fb60076904d25a3de7723d3aa448d Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Tue, 10 Nov 2026 00:44:11 +0200
+Subject: [PATCH 127/127] t/ppi_bugs_pcl.t: the lexical-sub row of a sub named
+ x is no longer TODO
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`my sub x { ... } x` lexes the call as a Word since the commit that
+treats a name declared by my / state / our sub as a word where perl does
+not expect an operator (PCL §43), and the statement-start rule of the
+commit before this one covers it too; the row passed inside its TODO
+block.  Only the marker goes; the assertion is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index e3e6f61f..04e8ec72 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -475,8 +475,7 @@ TODO: {
+              map { ref($_) . '[' . $_->content . ']' }
+              grep { $_->significant } $doc->tokens);
+ }
+-TODO: {
+-    local $TODO = 'PCL §19: A call to a sub named x after a list operator is lexed as the repetition operator';
++{
+     my $doc = PPI::Document->new(\'my sub x { print "LEX\n" } x');
+     my ($op) = grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+                $doc->tokens;
+-- 
+2.53.0
+
