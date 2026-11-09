@@ -143,3 +143,20 @@ the fix", PPI's suite green after every commit, plain and AUTHOR_TESTING=1:
 its statement, in four pairs -- the token, a statement after it, a nested
 format in an argument block, a sub declared after it (`PR-AU.md`).
 t/ppi_bugs_pcl.t: 323 -> 372 rows.
+
+## s536j (2026-11-08, finished in s537): the branch is now 127 commits, head c2f21706
+
+`0001-*.patch` .. `0127-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); pushed fast-forward to
+the BARE repo only (`86623347` -> `c2f21706`) -- the fork's `pcl`, which heads
+#459, is moved by the reviewing session.  Three groups, each "TODO tests, then
+the fix", plus one TODO-only commit; PPI's suite green after every commit, plain
+and AUTHOR_TESTING=1: **AV** §62 a negated bareword takes its whole
+package-qualified name, `-Foo::bar` / `-CORE::log(...)` (`PR-AV.md`); **AW** §63
+`x` / `x<digits>` after the `}` of a block that ends a statement is a word, so
+`sub x3 { } x3();` calls (`PR-AW.md`); **AX** §64 `__DATA__` / `__END__` before
+a fat comma is a word (`PR-AX.md`); and §65's rows (a CR in the source is
+lost) as TODO only -- PPI's own t/06_round_trip.t asserts the newline
+rewrite, so that fix needs a design (PCL task #4761).  One more commit takes
+the TODO marker off the lexical-sub row of a sub named `x` (`my sub x { } x`),
+which passes since group AL.  t/ppi_bugs_pcl.t: 372 -> 411 rows.
