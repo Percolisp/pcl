@@ -10,13 +10,13 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 * ROUND DUTY (board + companion `--all --quick`; -75..-83 unmeasured by the board, -64..-83 by the companion): taken on the merged main once these batches are in and the box is quiet -- a board leg beside three agents ran 2 h in s536 and stalled every bench behind it (PAUSE-s536 11:5x).
 * Owed by me, light: s534a's AUTOLOAD probe rows 37-38.
 
-## 00:5x -- s536e PRE-REVIEWED while it takes its legs (tree code is final).
+## 00:2x (2) -- s536e PRE-REVIEWED while it takes its legs (tree code is final).
 * `Pl/t` diff read: +13 span-binder rows, 2 while-my-closure blocks, misc-fixes-01 row 132 leaves its TODO with the assertion unchanged.  Nothing weakened.
 * Probes perl -> main -> tree (`~/pcl-agent-scratch/s537/review/e/p1..p10.pl`): tree = perl on 8 of 10, main wrong on 6 of those (p1 `$a`/`$b` across sections, p3 list-`my` containers, p5 chained-`my` per iteration, p6 an embedded `my` re-mentioned, p10 a closure over `my $a`).  The two the tree misses are PRE-EXISTING and not the batch's: p2 = #314 family F-F (file-level `state @arr` refuses the file; note appended), p4 = **#4782 FILED** (`sub f ($n = @d)` binds the array, not its count -- silent wrong).
 * Left for its merge: the bars in its report, ff, CLAUDE.md + STATUS numbers, tasks #4547 #4541 #4543 #4545 #4641 #4642 COMPLETED by me.
 
-## 01:0x -- s536h PRE-REVIEWED (tree code final; it owes gate + sweep + everyday).
+## 00:2x (3) -- s536h PRE-REVIEWED (tree code final; it owes gate + sweep + everyday).
 * `Pl/t` diff: only the four plan counts go up; rows added to errno-magic-01, forced-main-sub-01, open-modes-01, system-block-01.
 * Probes perl -> main -> tree (`~/pcl-agent-scratch/s537/review/h/p1..p5.pl`): tree = perl on all five, main wrong on all five (p1 the `-` opens + empty file name; p2 `wait` / `waitpid` -- main leaves `$?` stale and a WNOHANG poll stores GARBAGE, 628211684; p3 `$!` across EOF / read / getc / truncate; p4 `open(*{"STDERR"}, ...)` inside a package; p5 `do FILE` clears `$!`).
 
-## 01:1x -- OWED ITEM DONE: s534a's probe matrix re-run on main `3139fcb0` (`~/pcl-agent-scratch/s537/review/matrix/`): the AUTOLOAD rows 37-38 = perl; row 49 (`use parent -norequire` with `::` names) = perl now.  Still differing, all known before: 30-31 (undef of a sub), 39-40 (c3 / next::method, ns-mro), 56 (stash alias), 60 (inherited overload fallback).  Input for the method-lookup batch (#4523-#4525) when the USER rules on it.
+## 00:2x (4) -- OWED ITEM DONE: s534a's probe matrix re-run on main `3139fcb0` (`~/pcl-agent-scratch/s537/review/matrix/`): the AUTOLOAD rows 37-38 = perl; row 49 (`use parent -norequire` with `::` names) = perl now.  Still differing, all known before: 30-31 (undef of a sub), 39-40 (c3 / next::method, ns-mro), 56 (stash alias), 60 (inherited overload fallback).  Input for the method-lookup batch (#4523-#4525) when the USER rules on it.
