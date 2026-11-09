@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-10",
+   "description" : "FILED s537 (reviewing session, 2026-11-10) from a review probe of s536e (#4545 sibling shape; NOT that batch: main 3139fcb0 and the s536e tree answer the same).\n\nREPRODUCER (perl 5.40.3):\n\n    use feature \"signatures\"; our @d = (5,6,7);\n    sub f ($n = @d, $c = () = @d) { \"n=$n c=$c\" } print f(), \"\\n\";\n\nperl: `n=3 c=3`.   PCL: `n=ARRAY(0x1) c=ARRAY(0x1)`.  `$n = scalar(@d)`, `$m = (4,5,6)` (6) and `$o = @d + 0` are right.\n\nMECHANISM (read from the emission, not fixed): the default is emitted as a bare value form inside the parameter binding --\n\n    ($n (p-copy-scalar-arg (if (p-arg-supplied-p @_ 0) (aref @_ 0) @d)))\n\n-- so an aggregate-valued default expression reaches the scalar parameter as the aggregate.  perl compiles a scalar parameter default as the RHS of a scalar assignment (`$n = DEFAULT`): scalar context.  Fix shape: lower the default through the same path as `my $n = DEFAULT` (the scalar-assignment RHS: an array is its count, a hash its count / truth, a list assignment its RHS count), ONE path, not a per-shape case; an `@rest` / `%h` slurpy has no default in perl.  Probe also `$n = @$r`, `$n = (@a, @b)` (last element count), `$n = f()` (f called in scalar context -- check wantarray inside), `$n = wantarray` and `//=` / `||=` defaults (5.38).\n\nBar: guard rows vs perl incl. the wantarray one; corpus-diff + wide A/B (every signature-default site with an aggregate or call default moves; explain each).",
+   "id" : "4782",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a signature DEFAULT is not evaluated in scalar context -- `sub f ($n = @d)` binds the ARRAY (prints ARRAY(0x1)) where perl binds its count; `$k = %h`, `$c = () = @d` the same"
+}
