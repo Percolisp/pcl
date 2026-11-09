@@ -16134,10 +16134,22 @@ which is one of #1140's escape spellings (probed)."
    a vector of their own CELLS (%p-alias-aelem through p-aref-deref's slice
    arm), so a write through the alias reaches the variable or the array slot
    the list was built from.  One index or a list of them: a scalar IDX is a
-   one-index slice.  A missing element is a lazy alias over the list and
-   creates nothing, as perl's read of `(@a)[8]' grows nothing.  Emitted only
-   by %p-aliasing-slice-form."
-  (p-aref-deref list (if (and (vectorp idx) (not (stringp idx))) idx (vector idx))))
+   one-index slice.  An index PAST EITHER END of the flat list is perl's
+   read-only undef (pp_lslice puts &PL_sv_undef there): a read is undef and
+   grows nothing, a write is `Modification of a read-only value attempted'
+   -- `w((@a)[9])' and `for ((@a, $x)[9]) { $_ = 1 }' die, never extend @a
+   or write a temporary.  Emitted only by %p-aliasing-slice-form."
+  (let* ((iv (if (and (vectorp idx) (not (stringp idx))) idx (vector idx)))
+         (cells (p-aref-deref list iv))
+         (src (%p-listslice-array (unbox list))))
+    (when (and (vectorp src) (not (stringp src)) (not (%p-tied src)))
+      (multiple-value-bind (flat n) (%p-flatten-slice-args (list iv))
+        (when (= n (length cells))
+          (let ((len (length src)))
+            (dotimes (j n)
+              (unless (< -1 (%p-array-index src (svref flat j)) len)
+                (setf (aref cells j) (%p-ro-box *p-undef*))))))))
+    cells))
 
 ;;; The KEY / INDEX list of a slice or slice-delete, flattened (#387 family
 ;;; 21, s413 — six functions spelled this loop, and the three that DISAGREED

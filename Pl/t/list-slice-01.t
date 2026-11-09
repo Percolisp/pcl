@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 23;
 
 sub run_cl {
     my ($code) = @_;
@@ -265,3 +265,17 @@ test_perl_oracle("#4682 a list slice in an aliasing consumer aliases the list's 
       my @b = (1,2,3); for ((@b)[8]) { } for ((\@b, $x)[0]) { print "9 ", ref($_), "\n" }
       my ($y, $z) = (1, 2); for (($y), $z) { $_ .= "s" } print "10 $y $z ", scalar(@b), "\n";
       sub two { return ($y, $z) } for ((two())[1]) { print "11 $_\n" }});
+# #4682 (s536i, the WRITE half; found by the s537 resume probes): an index PAST
+# EITHER END of the list is perl's read-only undef (pp_lslice puts
+# &PL_sv_undef there), so a write through it DIES -- the alias first built for
+# it extended @b (`w((@b)[9])` grew @b to 10) or wrote a temporary.  Line 5 is
+# the in-range control, line 6 a read that must grow nothing.
+test_perl_oracle("#4682 a list slice past the end is read-only in an aliasing consumer",
+    q{sub w { $_[0] .= "w" }
+      sub ro { $@ =~ /^Modification of a read-only value/ ? "ro" : "other: $@" }
+      my @b = (1,2,3); eval { w((@b)[9]); 1 } or print "1 ", ro(), "\n"; print "1 ", scalar(@b), "\n";
+      my @c = (1,2,3); eval { for ((@c)[9]) { $_ = 1 } 1 } or print "2 ", ro(), "\n"; print "2 ", scalar(@c), "\n";
+      my @d = (1,2,3); eval { map { $_ = 1 } (@d)[9]; 1 } or print "3 ", ro(), "\n"; print "3 ", scalar(@d), "\n";
+      my @e = (1,2,3); my $x; eval { for ((@e, $x)[9], (@e)[-9]) { $_ = 1 } 1 } or print "4 ", ro(), "\n"; print "4 ", scalar(@e), "\n";
+      my @f = (1,2,3); eval { w((@f)[1], (@f)[-1]); 1 } or print "5 died\n"; print "5 @f\n";
+      my @g = (1,2,3); for ((@g)[7]) { print "6 ", defined $_ ? "d" : "u", "\n" } print "6 ", scalar(@g), "\n";});
