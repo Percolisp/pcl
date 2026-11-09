@@ -30,3 +30,8 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 * s537a = CALL AND SUB-BODY SHAPES: #4782 #4281 #4762 #4703 #4664+#4325 #4264; IDs 4801-4819; generation v2-13600.  All six re-probed wrong on merged main today (`~/pcl-agent-scratch/s537/review/a/m1..m5.pl`, `review/e/p4b.pl`).  Regions disjoint from s536i (ExprToCL aliasing / argument loop / element generators) and s536j (PPI, `_repair_*`).
 * NEXT brief idea (s537b, for the slot after that): the file-lexical / state follow-ups of s536e -- #314 F-F plain shapes (file-level `state @arr`, #1579), #4661, #4662 (= #338 b1), #4663, #4461.
 * s536h is re-taking gate + sweep + corpus-diff on the combined tree `1426433e` (queued behind s536i / s536j on the three slots).
+
+## 00:5x -- **s536h MERGED = MAIN-READY-85 `bdd36d06`** (`cl/` + `Pl/Environment.pm` accessor; generation v2-13300 unchanged)
+* ff 12 commits.  Bars on the combined tree `1426433e`: gate 369 / 11,998 PASS, sweep 18,795 +0 GATE clean, corpus-diff vs e7205dde IDENTICAL; wide A/B / ir-conform / bench / everyday from the pre-merge tree (a `Pl/`-only move cannot change a `cl/` batch's A/B).  On merged main: its four guard files + artifact-staleness 81 rows PASS, check-parens balanced, my five probes = perl.
+* COMPLETED by me: #4263 #4262 #4224 #4284 #4310.  #4286 measured, open.  Filed by it: #4721 #4722.
+* s536i + s536j told (a `cl/` move: gate + sweep re-take).  **s537a LAUNCHED** in the freed slot (new isolated worktree).
