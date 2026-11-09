@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-10",
+   "description" : "FILED s537a (Opus 5.5, 2026-11-10) as #4703's residue.  PRE-EXISTING (main 4a39a1c7 the same).  A loud DROP, not silent.\n\n    no warnings;\n    sub isa { \"isa(\" . join(\" \", @_) . \")\" }\n    my @d = (isa 7, 8); print scalar(@d), \" @d\\n\";\n      perl 5.40.3:  1 isa(7 8)\n      PCL:          PCL: statement dropped at ... line 3: my @d = (isa 7, 8); -- Bug. Fell through. Missing case: []\n\n`isa(1, 2)` with parens is right since #4603 (runtime-name-hygiene-01.t).  The paren-less word is classified by Pl::PExpr::TokenUtils::is_token_operator from Config's precedence table (`'isa' => { assoc => 'x', no => 2, prec => 50 }`), so handle_subcalls skips it as \"a word-form binary operator\" (PExpr.pm `next if $self->is_token_operator($now)`) whatever the feature state.  perl's `isa` is an infix operator ONLY where the `isa` feature is in force (5.32+, in the :5.36 bundle); elsewhere it is an ordinary identifier.\n\nFix direction: the word-operator classification of `isa` asks the same one answer as the other gated keywords -- Pl::Parser::gated_keyword_at (s537a's PExpr::_gated_sub_here reads it from a head token) -- at the classification site, so `$o isa Foo` under the feature stays infix and a user sub call without it is a call.  Measure first: is_token_operator has many callers (every token test in PExpr); the gate must be asked only for the Word `isa`.  s537a did not take it: it changes the token classifier, a different site from the operand grammar #4703 fixed.  Probe: scratch/s537a/p/m4a.pl's removed line in the s537a worktree.\n",
+   "id" : "4802",
+   "status" : "pending",
+   "subject" : "#4703 residue: `isa` is an INFIX OPERATOR to PCL everywhere -- where the `isa` feature is off, a paren-less call of a user `sub isa` (`my @d = (isa 7, 8)`) is DROPPED (\"Fell through. Missing case: []\"); perl calls the sub"
+}

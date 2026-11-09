@@ -45,3 +45,9 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s537/resume-s537.md`,
 ## 01:0x -- brief `s537/s537b-prompt.md` WRITTEN for the next free slot (not launched).
 * s537b = STATE CONTAINERS + THE CONTAINER SPAN MANGLE: #314 F-F plain shapes, #1579 (op/lvref.t 201 rows), #4661 + #4662 (= #338 b1), #4461, #4663 measure-only; IDs 4821-4839; generation v2-13700.  A name-resolution batch: sweep + gate-SET scan are its gate.
 * RUNNING now: s536i, s536j, s537a (+ my round board, chunked).
+
+## 01:1x -- **THE USER ENDED THE SESSION EARLY: everything STOPPED.**  Resume = `s537/resume-after-stop.md`.
+* Stopped at 01:17: s536i, s536j, s537a (TaskStop) and the round board; their detached legs killed after (scopes stopped, xserver listeners killed); 0 SBCL, holders removed.
+* Merged this session: s536e = MAIN-READY-84 `9c425a19`, s536h = MAIN-READY-85 `bdd36d06`; both pushed.  Filed by me: #4782.  Briefs written: s537a (launched, 3 of 6 members committed), s537b (not launched).
+* NEXT SESSION, in order: (1) read `s537/resume-after-stop.md`; check no leg runs and `HEAVY.holder*` is absent; (2) relaunch s536i / s536j / s537a (Opus 5.5 xhigh, existing worktrees); (3) resume the round board from chunk b in the background; (4) merge in MERGE-READY order with the usual review (ff; `Pl/t` diff; probes perl -> main -> tree; tasks completed by me; CLAUDE.md + STATUS); s536j's merge needs `prove tools/t/install-container.t`; (5) s537b into the first freed slot; (6) the companion `--all --quick` on merged main; (7) CI of the pushed sha through the public API.
+* OPEN USER QUESTIONS, unchanged: the method-lookup batch #4523-#4525 (#4522 first? a dual-run check?); `docs/eval-in-cl-plan.md` §7 (#4480); the fork push of PPI `pcl`; #1836; #4503; #4624's surrogate-escape design.
