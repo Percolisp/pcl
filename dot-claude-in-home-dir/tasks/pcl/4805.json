@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-11",
+   "description" : "FILED s537a (Opus 5.5, 2026-11-11), found probing #4664's break shapes.  PRE-EXISTING (main 4a39a1c7 identical).  A SILENT WRONG.\n\n    my @n = (1); push @n, @n, @n; print \"@n\\n\";            # perl 1 1 1     PCL 1 1 1 1\n    my @m = (1, 2); push @m, @m; print \"@m\\n\";             # perl 1 2 1 2   PCL same (one source: right)\n    my @u = (1); unshift @u, @u, @u; print \"@u\\n\";         # perl 1 1 1     PCL same (unshift builds a flat list first)\n    my @s = (1); splice @s, 1, 0, @s, @s; print \"@s\\n\";    # perl 1 1 1     PCL same\n\nMECHANISM (read): p-push-impl walks its items one by one and a flatten-marker item is read AT ITS TURN (`(loop for elem across src ...)`), so the second `@n` sees the elements the first one appended.  perl puts the whole argument list on the stack before pp_push stores anything.  p-unshift already builds a flat list first; push needs the same only when an item's source IS the target array (an `eq` test per marker is enough -- the common `push @a, @b` must not pay a copy).  Probe: scratch/s537a/p/m5h.pl in the s537a worktree.\n",
+   "id" : "4805",
+   "status" : "pending",
+   "subject" : "`push @n, @n, @n` reads the array it is growing: `my @n = (1); push @n, @n, @n` gives \"1 1 1 1\" (perl \"1 1 1\" -- the argument list is flattened before the first store)"
+}

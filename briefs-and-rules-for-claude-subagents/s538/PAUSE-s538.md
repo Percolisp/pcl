@@ -31,3 +31,7 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s538/resume-s538.md`,
 * COMPLETED by me: #4701 #4542 #4482.  #4302 stays open (= #4761, with the USER's ruling).  CLAUDE.md + STATUS numbers.  Filed by s537a meanwhile: #4803 #4804 (committed with this).
 * s536i + s537a TOLD (SendMessage 00:5x): rebase, re-take corpus-diff + wide A/B vs `3d524ad7`, gate, sweep, ir; **s536i takes v2-13700** (its v2-13400 is below main now), s537a keeps v2-13600, the s537b brief moves to **v2-13800**.  s537a warned that its #4762 / #4703 edits sit in the same two files and topic as s536j's qualified-autoquote change.
 * Round board: chunks a b c done (c at 00:39); d waits behind the bench.
+
+## 01:1x -- THE USER APPROVED THE COMPATIBILITY PLAN (six points; DECIDED ## s538; memory `project_compat_plan_s538.md`) and asked to be told when point 4 (the three decisions #2370, #233 / #1361, #1389) is reached.
+* **s537b LAUNCHED** in the slot s536j freed (a new isolated worktree; point 2, silent wrongs / refusals in name resolution; v2-13800).  RUNNING: s536i (rebasing over -86, v2-13700), s537a (v2-13600), s537b.
+* NEXT BRIEFS to write: **s538a** = point 1, the board's whole-file losses, from the round board's `--diff` + the `*PLAN*` / `*FILE*` rows of `baselines/cpan-board14-fails.tsv` (pick by assertions hidden, one cause each); **s538b** = point 3, parser port 4 (the renames through `_rename_decl_within`; #3694's "NEXT, port 4" note) or the next seam kind.
