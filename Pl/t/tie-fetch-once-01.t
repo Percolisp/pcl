@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 37;
 
 sub run_pcl {
     my ($code) = @_;
@@ -182,3 +182,35 @@ like($copies, qr/^a-list=two 1 fetch=1$/m,      '@a = ($tied, ...) copies the va
 like($copies, qr/^a-push=three three three fetch=3$/m, 'push / unshift / splice copy the value, one FETCH each');
 like($copies, qr/^a-nowrite=four$/m,            'a write to the element does not STORE into the tied scalar');
 like($copies, qr/^a-ref=ARRAY 7$/m,             'a reference FETCHed into an element stays an unblessed ARRAY ref');
+
+# ---------------------------------------------------------------- program 5
+# #4664 (s537a): a multi-argument `push` FETCHed a tied argument TWICE (its
+# item loop unboxed to classify, then the store read the proxy again);
+# p-unshift's PEEK is the rule.  #4325 (s537a): an `eval { }` that is a whole
+# VOID statement copied its last value out of the frame -- a FETCH perl never
+# makes (`eval { bless $tr, 'Q' };` 2 vs 1, `eval { $tr };` 1 vs 0).  Every
+# expectation is the perl 5.40.3 line; INVERSE: main 4a39a1c7 prints
+# p-push2=2 p-push3=4 p-eval-bless=2 p-eval-var=1 p-eval-loop=2.
+my $ONCE = <<'PERL';
+our $n = 0;
+{ package T3; sub TIESCALAR { my $v = $_[1]; bless \$v, $_[0] } sub FETCH { $main::n++; ${$_[0]} } }
+tie my $t, 'T3', "v";
+$n = 0; push my @a, $t, 5; print "p-push2=$n @a\n";
+$n = 0; push my @b, 5, $t, $t; print "p-push3=$n @b\n";
+$n = 0; unshift my @c, $t, 5; print "p-unshift2=$n @c\n";
+my $u = [];
+tie our $tr, 'T3', $u;
+$n = 0; eval { bless $tr, 'Q' }; print "p-eval-bless=$n ", ref($u), "\n";
+$n = 0; eval { $tr }; print "p-eval-var=$n\n";
+$n = 0; my $v = eval { $tr }; print "p-eval-kept=$n\n";
+$n = 0; for my $i (1) { eval { bless $tr, 'R' } } print "p-eval-loop=$n ", ref($u), "\n";
+PERL
+
+my $once = run_pcl($ONCE);
+like($once, qr/^p-push2=1 v 5$/m,     'push with two arguments FETCHes a tied one once (#4664)');
+like($once, qr/^p-push3=2 5 v v$/m,   '... and a tied argument given twice twice');
+like($once, qr/^p-unshift2=1 v 5$/m,  'unshift with two arguments: once (control)');
+like($once, qr/^p-eval-bless=1 Q$/m,  'a void eval { bless $tied } FETCHes once (#4325)');
+like($once, qr/^p-eval-var=0$/m,      'a void eval { $tied } never FETCHes');
+like($once, qr/^p-eval-kept=1$/m,     'an eval whose value is kept FETCHes once (control)');
+like($once, qr/^p-eval-loop=1 R$/m,   'a void eval in a loop body: once');

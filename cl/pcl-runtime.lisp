@@ -2703,8 +2703,17 @@
   `(let ((*wantarray* nil)) ,@body))
 
 (defmacro p-void-ctx (&body body)
-  "Evaluate BODY in Perl VOID context."
-  `(let ((*wantarray* :void)) ,@body))
+  "Evaluate BODY in Perl VOID context.
+   The one exception to `exactly that let': a BODY that is ONE `eval { }' is a
+   frame whose value nobody reads, so it takes p-eval-block-discarded -- no
+   leave copy, which for a tied last value was a FETCH perl never makes
+   (#4325).  Only the SOLE form qualifies: an eval nested deeper in a void
+   statement (`my $r = \\eval { $x };') sees :void too and IS consumed --
+   %p-leavesub's docstring is that measurement for subs."
+  (if (and body (null (cdr body)) (consp (car body)) (symbolp (caar body))
+           (string= (symbol-name (caar body)) "P-EVAL-BLOCK"))
+      `(let ((*wantarray* :void)) (p-eval-block-discarded ,@(cdar body)))
+      `(let ((*wantarray* :void)) ,@body)))
 
 (defmacro p-caller-ctx (&body body)
   "Evaluate BODY in the context this sub was CALLED in — the propagating case
@@ -15398,7 +15407,9 @@ create the key on a read-only call, which perl does not.
     (return-from p-push-impl (%p-push-cold arr items)))
   (%p-when-tied (r arr) (return-from p-push-impl (%p-ta-push r items)))
   (dolist (item items)
-    (let ((val (unbox item)))
+    ;; a PEEK, never unbox: the store reads a tied or magic item ONCE (#4664,
+    ;; p-unshift's #1814 rule) -- an unbox here FETCHed it a second time.
+    (let ((val (if (p-box-p item) (p-box-value item) item)))
       (cond
         ;; Flatten marker - push each element of the marked array
         ((p-flatten-marker-p val)
@@ -19485,6 +19496,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (p-exception-object e)
       (%p-die-text (format nil "~A" e))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-eval-block-expansion (body copy-out)
+    "The expansion of `eval { BODY }`, ONE spelling for p-eval-block (COPY-OUT
+     t: perl's leave rule on the value it exits with) and
+     p-eval-block-discarded (COPY-OUT nil: the value is never read, #4325)."
+    (let ((run `(let ((|$^S| 1))
+                  (box-set $@ "")
+                  (catch :p-return ,@body))))
+      `(p-loc-save
+        (handler-case
+            (prog1 ,(if copy-out `(%p-leavesub ,run) run)
+              (box-set $@ ""))
+          (error (e)
+            (box-set $@ (%p-caught-perl-value e))
+            nil))))))
+
 ;;; p-eval-block: Execute code catching errors (Perl's eval { })
 ;;; Sets $@ to error message on failure, empty string on success.
 ;;; Returns nil on error, block result on success.
@@ -19519,15 +19546,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; an eval propagated a STALE error: probed 5.40.3, `eval { die "x\n" };
   ;; eval { die }` leaves "Died", not "x ...propagated".  p-try has cleared at
   ;; entry since #340 — this is that sibling's missing half.
-  `(p-loc-save
-    (handler-case
-        (prog1 (%p-leavesub (let ((|$^S| 1))
-                              (box-set $@ "")
-                              (catch :p-return ,@body)))
-          (box-set $@ ""))
-      (error (e)
-        (box-set $@ (%p-caught-perl-value e))
-        nil))))
+  (%p-eval-block-expansion body t))
+
+(defmacro p-eval-block-discarded (&body body)
+  "`eval { BODY }` whose VALUE nobody reads: the whole of a void statement
+   (p-void-ctx expands its sole p-eval-block form into this, #4325).  perl
+   copies nothing out of a frame left in void context, so neither does this:
+   p-eval-block's leave copy is the one difference, and it was a second FETCH
+   of a tied last value (`eval { bless $tied, 'Q' };` read $tied twice, perl
+   once; `eval { $tied };` once, perl never).  The value is the body's,
+   uncopied -- a discarded statement's value has no reader."
+  (%p-eval-block-expansion body nil))
 
 (defmacro p-try (try-form catch-clause &optional finally-form)
   "Perl's `try BLOCK catch (VAR) BLOCK [finally BLOCK]` (feature 'try', 5.34).
