@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 35;
+plan tests => 37;
 
 sub write_pl {
     my ($code) = @_;
@@ -425,4 +425,35 @@ our $t = "m";
 package A;
 use feature 'signatures'; no warnings; sub f ($x = $t) { "f=$x" }
 print f(), "\n";
+PL
+# #4661 (s537b): an EXCEPTION-partition container (`my %ENV`, `my @ARGV`,
+# `my %SIG`) read in a later section takes the MANGLE (`%ENV__file__N`) -- it
+# refused "spans a package boundary" since s536e (and read the REAL %ENV
+# before); a qualified `@main::ARGV` stays the global.
+is(run_cl(<<'PL'), "k\n1|0\nX,y u\n", '#4661: an exception-named container spanning a section is the lexical, mangled');
+my %ENV = (k => 1); package Q; print join(",", keys %ENV), "\n";
+package main;
+my @ARGV = (1); package Q2; print "@ARGV|", scalar(@main::ARGV), "\n";
+package main;
+my %SIG = (X => 'y'); package R; print join(",", %SIG), " ", (defined $main::SIG{X} ? "g" : "u"), "\n";
+PL
+# #4662 (s537b): a CHAINED / EMBEDDED container declarator, or a canon
+# declared more than once (#338 b1: op/svleak.t's `tie my @a` in a block),
+# read in a later section is promoted per BINDING with the mangle -- every
+# one refused before.  A string eval, a named sub and a closure in the later
+# section reach the cell; a `local` of the same-named GLOBAL stays apart.
+is(run_cl(<<'PL'), "1 2|1 2\n3 4|7 8\nq|2\n1 2 3|2|1 2 3 3\na,b|a\n", '#4662: chained, embedded and twice-declared containers spanning a section');
+my @c = my @d = (1, 2);
+push(my @e, 3, 4); my $n = push(my @f, 7);
+my ($x, %h); { my %h = (z => 1); } $h{q} = 1;
+my @a = (1, 2); { tie my @a, 'main'; } { my @a = (9); }
+my %g = (a => 1); { my %g; }
+sub TIEARRAY { bless [], shift } sub FETCHSIZE { 0 }
+package Foo;
+print "@c|@d\n"; push @f, 8; print "@e|@f\n";
+print join(",", keys %h), "|", eval('scalar @a'), "\n";
+sub s3 { push @a, 3; "@a" } my $cl = sub { scalar(@a) };
+print s3(), "|", $cl->() - 1, "|", eval('"@a"'), " ", scalar(@a), "\n";
+{ local %main::g = (b => 2); print join(",", sort(keys %g, keys %main::g)), "|"; }
+print join(",", keys %g), "\n";
 PL

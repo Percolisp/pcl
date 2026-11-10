@@ -3955,7 +3955,8 @@ sub _span_scalar_instances {
 #   - the cell is reachable from a string eval by its ORIGINAL name: the pair
 #     is published on every segment of the extent (M-F, #2285 -- the identity
 #     cell's too, or an eval re-homes the name);
-#   - containers (`my %h` / `my @a`) take the identity path only (W10-ext-3).
+#   - containers (`my %h` / `my @a`) take the same two paths, binding by
+#     binding (W10-ext-3; the mangle `@a__file__N` since s537b, #4661 #4662).
 # References BEFORE the declaration (earlier segments, earlier statements, the
 # decl's own RHS) belong to a DIFFERENT variable and are left untouched; so
 # does every use inside a shadow's scope -- both by the binder's answer.
@@ -4092,78 +4093,139 @@ sub _span_check_rewritten {
   }
 }
 
-# The container half (W10-ext-3): a single-container `my %h` / `my @a` that is
-# the sole binding of its canon file-wide (nested shadows of the canon count),
-# promoted under its own name -- no mangled spelling -- its later-segment uses,
-# exactly the binding's, qualified (interpolated text only where the reading
-# package differs).  A container in a list or chained declaration is not
-# offered: it stays unpromoted, and the checker says so.
+# The container half (W10-ext-3; the mangle since s537b, #4661 #4662): every
+# spanning container binding -- a single-container `my %h` / `my @a`, one in a
+# LIST, a chained or embedded declarator -- is promoted, under its own name
+# where that is safe, else mangled (_span_rename_container).
 sub _span_rename_containers {
   my ($self, $segments, $bd, $spanning, $span_of, $sf, $f, $alltxt) = @_;
   for my $bare (sort keys %$spanning) {
-    my @cinst;
-    for my $i (0 .. $#$segments) {
-      my $top = $segments->[$i]{stmts};
-      # a single-container `my @a` and a container inside a LIST declaration
-      # (`my ($u, @v)`, #4543: [stmt, canon] -- the name of the same list's
-      # scalar is the scalar path's)
-      for my $cd (@{ $sf->[$i]{container_decl}{$bare} || [] },
-                  grep { $_->[1] =~ /^[\@\%]/ } @{ $sf->[$i]{mlist_decl}{$bare} || [] }) {
-        push @cinst, [$i, $cd] if grep { $top->[$_] == $cd->[0] } 0 .. $#$top;
-      }
-    }
-    for my $ci (@cinst) {
-      my ($di, $cd) = @$ci;
+    $self->_span_rename_container($segments, $bd, $bare, $_, $f, $span_of, $alltxt)
+      for $self->_span_container_instances($segments, $sf, $bare, $bd, $span_of);
+  }
+}
+
+# The container instances of the bare name $bare whose binding SPANS: a
+# single-container `my @a` and a container inside a LIST declaration (`my ($u,
+# @v)`, #4543) the facts list (lead = 1), plus a chained (`my @c = my @d =
+# …`) or expression-embedded (`push(my @e, …)`) container declarator the facts
+# cannot see (lead = 0, #4662) -- the scalar path's population
+# (_span_scalar_instances), sigil by sigil.  [segment, top index, top
+# statement, declarator token, binding, lead, canon], latest first.
+sub _span_container_instances {
+  my ($self, $segments, $sf, $bare, $bd, $span_of) = @_;
+  my (@inst, %have);
+  for my $i (0 .. $#$segments) {
+    my $top = $segments->[$i]{stmts};
+    for my $cd (@{ $sf->[$i]{container_decl}{$bare} || [] },
+                grep { $_->[1] =~ /^[\@\%]/ } @{ $sf->[$i]{mlist_decl}{$bare} || [] }) {
       my ($decl, $csym) = @$cd;
-      next unless ($f->{canon_decl_count}{$csym} // 0) == 1;
-      next unless $self->_own_name_cell_ok($csym);
-      my ($dsym) = grep { $_->content eq $csym } @{ $decl->find('PPI::Token::Symbol') || [] };
+      my ($ix) = grep { $top->[$_] == $decl } 0 .. $#$top;
+      next unless defined $ix;
+      my ($dsym) = grep { $_->content eq $csym && $self->_symbol_is_declarator($_) }
+                   @{ $decl->find('PPI::Token::Symbol') || [] };
       my $b = $dsym && $bd->decl_binding($dsym) or next;
-      next unless $span_of->{ refaddr $b };
-      next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
-      next if $segments->[$di]{blockform};
-      next if $self->{_file_lex_renamed}{$csym};
-      my $hi = _blk_extent($segments, $di);
-      my $qname = $segments->[$di]{pkg} . '::' . $bare;
-      my $qfix  = _interp_fixer($csym, $qname);
-      my $mine  = sub { $self->_refers_to_decl($_[0], $csym, $dsym) };
-      for my $j ($di + 1 .. $hi) {
-        my $cross = $segments->[$j]{pkg} ne $segments->[$di]{pkg};
-        for my $stmt (@{ $segments->[$j]{stmts} }) {
-          next unless ref $stmt && $stmt->isa('PPI::Node');
-          my @toks = @{ $stmt->find('PPI::Token') || [] };     # ONE walk (s536e)
-          for my $s (@toks) {
-            next unless $s->isa('PPI::Token::Symbol') && $s->symbol eq $csym && $mine->($s);
-            (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1 . $qname/e;
-            $s->set_content($c);
-          }
-          if ($csym =~ /^\@/) {
-            for my $ai (@toks) {
-              next unless $ai->isa('PPI::Token::ArrayIndex');
-              my $c = $ai->content;
-              next unless $c =~ /^\$\#\Q$bare\E\b/ && $mine->($ai);
-              $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
-            }
-          }
-          for my $p (@toks) {                                    # #4545
-            next unless $p->isa('PPI::Token::Prototype') && index($p->content, $bare) >= 0;
-            $self->_rename_in_proto_defaults($p, $csym, substr($csym, 0, 1) . $qname)
-              if $mine->($p);
-          }
-          if ($cross) {
-            my $skip = sub { !$mine->($_[0]) };
-            _fix_interp_token($_, $qfix, $skip) for @toks;
-          }
-        }
-      }
-      $self->_span_check_rewritten($segments, $bd, $b, $bare, $bare, 1, $di);
-      $self->{_file_lex_renamed}{$csym} = 1;
-      $self->{_span_promoted}{ refaddr $b } = 1;
-      $self->_filecell_note('cspan', $csym,
-        $self->_program_unit ? 'identity' : 'fallback:container-span-identity-only');
-      _publish_span_pair($segments, $di, $hi, $csym, $csym);
+      next if $have{ refaddr $b }++;
+      push @inst, [$i, $ix, $decl, $dsym, $b, 1, $csym] if $span_of->{ refaddr $b };
     }
   }
+  for my $s (values %$span_of) {
+    my $bn = $s->{b};
+    next unless $bn->{canon} =~ /^[\@\%]\Q$bare\E\z/ && $bn->{kind} eq q{my}
+             && !$have{ refaddr $bn };
+    my $top = $segments->[ $s->{di} ]{stmts};
+    my %in = map { (refaddr($top->[$_]) => $_) } grep { ref $top->[$_] } 0 .. $#$top;
+    my $n = $bn->{decl_node};
+    $n = $n->parent while $n && !exists $in{ refaddr $n };
+    next unless $n;
+    # the statements whose lowering publishes a promoted declarator's cell
+    # (_blk_expr, _lower_decl_stmt): a plain statement or a my/our declaration
+    next unless ref($n) eq 'PPI::Statement' || ref($n) eq 'PPI::Statement::Expression'
+      || ($n->isa('PPI::Statement::Variable') && ($n->schild(0) // '') =~ /^(?:my|our)$/);
+    push @inst, [$s->{di}, $in{ refaddr $n }, $n, $bn->{decl_node}, $bn, 0, $bn->{canon}];
+  }
+  return sort { $b->[0] <=> $a->[0] || $b->[1] <=> $a->[1] || $b->[4]{decl_ord} <=> $a->[4]{decl_ord} } @inst;
+}
+
+# Promote ONE spanning container binding (W10-ext-3; the mangle #4661 #4662).
+# IDENTITY -- the cell keeps the source name, the later segments' uses are
+# qualified, interpolated text only where the reading package differs -- when
+# the statement's own declarator is the canon's sole declaration file-wide
+# (nested shadows count), the name may be its own cell (_own_name_cell_ok) and
+# the unit is the PROGRAM (#2633); else the MANGLE `@x__file__N` the scalar
+# path has: the declarator renamed alone, the declaring segment's later uses
+# bare, the later segments' qualified, interpolated text everywhere.  A
+# `${x}`-style braced spelling anywhere, or a block-form segment, leaves the
+# binding unpromoted -- the checker refuses it (rule 12).
+sub _span_rename_container {
+  my ($self, $segments, $bd, $bare, $in, $f, $span_of, $alltxt) = @_;
+  my ($di, $idx, $decl, $dsym, $b, $lead, $csym) = @$in;
+  return if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
+  return if $segments->[$di]{blockform};
+  return if $self->{_span_promoted}{ refaddr $b };
+  my $sig = substr($csym, 0, 1);
+  my $id_ok = $lead && ($f->{canon_decl_count}{$csym} // 0) == 1
+    && $self->_own_name_cell_ok($csym);
+  my $unique = $id_ok && $self->_program_unit;
+  return if $unique && $self->{_file_lex_renamed}{$csym};
+  my $newbare = $unique ? $bare : $bare . '__file__' . $self->{_file_lex_counter}++;
+  my $hi = _blk_extent($segments, $di);
+  my $mine = sub { $self->_refers_to_decl($_[0], $csym, $dsym) };
+  if (!$unique) {
+    _reg_rename($csym, "$sig$newbare", ':spanning');
+    $self->_rename_decl_within($decl, $dsym, "$sig$newbare", $lead ? undef : $decl);
+    $self->{_emb_promoted}{"$sig$newbare"} = q{span} if !$lead;
+    my $fix = _interp_fixer($csym, $newbare);
+    my $stmts = $segments->[$di]{stmts};
+    $self->_span_rewrite_container_stmt($stmts->[$_], $csym, $bare, $newbare, $fix, $mine)
+      for $idx + 1 .. $#$stmts;
+  }
+  my $qname = $segments->[$di]{pkg} . '::' . $newbare;
+  my $qfix  = _interp_fixer($csym, $qname);
+  for my $j ($di + 1 .. $hi) {
+    my $cross = !$unique || $segments->[$j]{pkg} ne $segments->[$di]{pkg};
+    $self->_span_rewrite_container_stmt($_, $csym, $bare, $qname, $cross ? $qfix : undef, $mine)
+      for @{ $segments->[$j]{stmts} };
+  }
+  $self->_span_check_rewritten($segments, $bd, $b, $bare, $newbare, $unique, $di);
+  $self->{_file_lex_renamed}{"$sig$newbare"} = 1;
+  $self->{_span_promoted}{ refaddr $b } = 1;
+  $self->_filecell_note('cspan', $csym, $unique ? 'identity' : 'mangle');
+  _publish_span_pair($segments, $di, $hi, $csym, "$sig$newbare");
+  return;
+}
+
+# The container rewrite of one statement: Symbols whose ->symbol is $csym
+# (element and slice spellings keep their access sigil), `$#x`, a one-token
+# signature's defaults (#4545), interpolated text ($fix undef = leave the text
+# alone) -- each token only when it is a use of THIS binding ($mine).  $new is
+# the name part the uses take (bare or package-qualified).
+sub _span_rewrite_container_stmt {
+  my ($self, $stmt, $csym, $bare, $new, $fix, $mine) = @_;
+  return unless ref $stmt && $stmt->isa('PPI::Node');
+  my @toks = @{ $stmt->find('PPI::Token') || [] };     # ONE walk (s536e)
+  for my $s (@toks) {
+    next unless $s->isa('PPI::Token::Symbol') && $s->symbol eq $csym;
+    next if $self->_symbol_is_declarator($s) || !$mine->($s);
+    (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$new/;
+    $s->set_content($c);
+  }
+  if ($csym =~ /^\@/) {
+    for my $ai (@toks) {
+      next unless $ai->isa('PPI::Token::ArrayIndex');
+      my $c = $ai->content;
+      next unless $c =~ /^\$\#\Q$bare\E\b/ && $mine->($ai);
+      $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1$new/;
+    }
+  }
+  for my $p (@toks) {                                    # #4545
+    next unless $p->isa('PPI::Token::Prototype') && index($p->content, $bare) >= 0;
+    $self->_rename_in_proto_defaults($p, $csym, substr($csym, 0, 1) . $new) if $mine->($p);
+  }
+  return unless $fix;
+  my $skip = sub { !$mine->($_[0]) };
+  _fix_interp_token($_, $fix, $skip) for @toks;
+  return;
 }
 
 # The CHECKER: a binding that spans and was not promoted dies -- the first one
@@ -10586,10 +10648,23 @@ sub _lower_decl_list {
         die "Parser2 TODO: self-referential init: " . $first->content
           if _elems_decl_at_level('our|local|state', @r)
           || (grep { !$self->{_let_bound_vars}{$_} || $seen{$_} } @inner)
-          || (grep { $final_txt =~ _reads_name_rx($_) } @all)
-          || (grep { $self->{_file_lex_renamed}{$_} } @all);
-        $self->_reg_lex(@all);
-        return (_decl_let([map { _decl_fresh($_, $vi) } @all],
+          || (grep { $final_txt =~ _reads_name_rx($_) } @all);
+        # A PROMOTED name (a span cell, #4662: `my @c = my @d` with `@d` used
+        # in a later section) binds no `let`: a chained declarator's cell was
+        # published before this arm by _emb_promoted_cells (one still pending
+        # dies, rule 12), the statement's own declarator publishes here.
+        my %own  = map { ($_ => 1) } @$vars;
+        my @lets = grep { !$self->{_file_lex_renamed}{$_} } @all;
+        for my $c (grep { $self->{_file_lex_renamed}{$_} } @all) {
+          die "PCL internal: the promoted declarator $c was never published\n"
+            if !$own{$c} && $self->{_emb_promoted}{$c};
+          push @{ $self->{_captured_decls} }, _decl_cell($c, _fresh_container($c))
+            if $own{$c};
+        }
+        $self->_reg_lex(@lets);
+        return ($assign_form->(), $self->_lower_block(\@rest, $vi, $tail_ctx))
+          unless @lets;
+        return (_decl_let([map { _decl_fresh($_, $vi) } @lets],
                  $assign_form->(),
                  $self->_lower_block(\@rest, $vi, $tail_ctx)));
       }
