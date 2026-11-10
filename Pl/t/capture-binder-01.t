@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 13;
+plan tests => 14;
 
 sub write_pl {
     my ($code) = @_;
@@ -156,10 +156,10 @@ is(run_cl(<<'PL'), "2\n", 'closure.t:548: an anon sub returned by a named sub ev
 }
 PL
 
-# ── 11. the promoter's eval-pair test (_enclosing_lex_decl): a same-name FILE
-#    `my` declared AFTER the block still encloses it -- the block cell takes
-#    the per-site pair, so the global name after the block is untouched (the
-#    alias path would leak the cell into it, #4461; eval.t:151's shape).
+# ── 11. a block cell under a same-name FILE `my` declared AFTER the block
+#    takes the per-site pair, so the global name after the block is untouched
+#    (eval.t:151's shape; since #4461 every BLOCK-extent cell takes the pair,
+#    row 14).
 is(run_cl(<<'PL'), "in=ok 3 ev=ok 3\nbetween=u\nafter=file ev=file show=file\n", 'a block cell under a LATER same-name file `my` keeps out of the global name');
 {
     my $got;
@@ -191,3 +191,23 @@ PL
     like($err, qr/^PCL internal: the binder holds no record of the block at line 1 \(no-record\) -- the capture question about 'q'/,
          'rule 12: the capture question dies on a block the binder does not fully hold');
 }
+
+# ── 14. #4461 (s537b): a promoted BLOCK lexical captured by a named sub, with a
+#    string eval in the block, takes the per-site pair -- the alias wrote the
+#    cell into the original-name global, where it outlived the block
+#    (`between` printed the cell).  An eval that WRITES it, a nested block, a
+#    recursion through the eval; the package variable after the block is
+#    perl's undef.
+is(run_cl(<<'PL'), "in=ok 3\nbetween=u\n5 6 6\nh=2 n=4\nu u\n", '#4461: a block cell with a later string eval stays out of the global name');
+{
+    my $got;
+    sub rec { my $l = shift; if ($l < 3) { eval 'rec($l + 1)'; } else { $got = "ok $l" } }
+    rec(0);
+    print "in=$got\n";
+}
+print "between=", (defined $got ? $got : 'u'), "\n";
+{ my $c = 5; sub f { eval '$c' } print f(), " "; eval '$c = 6'; print "$c ", f(), "\n"; }
+{ my $x = 1; sub h { $x } { { eval '$x = 2' } } print "h=", h(), " "; }
+{ my $n = 0; sub rr { my $l = shift; $n++; eval 'rr($l - 1)' if $l > 0; $n } print "n=", rr(3), "\n"; }
+print defined($c) ? "def" : "u", " ", defined($n) ? "def" : "u", "\n";
+PL

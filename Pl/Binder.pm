@@ -870,26 +870,6 @@ sub _pkg_at {
   return $self->{opt}{pkg} // 'main';
 }
 
-# Does a `my` / `state` of $canon declared OUTSIDE $node have a SCOPE that
-# encloses $node -- wherever in that scope it is declared, before or after
-# $node?  The promoter's eval-pair test (Parser2::_enclosing_lex_decl): such
-# a name has a let-bound pair in the eval alists of that scope, so a cell
-# nested inside it must take the per-site pair, never the global alias.
-# Asked about the program as written (a renamed declaration still counts).
-sub enclosing_decl {
-  my ($self, $node, $canon) = @_;
-  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
-  return 0 unless defined $a && defined $z;
-  for my $b (@{ $self->{by_canon}{$canon} || [] }) {
-    next unless $b->{kind} eq 'my' || $b->{kind} eq 'state';
-    next if $b->{decl_ord} >= $a && $b->{decl_ord} <= $z;
-    my $s = $b->{scope_node} or next;
-    my ($sa, $sz) = ($self->_first_ord($s), $self->_last_ord($s));
-    return 1 if defined $sa && $sa <= $a && $z <= $sz;
-  }
-  return 0;
-}
-
 sub _is_lexical { return $_[0] && $_[0]{kind} =~ /^(?:my|state|our|param|lexsub|outer)$/ ? 1 : 0 }
 
 # The refs inside $block whose binding is declared OUTSIDE it (pad_findlex's

@@ -4885,7 +4885,12 @@ sub _promote_captured {
   # by-name lexical capture — refuse when a post-decl string eval could name
   # it.  eval BLOCKS are fine; a literal eval that never mentions the name
   # is fine.
-  my $eval_pair = $sig eq '$' && !$self->_enclosing_lex_decl($extent, $bare);
+  # #4461 (s537b): the alias is right only for a SEGMENT-extent cell, whose
+  # lifetime is the file's; a BLOCK-extent cell takes the per-site pair (M5)
+  # whatever encloses it -- the alias wrote the cell into the original-name
+  # global, where it outlived the block (`{ my $got; sub rec {…} eval … }
+  # print $got` printed the cell, perl the package variable).
+  my $eval_pair = $sig eq '$' && !$extent;
   my $post_eval = 0;
   my $site_pair = 0;
   for my $st (@post) {
@@ -4895,9 +4900,9 @@ sub _promote_captured {
       my $nx = $w->snext_sibling;
       next if !$nx || $nx->isa('PPI::Structure::Block');    # eval { } — fine
       if ($eval_pair) { $post_eval = 1; next }
-      # E4.1 M5 (s353): the enclosing-outer-lexical SCALAR shape — the
-      # static-variable idiom `my $x; { my $x; sub f { $x } eval q{$x} }` —
-      # no longer refuses.  The promoted cell reaches these evals through a
+      # E4.1 M5 (s353): a BLOCK-extent SCALAR (every one since #4461; the
+      # static-variable idiom `my $x; { my $x; sub f { $x } eval q{$x} }`
+      # first) does not refuse.  The promoted cell reaches these evals through a
       # PER-SITE capture-alist pair under the original name: registered
       # when the renamed decl lowers (see the _file_lex_renamed my-branch),
       # block-scoped for free by the existing _let_bound_vars save/restore,
@@ -5023,29 +5028,6 @@ sub _eval_operand_may_name {
   return 'string eval names the lexical'
     if grep { $_->content =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/ } @q;
   return undef;
-}
-
-# M-F: any my/state declaration of $bare at a scope ENCLOSING $extent — an
-# outer lexical the promoted cell would nest inside.  The flat eval-capture
-# alist puts let-bound pairs first, so a cell nested inside the outer
-# lexical's scope could never win the by-name lookup; the caller then keeps
-# the eval refusals for this (rare) shape instead of registering a pair.
-# The BINDER answers (s533d, 1c port 2; Pl::Binder::enclosing_decl): a `my` /
-# `state` of `$bare` declared outside the extent whose SCOPE encloses it --
-# wherever in that scope, BEFORE or AFTER the extent: a file `my $got`
-# declared after the block (eval.t:151, mro/basic.t:93) still has its
-# let-bound pair at the evals of the file scope, and the alias path would
-# also write the block cell into the global name (#4461).  A declaration in a
-# SIBLING block does not count; one an earlier pass already renamed
-# (`$x__file__0`) still does (the s295 "2 2" probe).  It replaced a scope
-# walk over the enclosing blocks' statement-level declarations.
-sub _enclosing_lex_decl {
-  my ($self, $extent, $bare) = @_;
-  return 0 unless $extent;
-  my $b = Pl::Binder::for_captures($self, $extent);
-  die "PCL internal: the binder holds no record of the block at line "
-    . ($extent->line_number // '?') . " -- the eval-pair test for \$$bare cannot be answered\n" unless $b;
-  return $b->enclosing_decl($extent, "\$$bare");
 }
 
 # M-F (s295 ALIAS rule, ir-spec §9.1): make a renamed (mangled) SCALAR cell
