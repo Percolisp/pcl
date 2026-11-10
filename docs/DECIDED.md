@@ -11,6 +11,10 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s538 (2026-11-10/11, the reviewing session) -- the s537 batches resumed after the stop; two USER rulings on PPI
+- **PPI source line endings, CR in strings (#4761 / #4302), USER RULED s538**: normalising line endings in pure CODE is fine; the content of a STRING (quote, here-doc body, `__DATA__`) keeps what PERL keeps -- probed: in a source file perl itself reads CR LF as LF inside `q{}` and a here-doc, and keeps a lone CR, an eval string's CR and `__DATA__`'s.  Owner the next PPI batch -> task #4761.
+- **PPI fork push (`github.com/Percolisp/PPI`, branch `pcl`), USER RULED s538**: at the reviewing session's discretion, like PCL's own pushes -- a merged PPI batch is pushed fast-forward after its merge (the earlier hold for PR #459's head is lifted).  First use: `86623347` (batch 7) pushed 2026-11-11.  Agents still never push to GitHub.
+
 ## s536 (2026-11-08, the reviewing session on Opus 5.5) -- agents in parallel by the USER's word; nobody waits for a sibling; correctness over the #4061 cost
 - **USER (s536): CORRECTNESS FIRST -- #4061 (a first bless recorded on the referent) is KEPT** despite its INFO cost (arrobj-new 1.9x, `ref []` after any array bless 2.3x: SBCL weak tables are synchronized); a serious benchmarking effort on what is slow in REAL programs comes later (the USER's direction, paraphrased) -> task #4621 (unscheduled; carries the #4061 cost and the method-lookup evaluation as inputs).
 - **Nobody waits for a sibling to merge** (`s536/SHARED-BOX.md` rule 25, after the USER asked why only one agent was running): whoever is MERGE-READY first merges first; a rebase re-takes only what the move can change.  The s535/s536 "take the combined-tree bars after the agents ahead merged" wait is REVOKED -- it parked two agents for an hour.

@@ -19,3 +19,8 @@ hardcoded-path guards, not the full gate.  NEVER include the USER's uncommitted 
 (check `git status` / `git diff` first; add files by name).  Read CI afterwards through the
 public API.  A one-off "not now" from the USER is about THAT moment unless they say otherwise —
 ask what was meant before writing it down as a standing rule.
+
+**Extended s538 (2026-11-11):** the same discretion covers the PPI fork (`github.com/Percolisp/PPI`,
+branch `pcl`): push a PPI batch fast-forward from the bare repo `~/pcl-agent-scratch/ppi/PPI.git`
+(remote `fork`) once it is MERGED into PCL's main; the earlier hold for PR #459's head is lifted.
+Agents still never push to GitHub -- the reviewing session does it after the merge.
