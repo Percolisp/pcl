@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 49;
+plan tests => 50;
 
 sub run_cl {
     my ($code) = @_;
@@ -358,6 +358,17 @@ test_cl('#4762: ... and a sub that exists at run time is still CALLED',
     qq{$USE_EXT\nBEGIN { *Imp::run = sub { "IMP" } }\nsub Foo::early { "EARLY" }\n}
   . qq{my \$v = Ext::yes; my \$w = Imp::run; my \$x = Foo::early;\nprint "\$v \$w \$x\\n";},
     "Y IMP EARLY\n");
+# ... but in a builtin's HANDLE slot the same word is the handle: the first
+# #4762 cut spelled `open Q::A, ...` / `opendir(Q::D, ...)` / `tell Q::A` /
+# `-f Q::A` as `(p-bareword-value "Q::A")` and readdir read NOTHING (s537a's
+# corpus-diff: perl-tests/method.t's `open Colour::H1, ...`).  INVERSE: the
+# commit 33d96dd4 prints `0 0 -1`.
+test_cl('#4762: a qualified bareword in a builtin handle slot stays the handle',
+    qq{no strict;\nopen Q::A, "<", "/dev/null" or die;\nmy \$t = tell Q::A; close Q::A;\n}
+  . qq{opendir Q::D, "/" or die; my \@e = grep { \$_ eq "tmp" } readdir Q::D; closedir Q::D;\n}
+  . qq{opendir(Q::E, "/") or die; my \@f = grep { \$_ eq "tmp" } readdir(Q::E); closedir(Q::E);\n}
+  . qq{print scalar(\@e), " ", scalar(\@f), " \$t\\n";},
+    "1 1 0\n");
 
 # An UNQUALIFIED unknown keeps #266's string reading — the corpus depends on
 # it (`print "x=", nosuch;`, `\@ISA = (Exporter)`).

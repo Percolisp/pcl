@@ -6265,6 +6265,7 @@ sub _read_star_slot_bareword {
     # table when the block pops (measured: io/pipe.t's later `pipe(READER,
     # WRITER)`).
     $c_ids->[0] = $name_id;
+    delete $name_node->{_bareword_runtime};
     $self->environment->add_filehandle($name);
   }
 }
@@ -6275,13 +6276,22 @@ sub _read_star_slot_bareword {
 # child, the usual classification of a bareword the compiler cannot place.
 # Returns (name-id, Word node, came-from-a-funcall) or the empty list.
 #
+# A THIRD shape counts as the funcall one: a Word `handle_subcalls` marked
+# `_bareword_runtime` -- a package-QUALIFIED name it could not place (#4762:
+# `my $y = Foo::nob;` is perl's string, asked of the image).  It is the same
+# "unplaceable bareword" fact, so a handle slot takes it as the HANDLE exactly
+# as it takes the funcall, and the taker clears the mark (`open Q::FH, ...`,
+# `opendir(Q::D, ...)`, `-f Q::FH` were spelled `(p-bareword-value "Q::FH")`
+# and readdir read nothing -- found by s537a's own corpus-diff).
+#
 # Two slots ask: the `*`-slot post-process above, and the filetest operand
 # below.  They are the same two shapes for the same reason, so they share one
 # unwrap rather than carrying two copies of it (CLAUDE.md rule 11).
 sub _bareword_slot_word {
   my ($self, $id) = @_;
   my $first = $self->get_a_node($id);
-  return ($id, $first, 0) if ref($first) eq 'PPI::Token::Word';
+  return ($id, $first, $first->{_bareword_runtime} ? 1 : 0)
+    if ref($first) eq 'PPI::Token::Word';
   return () if !$self->is_internal_node_type($first)
             || ($first->{type} // '') ne 'funcall';
   my $kids = $self->get_node_children($id);
@@ -6324,6 +6334,7 @@ sub _expr_slot_bareword_operand {
   my $name = $name_node->content;
   return $operand_id if !Pl::Environment::fh_bareword_shape($name);
   return $operand_id if $self->_expr_slot_keeps_call($name, $name_node);
+  delete $name_node->{_bareword_runtime};
   return $name_id;
 }
 
