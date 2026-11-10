@@ -17731,9 +17731,19 @@ carries a continue block.  Every other foreach is emitted exactly as before."
   "A read-only scalar box holding VALUE: reads answer VALUE, a write is perl's
    `Modification of a read-only value attempted`."
   (make-p-box (make-p-magic-cell
+               :kind :readonly
                :getter (lambda () value)
                :setter (lambda (new) (declare (ignore new))
                          (%p-readonly-modification)))))
+
+(declaim (inline %p-readonly-box-p))
+(defun %p-readonly-box-p (place)
+  "Is PLACE a read-only scalar box (%p-ro-box)?  For the operators perl checks
+   for writability BEFORE they read -- s/// dies on a read-only target even
+   when nothing would match (pp_subst, #4264)."
+  (and (p-box-p place)
+       (let ((c (p-box-value place)))
+         (and (p-magic-cell-p c) (eq (p-magic-cell-kind c) :readonly)))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-ro-literal-p (f)
@@ -41616,6 +41626,11 @@ would consume, so it dies naming the stream (rule 12)."
            (minend-key        (svref c 8))
            (count 0)
            (result nil))
+      ;; A read-only target dies BEFORE the match, as perl's pp_subst does --
+      ;; a miss changes nothing and still dies, and an /e replacement never
+      ;; runs (#4264).  /r copies, so it never writes.
+      (when (and (not non-destructive-p) (%p-readonly-box-p string-box))
+        (%p-readonly-modification))
       (if eval-p
           ;; s///e (and an interpolated replacement, which is compiled to
           ;; the same lambda): call it per match with the match state in
@@ -41793,10 +41808,13 @@ would consume, so it dies naming the stream (rule 12)."
         (return-p result)
         (t
          (if (p-box-p string-box)
-             (%p-write-match-target string-box result
-                                    (not (%tr-identical-p delete-p squash-p
-                                                          complement-p
-                                                          from-chars to-chars)))
+             ;; An IDENTICAL tr (perl's OPpTRANS_IDENTICAL: a count) never
+             ;; writes its target -- so a read-only one does not die and a
+             ;; tied one is not STOREd (#4264); any other tr writes, matched
+             ;; or not, and a read-only target dies in the write.
+             (unless (%tr-identical-p delete-p squash-p complement-p
+                                      from-chars to-chars)
+               (%p-write-match-target string-box result))
              ;; A count-only tr (empty replacement, no /d) leaves the target
              ;; untouched, and perl accepts that on a read-only value:
              ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result

@@ -219,6 +219,14 @@ t("array elems ok",  sub { my @a = (1, 2); $_ *= 2 for @a; die "no\n" if "@a" ne
 t("list+array",      sub { my @a = (1); for my $x (@a, 5) { $x++ } });
 t("nested last",     sub { my $n = 0; for my $x (1, 2, 3) { $n++; last if $x == 2 } die "no\n" if $n != 2 });
 t("return value",    sub { my @o = map { $_ * 2 } (1, 2); for (@o) { $_++ } die "no\n" if "@o" ne "3 5" });
+t("s/// miss on literal", sub { for ("lit") { s/x/z/ } });
+t("s///g miss on literal", sub { for my $s ("lit") { $s =~ s/x/z/g } });
+t("s///e miss on literal", sub { for ("lit") { s/x/die "E\n"/e } });
+t("s///r on literal", sub { for ("lit") { my $r = s/l/L/r; die "no\n" if $r ne "Lit" } });
+t("tr count on literal", sub { my $n; for ("lit") { $n = tr/a-z// } die "no\n" if $n != 3 });
+t("tr identical on literal", sub { for ("lit") { tr/a-z/a-z/ } });
+t("tr miss on literal", sub { for ("lit") { tr/x/z/ } });
+t("s/// miss on range", sub { for (1 .. 2) { s/x/z/ } });
 PERL
 
 my $ro_want = <<'WANT';
@@ -240,6 +248,14 @@ array elems ok: lived
 list+array: died Modification of a read-only value attempted
 nested last: lived
 return value: lived
+s/// miss on literal: died Modification of a read-only value attempted
+s///g miss on literal: died Modification of a read-only value attempted
+s///e miss on literal: died Modification of a read-only value attempted
+s///r on literal: lived
+tr count on literal: lived
+tr identical on literal: lived
+tr miss on literal: died Modification of a read-only value attempted
+s/// miss on range: lived
 WANT
 
 my %want = map { /^(.*?)\s+(LIVED|died)\b/ ? ($1 => $2) : () } split /\n/, $perl_says;
