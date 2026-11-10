@@ -390,7 +390,10 @@ print reftype $v;         # one FETCH
 (normative, s536a, tasks #1814 / #2601).  `[$t]`, `@a = ($t)`, `push` /
 `unshift` / `splice` store what ONE FETCH returned; the element is not tied and
 does not alias `$t` (the array construction arm `%p-array-store-scalar` reads a
-tie proxy as the list assignment does, `(unbox (%p-tie-fetch ...))`).
+tie proxy as the list assignment does, `(unbox (%p-tie-fetch ...))`).  An
+operator that walks its arguments to classify them (flatten marker, raw
+vector, raw hash) PEEKS at a box's value slot and never unboxes it, so the
+store's read is the only one — `push @a, $t, 5` is one FETCH (s537a, #4664).
 
 ```perl
 tie my $t, 'T'; $t = "one";
@@ -3538,6 +3541,17 @@ cell whose setter is the fatal), so the emission does not change and only a
 literal element pays.  A range, an array, a variable and a `map` result stay
 writable.  NOT modelled: the mark does not propagate through `sort` /
 `reverse` / `grep` (the rest of #1391).
+
+**The read-only check comes BEFORE the operator reads** (normative, s537a,
+#4264).  `s///` on a read-only target dies before it matches — a miss still
+dies, and an `/e` replacement never runs — as perl's `pp_subst` does; `s///r`
+copies and never dies.  `tr///` dies on a read-only target only when it
+WRITES, and an IDENTICAL `tr` (perl's `OPpTRANS_IDENTICAL`: no `/d`, no `/s`,
+an empty replacement or one equal to the search list — a count) never writes
+any target, so `for ("lit") { $n = tr/a-z// }` lives; any other `tr` writes,
+matched or not, so `for ("lit") { tr/x/z/ }` dies.  The read-only box carries
+the magic kind `:readonly` (`%p-readonly-box-p`); a capture variable is not
+one (`$1 =~ s/zzz/q/` lives, as in perl).
 ### 6.3 Exceptions: `die` / `eval { }` / `$@`
 
 `die` signals a `p-exception` carrying either a string or an arbitrary
@@ -3557,6 +3571,15 @@ from is §6.3b.
    see §5.3;
 4. on `p-exception` sets `$@` to the payload (string or object) and
    yields `nil`; any other host error is stringified into `$@`.
+
+**An `eval { }` that IS a whole void statement copies nothing** (normative,
+s537a, #4325): `(p-void-ctx (p-eval-block BODY))` — the eval the sole form —
+expands to `p-eval-block-discarded`, which omits step 3's leave copy, because
+perl copies nothing out of a frame left in void context.  The copy was a FETCH
+of a tied last value perl never makes: `eval { bless $tied, 'Q' };` FETCHes
+once, `eval { $tied };` never.  Only the sole form qualifies — an eval deeper
+inside a void statement (`my $r = \eval { $x };`) sees `:void` too and IS
+consumed; the same holds for a sub frame, whose void-call half is #4804.
 
 A string `eval` is a frame on the same terms, and clears `$@` on the way in
 too.  A `do { }` block is **not** a frame: it has no return frame and no copy,
