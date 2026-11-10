@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-11",
+   "description" : "FILED s537a (Opus 5.5, 2026-11-11), seen while probing #4762's handle slots.  PRE-EXISTING (main 3d524ad7 identical).  A divergence in a discouraged spelling (perlfunc: mixing syswrite with buffered I/O on one handle \"can get confused\"), so a LOW one -- but the file content differs.\n\n    my $f = \"/tmp/x.out\";\n    open(my $fh, \">\", $f) or die; print $fh \"p\\n\"; syswrite($fh, \"s\\n\"); close $fh;\n    open($fh, \"<\", $f) or die; print <$fh>;\n      perl 5.40.3:  s / p   (the buffered \"p\\n\" reaches the file at close, after the unbuffered syswrite)\n      PCL:          p / s\n\nMECHANISM (not read): PCL's syswrite either flushes the handle's buffer first or writes through the same buffered stream.  perl's pp_syswrite writes to the fd directly (PerlLIO_write) and leaves the PerlIO buffer as it is.  Decide whether to model it at all (a program that depends on it is rare and fragile); if yes, syswrite writes to the fd without flushing.  Probe: scratch/s537a/p/m7.pl in the s537a worktree.\n",
+   "id" : "4806",
+   "status" : "pending",
+   "subject" : "`syswrite` after a buffered `print` on the same handle writes in PROGRAM order in PCL; perl's syswrite bypasses the PerlIO buffer, so the file holds the syswrite bytes FIRST (\"s p\" vs PCL \"p s\")"
+}

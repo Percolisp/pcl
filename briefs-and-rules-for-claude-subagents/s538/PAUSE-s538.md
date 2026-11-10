@@ -44,3 +44,5 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s538/resume-s538.md`,
 ## 01:5x -- THE USER SCHEDULED `DESTROY` AT PROGRAM EXIT (Stage 0, #2371) and asked for README.md etc. to be updated when it is done.  Stage 2 (#2370) waits for the point-4 write-up.
 * Brief `s538/s538b-prompt.md` WRITTEN (IDs 4861-4879; generation v2-14000 only if emission changes; the documents are part of the batch; measurements A / B / C required).  **It takes the NEXT freed slot, ahead of s538a** (the USER asked for it directly); s538a the one after.
 * For the review of s538b: read the README bullet + STATUS row it writes against its own measurement A (what a WEAK registry leaves out); check `bless` cost on a no-DESTROY program; `Test::More` exit codes unchanged.
+
+## 01:4x -- s536j's merge bars DONE on merged main: `j-check.log` (6 guard files / 147 rows PASS; probes p1 p3 q5 = perl) and `j-container.log` (`prove tools/t/install-container.t` 17/17 PASS, END rc=0 01:40).  PUSHED: main, and PPI `pcl` = `c2f21706` to the fork.
