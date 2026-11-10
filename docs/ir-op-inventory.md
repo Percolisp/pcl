@@ -504,7 +504,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-return-empty` | macro | `(&optional (ctx (quote *wantarray*)))` | — | — | — | — | — | — | — |
 | `p-tail-value` | macro | `(form)` | — | — | — | — | — | — | — |
 | `p-unless` | macro | `(condition then-form &optional else-form)` | — | — | — | — | — | — | — |
-| `p-until` | macro | `(condition &body body)` | — | — | — | — | — | — | — |
+| `p-until` | macro | `(condition &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-while` | macro | `(condition &rest body-and-keys)` | — | — | — | — | — | — | — |
 
 ## directory-io (6)
