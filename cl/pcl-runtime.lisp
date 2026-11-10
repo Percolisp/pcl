@@ -31797,6 +31797,22 @@ would consume, so it dies naming the stream (rule 12)."
                      (write-char ch s))))
       name))
 
+(defun %p-split-symbolic-name (name default-pkg)
+  "Split the perl SYMBOLIC name NAME (a string) into (values PACKAGE BARE).
+   The package part ends at the LAST `::'.  A LEADING `::' names main's stash
+   -- `::foo' is main::foo, `::Foo::bar' is Foo::bar -- never the current
+   package and never a package named \"\" (s537a: `::pass;' in t/op/attrs.t,
+   asked through p-bareword-value, was not called; `*{\"::made\"} = sub {...}'
+   built a package \"\").  An unqualified name takes DEFAULT-PKG, which may be
+   NIL for a caller with its own rule.  ONE reading for the sub resolver and
+   the dynamic-glob one."
+  (let* ((lead (and (> (length name) 2) (string= "::" name :end2 2)))
+         (rest (if lead (subseq name 2) name))
+         (sep (search "::" rest :from-end t)))
+    (cond (sep (values (subseq rest 0 sep) (subseq rest (+ sep 2))))
+          (lead (values "main" rest))
+          (t (values default-pkg rest)))))
+
 (defun %p-sub-symbol-in (perl-pkg bare-name)
   "The sub SYMBOL for BARE-NAME in Perl package PERL-PKG, interning it, or NIL
    when that package does not exist (nothing can be defined there, so there is
@@ -31827,14 +31843,13 @@ would consume, so it dies naming the stream (rule 12)."
    here even when the Perl current package is Foo\"; two answers to one
    question is the bug.  A string eval's `package X;` REGION binds both (see
    p-eval-thunk), so #240's rule still holds."
-  (let* ((name (%p-tick-package-seps (to-string name)))
-         (sep-pos (search "::" name :from-end t))
-         (perl-pkg (if sep-pos (subseq name 0 sep-pos) *pcl-current-package*))
-         (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
-         (cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
-    (values (when cl-pkg (find-symbol (%pcl-cl-sub-name bare-name) cl-pkg))
-            perl-pkg
-            bare-name)))
+  (multiple-value-bind (perl-pkg bare-name)
+      (%p-split-symbolic-name (%p-tick-package-seps (to-string name))
+                              *pcl-current-package*)
+    (let ((cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
+      (values (when cl-pkg (find-symbol (%pcl-cl-sub-name bare-name) cl-pkg))
+              perl-pkg
+              bare-name))))
 
 (defun p-bareword-value (name)
   "A BAREWORD standing alone as a whole STATEMENT whose name the compiler
@@ -34397,12 +34412,9 @@ would consume, so it dies naming the stream (rule 12)."
    EXCEPT the names perl forces into main (%p-forced-main-bare-p, task #4310):
    `*{\"STDIN\"}' / `*{\"ENV\"}' / `*{\"!\"}' inside `package Foo' are main's
    globs, the answer the static `\\*STDIN' already gets from the compiler."
-  (let* ((name-str (to-string name-box))
-         (sep-pos  (search "::" name-str :from-end t)))
-    (if sep-pos
-        (values (subseq name-str 0 sep-pos) (subseq name-str (+ sep-pos 2)))
-        (values (if (%p-forced-main-bare-p name-str) "main" *pcl-current-package*)
-                name-str))))
+  (multiple-value-bind (pkg bare) (%p-split-symbolic-name (to-string name-box) nil)
+    (values (or pkg (if (%p-forced-main-bare-p bare) "main" *pcl-current-package*))
+            bare)))
 
 (defun %p-glob-dynamic-target (name-box)
   "The glob a dynamic designator `*{EXPR}` names, as (values package-object

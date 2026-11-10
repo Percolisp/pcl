@@ -4817,6 +4817,14 @@ sub handle_subcalls {
     # Everything to the right of the Expr seems to be parameter(s).
     my($top_node, $top_id) = $self->make_node_insert('funcall');
     my $c_ids   = $self->parse_list($e, $i+1, $end_pars);
+    # A Word THIS parse builds into a call is no unplaceable bareword: a mark
+    # an EARLIER parse of the same statement left on the shared token (its
+    # verdict `no`, this one's `yes` -- a BEGIN-time `*Foo::hello = sub {...}`
+    # registered in between) made the call's HEAD the leaf form, emitted as
+    # `(|(p-bareword-value "Foo|::|pl-hello")|)`, an undefined function
+    # (s537a; `my $x = Foo::hello` in a sub on main, `::hello;` with #4762).
+    delete @{ $e->[$i] }{qw(_bareword_runtime _bareword_string)}
+      if ref($e->[$i]) eq 'PPI::Token::Word';
     my $node_id = $self->make_node($e->[$i]);
 
     # - - - Post-process for * (filehandle) prototype:

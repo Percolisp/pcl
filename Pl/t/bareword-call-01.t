@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 50;
+plan tests => 52;
 
 sub run_cl {
     my ($code) = @_;
@@ -358,6 +358,28 @@ test_cl('#4762: ... and a sub that exists at run time is still CALLED',
     qq{$USE_EXT\nBEGIN { *Imp::run = sub { "IMP" } }\nsub Foo::early { "EARLY" }\n}
   . qq{my \$v = Ext::yes; my \$w = Imp::run; my \$x = Foo::early;\nprint "\$v \$w \$x\\n";},
     "Y IMP EARLY\n");
+# A LEADING `::` is main's stash for every symbolic name -- the run-time answer
+# #4762's `::pass;` asks (t/op/attrs.t: a sub test.pl defines at BEGIN time
+# was NOT called), `&{"::hello"}` and `*{"::made"} = sub {...}` inside another
+# package (one splitter, %p-split-symbolic-name).  INVERSE: main 3d524ad7
+# dies "Undefined subroutine &::hello"; the tree before the splitter skipped
+# the `::hello;` call.
+test_cl('#4762: a leading :: names main for a bareword, a symbolic call and a glob',
+    qq{no strict;\nBEGIN { *main::hello = sub { print "H(\@_)\\n"; "h" } }\n}
+  . qq{package Other;\nsub f { ::hello; }\nf();\nprint &{"::hello"}(1), "\\n";\n}
+  . qq{*{"::made"} = sub { "made" }; print main::made(), "\\n";\n}
+  . qq{my \$t = ::nothere; print "\$t\\n";},
+    "H()\nH(1)\nh\nmade\n::nothere\n");
+# A qualified name a BEGIN-time glob install defines, read in a SUB body: an
+# earlier parse marked the word unplaceable and the later one built a CALL
+# from the marked token, whose head was emitted as the leaf FORM --
+# `(|(p-bareword-value "Foo|::|pl-hi")|)`, an undefined function at run time.
+# The word is the TAIL statement of the sub (its value is parsed again).
+# PRE-EXISTING on main 3d524ad7 (it dies); #4762 reached it at `::hello;`.
+test_cl('a call built from a word an earlier parse marked unplaceable has a NAME head',
+    qq{BEGIN { *Foo::hi = sub { "HI(\@_)" } }\nsub g { my \$x = Foo::hi; }\nsub h { Foo::hi; }\n}
+  . qq{print g(), " ", h(), "\\n";},
+    "HI() HI()\n");
 # ... but in a builtin's HANDLE slot the same word is the handle: the first
 # #4762 cut spelled `open Q::A, ...` / `opendir(Q::D, ...)` / `tell Q::A` /
 # `-f Q::A` as `(p-bareword-value "Q::A")` and readdir read NOTHING (s537a's
