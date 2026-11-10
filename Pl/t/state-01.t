@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 36;
+plan tests => 39;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -450,3 +450,52 @@ test_cl('a state decl shadows an earlier my from its own point on',
      print "s=", (state $y = 5), " ";
      print "after=$y\n";',
     "before=1 s=5 after=5\n");
+
+# Test 37 (#314 F-F, s537b): a state ARRAY / HASH outside a named sub's own
+# statement -- file level with a list initializer, a file-level loop (init
+# ONCE), an anon sub (one cell per CLONE), a map block, a nested block of a
+# named sub, a later `package` section (the #4541 rule), and a LIST
+# declaration in a named sub.  The whole file refused ("non-scalar state
+# declaration outside a named-sub statement").  Probed vs perl 5.40.3.
+test_cl('state containers outside a named-sub statement',
+    'use feature "state";
+     state @arr = (1,2); push @arr, 3; print "@arr\n";
+     for (1..2) { state %h; $h{$_}++; print join(",", sort keys %h), "\n" }
+     for (1..3) { state @a = (1,2); push @a, $_; print scalar(@a), "\n" }
+     my @f = map { sub { state @c; push @c, 1; scalar @c } } 1..2;
+     print $f[0]->(), $f[0]->(), $f[1]->(), "\n";
+     my @r = map { state @seen; push @seen, $_; scalar @seen } 1..3; print "@r\n";
+     sub f { if (1) { state @n; push @n, $_[0]; return "@n" } }
+     print f(1), "|", f(2), "\n";
+     for (1..2) { state @z = (5); package Other; push @z, $_; print "$#z @z\n" }
+     sub g { state ($k, @l); $k++; push @l, $k; return "$k:@l" }
+     print g(), " ", g(), "\n";',
+    "1 2 3\n1\n1,2\n3\n4\n5\n121\n1 2 3\n1|1 2\n1 5 1\n2 5 1 2\n1:1 2:1 2\n");
+
+# Test 38 (#1579, s537b): a REFALIASING state declaration -- the aliasing
+# assignment is the once-guarded initializer (t/op/lvref.t's shapes).  The
+# scalar spelling was a SILENT wrong (`\state $s = \$y` stored the reference
+# itself, `$s` printed SCALAR(0x...)); the containers refused the file.
+test_cl('refaliasing a state variable aliases once',
+    'use feature "state", "refaliasing"; no warnings;
+     my $y = 5;
+     sub g { \state $s = \$y; $s }
+     print g(), " "; $y = 6; print g(), "\n";
+     for (1,2) {
+       \state $a = \3, \state($b) = \3, \state @x = [1..3], \state(@w) = \4 if $_ == 1;
+       \state @c = [$_]; \state %h = {X => $_};
+       print "$a $b @x @w $c[0] $h{X}\n" if $_ == 2;
+     }',
+    "5 6\n3 3 1 2 3 4 1 1\n");
+
+# Test 39 (#314 F-F, s537b): a state CONTAINER of the source rewrite is not
+# reachable from a string eval by its original name, so an eval after it that
+# may NAME it refuses -- loudly, never a read of the global (rule 12).
+{
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh 'use feature "state"; for (1..2) { state %h; $h{$_} = 1; print eval q{join ",", keys %h} }';
+    close $fh;
+    my $err = `$pl2cl < $pl 2>&1 >/dev/null`;
+    like($err, qr/state %h rewrite \(string eval names the lexical\)/,
+         'a state container a later string eval may name refuses');
+}

@@ -4844,12 +4844,8 @@ sub _promote_captured {
       # and after the block it is gone.  Containers keep the refusal below:
       # the alist carries scalar cells only.
       if ($sig eq '$') { $site_pair = 1; next }
-      my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
-            : $nx->isa('PPI::Structure::List')
-              ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
-      return $refuse->('dynamic string eval after decl') if !@q;
-      return $refuse->('string eval names the lexical')
-        if grep { $_->content =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/ } @q;
+      my $why = _eval_operand_may_name($nx, $bare) or next;
+      return $refuse->($why);
     }
   }
   # The eval waivers above rest on the decl LOWERING to its defvar (M-F), and
@@ -4949,6 +4945,22 @@ sub _captured_in_subs {
     push @$found, $sub;
   }
   return $found && @$found ? 1 : 0;
+}
+
+# Could the string eval whose operand starts at $nx (the token after `eval`)
+# NAME the variable $bare?  A DYNAMIC operand (no literal text) can; a literal
+# text can when it spells the name with a sigil (`$x` `@x` `%x` `${x}` ...).
+# Returns the refusal reason, or undef.  ONE reading for the capture promoter's
+# container refusal and the state rewrite's (_state_eval_blocker).
+sub _eval_operand_may_name {
+  my ($nx, $bare) = @_;
+  my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
+        : $nx->isa('PPI::Structure::List')
+          ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
+  return 'dynamic string eval after decl' if !@q;
+  return 'string eval names the lexical'
+    if grep { $_->content =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/ } @q;
+  return undef;
 }
 
 # M-F: any my/state declaration of $bare at a scope ENCLOSING $extent — an
@@ -5736,14 +5748,19 @@ sub _rename_use_token {
 # do-blocks over fresh cells:
 #     state $s = EXPR   →  do { unless ($FLAG) { $CELL = EXPR; $FLAG = 1 } $CELL }
 #     state $s          →  $CELL          (bare cell — undef box, ref-stable)
-# with every post-decl use of $s in its scope renamed to $CELL.  Cell
-# OWNERSHIP decides where the cells live:
+#     state @a = LIST   →  do { unless ($FLAG) { @CELL = LIST; $FLAG = 1 } @CELL }
+#     state ($x, @y)    →  ($CELL1, @CELL2)        (one cell per name)
+#     \state @a = REF   →  do { unless ($FLAG) { \@CELL = REF; $FLAG = 1 } \@CELL }
+# with every post-decl use of $s in its scope renamed to $CELL; the flag is a
+# SCALAR named after the first cell (#314 F-F containers and lists, #1579 the
+# refaliasing `\`, moved inside the guard -- it stored the reference before).
+# Cell OWNERSHIP decides where the cells live:
 #   - nearest enclosing CV is an ANON SUB → the `sub {…}` is wrapped
 #     `do { my $CELL; my $FLAG; sub {…} }`.  The do runs per sub{} EVALUATION,
 #     so each closure instance gets fresh cells (perl's per-instance state
 #     semantics: `push @f, sub { state $x } for 1..2` yields independent
 #     cells) — riding entirely on the proven anon-sub-closes-over-block-my
-#     seam mechanism.  Scalar decls only; containers in anon subs die → v1.
+#     seam mechanism.  Containers the same way (`my @CELL;`).
 #   - named sub / file CV (including map/grep/sort blocks, which are NOT CVs)
 #     → no wrap: the fresh unique names are left undeclared and become
 #     defvar'd package globals via _forward_global_decls (boxed cell, raw-nil
@@ -5759,7 +5776,9 @@ sub _rename_use_token {
 #     machinery handles them (signatures.t t126/t127);
 #   - `state sub NAME` lexical subs (snext is not a Symbol).
 # String eval residue: a renamed cell is NOT reachable by its original name
-# from eval'd code (same gap as v1's own state renames — v1 parity).
+# from eval'd code -- a SCALAR then reads the global (#4821, a silent wrong
+# filed s537b); a CONTAINER a later eval may name refuses
+# (_state_eval_blocker).
 sub _rewrite_state_prepass {
   my ($self, $doc) = @_;
   my $has = $doc->find(sub {
@@ -7902,7 +7921,7 @@ sub _state_route {
 sub _state_rw_blocker {
   my ($self, $root, $sym) = @_;
   my $old = $sym->content;
-  (my $bare = $old) =~ s/^\$//;
+  (my $bare = $old) =~ s/^[\$\@\%]//;
   # NO `my`/`our`/`local` re-declaration refusal any more (s415, task #401).
   # It existed because a positional rename of every `$y` in $root would merge
   # two different variables, but _rename_decl_within has been SHADOW-AWARE
@@ -7914,6 +7933,30 @@ sub _state_rw_blocker {
   # under it).  Keeping the refusal cost t/opbasic/concat.t its whole run
   # (248 rows) the moment `CORE::state` began normalising.
   return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  return undef;
+}
+
+# A CONTAINER cell of the source rewrite (`state @a`, `state %h`) is not
+# reachable from a string eval by its original name -- the scalar's residue
+# too (#4821), but a container has no other route at all (the alist carries
+# scalar cells only, ir-spec §2b.4) -- so a string eval after the declaration
+# in its scope that could NAME it refuses, loudly (rule 12), never reads the
+# global.  The question is the capture promoter's (_eval_operand_may_name):
+# an eval BLOCK and a literal text that never names it are fine.  undef for a
+# scalar or when no such eval exists.
+sub _state_eval_blocker {
+  my ($self, $root, $w, $sym) = @_;
+  my ($sig, $bare) = $sym->content =~ /^([\$\@\%])(\w+)$/;
+  return undef if !defined $sig || $sig eq '$';
+  my $past = 0;
+  for my $t ($root->tokens) {
+    if (!$past) { $past = 1 if $t == $w; next }
+    next unless $t->isa('PPI::Token::Word') && $t->content eq 'eval';
+    my $nx = $t->snext_sibling;
+    next if !$nx || $nx->isa('PPI::Structure::Block');      # eval { } -- fine
+    my $why = _eval_operand_may_name($nx, $bare) or next;
+    return $why;
+  }
   return undef;
 }
 
@@ -7952,18 +7995,7 @@ sub _state_init_end {
 
 sub _state_rewrite_routes {
   my ($self, $doc) = @_;
-  my (@sites, %anon);
-  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
-                 && $_[1]->content eq 'state' }) || [] }) {
-    next unless _state_declarator_word($w);
-    my $sym = $w->snext_sibling;
-    next unless $sym && $sym->isa('PPI::Token::Symbol');
-    my $route = $self->_state_route($w);
-    next if $route->{route} eq 'skip' || $route->{route} eq 'classic';
-    die "Parser2 TODO: non-scalar state declaration outside a named-sub statement: "
-      . $sym->content . "\n" unless $sym->content =~ /^\$\w+$/;
-    push @sites, [$w, $sym, $route];
-  }
+  my @sites = $self->_state_rewrite_sites($doc);
   return 0 unless @sites;
   # The rename below asks the binder which uses are the declaration's own
   # (_rename_decl_within, 1c port 3), and this prepass runs BEFORE the main
@@ -7971,37 +8003,8 @@ sub _state_rewrite_routes {
   # duration of the loop (the document is re-parsed right after).
   require Pl::Binder;
   local $self->{_binder} = Pl::Binder::build_for($self, $doc);
-  for my $site (reverse @sites) {
-    my ($w, $sym, $route) = @$site;
-    my $root = _enclosing_block($w) // $doc;
-    if (my $why = $self->_state_rw_blocker($root, $sym)) {
-      die "Parser2 TODO: state " . $sym->content . " rewrite ($why)\n";
-    }
-    (my $bare = $sym->content) =~ s/^\$//;
-    my $n    = $self->_state_disambig . $self->{_state_rename_counter}++;
-    my $cell = "\$${bare}__state__${n}";
-    my $flag = "${cell}__init";
-    _reg_rename($sym->content, $cell, ':state-cell');
-    $self->_rename_decl_within($root, $sym, $cell);
-    $self->_state_qualify_foreign_uses($sym, $cell) if $route->{route} ne 'anon';
-    my $nx = $sym->snext_sibling;
-    my $has_init = $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=';
-    if ($has_init) {
-      my $stmt = $w->parent;
-      my $stmt_shaped = $stmt && $stmt->isa('PPI::Statement::Variable')
-        && do { my @sk = _strip_semi($stmt->schildren); @sk && $sk[0] == $w };
-      my $end = $self->_state_init_end($sym, $stmt_shaped);
-      $w->set_content("do { unless ($flag) { ");
-      $end->insert_after(PPI::Token::Word->new(" ; $flag = 1 } $cell }"));
-    } else {
-      $w->delete;
-    }
-    if ($route->{route} eq 'anon') {
-      my $a = $anon{ refaddr $route->{cv_block} } //=
-        { subword => $route->{subword}, block => $route->{cv_block}, cells => [] };
-      unshift @{ $a->{cells} }, $cell, ($has_init ? ($flag) : ());
-    }
-  }
+  my %anon;
+  $self->_state_rewrite_site($_, $doc, \%anon) for reverse @sites;
   for my $a (values %anon) {
     my $fin = $a->{block}->finish
       or die "Parser2 TODO: unterminated anon sub in state rewrite\n";
@@ -8010,6 +8013,108 @@ sub _state_rewrite_routes {
     $fin->set_content('} }');
   }
   return 1;
+}
+
+# The declarations the rewrite owns, in document order: [WORD, [SYMBOLS],
+# ROUTE, LIST, CAST].  A container (`state @a [= LIST]`, `state %h`) takes the
+# scalar's route (#314 F-F): the cell `@a__state__N` / `%h__state__N` with the
+# SCALAR once-flag `$a__state__N__init`.  A LIST declaration (`state ($x, @y);`,
+# legal without an initializer) is the rewrite's in a named sub too -- the
+# classic pass reads one name.  CAST is the `\` of a REFALIASING declaration
+# (`\state @a = [1..3]`, `\state($b) = \3`, #1579): the aliasing assignment is
+# the once-guarded initializer.  A shape that is not plain names dies.
+sub _state_rewrite_sites {
+  my ($self, $doc) = @_;
+  my @sites;
+  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
+                 && $_[1]->content eq 'state' }) || [] }) {
+    next unless _state_declarator_word($w);
+    my $nx = $w->snext_sibling or next;
+    my $list = $nx->isa('PPI::Structure::List') ? $nx : undef;
+    next unless $list || $nx->isa('PPI::Token::Symbol');
+    my $route = $self->_state_route($w);
+    next if $route->{route} eq 'skip' || ($route->{route} eq 'classic' && !$list);
+    my @syms = $list ? _state_list_syms($list) : ($nx);
+    for my $sym (@syms) {
+      die "Parser2 TODO: unsupported state declaration: " . $sym->content . "\n"
+        unless $sym->content =~ /^[\$\@\%]\w+$/;
+    }
+    my $pv   = $w->sprevious_sibling;
+    my $cast = $pv && $pv->isa('PPI::Token::Cast') && $pv->content eq '\\' ? $pv : undef;
+    my $after = ($list // $nx)->snext_sibling;
+    die "Parser2 TODO: unsupported state declaration: initialized list "
+      . $list->content . "\n"
+      if $list && !$cast && $after && $after->isa('PPI::Token::Operator')
+      && $after->content eq '=';
+    push @sites, [$w, \@syms, $route, $list, $cast];
+  }
+  return @sites;
+}
+
+# The names a `state (…)` list declares: its Symbols; `undef` and commas are
+# the only other tokens it may hold.
+sub _state_list_syms {
+  my ($list) = @_;
+  my @syms;
+  for my $t (grep { $_->significant } $list->tokens) {
+    next if $t == $list->start || ($list->finish && $t == $list->finish);
+    if ($t->isa('PPI::Token::Symbol')) { push @syms, $t; next }
+    next if ($t->isa('PPI::Token::Operator') && $t->content eq ',')
+         || ($t->isa('PPI::Token::Word') && $t->content eq 'undef');
+    die "Parser2 TODO: unsupported state declaration: " . $list->content . "\n";
+  }
+  die "Parser2 TODO: unsupported state declaration: " . $list->content . "\n" unless @syms;
+  return @syms;
+}
+
+# Rewrite ONE declaration site (see _rewrite_state_prepass): every name gets
+# its cell, the declaration becomes the guarded initializer (or the bare
+# cell), and an anon-sub owner collects the cells for its wrap.
+sub _state_rewrite_site {
+  my ($self, $site, $doc, $anon) = @_;
+  my ($w, $syms, $route, $list, $cast) = @$site;
+  my $root = _enclosing_block($w) // $doc;
+  my @cells;
+  for my $sym (@$syms) {
+    if (my $why = $self->_state_rw_blocker($root, $sym)
+                  // $self->_state_eval_blocker($root, $w, $sym)) {
+      die "Parser2 TODO: state " . $sym->content . " rewrite ($why)\n";
+    }
+    my ($sig, $bare) = $sym->content =~ /^([\$\@\%])(\w+)$/;
+    my $n    = $self->_state_disambig . $self->{_state_rename_counter}++;
+    my $cell = "$sig${bare}__state__${n}";
+    push @cells, $cell;
+    _reg_rename($sym->content, $cell, ':state-cell');
+    $self->_rename_decl_within($root, $sym, $cell);
+    $self->_state_qualify_foreign_uses($sym, $cell) if $route->{route} ne 'anon';
+  }
+  # ONE once-flag per declaration, named after its first cell.
+  (my $flag = $cells[0]) =~ s/^[\@\%]/\$/;
+  $flag .= '__init';
+  my $head = $list // $syms->[0];
+  my $nx = $head->snext_sibling;
+  my $has_init = $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=';
+  if ($has_init) {
+    my $stmt = $w->parent;
+    my $stmt_shaped = !$cast && $stmt && $stmt->isa('PPI::Statement::Variable')
+      && do { my @sk = _strip_semi($stmt->schildren); @sk && $sk[0] == $w };
+    my $end = $self->_state_init_end($head, $stmt_shaped);
+    # A refaliasing declaration aliases inside the guard and is the reference
+    # to its variable after it; the `\` moves inside.
+    my $bs  = $cast ? '\\' : '';
+    my $val = $bs . ($list ? '(' . join(', ', @cells) . ')' : $cells[0]);
+    $cast->delete if $cast;
+    $w->set_content("do { unless ($flag) { $bs");
+    $end->insert_after(PPI::Token::Word->new(" ; $flag = 1 } $val }"));
+  } else {
+    $w->delete;
+  }
+  if ($route->{route} eq 'anon') {
+    my $a = $anon->{ refaddr $route->{cv_block} } //=
+      { subword => $route->{subword}, block => $route->{cv_block}, cells => [] };
+    unshift @{ $a->{cells} }, @cells, ($has_init ? ($flag) : ());
+  }
+  return;
 }
 
 # #4541: an unwrapped state cell (`$x__state__N`, no `my`: the file CV or a
@@ -8031,7 +8136,7 @@ sub _state_qualify_foreign_uses {
          . ($sym->line_number // '?') . "\n";
   my $home = $b->{perl_package};
   die "PCL internal: state `$cell` has no declaring package\n" unless defined $home;
-  (my $cbare = $cell) =~ s/^\$//;
+  (my $cbare = $cell) =~ s/^[\$\@\%]//;
   my $q   = "${home}::$cbare";
   my $fix = _interp_fixer($cell, $q);
   my %done;
@@ -8039,8 +8144,10 @@ sub _state_qualify_foreign_uses {
     next if !defined $r->{pkg} || $r->{pkg} eq $home;
     my $t = $r->{tok};
     next if $done{ refaddr $t }++;
-    if ($t->isa('PPI::Token::Symbol')) {
-      (my $c = $t->content) =~ s/^\$\Q$cbare\E\b/\$$q/ or next;
+    # A container cell's uses keep their access sigil (`$a[0]`, `@h{…}`,
+    # `$#a`): only the name is qualified (#314 F-F, the #4541 rule).
+    if ($t->isa('PPI::Token::Symbol') || $t->isa('PPI::Token::ArrayIndex')) {
+      (my $c = $t->content) =~ s/^(\$#|[\$\@\%])\Q$cbare\E\b/$1$q/ or next;
       $t->set_content($c);
     } else {
       _fix_interp_token($t, $fix);
