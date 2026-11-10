@@ -9,3 +9,8 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s538/resume-s538.md`,
 * RELAUNCHED, each in its existing worktree (no isolation), model opus / effort xhigh (the USER's s537 word, standing): **s536i**, **s536j**, **s537a**.
 * ROUND BOARD resumed at chunk b (`~/pcl-agent-scratch/s537/round/round-s538.sh`, label `s538-round`, chunks b-f on the `7284c977` extraction; the killed `board-b.log` renamed `board-b.void-0117.log`).
 * NEXT: merge in MERGE-READY order with the usual review; s537b into the first freed slot; the companion `--all --quick` on merged main when no agent has a leg queued.
+
+## 23:5x -- s536i PRE-REVIEWED while it takes its legs (tree `88108e97`, code final unless a leg fails).
+* `Pl/t` diff read: only five plan counts removed; rows added to autoviv-02, blessed-copy-01, elem-assign-lvalue-01, list-slice-01, lvalue-ref-01, proto-alias-01.  Nothing weakened.
+* Probes perl -> main -> tree (`~/pcl-agent-scratch/s538/review/i/p1..p6.pl`, `p3b.pl`): tree = perl on p1 (#4682 list slices), p2 (#4684 magic lvalues), p4 (#4683 blessed hash spread), p5 (#4681 `++` on an assignment), p6 (#4283 + #4741, incl. the breaking shapes `$a[$k++] = 1`, `$g{$key .= "x"}++`, `\$b[$#b + 1]`, nested subscripts); main wrong on all six files.  ONE miss in p3 (#4685): `\(scalar($x))` / `\(scalar($a[0]))` -- the parenthesised one-element form -- still references a copy; every other spelling is right.  Pre-existing on main: **#4783 FILED**, not held against the batch.
+* Left for its merge: the bars in its report, ff, CLAUDE.md + STATUS numbers, its tasks COMPLETED by me.
