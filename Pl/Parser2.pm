@@ -6697,7 +6697,7 @@ sub _word_takes_list {
   return 0 if $n->isa('PPI::Token::Operator') && $n->content !~ /^(?:\\|!)$/;
   my $pe = $self->{_local_term_pexpr} ||= Pl::PExpr->new(
     environment => $self->environment, parser => $self->fallback_parser, analysis_only => 1);
-  return 0 if $pe->is_named_unary($w->content);
+  return 0 if $pe->is_named_unary($w->content, $w);
   return 0 if $self->_word_is_term($w->content, $w->top);
   return 1;
 }

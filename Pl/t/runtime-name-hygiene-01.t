@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 22;
 
 # ---- the names, derived from the TABLE THAT DECIDES ------------------------
 # `%RUNTIME_NAMES` in Pl/ExprToCL.pm is what routes a plain call to `p-NAME`,
@@ -340,4 +340,34 @@ my $r = say();
 print "r=$r\n";
 sub fc { "MYFC(@_)" }
 print "fc=", fc, "\n";
+P
+
+# #4703 (s537a): the PARSE of a paren-less call follows the same answer --
+# where `fc` / `evalbytes` is the user's sub it is a LIST operator (`(fc 1, 2)`
+# is fc(1, 2); it was the builtin's named unary, fc(1) and 2), its arguments
+# take a user sub's LIST context, and `say FH LIST` with a user `say` is
+# perl's indirect object FH->say(LIST) = IO::Handle::say, the builtin (the
+# user's sub was handed the `:fh` marker).  A ($)-prototyped user sub stays a
+# named unary; the feature-ON spellings keep the builtin.  INVERSE: main
+# 4a39a1c7 prints `2 fc(1) 2` / `say(fh STDOUT 1)`.
+both_agree(<<'P', '#4703 a gated keyword that is the user sub parses as a list operator; say FH is the builtin');
+sub fc { "fc(" . join(" ", @_) . ")" }
+sub evalbytes { "eb(" . join(" ", @_) . ")" }
+sub say { print "say(" . join(" ", @_) . ")\n"; 1 }
+my @a = (fc 1, 2); print "1 ", scalar(@a), " @a\n";
+my @c = (evalbytes 5, 6); print "2 ", scalar(@c), " @c\n";
+my @arr = (1, 2, 3); print "3 ", fc(@arr, 4), " ", fc(reverse("ab", "cd")), "\n";
+my @e = (fc "x", "y"); my @k = (fc 1 < 2, 3); print "4 @e | @k\n";
+my $r = fc "a" . "b"; print "5 $r ", (fc 1) . "z", "\n";
+say STDOUT 6;
+my @s = (say 7, 8);
+{ use feature 'fc'; my @f = (fc "AB", "CD"); print "9 @f\n"; }
+{ use feature 'say'; say STDOUT "10 kw"; }
+sub isa { "isa(" . join(" ", @_) . ")" }
+my @i = (isa 1, 2); print "11 ", scalar(@i), " @i ", (main->isa("main") ? "y" : "n"), "\n";
+P
+both_agree(<<'P', '#4703 a ($)-prototyped user fc stays a named unary (control)');
+sub fc($) { "fc(" . join(" ", @_) . ")" }
+my @a = (fc 1, 2); print "1 ", scalar(@a), " @a\n";
+my @h = (fc 9 + 1, 2); print "2 @h\n";
 P

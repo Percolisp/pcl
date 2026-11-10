@@ -190,10 +190,16 @@ sub named_unary { shift->config->named_unary }
 # The environment record is the ONLY second source: `known_no_of_params` is
 # NOT consulted, because its 1 covers Config builtins (shift, close…) that are
 # deliberately not named unaries.
+#
+# TOK, the call's head token when the caller has it: a FEATURE-GATED keyword
+# (`fc`, `evalbytes`) that is the user's sub at TOK is no builtin there, so the
+# Config row does not answer for it (#4703, _gated_sub_here).
 sub is_named_unary {
   my $self = shift;
   my $name = shift;
-  return 1 if $name && $self->named_unary->{$name};
+  my $tok  = shift;
+  return 1 if $name && $self->named_unary->{$name}
+           && !$self->_gated_sub_here($name, $tok);
   return $self->_declared_named_unary($name);
 }
 
@@ -284,7 +290,16 @@ sub is_arr_braces { Pl::PExpr::TokenUtils::is_arr_braces(@_) }
 sub is_hash_braces { Pl::PExpr::TokenUtils::is_hash_braces(@_) }
 sub is_inline_hash { Pl::PExpr::TokenUtils::is_inline_hash(@_) }
 sub is_inline_arr { Pl::PExpr::TokenUtils::is_inline_arr(@_) }
-sub is_token_operator { shift->token_utils->is_token_operator(@_) }
+# The word `isa` is the infix operator only where the keyword is in force: a
+# USER sub named `isa` where the feature is not (`sub isa {...} (isa 1, 2)`)
+# is an ordinary call, by the one answer _gated_sub_here asks (#4703; the
+# statement was dropped, "Fell through").
+sub is_token_operator {
+  my ($self, $tok) = @_;
+  my $op = $self->token_utils->is_token_operator($tok);
+  return undef if defined $op && $op eq 'isa' && $self->_gated_sub_here('isa', $tok);
+  return $op;
+}
 sub is_list { shift->token_utils->is_list(@_) }
 sub is_word { shift->token_utils->is_word(@_) }
 sub is_internal_node_type { shift->token_utils->is_internal_node_type(@_) }
@@ -4175,7 +4190,7 @@ sub handle_subcalls {
     # - - - Does it have zero parameters:
     # Simple case, e.g. time(), wantarray().
 
-    my $no_pars = $self->no_params_of_sub($sub_name);
+    my $no_pars = $self->no_params_of_sub($sub_name, $now);
 
     # Check if function takes 0 params, or can default to $_ or @_
     # and is followed by an operator (meaning no explicit args given)
@@ -4318,7 +4333,7 @@ sub handle_subcalls {
     # ternary) before any term derivation narrows it — the #153 walker and
     # the legacy branches must both be bounded by it.
     my $term_ceiling = $end_pars;
-    if ($self->is_named_unary($func_name_for_unary) && $end_pars > $i + 1) {
+    if ($self->is_named_unary($func_name_for_unary, $now) && $end_pars > $i + 1) {
         # #153 step 3: EVERY named unary takes its operand extent from the
         # ONE term-grammar walker (_term_extent) when the walker ANSWERS;
         # a decline (undef) falls through to the legacy hand-derived
@@ -4431,7 +4446,7 @@ sub handle_subcalls {
       # so `($;$)`, `($;)`, `(;$;)`, `(@)` never narrow here (s361 probed
       # `sub f ($;$)`: `f $a, $b` must stay f($a, $b); t/comp/proto.t's
       # `unilist 0 || 5` is unilist(0 || 5)), and `(;$)` / `(*)` do.
-      if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
+      if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary, $now)) {
         # Only apply for non-named-unary 1-param functions
         # Named unary already handled above with proper term detection
         # #153 step 3b: the operand extent comes from the ONE term-grammar
@@ -4663,6 +4678,12 @@ sub handle_subcalls {
         # Remove the filehandle token from expression list
         splice @$e, $i + 1, 1;
         $end_pars -= 1;
+        # `say FH LIST` where `say` is the USER's sub (no `say` feature here)
+        # is perl's indirect object syntax, FH->say(LIST) -- IO::Handle::say,
+        # which IS the builtin: print LIST and a newline to FH (#4703).  The
+        # head names the builtin unconditionally, as `CORE::say` does.
+        $now->{_core_qualified} = 1
+          if $sub_name eq 'say' && $self->_gated_sub_here('say', $now);
       }
     }
 
@@ -4857,9 +4878,22 @@ sub handle_subcalls {
 # keyword always.
 sub _gated_keyword_is_sub {
   my ($self, $name, $node_id) = @_;
-  my $feature = Pl::PExpr::Config::keyword_feature($name) // return 0;
+  return 0 if !defined Pl::PExpr::Config::keyword_feature($name);
   my $kids = $self->get_node_children($node_id) || [];
   my $tok = @$kids ? $self->get_a_node($kids->[0]) : undef;
+  return $self->_gated_sub_here($name, $tok);
+}
+
+# The same answer asked of the call's head TOKEN, for the parse sites that run
+# before the funcall node exists (#4703): the operand grammar of a paren-less
+# call (is_named_unary, no_params_of_sub), an argument's context
+# (child_context) and the print-family handle slot.  A feature-gated keyword
+# that is the user's sub HERE parses as that sub -- a list operator, or what
+# its own prototype record says -- never with the builtin's facts.  0 for
+# every name that is not a feature-gated keyword (one cached hash lookup).
+sub _gated_sub_here {
+  my ($self, $name, $tok) = @_;
+  my $feature = Pl::PExpr::Config::keyword_feature($name) // return 0;
   return 0 if ref($tok) && $tok->{_core_qualified};
   require Pl::Parser;   # at run time: a compile-time `use` is circular, and a
                         # caller may have loaded PExpr alone (s438f)
@@ -4955,6 +4989,9 @@ sub collapse_extra_unary_params {
 
   my $param_spec = $self->known_no_of_params->{$func_name};
   return unless defined $param_spec;
+  # The user's sub where a feature-gated keyword is none (#4703) keeps every
+  # argument it was given.
+  return if $self->_gated_keyword_is_sub($func_name, $node_id);
   my @specs = ref($param_spec) eq 'ARRAY' ? @$param_spec : ($param_spec);
   # The named-unary spec and nothing else: 0 args, 1 arg, or "$_ by default".
   # A list operator (-1), a "@_ default" (-3) or a "1 before a list" (-12)
@@ -5029,15 +5066,21 @@ sub find_matching_colon {
 # callers read 0 as "takes no arguments", so `(%)`, `(@)`, `(;$)`, `(;$;)`
 # subs and all-defaulted signatures were called with ZERO arguments and the
 # statement fell through and was dropped (task #259, t/comp/proto.t ×3).
+#
+# TOK (optional), the head token: a feature-gated keyword that is the user's
+# sub there and has no record of its own is a LIST operator, never the
+# builtin's row (#4703).
 sub no_params_of_sub {
   my $self = shift;
   my $name = shift;
+  my $tok  = shift;
 
   if ($self->has_environment) {
     my $rec = $self->environment->get_prototype($name);
     return $self->_proto_parse_spec($rec)
       if $rec && defined $rec->{min_params};
   }
+  return -1 if $self->_gated_sub_here($name, $tok);
 
   return $self->known_no_of_params->{$name} // -1;
 }
@@ -5464,6 +5507,12 @@ sub child_context {
       my $children  = $self->get_node_children($parent_id);
       my $func_node = $self->get_a_node($children->[0]);
       my $func_name = $func_node->content() if $func_node->can('content');
+      # Is this call the BUILTIN of that name here?  A feature-gated keyword
+      # that is the user's sub at this call (#4703) is not: its arguments take
+      # a user sub's context, never the builtin prototype's slots.
+      my $builtin_here = $func_name && $child_index >= 1
+          && exists $self->known_no_of_params->{$func_name}
+          && !$self->_gated_sub_here($func_name, $func_node);
 
       # List operators force list context on their list argument
       if ($func_name && $func_name =~ /^(map|grep|sort|keys|values|each)$/) {
@@ -5498,8 +5547,7 @@ sub child_context {
       # Gated on `known_no_of_params` — the compiler's own definition of "this
       # name is a builtin here" — so a perl keyword PCL does not treat as a
       # builtin keeps taking the user-sub paths below.
-      if ($func_name && $child_index >= 1
-          && exists $self->known_no_of_params->{$func_name}) {
+      if ($builtin_here) {
         my $bctx = Pl::PExpr::Config::core_arg_context($func_name,
                                                        $child_index - 1);
         if (defined $bctx) {
@@ -5578,8 +5626,7 @@ sub child_context {
       # scalar slots still impose SCALAR context (keeping is(unpack(...), …)
       # scalar).  Builtins are excluded via known_no_of_params (they have their
       # own context rules above).
-      if ($func_name && $child_index >= 1
-          && !exists $self->known_no_of_params->{$func_name}) {
+      if ($func_name && $child_index >= 1 && !$builtin_here) {
         return LIST_CTX;
       }
     }
@@ -6872,7 +6919,7 @@ sub _fix_ppi_negative_number_bug {
       if ($i > 0) {
         my $prev = $result[-1];  # Use result array since we may have inserted
         $is_expr_end = ref($prev) eq 'PPI::Token::Word'
-                    && !$self->is_named_unary($prev->content);
+                    && !$self->is_named_unary($prev->content, $prev);
       }
 
       if ($is_expr_end || $next_is_pow) {
