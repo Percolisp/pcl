@@ -46,3 +46,11 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s538/resume-s538.md`,
 * For the review of s538b: read the README bullet + STATUS row it writes against its own measurement A (what a WEAK registry leaves out); check `bless` cost on a no-DESTROY program; `Test::More` exit codes unchanged.
 
 ## 01:4x -- s536j's merge bars DONE on merged main: `j-check.log` (6 guard files / 147 rows PASS; probes p1 p3 q5 = perl) and `j-container.log` (`prove tools/t/install-container.t` 17/17 PASS, END rc=0 01:40).  PUSHED: main, and PPI `pcl` = `c2f21706` to the fork.
+
+## 02:2x -- **s536i MERGED = MAIN-READY-87 `5ca8e976`** (code sha `23f0f917`, generation v2-13700 on main)
+* ff 14 commits.  Its bars on the combined tree `8db886e9` (report): gate 369 / 12,018 PASS, verdict PASS / PASS, sweep 18,795 +0 GATE clean, corpus-diff 10 / 111, wide 112 DIFF all explained (`scratch/s536i/eab-explained.txt`), RCDIFF 0, ir 31 / 328-0-17-0, YAML-PP 32.cyclic-refs.t 8/8, everyday 116 + `--record`, Calc.pm 5.54 -> 5.52 s.  FLAGGED bench: `mapmulti` +2.7 % (twice), `pushloc` +5.1 % (unclear).  Batch code unchanged since my pre-review at `88108e97` (ExprToCL / VarAnnotator diff empty; the runtime differs by the generation string only).
+* QUEUED: `i-check.sh` on merged main (9 guard files + my probes i/p1..p6, j/p1 p3).  **The push waits for it.**
+* COMPLETED by me: #4682 #4684 #4685 #4683 #4681 #4283 #4741.  CLAUDE.md + STATUS numbers.  #4742 (filed by it) and #4783 (mine) stay open.
+* s537a + s537b TOLD (02:2x): rebase over `23f0f917`; **s537a takes v2-13750** (its v2-13600 fell below main), s537b keeps v2-13800.  Earlier (01:5x) s537b had wrongly concluded that s536i was merged from main's records commits: corrected by message; every agent prompt now says "check the code sha before concluding main moved".
+* **s538b LAUNCHED** (DESTROY at program exit + the documents; a new isolated worktree) in the slot s536i freed.  RUNNING: s537a, s537b, s538b.  NEXT slot: s538a (point 1).
+* Round board: chunks a-d done (d at 01:39); e, f remain.
