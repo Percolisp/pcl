@@ -54,3 +54,5 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s538/resume-s538.md`,
 * s537a + s537b TOLD (02:2x): rebase over `23f0f917`; **s537a takes v2-13750** (its v2-13600 fell below main), s537b keeps v2-13800.  Earlier (01:5x) s537b had wrongly concluded that s536i was merged from main's records commits: corrected by message; every agent prompt now says "check the code sha before concluding main moved".
 * **s538b LAUNCHED** (DESTROY at program exit + the documents; a new isolated worktree) in the slot s536i freed.  RUNNING: s537a, s537b, s538b.  NEXT slot: s538a (point 1).
 * Round board: chunks a-d done (d at 01:39); e, f remain.
+
+## 02:2x (2) -- s536i's merge bars DONE on merged main: `i-check.log` 9 guard files / 156 rows PASS; probes i/p1 p2 p4 p5 p6 + j/p1 p3 = perl; i/p3 differs in the ONE line that is #4783 (`\ (scalar($a[1]))`), as at the pre-review.  PUSHED main.  CI green on the earlier push `6cf7d9d1` (the s536j merge).
