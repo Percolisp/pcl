@@ -4899,6 +4899,13 @@ Two consequences a translator must implement or lose output:
   ARGV STDIN STDOUT STDERR ARGVOUT`) or does not begin like an identifier
   (punctuation, a digit, a caret name), and the current package's otherwise.
   Example: `package Foo; print *{"STDIN"}{PACKAGE}` prints `main`.
+* **A LEADING `::` names main's stash** (s537a): `::foo` is `main::foo` and
+  `::Foo::bar` is `Foo::bar` for every SYMBOLIC name -- a glob `*{"::x"}`, a
+  call `&{"::f"}`, `defined &{"::f"}`, and the run-time bareword
+  `p-bareword-value "::f"` -- never the current package and never a package
+  named `""`; ONE splitter `%p-split-symbolic-name` reads it for the sub
+  resolver and the dynamic glob.  Example: `package Other; *{"::m"} = sub
+  { 1 }; print main::m()` prints 1.
 
 ### 7.7 I/O layers: a handle carries OCTETS unless told otherwise (normative, s470br, task #1115)
 
