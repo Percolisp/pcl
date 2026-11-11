@@ -56,3 +56,9 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s538/resume-s538.md`,
 * Round board: chunks a-d done (d at 01:39); e, f remain.
 
 ## 02:2x (2) -- s536i's merge bars DONE on merged main: `i-check.log` 9 guard files / 156 rows PASS; probes i/p1 p2 p4 p5 p6 + j/p1 p3 = perl; i/p3 differs in the ONE line that is #4783 (`\ (scalar($a[1]))`), as at the pre-review.  PUSHED main.  CI green on the earlier push `6cf7d9d1` (the s536j merge).
+
+## 02:3x -- THE USER: prepare for the end of the session.  State read at 02:29:
+* THREE agents run: **s537a** (code-complete incl. two fix-forwards; rebased over -87 at `ed8ac1d9`, v2-13750; ALL combined-tree legs to re-take: gate, sweep, corpus-diff + wide A/B, ir, bench), **s537b** (code-complete; rebased over -87 at `92e5238d`, v2-13800; seven legs queued: corpus-diff + ir, wide A/B, gate-SET scan x2, sweep, gate, companion one-file runs, bench), **s538b** (launched 02:2x; reading / design stage).  Neither s537a nor s537b is minutes away: about an hour each with the queue, and the second to merge re-takes after the first.
+* **ROUND BOARD STOPPED by me** to free its slot: chunks a b c d are DONE and valid (`board-{a,b,c,d}.tsv` + `.rows.tsv`); chunk e was killed 5 min in (`board-e.void-0230.log`), f never started.  Resume next session: `round-s538.sh` with the loop `e f` on the same `7284c977` extraction (main is two code merges ahead by now -- the round's measurement stays the -85 one; attribute -86 / -87 with one-file runs).
+* s538b TOLD: checkpoint mode -- WIP commits + STOP.md at every stage, no full legs until told (the two finishing siblings get the slots).
+* AT THE STOP (when the USER says): TaskStop the agents still running; `systemctl --user stop 'run-p*.scope'` + kill stray `pl2cl --xserver` listeners; check `HEAVY.holder*` gone; write `s538/resume-after-stop.md` (per batch: HEAD, tree clean?, which logs have END lines, what is owed); memory STATE line; commit; push.
