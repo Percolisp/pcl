@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FILED s537a (Opus 5.5, 2026-11-12), found while writing #4281's fix-forward guard row (Pl/t/tail-return-01.t row 13 had to avoid the spelling).  PRE-EXISTING: main 23f0f917 identical (a DROP announced at transpile, a die when reached).\n\nA symbolic code call through `$_` WITH an argument list is dropped: `&$_()` / `&$_(ARGS)` in any position.\n\n    sub a { \"A\" } $_ = \"a\"; my $x = &$_(); print \"$x\\n\";\n    # perl: A\n    # PCL : PCL: statement dropped at q.pl line 1: my $x = &$_(); -- Bug. Fell through. Missing case: [prefix_op, tree_val]\n    #       then dies \"PCL: statement not supported ...\" when the statement is reached\n\nAlso `print &$_(), \"\\n\" for qw(a);`, `print scalar(&$_()), \"\\n\" for qw(a);`, `for (qw(a)) { print scalar(&$_()), \"\\n\" }` (all drop).  Controls that WORK: `&$n()` with `my $n = \"a\"` (A), `&$_` WITHOUT parens (A).\n\nPPI is right (not a PPI bug): `my $x = &$_();` = Word my | Symbol $x | Operator = | Cast & | Magic $_ | List () | Structure ; -- the same shape as `&$n()` but with a PPI::Token::Magic where `&$n()` has a PPI::Token::Symbol.  So PExpr's `&$var(args)` reduction (the code-ref call, CLAUDE.md \"&$foo(args) DONE session 62\") keys on PPI::Token::Symbol and does not accept the Magic token `$_` (check the other magic scalars too: `&$1()`).  Fix: the reduction asks for a SCALAR VARIABLE token (a Symbol or a scalar Magic), one predicate; probe `&$_(1,2)`, `&{$_}()`, `$_->()`, `&$_` (works today), `goto &$_`.\n",
+   "id" : 4807,
+   "status" : "pending",
+   "subject" : "`&$_()` (a code-ref / symbolic call through $_ WITH parens) is DROPPED, \"Fell through\": PExpr reduces `&$var(args)` only for a PPI Symbol, and $_ is a Magic token"
+}

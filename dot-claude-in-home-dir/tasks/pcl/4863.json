@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "RESIDUE of s538b (#2371, DESTROY at program exit).  The registry is filled at bless only while the gate *p-destroy-live* is open (a non-empty DESTROY or AUTOLOAD has been installed anywhere); the class and method are decided at EXIT, so a DESTROY installed late is found -- for objects that were registered.  Objects blessed before the FIRST destructor of the whole program existed were not.\n  package L; sub new { bless {}, shift } package main; our $l = L->new; *L::DESTROY = sub { print \"late DESTROY\\n\" }; print \"main\\n\";\n  perl: main / late DESTROY      PCL: main\n(With any other non-empty DESTROY in the program first, PCL prints it too: Pl/t/destroy-exit-01.t row 10.)  The fix that closes it is to register every bless always (no gate): measured cost in the s538b report (measurement B, bench rows blessnew vs blessnew-d).  Rare shape: a named `sub DESTROY` is installed at load, before any code runs.",
+   "id" : 4863,
+   "status" : "pending",
+   "subject" : "an object blessed BEFORE the program had any non-empty DESTROY or AUTOLOAD gets no DESTROY at exit (the #2371 gate was closed at its bless): `*L::DESTROY = sub {...}` installed at run time as the program's first destructor"
+}

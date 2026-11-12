@@ -7,6 +7,12 @@ representation (#1389).  The board hunts have reached all three.  This note give
 one's measured size, what was found while sizing it, the options, and a recommendation.
 Nothing here is decided or built.
 
+**RULED BY THE USER the same day (s539, 2026-11-12; DECIDED `## s539`):**
+
+1. **The UTF-8 flag: left alone for now.**  The always-1 ruling stands; the measurement below stays as the record for when the question is re-opened.
+2. **`caller`: made better where that is cheap in execution time and code size.**  Tier 1 below becomes a batch in which each item ships only if it is measured free (brief `briefs-and-rules-for-claude-subagents/s539/s539d-prompt.md`); tier 2 is not scheduled.
+3. **Scope-exit `DESTROY`: stays parked**, as recommended; the returned-handle case is a small member of a later batch.
+
 The CPAN board's blessed baseline holds 1,909 failing rows (`baselines/cpan-board14-fails.tsv`,
 main `d1e98177`).  The three questions hold 740 of them:
 

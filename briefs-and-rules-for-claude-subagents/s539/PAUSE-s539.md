@@ -28,3 +28,9 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s539/resume-s539.md`,
 * STILL TO WRITE: the point-4 batches when the USER rules.
 * The reviewing session's task IDs this session: 4785-4799.
 * STATE 08:2x: s537b holds two slots (it queued six legs at 08:07), the round board chunk e the third; s537a (code-complete, nearest to MERGE-READY by work) and s538a wait.
+
+## 08:4x -- THE USER RULED POINT 4 and gave FOUR HEAVY SLOTS for this sitting (the laptop is left idle).
+* #1389 UTF-8 flag: left alone for now.  #2370: stays parked.  `caller()`: better where cheap in execution time and code size -> **brief `s539/s539d-prompt.md` WRITTEN** (tier 1 + #1361; a cost table per item is the batch's first bar; IDs 4941-4959; v2-14400).  DECIDED ## s539, the point-4 doc's head, task notes on #1389 #233 #1361 #2370.
+* `~/pcl-agent-scratch/s513/heavy.sh` = the FOUR-slot script since 08:42 (atomic `mv`; waiters that started before run the three-slot copy and cannot take slot 4).  s537a TOLD to re-queue one waiting leg onto slot 4.  **BACK TO THREE at the session end** (`cp heavy.sh.three-slot-s530` the same way) and in memory.
+* ORDER FOR FREED SLOTS: s539d (the USER's ruling) -> s539a -> s539c; s539b only after s537b's merge.
+* Round board: chunk e DONE 08:37, chunk f running.

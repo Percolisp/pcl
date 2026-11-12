@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "MEASURED by s538b (#2371, measurement A, scratch/s538b/measA/ in its worktree): with a forced full GC as the program's last statement, a FILE-LEVEL `my $counter = bless {}, \"Counter\"` never read after its assignment was collected and its DESTROY never ran -- SBCL keeps no dead variable's value alive.  perl destroys it at global destruction.  The natural run (no forced GC) destroys it at exit, because no GC happened in between; any program that allocates ~50 MB after making the guard can lose it.\nWHAT WOULD CLOSE IT (not built, for the reviewing session): a compiler fact -- a `my` scalar whose value is an object and whose scope has no later READ -- lowered with one keep-alive reference at the end of its scope (a call the compiler cannot elide), which keeps the box reachable until the block ends; for a file-level variable, until the end of the main program, after which the exit hook pins it.  An emission change (VarAnnotator verdict + one lowering), cost one call per scope exit for such variables only.  It is a step towards Stage 2 (#2370: the same licence walk) and gives no scope-exit DESTROY by itself.  ALTERNATIVE (runtime only, weaker): a small STRONG ring of the newest N registered objects -- bounded memory, saves the last N but not an early guard in a long program.",
+   "id" : 4864,
+   "status" : "pending",
+   "subject" : "PROPOSAL (s538b measurement A): an object held only by a variable the program never READS again (a sentinel / scope guard: `my $guard = Guard->new(...)`) can be reclaimed by the GC while the variable is still in scope, and then never gets its exit-time DESTROY"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FOUND by s538b (probing the exit sequence for #2371).  perl 5.40.3:\n  $@ = \"x\\n\"; END { print \"[$@]\\n\" }                      perl: []      PCL: [x\\n]\n  eval { die \"x\\n\" }; END { print \"[$@]\\n\" }              perl: []      PCL: [x\\n]\n  END { print \"[$@]\\n\" } $@ = \"y\\n\"; exit 3;               perl: [] rc 0?  PCL: [y\\n]\n  END { print \"[$@]\\n\" } die \"boom\\n\";                    perl: []      PCL: []   (same)\nPre-existing (the base 23f0f917 prints the same).  Where: %p-run-end-phase (cl/pcl-runtime.lisp) runs the END blocks with $@ untouched; perl clears ERRSV before calling the END list (measure whether per block: `END { print \"[$@]\" } END { $@ = \"a\" }` -- LIFO -- tells).  Probe also the exit status of the third line under perl before writing the guard row.  Not fixed in s538b: outside its members, and its legs were already running.",
+   "id" : 4861,
+   "status" : "pending",
+   "subject" : "$@ is not cleared before the END blocks: perl's END always sees an EMPTY $@ (after a normal end, an eval that died, an explicit exit), PCL's sees whatever the program left there"
+}

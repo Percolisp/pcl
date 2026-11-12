@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FOUND by s538b (#2371).  perl 5.40.3:\n  package A1; our $AUTOLOAD; sub new { bless {}, shift } sub AUTOLOAD { print \"AUTOLOAD $AUTOLOAD\\n\"; return }\n  package main; my $o = A1->new; $o->DESTROY; print \"after\\n\";\n  perl: AUTOLOAD A1::DESTROY / after (and again at global destruction)\n  PCL:  dies `Can't locate object method \"DESTROY\" via package \"A1\"` (pre-existing: the base prints the same).\nCause: %pcl-dispatch-autoload and %pcl-super-autoload in cl/pcl-runtime.lisp both start `(unless (string-equal method-name \"DESTROY\") ...)` -- an exclusion with no recorded reason (an old guard against an implicit-DESTROY path that never existed?).  perl excludes nothing for an explicit call.  The exit-time destruction s538b built does its own resolution (%p-destroy-method) and calls AUTOLOAD as perl does.  Fix = delete the two exclusions, guard row, probe a SUPER:: spelling.",
+   "id" : 4865,
+   "status" : "pending",
+   "subject" : "an EXPLICIT `$obj->DESTROY` / `Class->DESTROY` on a class with AUTOLOAD and no DESTROY dies \"Can't locate object method DESTROY\" -- perl calls AUTOLOAD with $AUTOLOAD = CLASS::DESTROY"
+}

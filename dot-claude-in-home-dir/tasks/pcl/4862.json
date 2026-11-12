@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FOUND by s538b (#2371 probes).  perl 5.40.3, inside a DESTROY run at program exit:\n  package D; sub new { bless {}, shift } sub DESTROY { warn \"w\"; eval { die \"d\" }; print \"caught: $@\" } package main; our $d = D->new;\n  perl: stderr `w at FILE line 1 during global destruction.`, stdout `caught: d at FILE line 1 during global destruction.`\n  PCL (s538b): the same without ` during global destruction`.\nperl's mess_sv appends it whenever PL_phase is DESTRUCT.  PCL builds the ` at FILE line N.` tail in four places (p-die two arms, %p-die-text, p-warn-build-message): one helper reading ${^GLOBAL_PHASE} would cover them (rule 11).  Exact message TEXT is not a goal (USER s494), so LOW; it changes $@ text a DESTROY can read.",
+   "id" : 4862,
+   "status" : "pending",
+   "subject" : "a die / warn message raised during global destruction lacks perl's \" during global destruction\" location suffix (`w at F line 1 during global destruction.`) -- cosmetic"
+}
