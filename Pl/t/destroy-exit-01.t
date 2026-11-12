@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 # destroy-exit-01.t — DESTROY AT PROGRAM EXIT (task #2371, s538b; Stage 0 of
-# docs/scope-exit-destroy-design.md; ir-spec §7.5).
+# docs/scope-exit-destroy-design.md; ir-spec §7.4a).
 #
 # perl destroys every object still alive when the program ends, AFTER the END
 # blocks, with ${^GLOBAL_PHASE} = DESTRUCT.  PCL has no reference counts, so

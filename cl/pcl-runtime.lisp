@@ -2154,7 +2154,7 @@
 (defvar *p-sub-table-epoch* 0
   "Incremented whenever a named sub is installed or a prototype registered.")
 
-;;; DESTROY AT PROGRAM EXIT (task #2371, s538b; ir-spec §7.5): the GATE.  The
+;;; DESTROY AT PROGRAM EXIT (task #2371, s538b; ir-spec §7.4a): the GATE.  The
 ;;; registry p-bless fills (see "DESTROY at program exit" by p-bless) is only
 ;;; kept once a program HAS something global destruction would call -- a
 ;;; non-empty sub named DESTROY or AUTOLOAD (perl calls AUTOLOAD for a class
@@ -37323,7 +37323,7 @@ would consume, so it dies naming the stream (rule 12)."
     (sort (remove-duplicates out :test #'string=) #'string<)))
 
 ;;; ============================================================
-;;; DESTROY at program exit (task #2371, s538b; ir-spec §7.5)
+;;; DESTROY at program exit (task #2371, s538b; ir-spec §7.4a)
 ;;; ============================================================
 ;;; perl destroys every object still alive when the program ends, after the
 ;;; END blocks (`${^GLOBAL_PHASE}` is DESTRUCT).  PCL has no reference counts,
