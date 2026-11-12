@@ -1395,6 +1395,13 @@
                   (if (and (consp a) (eq (first a) 'list)) (rest a) a)))
          (register (when proto
                      `((%p-register-prototype (symbol-function local-sym) ,proto))))
+         ;; An EMPTY DESTROY / AUTOLOAD (the AUTOLOAD-guard idiom) is marked
+         ;; before the install note reads it: it opens no destruction gate (#2371).
+         (empty-destroy
+          (when (and (member (symbol-name name) '("pl-DESTROY" "pl-AUTOLOAD")
+                             :test #'string=)
+                     (equal body '((p-args-body (block nil (p-return-empty))))))
+            '((%p-mark-empty-destroy (symbol-function local-sym)))))
          (install
           `(let* ((local-sym (%p-reserve-sub-name ',name))
                   ;; Per-sub constants, computed ONCE at definition:
@@ -1421,6 +1428,7 @@
              ,@(when attrs
                  `((%p-apply-sub-attributes (symbol-function local-sym) %%home-pkg
                                             ',attrs)))
+             ,@empty-destroy
              (%p-note-sub-install local-sym :sub))))
     (if *pcl-fasl-build*
         ;; Building a module fasl: the compile pass reserves the NAME (the
@@ -2146,15 +2154,45 @@
 (defvar *p-sub-table-epoch* 0
   "Incremented whenever a named sub is installed or a prototype registered.")
 
+;;; DESTROY AT PROGRAM EXIT (task #2371, s538b; ir-spec §7.5): the GATE.  The
+;;; registry p-bless fills (see "DESTROY at program exit" by p-bless) is only
+;;; kept once a program HAS something global destruction would call -- a
+;;; non-empty sub named DESTROY or AUTOLOAD (perl calls AUTOLOAD for a class
+;;; with no DESTROY).  Every install path that gives a sub a NAME reaches
+;;; %p-note-sub-install below, so that is where the gate opens; it never closes.
+;;; A defglobal, read once per bless: a program with no such sub pays that load.
+(sb-ext:defglobal *p-destroy-live* nil)
+(declaim (type boolean *p-destroy-live*))
+
+(defvar *p-empty-destroy-subs* (make-hash-table :test 'eq :weakness :key)
+  "The functions of the EMPTY DESTROY / AUTOLOAD subs (`sub DESTROY {}`, the
+   AUTOLOAD-guard idiom): the p-sub macro marks them, by name, at definition.
+   Such a sub opens no gate and is never called at exit -- calling it does
+   nothing, and it suppresses AUTOLOAD by being found.")
+
+(defun %p-mark-empty-destroy (fn)
+  "FN is an empty DESTROY / AUTOLOAD body (the p-sub macro's call)."
+  (setf (gethash fn *p-empty-destroy-subs*) t))
+
+(defun %p-destroy-note-install (sym)
+  "SYM just got a sub: open the gate when it is a non-empty DESTROY or AUTOLOAD."
+  (when (and (symbolp sym) (fboundp sym))
+    (let ((name (symbol-name sym)))
+      (when (and (or (string= name "pl-DESTROY") (string= name "pl-AUTOLOAD"))
+                 (not (gethash (symbol-function sym) *p-empty-destroy-subs*)))
+        (setf *p-destroy-live* t)))))
+
 (declaim (inline %p-note-sub-install))
 (defun %p-note-sub-install (sym kind)
   "SYM just got a sub, through install KIND (:sub, :glob, :glob-copy, or
    :set-prototype with SYM the FUNCTION): the visible-prototype index is stale,
-   and the detector (#2610), when a table is active, compares it."
+   and the detector (#2610), when a table is active, compares it.  A DESTROY or
+   AUTOLOAD may open the global-destruction gate (#2371)."
   (incf *p-sub-table-epoch*)
   ;; A NEW sub under a name a stash delete removed is visible again (#3831).
   (when (and (symbolp sym) (%p-stash-deleted-p sym))
     (remhash sym *p-stash-deleted*))
+  (unless *p-destroy-live* (%p-destroy-note-install sym))
   (when *p-detect-active* (%p-detect-check sym kind))   ; #2610, an instrument
   nil)
 
@@ -2928,10 +2966,16 @@
         (when (zerop (logand (%p-status) 255))
           (%p-set-status 1))))))
 
+(declaim (ftype function %p-destroy-pin %p-run-global-destruction))
+
 (defun %p-run-end-phase ()
-  "The exit hook: run the END blocks, flush every handle, exit with $?."
+  "The exit hook: run the END blocks, destroy the objects still alive (perl's
+   global destruction, #2371), flush every handle, exit with $?."
   (let ((pending (or *p-exit-status* 0)))
     (%p-set-status pending)
+    ;; Before anything can run the collector: the objects alive NOW are the
+    ;; ones global destruction owes a DESTROY.
+    (%p-destroy-pin)
     (setf |${^GLOBAL_PHASE}| "END")
     (let ((*p-in-end-phase* t)
           (*p-end-phase-pid* (sb-posix:getpid)))
@@ -2943,6 +2987,9 @@
           (error (e)
             (%p-diag "Error in END block: ~A~%" e)))))
     (setf |${^GLOBAL_PHASE}| "DESTRUCT")
+    ;; After the ENDs, before the flushes (a DESTROY may print), and before
+    ;; `final' is read: a $? a DESTROY sets is the exit status, as in perl.
+    (%p-run-global-destruction)
     (%p-flush-stdout-at-exit)
     (%p-flush-all-output)
     ;; Only now, with every END run and every handle flushed, does a status
@@ -37274,6 +37321,185 @@ would consume, so it dies naming the stream (rule 12)."
           (when proto
             (push (concatenate 'string q "=" proto) out)))))
     (sort (remove-duplicates out :test #'string=) #'string<)))
+
+;;; ============================================================
+;;; DESTROY at program exit (task #2371, s538b; ir-spec §7.5)
+;;; ============================================================
+;;; perl destroys every object still alive when the program ends, after the
+;;; END blocks (`${^GLOBAL_PHASE}` is DESTRUCT).  PCL has no reference counts,
+;;; so this is the one DESTROY moment it can know.  While the gate is open (a
+;;; non-empty DESTROY or AUTOLOAD exists: *p-destroy-live*, set where subs are
+;;; installed), every bless notes its REFERENT in ONE WEAK VECTOR, and the exit
+;;; hook calls DESTROY on each one still alive.  An object the collector
+;;; reclaimed before exit is gone and gets no DESTROY: the registry is weak on
+;;; purpose -- strong, it would keep every object a loop ever made until exit.
+;;; The class and its method are read AT EXIT, so a re-bless, an @ISA change
+;;; or a DESTROY defined after the bless need no cache invalidation.
+;;; Measured (s538b, SBCL 2.6.0): one weak POINTER per object costs +115 ns a
+;;; registration (GC +65); a slot in one weak VECTOR +28 ns.  A weak vector is
+;;; a SIMPLE-VECTOR (svref) whose dead entries read NIL; SBCL >= 1.4.10.
+(sb-ext:defglobal *p-destroy-reg* (sb-ext:make-weak-vector 256))
+(sb-ext:defglobal *p-destroy-fill* 0)
+(declaim (type simple-vector *p-destroy-reg*) (type fixnum *p-destroy-fill*))
+
+(defvar *p-destroy-pinned* #()
+  "The registry's objects, held STRONGLY from the start of the exit hook: the
+   main program's frame is gone by then (an object only a file lexical held
+   is reachable from nothing), and an END block may run the collector.")
+
+(defconstant +p-destroy-max-rounds+ 100
+  "Global destruction rounds: objects a DESTROY blesses are the next round's.")
+
+(defun %p-destroy-compact ()
+  "Drop the registry's dead entries, order kept, and double the vector when
+   it is still more than half full: amortized O(1) per registration."
+  (let ((reg *p-destroy-reg*) (j 0))
+    (declare (type fixnum j))
+    (dotimes (i *p-destroy-fill*)
+      (let ((e (svref reg i)))
+        (when e
+          (setf (svref reg j) e)
+          (incf j))))
+    (fill reg nil :start j :end *p-destroy-fill*)
+    (setf *p-destroy-fill* j)
+    (when (> (* 2 j) (length reg))
+      (let ((new (sb-ext:make-weak-vector (* 2 (length reg)))))
+        (replace new reg :end2 j)
+        (setf *p-destroy-reg* new)))))
+
+(defun %p-destroy-register (obj)
+  "Note OBJ, a blessed referent, for global destruction.  The same referent
+   blessed twice running (a constructor re-blessing what SUPER::new made) is
+   noted once; a later duplicate is skipped at exit by the destroyed mark."
+  (let ((n *p-destroy-fill*))
+    (declare (type fixnum n))
+    (unless (and (plusp n) (eq (svref *p-destroy-reg* (1- n)) obj))
+      (when (= n (length *p-destroy-reg*))
+        (%p-destroy-compact)
+        (setf n *p-destroy-fill*))
+      (setf (svref *p-destroy-reg* n) obj
+            *p-destroy-fill* (1+ n)))))
+
+(defun %p-destroy-note-bless (ref inner)
+  "p-bless's half of #2371: register the REFERENT a bless of REF (unboxed:
+   INNER) stamps -- the hash table, the array vector, the function, the
+   scalar's box, the glob or handle -- which every copy of the reference
+   shares.  A non-reference registers nothing (p-bless dies on it next)."
+  (let ((obj (cond ((hash-table-p inner) inner)
+                   ((p-box-p inner) (or (%p-scalar-ref-referent ref)
+                                        (p-box-value inner)))
+                   (t inner))))
+    (unless (or (null obj) (eq obj *p-undef*) (stringp obj) (numberp obj))
+      (%p-destroy-register obj))))
+
+(defun %p-destroy-pin ()
+  "The exit hook's first act: the live registered objects, held strongly."
+  (when *p-destroy-live*
+    (let* ((n *p-destroy-fill*)
+           (keep (make-array n)))
+      (replace keep *p-destroy-reg* :end2 n)
+      (setf *p-destroy-pinned* keep)
+      (fill *p-destroy-reg* nil :end n)
+      (setf *p-destroy-fill* 0))))
+
+(defun %p-destroy-batch ()
+  "The objects one destruction round visits, NEWEST FIRST -- those registered
+   since the pin, then the pinned ones -- as a strong list; both sources are
+   emptied, so what a DESTROY blesses during the round is the next round's."
+  (let ((out '()))
+    (flet ((take (vec n)
+             (dotimes (i n)
+               (let ((e (svref vec i)))
+                 (when e (push e out))))))
+      (take *p-destroy-pinned* (length *p-destroy-pinned*))
+      (take *p-destroy-reg* *p-destroy-fill*))
+    (setf *p-destroy-pinned* #())
+    (fill *p-destroy-reg* nil :end *p-destroy-fill*)
+    (setf *p-destroy-fill* 0)
+    out))
+
+(defun %p-destroy-method (class)
+  "What global destruction calls for an object of CLASS: the DESTROY its @ISA
+   chain or UNIVERSAL defines, else an AUTOLOAD's (PKG . SYM) -- perl calls
+   AUTOLOAD for DESTROY -- else NIL.  An EMPTY DESTROY found first is NIL (and
+   suppresses AUTOLOAD: that is the idiom); an empty AUTOLOAD is NIL."
+  (let* ((sub (%pcl-cl-sub-name "DESTROY"))
+         (fn (or (%pcl-find-method-in-chain class sub)
+                 (%pcl-find-method-in-chain "UNIVERSAL" sub))))
+    (if fn
+        (and (not (gethash fn *p-empty-destroy-subs*)) fn)
+        (let ((al (or (%pcl-find-autoload-in-isa class)
+                      (%pcl-find-autoload-in-isa "UNIVERSAL"))))
+          (and al
+               (not (gethash (symbol-function (cdr al)) *p-empty-destroy-subs*))
+               al)))))
+
+(defun %p-destroy-call (m class ref)
+  "Run the destructor M (a DESTROY function, or an AUTOLOAD's (PKG . SYM)) on
+   REF in void context.  A perl die inside it never changes the exit status;
+   perl reports it as `(in cleanup) MSG', a DEFAULT-OFF warning (W misc), so
+   here it is absent (#221) -- $SIG{__DIE__} still runs at the die.  Anything
+   else is a PCL failure and is announced."
+  (handler-case
+      (p-void-ctx
+       (if (functionp m)
+           (funcall m ref)
+           (let ((f (symbol-function (cdr m))))
+             (%pcl-set-autoload-var (car m) (format nil "~A::DESTROY" class) f)
+             (funcall f ref))))
+    (serious-condition (c)
+      (unless (%p-perl-die-p c)
+        (%p-diag "PCL: DESTROY of a ~A object failed in global destruction: ~A~%"
+                 class c)))))
+
+(defun %p-destroy-one (obj cache)
+  "Global destruction of the registered referent OBJ: a reference to it, its
+   CURRENT class, that class's destructor (CACHE: class -> %p-destroy-method).
+   A failure before the call (a PCL bug) is announced and the next object
+   goes on: the exit hook's flushes must still run."
+  (handler-case
+      (let* ((ref (if (or (p-box-p obj) (p-typeglob-p obj))
+                      (p-backslash obj)
+                      (make-p-box obj)))
+             (class (p-get-class ref)))
+        (when class
+          (multiple-value-bind (m hit) (gethash class cache)
+            (unless hit
+              (setf m (%p-destroy-method class)
+                    (gethash class cache) m))
+            (when m (%p-destroy-call m class ref)))))
+    (error (c)
+      (%p-diag "PCL: global destruction failed for one object: ~A~%" c))))
+
+(defun %p-run-global-destruction ()
+  "perl's global destruction (#2371), run by the exit hook after the END
+   blocks: DESTROY for every registered object still alive, newest first,
+   each once (SEEN is the destroyed mark; an explicit $obj->DESTROY earlier
+   does not set it -- perl calls it again too).  `exit' in a destructor ends
+   the phase with its status, as perl does; $@ $! $? are NOT saved -- perl
+   saves none of them, and a $? a DESTROY sets is the exit status (probed)."
+  (when *p-destroy-live*
+    (let ((seen (make-hash-table :test 'eq))
+          (cache (make-hash-table :test 'equal))
+          (epoch *p-sub-table-epoch*)
+          (*p-in-end-phase* t)
+          (*p-end-phase-pid* (sb-posix:getpid)))
+      (catch '%p-end-exit
+        (loop repeat +p-destroy-max-rounds+
+              for batch = (%p-destroy-batch)
+              while batch
+              do (dolist (obj batch)
+                   (unless (gethash obj seen)
+                     (setf (gethash obj seen) t)
+                     ;; a sub a destructor installed may change any answer
+                     (unless (eql epoch *p-sub-table-epoch*)
+                       (clrhash cache)
+                       (setf epoch *p-sub-table-epoch*))
+                     (%p-destroy-one obj cache))))
+        (when (%p-destroy-batch)
+          (%p-diag "PCL: global destruction stopped after ~D rounds: DESTROY ~
+                    keeps blessing new objects~%" +p-destroy-max-rounds+))))))
+
 ;;; ============================================================
 ;;; OO Support
 ;;; ============================================================
@@ -37315,6 +37541,9 @@ would consume, so it dies naming the stream (rule 12)."
     ;; so it can add the "(perhaps you forgot to load...)" hint only for truly unknown classes.
     (unless (%pcl-find-package class-name)
       (ignore-errors (make-package (perl-pkg-to-cl-pkg-name class-name) :use '(:cl :pcl))))
+    ;; DESTROY at program exit (#2371): one global read while the program
+    ;; has no non-empty DESTROY / AUTOLOAD anywhere.
+    (when *p-destroy-live* (%p-destroy-note-bless ref inner))
     (cond
       ((hash-table-p inner)
        (setf (gethash :__class__ inner) class-name)

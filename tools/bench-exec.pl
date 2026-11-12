@@ -371,6 +371,15 @@ my @benches = (
   # asks p-find-overload of an unblessed reference).
   ['refderef',  "$HN my \$r = [1 .. 10]; my \$h = { a => 1 }; my \$s = 0; for my \$i (1 .. \$n) { \$s += \$r->[\$i % 10] + \$h->{a} + scalar(\@\$r) } print \"\$s\\n\";", 2_000_000, 0],
   ['refderefov', "$HN package O; use overload '\@{}' => sub { [] }, fallback => 1; package main; my \$r = [1 .. 10]; my \$h = { a => 1 }; my \$s = 0; for my \$i (1 .. \$n) { \$s += \$r->[\$i % 10] + \$h->{a} + scalar(\@\$r) } print \"\$s\\n\";", 2_000_000, 0],
+  # s538b (#2371, DESTROY at program exit): the cost of `bless`.  blessnew is a
+  # program with no DESTROY / AUTOLOAD anywhere (one global read per bless);
+  # blessnew-d the same loop in a program where ANOTHER class has a DESTROY
+  # (every bless registers its referent in the weak registry); blessdes the
+  # objects' own class has one (registration + the exit-time DESTROY of the
+  # objects still alive at exit -- which the subtraction keeps, it is real).
+  ['blessnew',   "$HN package P; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$s = 0; for my \$i (1 .. \$n) { my \$o = P->new(\$i); \$s += \$o->{v} } print \"\$s\\n\";", 1_000_000, 0],
+  ['blessnew-d', "$HN package Q; sub DESTROY { \$Q::d++ } package P; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$s = 0; for my \$i (1 .. \$n) { my \$o = P->new(\$i); \$s += \$o->{v} } print \"\$s\\n\";", 1_000_000, 0],
+  ['blessdes',   "$HN package P; sub new { bless { v => \$_[1] }, \$_[0] } sub DESTROY { \$P::d++ } package main; my \$s = 0; for my \$i (1 .. \$n) { my \$o = P->new(\$i); \$s += \$o->{v} } print \"\$s\\n\";", 1_000_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
