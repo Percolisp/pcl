@@ -349,7 +349,8 @@ P
 # perl's indirect object FH->say(LIST) = IO::Handle::say, the builtin (the
 # user's sub was handed the `:fh` marker).  A ($)-prototyped user sub stays a
 # named unary; the feature-ON spellings keep the builtin.  INVERSE: main
-# 4a39a1c7 prints `2 fc(1) 2` / `say(fh STDOUT 1)`.
+# 4a39a1c7 prints `2 fc(1) 2` / `say(fh STDOUT 1)`; main 23f0f917 (re-probed
+# s539) DIES at `my @i = (isa 1, 2);` ("statement not supported ... Fell through").
 both_agree(<<'P', '#4703 a gated keyword that is the user sub parses as a list operator; say FH is the builtin');
 sub fc { "fc(" . join(" ", @_) . ")" }
 sub evalbytes { "eb(" . join(" ", @_) . ")" }

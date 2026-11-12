@@ -362,8 +362,8 @@ test_cl('#4762: ... and a sub that exists at run time is still CALLED',
 # #4762's `::pass;` asks (t/op/attrs.t: a sub test.pl defines at BEGIN time
 # was NOT called), `&{"::hello"}` and `*{"::made"} = sub {...}` inside another
 # package (one splitter, %p-split-symbolic-name).  INVERSE: main 3d524ad7
-# dies "Undefined subroutine &::hello"; the tree before the splitter skipped
-# the `::hello;` call.
+# and 23f0f917 (MAIN-READY-87, re-probed s539) die "Undefined subroutine
+# &::hello"; the tree before the splitter skipped the `::hello;` call.
 test_cl('#4762: a leading :: names main for a bareword, a symbolic call and a glob',
     qq{no strict;\nBEGIN { *main::hello = sub { print "H(\@_)\\n"; "h" } }\n}
   . qq{package Other;\nsub f { ::hello; }\nf();\nprint &{"::hello"}(1), "\\n";\n}
@@ -375,7 +375,8 @@ test_cl('#4762: a leading :: names main for a bareword, a symbolic call and a gl
 # from the marked token, whose head was emitted as the leaf FORM --
 # `(|(p-bareword-value "Foo|::|pl-hi")|)`, an undefined function at run time.
 # The word is the TAIL statement of the sub (its value is parsed again).
-# PRE-EXISTING on main 3d524ad7 (it dies); #4762 reached it at `::hello;`.
+# PRE-EXISTING on main 3d524ad7 and 23f0f917 (both die: "The function
+# |(p-bareword-value \"Foo|::|pl-hi\")| is undefined"); #4762 reached it at `::hello;`.
 test_cl('a call built from a word an earlier parse marked unplaceable has a NAME head',
     qq{BEGIN { *Foo::hi = sub { "HI(\@_)" } }\nsub g { my \$x = Foo::hi; }\nsub h { Foo::hi; }\n}
   . qq{print g(), " ", h(), "\\n";},
