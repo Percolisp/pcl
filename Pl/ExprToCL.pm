@@ -5366,7 +5366,12 @@ sub gen_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
-  my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol';
+  # A Magic token is a bare container too (#3615): PPI hands `@_{…}` / `@+{…}`
+  # / `@!{…}` over as PPI::Token::Magic, so the slice of `%_` read the ARRAY
+  # `@_` ("Not a HASH reference" -- Text::CSV_PP's `local %_; @_{@hdr} = @$row`
+  # filter-by-name path).  The element emitter's predicate, word for word.
+  my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol'
+             || ref($hash_node) eq 'PPI::Token::Magic';
   my $hash = $is_bare ? $self->gen_node($kids->[0])
                       : $self->_slice_base_form(sub {                   # #612, #720
                           $self->_paren_deref_base_form($kids->[0], 1)

@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 22;
 
 sub run_cl {
     my ($code) = @_;
@@ -244,3 +244,20 @@ test_cl('delete in LIST context and delete of an ELEMENT are unchanged',
      print join(",", @d1), "|", join(",", @d2), "|", join(",", @d3),
            "|$e1|$e2\n";',
     "b,2|3|1,20|1|10\n");
+
+# #3615 (s538a): a hash slice of a MAGIC-named hash -- `@_{...}` (of %_),
+# `@+{...}`, `@!{...}` -- is the HASH's slice.  PPI hands the container over
+# as a PPI::Token::Magic, and the slice emitter's bare-container test asked
+# for a Symbol only, so `@_{...}` sliced the ARRAY @_ and died "Not a HASH
+# reference" (Text::CSV_PP's `local %_; @_{@hdr} = @$row`, its filter-by-name
+# path; Text-CSV t/91_csv_cb.t ran 19 of 79).  Inverse-checked on 23f0f917.
+test_cl('a hash slice of %_ / %+ / %! (a Magic-token container) is the hash slice',
+    'my @hdr = qw(foo bar baz);
+     my $cb = sub { my ($row) = @_; local %_; @hdr and @_{@hdr} = @$row;
+                    join ",", map { "$_=$_{$_}" } sort keys %_ };
+     my $o = $cb->([1, 2, 3]);
+     my @v = do { local %_; @_{qw(x y)} = (7, 8); @_{qw(y x)} };
+     my @c = "ab" =~ /(?<x>a)(?<y>b)/ ? @+{qw(y x)} : ();
+     my $e; { local $! = 2; my @s = @!{qw(ENOENT EBADF)}; $e = join ",", map { $_ ? 1 : 0 } @s }
+     print "$o|@v|@c|$e\n";',
+    "bar=2,baz=3,foo=1|8 7|b a|1,0\n");
