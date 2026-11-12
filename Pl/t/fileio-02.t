@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 46;
+plan tests => 47;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -426,6 +426,37 @@ open(my $in, '<', "/tmp/pcl_slurp_$$.dat") or die;
 my @d = do { local $/; <$in> };
 print scalar(@l), " ", length($s), " ", scalar(@d), " ", (defined $/ ? "rs-restored" : "rs-LEAKED"), "\n";
 unlink "/tmp/pcl_slurp_$$.dat";
+PERL
+}
+
+# --- Test 21c (#660): slurp mode at END OF FILE answers "" ONCE per handle ---
+# perl's IOf_NOLINE: a scalar-context `<$fh>` with $/ undef on a handle that
+# has answered no record since its OPEN is the defined empty string; a repeat
+# read, a handle that answered a line, a list-context read and a read failure
+# are undef / the empty list; a seek does not reset it, a reopen or a dup does;
+# <> opens each @ARGV file, so an empty one in the middle is "" once.
+# PCL answered undef for the first read (Path-Tiny's ->slurp died "Error read").
+{
+    test_io('slurp at EOF: "" once per handle, seek keeps it, open / dup / <> file reset it (#660)', <<'PERL');
+my $d = "/tmp/pcl_660_$$"; mkdir $d or die;
+sub mk { my ($n, $c) = @_; open my $o, ">", "$d/$n" or die; print $o $c; close $o; "$d/$n" }
+my $e = mk("e", ""); my $f = mk("f", "ab\ncd\n");
+sub sh { print $_[0], "=", (defined $_[1] ? "def" . length($_[1]) : "undef"), " " }
+{ local $/; open my $h, "<", $e or die; sh("e1", scalar <$h>); sh("e2", scalar <$h>); print "dot=$. ";
+  seek($h, 0, 0); sh("seek", scalar <$h>); }
+{ local $/; open my $h, "<", $f or die; sh("f1", scalar <$h>); sh("f2", scalar <$h>); }
+{ open my $h, "<", $f or die; my $l = <$h>; local $/; sh("line+slurp", scalar <$h>); sh("again", scalar <$h>); }
+{ local $/; open my $h, "<", $e or die; my @l = <$h>; print "list=", scalar(@l), " "; sh("then", scalar <$h>); }
+{ local $/; open my $h, "<", $e or die; my $b; read($h, $b, 9); getc($h); eof($h); sh("after-read-getc-eof", scalar <$h>); }
+{ local $/; open my $h, "<", $e or die; my $t = eof($h); $. = 0; sh("dot-assigned", scalar <$h>); }
+{ local $/; open my $s, "<", $f or die; my $x = <$s>; open(my $u, "<&=" . fileno($s)) or die; sh("fdopen", scalar <$u>); }
+{ local $/; my $str = ""; open my $m, "<", \$str or die; sh("mem", scalar <$m>); sh("mem2", scalar <$m>); }
+{ local $/; open my $h, "<", $e or die; my $c = 0; while (<$h>) { last if ++$c > 3 } print "while=$c "; }
+{ local $/; open my $h, "<", "." or die; sh("dir", scalar <$h>); }
+print "\n";
+{ local $/; local @ARGV = ($f, $e, $f); my @g; while (<>) { push @g, length($_) . ":$." } print "argv: @g\n"; }
+{ local $/; local @ARGV = ($e, $e); my @l = <>; print "argv-list: ", scalar(@l), "\n"; }
+system("rm", "-rf", $d);
 PERL
 }
 

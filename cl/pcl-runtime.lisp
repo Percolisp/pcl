@@ -3809,9 +3809,38 @@
 ;;; read all make their handle the current one.  We model this with a per-handle
 ;;; counter table keyed on the CL stream, plus a magic p-box whose getter/setter
 ;;; dispatch to *p-last-read-handle* (the handle $. refers to).
+;;;
+;;; THE ENTRY ALSO CARRIES perl's IOf_NOLINE (task #660).  perl sets that flag
+;;; on the handle when a readline ANSWERS a record (pp_hot.c do_readline,
+;;; beside IoLINES++), and only an OPEN clears it (doio.c openn_cleanup) -- a
+;;; seek does not (probed 5.40.3).  Its one reader is slurp mode at end of
+;;; file: a scalar-context `<$fh>` with `$/` undef on a handle that has
+;;; answered nothing since its open is the DEFINED empty string, once
+;;; (SNARF_EOF).  So the entry is a FIXNUM once the handle has answered a
+;;; record, and a one-element LIST (COUNT) while it has not: `$. = N` on a
+;;; fresh handle and the <> file sequence's cumulative seed (%p-argv-advance)
+;;; both store a count without answering anything.  An absent entry is a
+;;; fresh handle with count 0.  ONE table, so a new stream (an open, a dup) is
+;;; fresh by construction, and the per-line cost is one CONSP test.
 (declaim (special *p-last-read-handle*))
 (defvar *p-fh-lines* (make-hash-table :test 'eq)
-  "Per-filehandle input line counter (Perl IoLINES): stream -> line count.")
+  "Per-filehandle input line counter (Perl IoLINES): stream -> line count, a
+   FIXNUM once a readline has answered a record on the stream, (COUNT) before
+   that (perl's IOf_NOLINE, task #660; see the note above).")
+(declaim (inline %p-fh-lines-of %p-fh-lines-bump))
+(defun %p-fh-lines-of (stream)
+  "STREAM's input line counter (perl IoLINES), 0 if none."
+  (let ((v (gethash stream *p-fh-lines* 0)))
+    (if (consp v) (car v) v)))
+(defun %p-fh-lines-bump (stream)
+  "A readline ANSWERED a record on STREAM: bump its counter, which also marks
+   the stream as having answered one (the fixnum form, task #660)."
+  (let ((v (gethash stream *p-fh-lines* 0)))
+    (setf (gethash stream *p-fh-lines*) (1+ (if (consp v) (car v) v)))))
+(defun %p-fh-answered-p (stream)
+  "Has a readline answered a record on STREAM since it was opened?  perl's
+   IOf_NOLINE (task #660)."
+  (integerp (gethash stream *p-fh-lines*)))
 (defvar *p-dot-value* nil
   "$.'s OWN value while no handle is current (task #3518): perl's `$.` is an
    SV, and with no last-read handle `$. = N` stores N there and a read
@@ -3821,14 +3850,17 @@
   "Getter for $.: the last-accessed handle's line counter, or -- with no
    current handle -- the value last assigned (undef if none, #3518)."
   (if *p-last-read-handle*
-      (gethash *p-last-read-handle* *p-fh-lines* 0)
+      (%p-fh-lines-of *p-last-read-handle*)
       *p-dot-value*))
 (defun %p-dot-set (new-val)
   "Setter for $.: store NEW-VAL as the last-accessed handle's line counter,
-   or as $.'s own value when no handle is current (#3518)."
+   or as $.'s own value when no handle is current (#3518).  An assignment
+   answers no record: a fresh handle stays fresh (task #660)."
   (let ((n (truncate (to-number new-val))))
     (if *p-last-read-handle*
-        (setf (gethash *p-last-read-handle* *p-fh-lines*) n)
+        (let ((h *p-last-read-handle*))
+          (setf (gethash h *p-fh-lines*)
+                (if (%p-fh-answered-p h) n (list n))))
         (setf *p-dot-value* n))
     n))
 (defvar |$.| (make-p-box (make-p-magic-cell :getter #'%p-dot-get
@@ -24834,8 +24866,11 @@ would consume, so it dies naming the stream (rule 12)."
     ;; Any stream error (e.g. reading from a directory) → nil like perl, AND
     ;; `$!` set the way perl sets it: %p-read-fail names EISDIR for a
     ;; directory handle and leaves $! alone for anything else (task #1237).
-    (stream-error () (%p-read-fail stream))
-    (error () (%p-read-fail stream))))
+    ;; The second value T says the nil is a FAILURE, not end of file: slurp
+    ;; mode's empty first record is an EOF answer only (task #660; perl's
+    ;; PerlIO_error test in do_readline).
+    (stream-error () (values (%p-read-fail stream) t))
+    (error () (values (%p-read-fail stream) t))))
 
 (defun %p-read-record-1 (stream sep)
   "%p-read-record's record rule, with no error handling of its own."
@@ -24908,11 +24943,15 @@ would consume, so it dies naming the stream (rule 12)."
                                     do (loop-finish))
                               (if (zerop (length result)) nil (subseq result 0)))))))
 
-(defun %p-readline-impl (&optional fh)
+(defun %p-readline-impl (&optional fh list-ctx)
   "Perl readline / diamond operator <FH> — one record from a FILEHANDLE.
    The record rule itself is %p-read-record; what belongs here is the handle:
    which stream, which one `eof`/`$.` last referred to, and the line-counter
-   bump.  Returns nil at EOF; with no filehandle, reads *standard-input*."
+   bump.  Returns nil at EOF; with no filehandle, reads *standard-input*.
+   SLURP MODE AT END OF FILE (task #660): a SCALAR-context read with `$/`
+   undef on a handle that has answered no record since its open answers the
+   DEFINED empty string, once -- perl's SNARF_EOF; LIST-CTX (the list-context
+   readers) and a read FAILURE answer nil as before."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
     ;; Remember the handle so a later argument-less `eof` tests THIS stream and
@@ -24920,10 +24959,13 @@ would consume, so it dies naming the stream (rule 12)."
     (when stream (setf *p-last-read-handle* stream))
     (let ((r (and stream (%p-stream-tie stream))))
       (when r (return-from %p-readline-impl (%p-tied-readline r))))
-    (let ((%rl-result (when stream (%p-read-record stream sep))))
+    (unless stream (return-from %p-readline-impl nil))
+    (multiple-value-bind (%rl-result failed) (%p-read-record stream sep)
+      (when (and (null %rl-result) (null sep) (not list-ctx) (not failed)
+                 (not (%p-fh-answered-p stream)))
+        (setf %rl-result ""))
       ;; A successful record read bumps THIS handle's line counter ($.).
-      (when (and stream %rl-result)
-        (incf (gethash stream *p-fh-lines* 0)))
+      (when %rl-result (%p-fh-lines-bump stream))
       %rl-result)))
 
 (defun %p-readline-all (fh)
@@ -24935,7 +24977,7 @@ would consume, so it dies naming the stream (rule 12)."
       (return-from %p-readline-all (%p-tied-readline-all r))))
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (loop
-     (let ((line (%p-readline-impl fh)))
+     (let ((line (%p-readline-impl fh t)))
        (if line
            (vector-push-extend (make-p-box line) result)
            (return result))))))
@@ -25064,8 +25106,12 @@ would consume, so it dies naming the stream (rule 12)."
   ;; Every file consumed: `$.' keeps its last value, but a LATER pass of <>
   ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).
   (cond ((null *p-argv-stream*) (setf *p-argv-last-count* 0) nil)
-        ;; Seed the new file's $. with the cumulative count from prior files.
-        (t (setf (gethash *p-argv-stream* *p-fh-lines*) *p-argv-last-count*)
+        ;; Seed the new file's $. with the cumulative count from prior files
+        ;; -- in the not-yet-answered form: perl's nextargv OPENS the file,
+        ;; which clears IOf_NOLINE, so an empty file read in slurp mode is
+        ;; "" once (task #660).
+        (t (setf (gethash *p-argv-stream* *p-fh-lines*)
+                 (list *p-argv-last-count*))
            *p-argv-stream*)))
 
 (defun %p-argv-drop-current ()
@@ -25076,15 +25122,17 @@ would consume, so it dies naming the stream (rule 12)."
   (%p-inplace-finish)
   (setf *p-argv-stream* nil))
 
-(defun %p-readline-argv ()
-  "Scalar-context <> : read one record across the @ARGV file sequence."
+(defun %p-readline-argv (&optional list-ctx)
+  "Scalar-context <> : read one record across the @ARGV file sequence.
+   LIST-CTX is %p-readline-argv-all's (task #660: no slurp-mode \"\")."
   (let ((r (%p-fh-tie "ARGV")))
     (when r (return-from %p-readline-argv (%p-tied-readline r))))
   (loop
    (unless *p-argv-stream*
      (unless (%p-argv-advance) (return nil)))
-   (let ((line (%p-readline-impl *p-argv-stream*)))   ; sets last-handle, bumps $.
-     (setf *p-argv-last-count* (gethash *p-argv-stream* *p-fh-lines* 0))
+   ;; sets last-handle, bumps $.
+   (let ((line (%p-readline-impl *p-argv-stream* list-ctx)))
+     (setf *p-argv-last-count* (%p-fh-lines-of *p-argv-stream*))
      (if line
          (return line)
          (%p-argv-drop-current)))))                  ; advance on next turn
@@ -25117,7 +25165,7 @@ would consume, so it dies naming the stream (rule 12)."
     (when r (return-from %p-readline-argv-all (%p-tied-readline-all r))))
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (loop
-     (let ((line (%p-readline-argv)))
+     (let ((line (%p-readline-argv t)))
        (if line
            (vector-push-extend (make-p-box line) result)
            (return result))))))
