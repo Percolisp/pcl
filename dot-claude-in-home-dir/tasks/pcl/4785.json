@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FILED s539 (reviewing session, 2026-11-12) from the pre-review probes of s537a (#4664 + #4325).  PRE-EXISTING: main 23f0f917 and the s537a tree (e7ffae33) answer alike.  Not held against the batch: #4325 as filed is the tied FIRST operand under an eval, which the tree fixes (main 2 fetches, tree 1, perl 1).\n\nREPRODUCER (perl 5.40.3; ~/pcl-agent-scratch/s539/review/a/p4.pl + .perl/.main/.tree):\n\n    package T; sub TIESCALAR { bless [0, $_[1]] } sub FETCH { $_[0][0]++; $_[0][1] } sub STORE {}\n    package main;\n    tie my $c, \"T\", \"Cls\"; my $o = bless [], $c; print tied($c)->[0], \" \", ref($o), \"\\n\";   # perl 1 Cls   PCL 3 Cls\n    tie my $d, \"T\", \"Cls\"; my $p = bless {}, $d; print tied($d)->[0], \"\\n\";                   # perl 1       PCL 3\n\nControls that are right on both: `bless $tied, \"Q\"` 1, `ref($tied)` 1, `length($tied)` 1, `join(\"-\", $t, $t)` 2.\n\nMECHANISM (not read): p-bless reads its class operand more than once (probably: the definedness / ref test, the stringification, the class registration).  Read the operand into a local once at the top of p-bless, as #4325 did for the first operand.  A silent wrong only for a FETCH with a side effect; LOW.  Guard: a row beside tie-fetch-once-01.t's #4325 rows.",
+   "id" : "4785",
+   "status" : "pending",
+   "subject" : "`bless REF, $tied` FETCHes a tied CLASS-NAME operand THREE times where perl FETCHes it once (#1813 family: an operator reads its operand once; the sibling of #4325, which was the tied FIRST operand)"
+}
