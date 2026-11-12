@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -292,4 +292,36 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'an empty file name fails ENOENT in every open mode (#4262)');
+}
+
+# #3618 (s538a): a handle variable holding a REFERENCE that is not a handle --
+# `\$coderef`, `[1]`, `{}`, `sub {}`, `\5` -- is perl's rv2gv death "Not a
+# GLOB reference", before the open (no file is created).  PCL overwrote the
+# variable with a new handle and the open SUCCEEDED, so Text::CSV_PP's
+# `csv(in => $f, out => \$code)` opened its INPUT through the out-handle and
+# t/90_csv.t stopped at row 117 of 128.  A glob, a glob ref and an open
+# handle still reopen; undef autovivifies.
+{
+    my $code = <<'PERL';
+my $d = "/tmp/pcl-openref-$$"; mkdir $d; my $f = "$d/in.txt";
+open(my $w, ">", $f) or die; print $w "x\n"; close $w;
+my $c = sub { 42 };
+my @h = (\$c, [1], {}, sub { 1 }, \5);
+for my $k (0 .. $#h) {
+    my $fh = $h[$k];
+    my $r = eval { open($fh, ">", "$d/new$k") or die "failed: $!"; 1 };
+    print "$k ", ($r ? "opened" : "died: " . ($@ =~ /^(.*?) at /s ? $1 : $@)),
+          " created=", (-e "$d/new$k" ? 1 : 0), "\n";
+}
+my $g = \*FH; open($g, "<", $f) or die; print "glob-ref: ", scalar <$g>;
+open(my $o, "<", $f) or die; open($o, "<", $f) or die; print "reopen: ", scalar <$o>;
+my $u; open($u, "<", $f) or die; print "undef: ", scalar <$u>;
+unlink glob("$d/*"); rmdir $d;
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'open on a variable holding a non-handle reference dies "Not a GLOB reference" (#3618)');
 }

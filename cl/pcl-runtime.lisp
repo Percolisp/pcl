@@ -22545,6 +22545,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    perl's does and covers the failing open too."
   (when (or (null designator) (eq designator *p-undef*))
     (p-die "Can't use an undefined value as filehandle reference"))
+  ;; A box holding a REFERENCE that is not a handle -- `\$coderef`, `[1]`,
+  ;; `{}`, `sub {}` -- is perl's rv2gv death, before the open (#3618): PCL
+  ;; overwrote the variable with a new handle and the open SUCCEEDED
+  ;; (Text::CSV_PP's `out => \$code` then read its INPUT file name as an
+  ;; array).  A handle-shaped payload (a glob, a stream, a socket, a
+  ;; dirhandle), undef, a name string or a number are the other spellings.
+  (when (p-box-p designator)
+    (let ((v (p-box-value designator)))
+      (unless (or (null v) (eq v *p-undef*) (stringp v) (numberp v)
+                  (%p-stat-handle-shaped-p v))
+        (when (plusp (length (p-ref designator)))
+          (p-die "Not a GLOB reference")))))
   designator)
 
 (defmacro %p-fh-install-arg (fh-form)
