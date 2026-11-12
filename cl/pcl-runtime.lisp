@@ -9098,11 +9098,21 @@
              (%p-ensure-storage (quote ,place))
              (setf (symbol-value ',place) (make-p-box nil)))
            (let ((,cur (p-box-value ,place)))
-             (if (p-tie-proxy-p ,cur)
-                 (%p-tie-store-ref ,place ,cur ,val)
-                 (setf (p-box-value ,place) ,val
-                       (p-box-nv-ok ,place) nil
-                       (p-box-sv-ok ,place) nil)))
+             (cond ((p-tie-proxy-p ,cur)
+                    (%p-tie-store-ref ,place ,cur ,val))
+                   ;; A GLOB ref (`\*STDOUT`) is stored the way box-set stores
+                   ;; it into a lexical -- the glob with the is-ref flag --
+                   ;; never box-in-box: held box-in-box, `$g->print` died
+                   ;; "unblessed reference" and fileno($g) was undef for a
+                   ;; package variable or a `||=` / `//=` target while the
+                   ;; `my $fh = \*STDOUT` spelling worked (Text::CSV_PP's
+                   ;; `$out ||= \*STDOUT`, 90_csv.t's stop after #3618).
+                   ((and (p-box-p ,val) (p-typeglob-p (p-box-value ,val)))
+                    (box-set ,place ,val))
+                   (t
+                    (setf (p-box-value ,place) ,val
+                          (p-box-nv-ok ,place) nil
+                          (p-box-sv-ok ,place) nil))))
            ,val))
       ;; Normal assignment - use box-set which unboxes.
       ;; Return the place (the box) so chained operators like (.= += etc.)

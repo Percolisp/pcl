@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -324,4 +324,29 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'open on a variable holding a non-handle reference dies "Not a GLOB reference" (#3618)');
+}
+
+# #3618's next stop (s538a): a GLOB REF stored into a package scalar or
+# through `||=` / `//=` / `&&=` (p-scalar-='s reference branch) was held
+# box-in-box, so `$g->print` died "unblessed reference" and fileno($g) was
+# undef, while `my $fh = \*STDOUT` worked.  Text::CSV_PP's `$out ||=
+# \*STDOUT` stopped t/90_csv.t right after its `out => \$code` row.
+{
+    my $code = <<'PERL';
+our $g; $g = \*STDOUT;
+sub t1 { my $o; $o ||= \*STDOUT; $o }
+sub t2 { my $o; $o //= \*STDERR; $o }
+sub t3 { my $o = 1; $o &&= \*STDOUT; $o }
+for my $h ($g, t1(), t2(), t3()) {
+    my $r = eval { $h->print(""); 1 };
+    print ref($h), " ", ($r ? "method" : "died"), " ", (defined fileno($h) ? "fd" : "nofd"), "\n";
+}
+$g->print("via package scalar\n");
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'a glob ref stored by `=` into a package scalar or by ||= //= &&= is a handle (#3618 next stop)');
 }
