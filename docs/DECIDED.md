@@ -11,6 +11,9 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s539 (2026-11-12, the reviewing session) -- four agents; POINT 4 raised with the USER
+- **Point 4 of the compatibility plan (#1389, #233 + #1361, #2370) is RAISED, NOT DECIDED**: measured sizes, options and a recommendation each -> `docs/point4-decisions-s539.md`.  The measurement that is new: `is_utf8` emulated under real perl over the seven board dists -- PCL's always-1 answer fails 273 rows, the content rule (1 iff a character above 0xFF) 20 (14 new); and Stage 2 of scope-exit DESTROY as designed reaches none of the board's whole-file losses (Try-Tiny: an array under a `local` hash element; IO-Compress: a self-tied glob).  Awaiting the USER.
+
 ## s538 (2026-11-10/11, the reviewing session) -- the s537 batches resumed after the stop; two USER rulings on PPI
 - **PPI source line endings, CR in strings (#4761 / #4302), USER RULED s538**: normalising line endings in pure CODE is fine; the content of a STRING (quote, here-doc body, `__DATA__`) keeps what PERL keeps -- probed: in a source file perl itself reads CR LF as LF inside `q{}` and a here-doc, and keeps a lone CR, an eval string's CR and `__DATA__`'s.  Owner the next PPI batch -> task #4761.
 - **PPI fork push (`github.com/Percolisp/PPI`, branch `pcl`), USER RULED s538**: at the reviewing session's discretion, like PCL's own pushes -- a merged PPI batch is pushed fast-forward after its merge (the earlier hold for PR #459's head is lifted).  First use: `86623347` (batch 7) pushed 2026-11-11.  Agents still never push to GitHub.
