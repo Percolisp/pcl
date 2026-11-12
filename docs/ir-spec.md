@@ -4448,6 +4448,58 @@ In a **fork child**, `END` blocks inherited from the parent still run at
 the child's exit (as in Perl); test-harness plan-checking is pid-guarded
 separately and is not an IR concern.
 
+### 7.4a Global destruction: `DESTROY` at program exit (normative, s538b, task #2371)
+
+**What runs, and when.**  The exit hook (`%p-run-end-phase`, the one exit
+path: `exit`, falling off the end, an uncaught top-level `die`, `exit` in an
+END block, a fork child's exit) runs, in order: the END blocks
+(`${^GLOBAL_PHASE}` = `END`), then **global destruction** with
+`${^GLOBAL_PHASE}` = `DESTRUCT`, then the handle flushes, then the exit with
+`$? & 255`.  `exec` and `POSIX::_exit` run none of it.  There is no other
+moment at which PCL calls `DESTROY`: not at scope exit, not at the last
+reference, not at `undef $obj` (Stage 2 = #2370, parked).
+
+**The registry.**  `p-bless` registers the REFERENT it stamps (the hash
+table, the array vector, the function, the scalar's box, the glob, the
+handle) in ONE weak vector — but only once the program has a non-empty sub
+named `DESTROY` or `AUTOLOAD` (the gate `*p-destroy-live*`, opened by
+`%p-note-sub-install`, the one place every named-sub install passes; it never
+closes).  An EMPTY `sub DESTROY {}` / `sub AUTOLOAD {}` (the AUTOLOAD-guard
+idiom; the p-sub macro recognises the body `(p-args-body (block nil
+(p-return-empty)))`) opens nothing.  The registry is WEAK: an object the
+garbage collector has reclaimed is gone and gets no `DESTROY` (that includes
+an object whose only holder is a variable the program never reads again —
+SBCL keeps no dead variable's value alive).  At the hook's first step the
+entries still alive are PINNED (held strongly) so that nothing the END blocks
+do can lose them.
+
+**The destruction.**  Objects are visited NEWEST FIRST (perl's order is
+unspecified; never assert one), each at most once (a per-run `seen` table is
+the destroyed mark; an explicit `$obj->DESTROY` earlier does not set it, and
+perl calls it again too).  For each: a fresh reference to the referent is
+built, its CURRENT class read (`p-get-class`), and the destructor resolved at
+that moment — `DESTROY` through `@ISA` then UNIVERSAL, else `AUTOLOAD` (with
+`$AUTOLOAD` = `CLASS::DESTROY`, as perl does); an empty one is skipped (and
+suppresses AUTOLOAD).  So a re-bless either way, an `@ISA` change and a
+`DESTROY` installed after the bless are all decided by what is true at exit.
+The call is in void context.  Objects blessed during a round are the next
+round's (at most 100 rounds, then a `PCL:` line on stderr).
+
+**What is not saved.**  perl localizes none of `$@`, `$!`, `$?` around a
+destructor at global destruction (probed 5.40.3), and neither does PCL: a
+later destructor sees an earlier one's values, and a `$?` a destructor sets
+IS the process's exit status (it is read after destruction).  A `die` inside
+a destructor is caught: it never changes the exit status, `$SIG{__DIE__}`
+runs at the die, and perl's `\t(in cleanup) MSG` report is a default-off
+warning (W misc), so it is absent (#221).  `exit N` inside a destructor ends
+the whole destruction with status N (perl, probed).  A non-perl condition
+(a PCL bug) is announced on stderr and the next object goes on.
+
+Example: `package G; sub DESTROY { print "bye\n" } package main; our $o =
+bless {}, "G"; END { print "end\n" } print "main\n";` prints `main`, `end`,
+`bye`; with `$? = 9` in the `DESTROY` and `exit 3` in the program, the
+process exits 9.
+
 ### 7.5 Bareword filehandle NAMES (normative, s443f)
 
 A bareword handle is a **name**, and the emitted CL carries it as a symbol

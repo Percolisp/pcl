@@ -273,11 +273,20 @@ The [IR manual](docs/ir-spec.md) documents every form.
   that keeps a reference to `$_[0]` and writes through it later, a write
   followed by `die`, and a closure reading the variable while the callee
   is still writing it.
-* **`DESTROY` is never called.** Memory is reclaimed by the Lisp
-  garbage collector, not by reference counting, so there is no
-  scope-exit destructor. Code that relies on one for cleanup (guard
-  objects, temporary files) does not get it. The same goes for
-  filehandles: for now, close your filehandles explicitly.
+* **`DESTROY` runs at program exit, not when the last reference goes.**
+  Memory is reclaimed by the Lisp garbage collector, not by reference
+  counting, so there is no scope-exit destructor. What PCL does is perl's
+  global destruction: when the program ends, after the `END` blocks, every
+  object still in memory gets its `DESTROY`. An object perl would have
+  destroyed earlier (at the end of its block, at `undef`, when its
+  container is cleared) gets it late, at exit, and only if the garbage
+  collector has not reclaimed it by then: in a loop that made and dropped
+  100,000 objects, 9,727 were still there at exit. The same can happen to
+  an object held only by a variable that is never read again, such as a
+  guard object. So temporary files are removed and buffered compressors
+  flushed at exit, but do not rely on a destructor running at a given
+  moment (scope guards for locks, restoring state at the end of a block),
+  and close your filehandles explicitly.
 * **Regex code blocks** `(?{ })` are removed from the pattern with a
   warning at compile time. The match runs without them.
 * **`format`/`write`**, **perl 5.38 `class`/`field`/`method`** and

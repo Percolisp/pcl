@@ -87,7 +87,7 @@ is [`not-supported.md`](not-supported.md). The main items:
 |---|---|
 | XS / compiled C extensions | experimental, through the separate [XS bridge](#xs); not part of PCL itself. One exception: `Compress::Raw::Zlib` is provided over the system zlib library, as a temporary route until the bridge supplies the module (see [XS](#xs)) |
 | `@_` argument aliasing | `$_[0] = 42` changes the caller's variable, array element or hash element when PCL sees the sub as it compiles the call; for a method, a code reference or a sub in another file, a plain scalar argument is copied in and written back after the call. An element reached through a reference (`f($r->{k})`) still gets a copy. Also not covered: the same variable passed twice, a kept reference to `$_[0]` written later, a write followed by `die`, a closure reading the variable mid-call, and a plain-string invocant (see "`@_` argument aliasing" in [`not-supported.md`](not-supported.md)) |
-| `DESTROY` | never called: memory is reclaimed by the garbage collector, and there is no scope-exit destructor. For now, close filehandles explicitly |
+| `DESTROY` | called at program exit, after the `END` blocks, for every object still in memory (perl's global destruction); never at scope exit or at the last reference, and an object the garbage collector reclaimed before exit gets none. Close filehandles explicitly |
 | regex code blocks `(?{…})`, `(??{…})` | removed from the pattern with a warning at compile time (cl-ppcre has no equivalent); the rest of the match runs |
 | `given`/`when`, smart match `~~` | refused with a message (removed in perl 5.42 anyway) |
 | `format`/`write` | refused with a message |

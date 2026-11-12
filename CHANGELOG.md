@@ -5,6 +5,12 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-12: **`DESTROY` at program exit** (#2371).  After the `END` blocks,
+  every object still in memory gets its `DESTROY` (or its class's `AUTOLOAD`),
+  as perl's global destruction does: temporary files are removed, buffered
+  compressors flushed.  It is never called at scope exit or at the last
+  reference, and an object the garbage collector reclaimed earlier gets none.
+
 - 2026-10-10: **`Encode`, `Storable`, `Digest::MD5` and `Digest::SHA` in pure
   Perl** (#2946, #2947, #2948).  `use Encode` works without XS: encode /
   decode / the CHECK modes / `:encoding(...)` layers over three runtime codec
