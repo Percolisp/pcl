@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FILED s539 (reviewing session, 2026-11-12) from the pre-review probes of s538a (#3554).  PRE-EXISTING: main 23f0f917 and the s538a tree (cf5c264f) print the same two lines.  Not held against the batch (it fixed what `_` holds; the die is in the right place with perl's exit status).\n\nREPRODUCER (perl 5.40.3; ~/pcl-agent-scratch/s539/review/c/p2.pl line 14 + .perl/.main/.tree):\n\n    symlink \"/tmp\", \"/tmp/l$$\"; print -l -e \"/tmp/l$$\";     # the stacked form: -e stats, then -l _\n\n  perl:  The stat preceding -l _ wasn't an lstat at p2.pl line 14.          (rc 9)\n  PCL:   While evaluating the form starting at line 99, column 0\n           of #P\"/tmp/runpcl_178172.lisp\":The stat preceding -l _ wasn't an lstat      (rc 9)\n\nThe error is signalled with a plain CL `error`, not through the perl-shaped die path, so it carries no location (the #1240 registers hold it) and the uncaught printer shows the load note.  The USER's rule (s494): fail in the same place and be TIDY -- one readable line.  Family: #2108 / #1595 / #1970 (untidy uncaught errors); s538a notes the same site reports `(eval 0) line 0` when caught.  Fix: raise it through the die helper the other run-time fatals use; check the siblings in the stat / filetest code for the same raw `error`.  LOW.",
+   "id" : "4786",
+   "status" : "pending",
+   "subject" : "TIDY: the uncaught die \"The stat preceding -l _ wasn't an lstat\" is a raw CL error -- no ` at FILE line N.`, and it prints the loader's \"While evaluating the form starting at line 99 ... of #P\\\"/tmp/runpcl_N.lisp\\\"\" note (perl: one line with the location; same place, same exit status 9)"
+}

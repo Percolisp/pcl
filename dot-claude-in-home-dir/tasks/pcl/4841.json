@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-12",
+   "description" : "FILED s538a (Opus 5.5, 2026-11-12) while building #3615's guard (a hash slice of a Magic-token container).  PRE-EXISTING in its mechanism: on main 23f0f917 the slice `@!{...}` sliced the ARRAY @! (#3615) and died before reaching this; with #3615 fixed the slice is %!'s, and its VALUES are still read too late.\n\nREPRO (perl 5.40.3 vs PCL on the s538a tree, scratch/s538a/pr/errslice.pl in the s538a worktree):\n    my $s = do { local $! = 2; $!{ENOENT} };          # perl set    PCL set\n    my @e = do { local $! = 2; @!{qw(ENOENT)} };      # perl set    PCL UNSET\n    my @f = do { local $! = 2; ($!{ENOENT}) };        # perl set    PCL set\n    sub g { local $! = 2; return $!{ENOENT} }         # perl set    PCL set\nInside the block (`{ local $! = 2; my @s = @!{qw(ENOENT EBADF)} }`) the slice is right (1,0) -- so the slice of the computed hash %! hands out elements that compute on READ, and the read happens after `local $!` is restored at the block's exit.  perl's slice of %! FETCHes each element into the returned list before LEAVE.\n\nFIX SHAPE (not started): p-hslice over a magic/computed hash (%!, %+, %-, %ENV?) must snapshot the element values when the slice is an rvalue, as the element and list forms already do.  Probe %+ / %- after a later match the same way (`my @c = do { \"ab\" =~ /(?<x>a)/; @+{x} }` then a match inside the block).  BAR: the four rows above + %+/%- twins vs perl; a Pl/t row beside Pl/t/kvaslice-01.t row 22.",
+   "id" : "4841",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (pre-existing): a hash slice of %! returned out of a block whose `local $!` it read -- `my @e = do { local $! = 2; @!{qw(ENOENT)} }` -- is read AFTER the restore: perl \"set\", PCL \"unset\" (the element form `$!{ENOENT}` and a list `($!{ENOENT})` are right)"
+}
