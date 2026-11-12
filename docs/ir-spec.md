@@ -4961,6 +4961,14 @@ Two consequences a translator must implement or lose output:
 
   Example: `BEGIN { -d "/nope" } print 0+$!` prints 0; `open my $h, "<", $f;
   -d "/nope"; my @l = <$h>; print 0+$!` prints 0.
+* **Slurp mode at end of file answers "" ONCE per handle** (s538a, #660, perl's
+  IOf_NOLINE): a SCALAR-context readline with `$/` undef on a handle that has
+  answered no record since its OPEN is the defined empty string; a repeat read,
+  a handle that answered a line or a slurp, a LIST-context read (the empty
+  list) and a read FAILURE answer undef.  A `seek` does not reset it; an open,
+  a dup and each file `<>` moves to do.  `$.` counts the "" as a record.
+  Example: on an empty file `local $/; my $x = <$h>; my $y = <$h>` leaves $x
+  "" and $y undef, and `while (<$h>)` runs once.
 * **A SYMBOLIC glob name resolves like a static one** (#4310): an unqualified
   `*{"NAME"}` is main's glob when NAME is a forced-main name (`_ INC ENV SIG
   ARGV STDIN STDOUT STDERR ARGVOUT`) or does not begin like an identifier
@@ -6263,7 +6271,7 @@ function's docstring states its Perl contract. The families:
 
 | family | members (representative) | rule |
 |---|---|---|
-| numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->>` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules and the two regimes of §3.5; the shifts read the LEFT operand as a UV (perl's `SvUV`, s525u, #3760: a negative operand is its 64-bit two's complement, NaN 0, +Inf and anything ≥ 2**64 UV_MAX, -Inf and anything below IV_MIN IV_MIN; `-1 >> 1` is 9223372036854775807), keep a left shift to 64 bits (`3 << 63` is 2**63), answer 0 for a count ≥ 64 either way and reverse direction for a negative count; `use integer` emits `p-<<-int` / `p->>-int` (signed IVs) for a BINARY shift, while the compound `<<=` / `>>=` keep the signed shift in and out of the pragma because the compiler emits the same macro for both (#3781) |
+| numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->>` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules and the two regimes of §3.5; the shifts read the LEFT operand as a UV (perl's `SvUV`, s525u, #3760: a negative operand is its 64-bit two's complement, NaN 0, +Inf and anything ≥ 2**64 UV_MAX, -Inf and anything below IV_MIN IV_MIN; `-1 >> 1` is 9223372036854775807), keep a left shift to 64 bits (`3 << 63` is 2**63), answer 0 for a count ≥ 64 either way and reverse direction for a negative count; `use integer` emits `p-<<-int` / `p->>-int` (signed IVs) for a BINARY shift and `p-op=` over them for the compound one; outside the pragma the compound `<<=` / `>>=` read a UV like the binary pair (s538a, #3781).  **`use integer` is a lexical REGION** (normative, s538a, #3781): it runs from the statement to the end of its enclosing block, `no integer` likewise; the integer family (`+ - * / % & | ^ << >>` and `~`, the compound `OP=` of each) applies at a site inside a region -- a file's or block's pragma reaches a named sub body defined in it, a sub body's own pragma reaches nothing outside the sub, and a string eval compiled inside a region inherits it.  `**` and `++`/`--` have no integer form (perl's i_preinc is preinc): `use integer; my $y = 2.5; $y++` is 3.5 |
 | bitwise (**mode-dispatched**) | `p-bit-and p-bit-or p-bit-xor p-bit-not` (perl's `& \| ^ ~`; the runtime has no `p-&`-style names — verified emitted, s470bm) · always-string twins `p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not` (`&. \|. ^. ~.`) | overload hook first; then ONE mode decision (`%p-bitwise-operand-kind`): the op is NUMERIC iff an operand carries a number, else it STRINGIFIES both operands and operates byte by byte (`&` truncates to the shorter, `\|`/`^` pad with NUL). A reference, glob, `qr//`, blessed object or undef carries neither a number nor a string body and therefore goes to the STRING side — `undef \| "abc"` is `"abc"`, `[1] \| ("\0" x 13)` is `"ARRAY(0x…)"`. **Unary `~` differs on one state and only one**: a REFERENCE goes to its numeric side (the complemented address), because perl's `pp_complement` takes the string branch only for an SV that has a PV. A bit-STRING op whose operands hold a code point above 0xFF is FATAL, with perl's wording. The "carries a number" test is perl's SvNIOKp: a number, or a BOX holding a string whose `nv-ok` is set (§2.2 — it was numified; s525u).  A string with no numification history still falls back to `looks-like-number`, so a numeric-LOOKING literal still takes the numeric side (`"12" & "10"` is `"10"` in perl, `8` here) until `use feature 'bitwise'` is an emitted fact (task #1040) |
 | numeric compare | `p-== p-!= p-< p-> p-<= p->= p-<=>` | numify; return `1`/`""` (`<=>` −1/0/1; NaN comparisons → `""`/undef) |
 | string ops | `p-. p-string-concat p-str-x p-lc p-uc p-lcfirst p-ucfirst p-length p-substr p-index p-rindex p-reverse p-sprintf p-join` | stringify operands (§3.2), return raw string; Perl's `$_`-default forms arrive with `$_` already explicit in the tree (§8).  Perl's `x` is TWO ops, by what it repeats: `p-str-x` for a string, `p-list-x` for a parenthesised list (which belongs to the array/hash builtins) |
@@ -6848,7 +6856,11 @@ BUFFER the inner test left, never the inner test's return VALUE
 PCL implements the buffer as the remembered OPERAND and stats again, rather
 than caching perl's `struct stat`; outside a race the answers agree, and each
 test keeps its own logic (access(2) for `-r`/`-w`/`-x`, `lstat` for `-l`, the
-first-block scan for `-T`/`-B`).  A backend may cache the buffer instead —
+first-block scan for `-T`/`-B`).  **Reading `_` re-reads with the flavour that FILLED
+it** (normative, s538a, #3554): after `lstat $link` the buffer is the link's own
+record, so `-d _` / `-f _` / `-s _` / `stat _` answer for the LINK, and `-e _`
+after an lstat of a dangling link is true.  Example: `lstat $link_to_dir; -d _`
+is false, `stat $link_to_dir; -d _` is true.  A backend may cache the buffer instead —
 what it may not do is drop the flavour and the success flag, which are
 observable.
 

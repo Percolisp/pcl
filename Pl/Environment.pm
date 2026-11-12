@@ -1212,7 +1212,7 @@ sub pop_scope {
 
 Sets a pragma on the current scope frame.
 
-    $env->set_pragma('use_integer', 1);
+    $env->set_pragma('strict_subs', 1);   # (`use integer` is a REGION, Pl::Parser::integer_regions_of)
 
 =cut
 
@@ -1225,7 +1225,7 @@ sub set_pragma {
 
 Returns the value of a pragma in the current scope, or undef if not set.
 
-    if ($env->has_pragma('use_integer')) { ... }
+    if ($env->has_pragma('strict_subs')) { ... }
 
 =cut
 
