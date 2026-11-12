@@ -186,12 +186,14 @@
    #:p-bit-and= #:p-bit-or= #:p-bit-xor= #:p-<<= #:p->>=
    #:p-str-bit-and= #:p-str-bit-or= #:p-str-bit-xor=
    #:p-and-assign #:p-or-assign #:p-//=
+   #:p-op=                ; the compiler-spelled compound (use integer, #3781)
    ;; Raw twins: compound assignment on a raw let-bound lexical slot
    #:p-incf-raw #:p-decf-raw
    #:p-*=-raw #:p-/=-raw #:p-%=-raw #:p-**=-raw
    #:p-.=-raw #:p-str-x=-raw
    #:p-bit-and=-raw #:p-bit-or=-raw #:p-bit-xor=-raw #:p-<<=-raw #:p->>=-raw
    #:p-str-bit-and=-raw #:p-str-bit-or=-raw #:p-str-bit-xor=-raw
+   #:p-op=-raw
    ;; Comparison (numeric)
    #:p-== #:p-!= #:p-< #:p-> #:p-<= #:p->= #:p-<=>
    ;; Comparison (string)
@@ -13121,21 +13123,56 @@ per element."
                        "Perl ^= (bitwise-xor-assign)"
                        `(p-bit-xor ,cur ,value))
 
-;;; `<<=' / `>>=' DELEGATE to `p-<<' / `p->>' (task #972).  They used to spell
-;;; a SECOND copy of the shift, and the copies disagreed: this one has no
-;;; clamp, so `my $z = 5; $z <<= 70' answered 5902958103587056517120 where
+;;; `<<=' / `>>=' DELEGATE to `p-<<' / `p->>''s body (task #972).  They used
+;;; to spell a SECOND copy of the shift, and the copies disagreed: this one had
+;;; no clamp, so `my $z = 5; $z <<= 70' answered 5902958103587056517120 where
 ;;; both perl and `5 << 70' answer 0.  One reading also gets them the overload
-;;; dispatch p-<< now carries, which is what perl does for `$obj <<= 3'.
-;;; They call p-<<'s body %p-shift with SIGNED = T: the compiler emits the
-;;; same `p-<<=' in and out of `use integer', and keeping the pre-#3760
-;;; signed shift here is right under the pragma (task #3781 owns the rest).
+;;; dispatch p-<< carries, which is what perl does for `$obj <<= 3'.  They read
+;;; the left operand as a UV, as the binary pair does (#3760): under `use
+;;; integer' the compiler emits `p-op=' over `p-<<-int' / `p->>-int' instead
+;;; (task #3781), so these two are only ever OUTSIDE the pragma.
 (%define-compound-pair p-<<= p-<<=-raw (value)
                        "Perl <<= (left-shift-assign)"
-                       `(%p-shift ,cur ,value 1 "<<" t))
+                       `(%p-shift ,cur ,value 1 "<<"))
 
 (%define-compound-pair p->>= p->>=-raw (value)
                        "Perl >>= (right-shift-assign)"
-                       `(%p-shift ,cur ,value -1 ">>" t))
+                       `(%p-shift ,cur ,value -1 ">>"))
+
+;;; A COMPOUND ASSIGNMENT WHOSE NEW VALUE THE COMPILER SPELLED (task #3781).
+;;; `use integer' changes what `+= -= *= /= %= &= |= ^= <<= >>=' compute --
+;;; perl's i_add / i_divide / ... carry the assignment form too -- and the
+;;; compiler already owns the integer family for the BINARY ops (ExprToCL's
+;;; `_integer_op_form').  So rather than a second table of integer compound
+;;; macros here, the compiler hands over the integer form of `CUR OP VAL' and
+;;; this macro supplies only the store: PLACE evaluated once (%store-back-form,
+;;; like every compound op), VALUE evaluated BEFORE the place is read (perl
+;;; pushes the target SV and reads it inside the op), and the overload guard
+;;; %compound-arith-form measured -- a blessed operand reaches SLOW, the base
+;;; operator's generic function, as `+=' always has (the binary integer ops
+;;; still bypass overloading: #1000).  The raw twin stores a raw slot; its
+;;; trailing `:numeric' licence drops the guard, as for the other pairs.
+;;;   (p-op= $y 2.5 (--pcl-cur --pcl-val) (+ (p-int --pcl-cur) (p-int --pcl-val)) p-+)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %compound-template-form (cur value vars new slow numericp)
+    "The new-value form of p-op= / p-op=-raw: bind VARS = (C V) to the current
+     value CUR and to VALUE (VALUE first), then NEW, guarded for overloading."
+    (destructuring-bind (c v) vars
+      `(let* ((,v ,value) (,c ,cur))
+         ,(if numericp
+              new
+              `(if (and *p-any-overload-registered*
+                        (or (and (p-box-p ,c) (p-box-class ,c))
+                            (and (p-box-p ,v) (p-box-class ,v))))
+                   (,slow ,c ,v)
+                   ,new))))))
+
+(%define-compound-pair p-op= p-op=-raw (value vars new slow)
+                       "Perl `PLACE OP= VALUE' with the new value spelled by the compiler: NEW
+   over VARS = (CUR VAL), SLOW the base operator's generic function for a
+   blessed operand.  Emitted for the compound family under `use integer'
+   (task #3781); see %compound-template-form."
+                       (%compound-template-form cur value vars new slow numericp))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -14043,40 +14080,25 @@ per element."
    UV_RIGHT_SHIFT: |COUNT| >= 64 is 0 and the result is kept to 64 bits."
   (if (>= (abs count) 64) 0 (ldb (byte 64 0) (ash uv count))))
 
-(defun %p-shift-signed (n count)
-  "The SIGNED shift `<<=' / `>>=' keep (see p-<<): N shifted by COUNT with no
-   UV reading and no 64-bit mask -- what every shift did before #3760, which
-   is right under `use integer' for the common in-range operand."
-  (let ((i (if (floatp n)
-               (cond ((%pcl-nan-p n) 0)
-                     ((sb-ext:float-infinity-p n)
-                      (if (minusp n) #x8000000000000000 #xFFFFFFFFFFFFFFFF))
-                     (t (truncate n)))
-               n)))
-    (if (>= (abs count) 64) 0 (ash i count))))
-
-(defun %p-shift-slow (a b count-sign op-str signed)
+(defun %p-shift-slow (a b count-sign op-str)
   "%p-shift's general path: the overload test, both coercions, and the UV
-   reading of the left operand (or the SIGNED shift `<<=' / `>>=' keep)."
+   reading of the left operand.  (The SIGNED flag `<<=' / `>>=' used to pass
+   is gone: under `use integer' the compound pair is `p-op=' over the integer
+   shifts, task #3781.)"
   (%with-binary-overload (op-str a b)
                          (let ((n (to-number a))
                                (c (* count-sign (%pcl-to-integer (to-number b)))))
-                           (if signed
-                               (%p-shift-signed n c)
-                               (%p-uv-shift (%pcl-uv-coerce n) c)))))
+                           (%p-uv-shift (%pcl-uv-coerce n) c))))
 
 (declaim (inline %p-shift))
-(defun %p-shift (a b count-sign op-str signed)
+(defun %p-shift (a b count-sign op-str)
   "The body p-<< and p->> share: A shifted by B (B's sign flipped when
    COUNT-SIGN is -1, i.e. a right shift).  A plain NON-NEGATIVE FIXNUM and a
    plain fixnum count skip the overload test and both coercions, which are
    identities on them (task #2513); that arm is INLINE and typed, so a right
    shift of a fixnum is one machine shift (the s525u bench: boxarith's
-   `$i >>= 1' must not pay a call and a generic ldb).  SIGNED is passed only
-   by `<<=' / `>>=': the compiler emits `p-<<-int' for a BINARY shift under
-   `use integer' but the same `p-<<=' for the compound one in and out of the
-   pragma, so the compound keeps the pre-#3760 signed shift rather than turn
-   `use integer; $x <<= 1' (perl -2 for -1) into a UV (task #3781)."
+   `$i >>= 1' must not pay a call and a generic ldb).  The compound `<<=' /
+   `>>=' reach it too, OUTSIDE `use integer' only (task #3781)."
   (let ((na (%p-plain-num a)) (nb (%p-plain-num b)))
     (if (and (typep na '(and fixnum unsigned-byte)) (typep nb 'fixnum))
         (let ((c (* count-sign nb)))
@@ -14084,15 +14106,15 @@ per element."
                 ((minusp c) (ash na c))
                 ((>= c 64) 0)
                 (t (ldb (byte 64 0) (ash na c)))))
-        (%p-shift-slow a b count-sign op-str signed))))
+        (%p-shift-slow a b count-sign op-str))))
 
 (defun p-<< (a b)
   "Perl left shift: the left operand is read as a UV (task #3760)."
-  (%p-shift a b 1 "<<" nil))
+  (%p-shift a b 1 "<<"))
 
 (defun p->> (a b)
   "Perl right shift: the left operand is read as a UV (task #3760)."
-  (%p-shift a b -1 ">>" nil))
+  (%p-shift a b -1 ">>"))
 
 (defun p-to-s64 (n)
   "Convert integer to signed 64-bit range (-2^63 to 2^63-1)."
@@ -27606,7 +27628,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-13800"
+(defparameter *pcl-cache-generation* "v2-13900"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

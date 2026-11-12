@@ -208,7 +208,8 @@ my %FAMILY;
   'compound-assignment' => [qw(p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x=
                                p-bit-and= p-bit-or= p-bit-xor= p-<<= p->>=
                                p-str-bit-and= p-str-bit-or= p-str-bit-xor=
-                               p-and-assign p-or-assign p-//=)],
+                               p-and-assign p-or-assign p-//=
+                               p-op=)],
   'increment' => [qw(p-pre++ p-post++ p-pre-- p-post--)],
   'elements' => [qw(p-aref p-aref-box p-aref-argbox p-gethash-argbox p-aref-deref-argbox p-gethash-deref-argbox
                     p-aref-deref p-aref-deref-box p-gethash p-gethash-box
@@ -391,7 +392,7 @@ my @SPEC10_CITED = qw(
   p-my-= p-scalar-= p-array-= p-hash-= p-list-=
   p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and= p-bit-or=
   p-bit-xor= p-<<= p->>= p-str-bit-and= p-str-bit-or= p-str-bit-xor=
-  p-and-assign p-or-assign p-//=
+  p-and-assign p-or-assign p-//= p-op=
   p-pre++ p-pre-- p-post++ p-post-- p-incf-raw p-decf-raw
   p-aref p-gethash p-setf p-exists p-delete p-aslice p-hslice
   p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice

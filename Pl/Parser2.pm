@@ -177,6 +177,7 @@ sub _build_fallback_parser {
 sub _eval_feature_seed {
   my ($self) = @_;
   my @feats = grep { $_ ne 'strict_refs' && $_ ne 'unicode_strings'
+                      && $_ ne 'use_integer'
                       && $_ ne 'current_sub' && !/\Are-/ }
                  @{ $self->eval_features // [] }
     or return ();
@@ -207,6 +208,9 @@ sub _scan_eval_site_features {
   # #2691: `current_sub` too -- the eval text's unowned __SUB__ is undef
   # under the feature and an ordinary bareword without it.
   my $cs = Pl::Parser::feature_regions_of($doc, 'current_sub');
+  # #3781: `use integer` -- perl compiles the eval text with the site's hints,
+  # so the integer ops reach it; pseudo-feature `use_integer`, never PPI's.
+  my $ui = Pl::Parser::integer_regions_of($doc);
   for my $w (@{ $doc->find(sub {
                   $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
     my $f = eval { $w->presumed_features } // {};
@@ -217,6 +221,8 @@ sub _scan_eval_site_features {
       if Pl::Parser::unicode_strings_at($us, $w->location);
     push @on, 'current_sub'
       if Pl::Parser::feature_at($cs, $w->location);
+    push @on, 'use_integer'
+      if Pl::Parser::integer_at($ui, $w->location);
     # #4101: the `use re` hints too -- perl compiles the eval text with the
     # site's %^H, so `use re '/FLAGS'`'s default modifiers and `use re 'eval'`
     # reach its patterns.  Pseudo-features `re-flags:LETTERS` / `re-eval`
@@ -252,6 +258,10 @@ sub _publish_strict_refs {
   # #2092: the case-mapping regime, the same way and for the same reason.
   $lh->{_unicode_strings_stmt} =
     Pl::Parser::unicode_strings_at($lh->{_unicode_strings_regions}, $loc);
+  # #3781: `use integer`, the same way (a raw-slot compound and a fragment
+  # site ask the statement).
+  $lh->{_use_integer_stmt} =
+    Pl::Parser::integer_at($lh->{_use_integer_regions}, $loc);
   # #2871: the PARSE CLOCK the prototype lookup compares a record's site with
   # (perl applies a prototype only to calls parsed after its declaration).
   $self->environment->parse_site(Pl::PExpr::TokenUtils::decl_site($stmt))
@@ -1745,6 +1755,14 @@ sub parse {
   unshift @{ $self->fallback_parser->lex_home->{_unicode_strings_regions} },
     [[0, 0], [1e9, 1e9], 1, 1]
     if grep { $_ eq 'unicode_strings' } @{ $self->eval_features // [] };
+  # `use integer` (task #3781), same clock, same seam, same document key:
+  # ExprToCL asks it at each integer-family operator; a string eval compiled
+  # at a `use integer` site inherits it.
+  $self->fallback_parser->lex_home->{_use_integer_regions} =
+    Pl::Parser::integer_regions_of($doc);
+  unshift @{ $self->fallback_parser->lex_home->{_use_integer_regions} },
+    [[0, 0], [1e9, 1e9], 1, 1]
+    if grep { $_ eq 'use_integer' } @{ $self->eval_features // [] };
   # The regions of a keyword's FEATURE (#4603: `say` / `fc` / `isa` /
   # `evalbytes` are keywords only where it is in force), by the same clock and
   # document key, computed on first ask: a gated-keyword call site is rare.
@@ -9564,10 +9582,11 @@ sub _lower_scope {
   # forward-decl pass.
   my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
   # Push an Environment scope frame around the block so LEXICAL PRAGMAS set by a
-  # fallback-emitted statement inside the block (`use integer` / `no integer`)
-  # are saved and restored — v1 relies on push_scope/pop_scope for this, and
-  # without it a nested `no integer` leaks out to the enclosing scope
-  # (transpile-test-01 "no integer restores float division").
+  # fallback-emitted statement inside the block (`no strict "subs"`) are saved
+  # and restored — v1 relies on push_scope/pop_scope for this.  (`use integer`
+  # / `no integer` were the first such pragma; they are REGIONS now, read at
+  # each site, because a named sub body is lowered before the statement is
+  # reached -- task #3781.)
   $self->environment->push_scope;
   my @forms = $self->_lower_block($stmts, $vi, $tail_ctx);
   $self->environment->pop_scope;
@@ -11487,9 +11506,18 @@ sub _lower_expr_stmt {
                     ? 1 : 0;
       my @marker = ($numfact && Pl::Passes::enabled('numeric-slot'))
                    ? (':numeric') : ();
+      my $rhs = $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt);
+      # Under `use integer' the integer family's compound form, raw store
+      # (task #3781) -- the SAME region question (this statement's answer,
+      # published by _publish_strict_refs) and the same form ExprToCL's boxed
+      # path asks (gen_binary_op_form), so a raw and a boxed `$x += 2.5`
+      # cannot disagree.
+      my $int = $self->fallback_parser->lex_home->{_use_integer_stmt}
+              ? Pl::ExprToCL::integer_compound_form($as->{op}, $name, $rhs, 1,
+                                                    @marker)
+              : undef;
       return Pl::Passes::fact('numeric-slot', $numfact,
-        [$rawmac, $name,
-         $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt), @marker]);
+        $int // [$rawmac, $name, $rhs, @marker]);
     }
   }
 

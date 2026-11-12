@@ -152,7 +152,7 @@ my %OBLIGATION = (
 my %ASSIGN_HEAD = map { ($_ => 1) }
   qw(p-setf p-scalar-= p-array-= p-hash-= p-list-= p-my-= p-array-fill
      p-hash-fill p-box-init p-incf p-decf p-pre++ p-post++ p-pre-- p-post--
-     p-incf-raw p-decf-raw);
+     p-incf-raw p-decf-raw p-op= p-op=-raw);
 
 # A MAGIC-GLOBAL NAME, by shape (ir-spec §8).  Written as a pattern set
 # because the population is open at the punctuation end: perl allows a

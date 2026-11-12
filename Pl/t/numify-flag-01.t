@@ -14,7 +14,14 @@
 # is its two's complement, >= 2**64 saturates, a left shift keeps 64 bits, a
 # count >= 64 is 0, a negative count reverses.  p01: positive operands are
 # UNCHANGED.  i01/i02: `use integer' keeps the signed shift, the compound
-# `>>=' / `<<=' included (they cannot see the pragma, #3781).
+# `>>=' / `<<=' included.  i03-i09 (#3781, s538a): a COMPOUND assignment
+# takes the integer op under the pragma (raw slot, element, deref, the value
+# it yields); OUTSIDE it the compound shift pair reads a UV (i05); the pragma
+# is a REGION -- a file's or block's reaches a named sub body (i06), a sub
+# body's own does not leak to code lowered after it (i07), and a string eval
+# inherits it (i08); the bitwise trio stays signed (i09).  i07's `sub il' is
+# hoisted, so if a sub body's pragma leaks again EVERY row of the program
+# fails -- on purpose: that is the leak's real reach (it did, on main 23f0f917).
 #
 # Every expectation is the output of the SAME program under perl 5.40.3; the
 # program needs nothing newer than 5.30.  20 of the rows FAIL on main
@@ -37,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 60;
+plan tests => 74;
 
 sub run_pcl {
     my ($code) = @_;
@@ -87,6 +94,17 @@ print "u08=", -9223372036854775808 >> 0, " ", -1 << 0, "\n";
 print "p01=", 7 >> 1, " ", 1 << 62, " ", 2**62 << 1, " ", 1 << 63, "\n";
 { use integer; print "i01=", -1 >> 1, " ", -1 << 1, " ", -1 >> 64, " ", 1 << 64, " ", -8 >> 1, "\n"; }
 { use integer; my $x = -7; $x >>= 1; my $z = -1; $z <<= 1; print "i02=", $x, " ", $z, "\n"; }
+{ use integer; my $a1 = 7; $a1 += 2.5; my $b1 = 7; $b1 -= 2.5; my $c = 7; $c *= 2.5; my $d = -7; $d /= 2;
+  my $e = 7.9; $e /= 2.9; my $f = -7; $f %= 3; print "i03=$a1 $b1 $c $d $e $f\n"; }
+{ use integer; my @a1 = (5); $a1[0] += 2.5; my %h = (k => 7); $h{k} /= 2; my $r = \(my $z = 9);
+  $$r -= 0.5; my $v = 7; my $w = ($v += 1.5) + 0.9; print "i04=$a1[0] $h{k} $z $w\n"; }
+{ my $x = -1; $x >>= 1; my $z = -1; $z <<= 1; print "i05=", $x, " ", $z, "\n"; }
+{ use integer; sub ig { my $n = shift; $n /= 3; return $n + 0.9 } }
+print "i06=", ig(10), "\n";
+{ my $q = 7.5; $q += 1.25; my $p = 7.5 / 2; print "i07=", $q, " ", $p, " ", il(), "\n"; }
+{ use integer; print "i08=", eval('7 / 2'), " ", eval('my $q = 7; $q -= 0.5; $q'), "\n"; }
+{ use integer; my $s = -6; $s ^= 0; my $t = 6.9; $t |= 1; print "i09=$s $t\n"; }
+sub il { use integer; return 7 / 2 }
 PERL
 
 my %EXPECT = (
@@ -120,6 +138,13 @@ my %EXPECT = (
     'p01' => '3 4611686018427387904 9223372036854775808 9223372036854775808',
     'i01' => '-1 -2 -1 0 -4',
     'i02' => '-4 -2',
+    'i03' => '9 5 14 -3 3 -1',
+    'i04' => '7 3 9 8',
+    'i05' => '9223372036854775807 18446744073709551614',
+    'i06' => '3',
+    'i07' => '8.75 3.75 3',
+    'i08' => '3 7',
+    'i09' => '-6 7',
 );
 
 for my $opt ('default', 'none') {

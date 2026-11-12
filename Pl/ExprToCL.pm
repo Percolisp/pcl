@@ -2040,21 +2040,12 @@ sub gen_binary_op_form {
     # else: fall through to (p-setf $left $right) at the generic tail.
   }
 
-  # 'use integer' pragma: truncate operands first, then operate.
-  if ($self->environment && $self->environment->has_pragma('use_integer')) {
-    return ['truncate', ['p-int', $left], ['p-int', $right]]  if $op eq '/';
-    return ['rem',      ['p-int', $left], ['p-int', $right]]  if $op eq '%';
-    return ['+',        ['p-int', $left], ['p-int', $right]]  if $op eq '+';
-    return ['-',        ['p-int', $left], ['p-int', $right]]  if $op eq '-';
-    return ['*',        ['p-int', $left], ['p-int', $right]]  if $op eq '*';
-    return ['p-to-s64', ['logand', ['pcl::%pcl-to-integer', ['to-number', $left]],
-                                   ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '&';
-    return ['p-to-s64', ['logior', ['pcl::%pcl-to-integer', ['to-number', $left]],
-                                   ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '|';
-    return ['p-to-s64', ['logxor', ['pcl::%pcl-to-integer', ['to-number', $left]],
-                                   ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '^';
-    return ['p-<<-int', $left, $right] if $op eq '<<';
-    return ['p->>-int', $left, $right] if $op eq '>>';
+  # 'use integer' pragma: truncate operands first, then operate -- the binary
+  # op and its compound assignment alike (task #3781).
+  if ($self->_use_integer_here(defined $node_id ? $self->expr_o->get_a_node($node_id) : undef)) {
+    my $int = _integer_op_form($op, $left, $right)
+           // integer_compound_form($op, $left, $right);
+    return $int if $int;
   }
 
   # Match operators read *wantarray* at runtime to choose boolean (scalar) vs
@@ -2100,6 +2091,49 @@ sub cl_op_name {
   }
 
   return "p-$op";
+}
+
+# THE `use integer` FAMILY: the integer form of binary OP over the forms L and
+# R, or undef when OP has none (perl's i_* ops; `**` has none -- probed,
+# `use integer; 2 ** 0.5` is 1.414...).  ONE table: the binary op asks it
+# directly, and its compound assignment asks it through
+# integer_compound_form (task #3781).
+sub _integer_op_form {
+  my ($op, $l, $r) = @_;
+  return ['truncate', ['p-int', $l], ['p-int', $r]]  if $op eq '/';
+  return ['rem',      ['p-int', $l], ['p-int', $r]]  if $op eq '%';
+  return ['+',        ['p-int', $l], ['p-int', $r]]  if $op eq '+';
+  return ['-',        ['p-int', $l], ['p-int', $r]]  if $op eq '-';
+  return ['*',        ['p-int', $l], ['p-int', $r]]  if $op eq '*';
+  return ['p-to-s64', ['logand', ['pcl::%pcl-to-integer', ['to-number', $l]],
+                                 ['pcl::%pcl-to-integer', ['to-number', $r]]]] if $op eq '&';
+  return ['p-to-s64', ['logior', ['pcl::%pcl-to-integer', ['to-number', $l]],
+                                 ['pcl::%pcl-to-integer', ['to-number', $r]]]] if $op eq '|';
+  return ['p-to-s64', ['logxor', ['pcl::%pcl-to-integer', ['to-number', $l]],
+                                 ['pcl::%pcl-to-integer', ['to-number', $r]]]] if $op eq '^';
+  return ['p-<<-int', $l, $r] if $op eq '<<';
+  return ['p->>-int', $l, $r] if $op eq '>>';
+  return undef;
+}
+
+# A COMPOUND ASSIGNMENT under `use integer` (task #3781): perl's integer ops
+# carry the assignment form too (`$y += 2.5` is i_add on $y), so `OP=` is the
+# store of _integer_op_form(OP, CUR, VAL) -- the runtime's p-op= evaluates
+# PLACE once and VALUE before reading it, and keeps the overload guard every
+# compound op has (SLOW = the base op's generic function).  RAW: the place is
+# a raw let-bound slot (Parser2's statement-root raw-twin path), so the store
+# is p-op=-raw; MARKER is that path's `:numeric' licence, if any.  undef when
+# OP is not a compound op of the integer family -- the caller keeps its own
+# lowering (`.=`, `x=`, `**=`, `||=` ... are not integer ops).  The CALLER
+# asks the pragma; this answers only "which form".
+sub integer_compound_form {
+  my ($op, $place, $value, $raw, @marker) = @_;
+  return undef unless Pl::PExpr::TokenUtils::is_compound_assign($op) && $op =~ /\A(.+)=\z/;
+  my $base = $1;
+  my ($cur, $val) = ('--pcl-cur', '--pcl-val');
+  my $new = _integer_op_form($base, $cur, $val) // return undef;
+  return [($raw ? 'p-op=-raw' : 'p-op='), $place, $value, [$cur, $val], $new,
+          cl_op_name(undef, $base), @marker];
 }
 
 
@@ -4437,7 +4471,7 @@ sub gen_prefix_op_form {
   my $cl_op = $self->cl_name($op);
 
   # Under 'use integer', ~ returns signed 64-bit complement.
-  if ($op eq '~' && $self->environment && $self->environment->has_pragma('use_integer')) {
+  if ($op eq '~' && $self->_use_integer_here($op_node)) {
     return ['p-to-s64', ['lognot', ['pcl::%pcl-to-integer', ['to-number', $operand]]]];
   }
   # Sigil cast operators (dereference).
@@ -4598,8 +4632,17 @@ sub _unicode_strings_here {
   return $self->_lexical_region_here($tok, '_unicode_strings');
 }
 
-# ONE reading of a lexical-region pragma at a site, for the two published
-# region sets (KEY `_strict_refs` / `_unicode_strings`: lex_home carries
+# The same question for `use integer` (task #3781): the integer family of the
+# operator at this site.  Regions from Pl::Parser::integer_regions_of,
+# published beside strict refs -- a named sub body is lowered before the
+# pragma's statement is reached, so the scope stack cannot answer it.
+sub _use_integer_here {
+  my ($self, $tok) = @_;
+  return $self->_lexical_region_here($tok, '_use_integer');
+}
+
+# ONE reading of a lexical-region pragma at a site, for the published region
+# sets (KEY `_strict_refs` / `_unicode_strings` / `_use_integer`: lex_home carries
 # KEY_regions and KEY_stmt).  A token of THIS document (the one whose
 # refaddr is `_strict_refs_doc`) is placed by its own location; any other
 # (a fragment re-parse, a synthesized Word) takes the statement's answer.

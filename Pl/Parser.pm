@@ -8296,6 +8296,33 @@ sub feature_regions_of {
 # Is `unicode_strings` in force at LOC?  The latest-starting region wins.
 sub unicode_strings_at { return strict_refs_at(@_) }
 
+# Every `use integer` / `no integer` REGION in a document (task #3781) -- the
+# strict-refs shape, for the reason every lexical pragma here has one: a named
+# sub's BODY is lowered before the in-stream include statement is reached, so
+# the scope-stack pragma this used to be (Environment's `use_integer`) never
+# reached a sub body -- `use integer; sub f { $_[0] / 3 }` divided as floats,
+# URI::_punycode's whole algorithm -- and a sub body's own `use integer`
+# leaked to every statement lowered after it.  A region runs to the end of
+# its enclosing block and sets 1 (`use`) or 0 (`no`); the latest-starting one
+# containing a site decides (strict_refs_at's rule, every region explicit).
+# Returns an ARRAY of [START, END, VALUE, 1].
+sub integer_regions_of {
+  my ($doc) = @_;
+  my @regions;
+  for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    next if ($stmt->module // '') ne 'integer';
+    my $type = $stmt->type // 'use';
+    next if $type ne 'use' && $type ne 'no';
+    my $loc = $stmt->location or next;
+    push @regions, [ [ $loc->[0], $loc->[1] ], _open_region_end($stmt),
+                     ($type eq 'no' ? 0 : 1), 1 ];
+  }
+  return \@regions;
+}
+
+# Is `use integer` in force at LOC?  The same rule.
+sub integer_at { return strict_refs_at(@_) }
+
 # Is the feature of a feature_regions_of answer in force at LOC?  The same rule.
 sub feature_at { return strict_refs_at(@_) }
 
@@ -8433,10 +8460,8 @@ sub _process_include_statement {
       $self->_process_use_lib($stmt, $perl_code, 'no');
       return;
     }
-    # 'no integer' - turn off integer pragma in current scope
-    if ($module eq 'integer') {
-      $self->environment->set_pragma('use_integer', 0);
-    }
+    # `no integer` is a REGION (Pl::Parser::integer_regions_of, task #3781),
+    # read at each site -- never the scope stack.
     # 'no strict' / 'no strict "subs"' - disable strict-subs mode
     if ($module eq 'strict') {
       my @args = map { $_->string } grep { $_->isa('PPI::Token::Quote') } $stmt->children;
@@ -8595,10 +8620,8 @@ sub _process_include_statement {
 
   # Handle pragmas - emit as comment (no CL equivalent)
   if (_never_loaded_pragma($module)) {
-    # 'use integer' - enable integer pragma in current scope
-    if ($module eq 'integer') {
-      $self->environment->set_pragma('use_integer', 1);
-    }
+    # `use integer` is a REGION (Pl::Parser::integer_regions_of, task #3781),
+    # read at each site -- never the scope stack.
     # 'use strict' / 'use strict "subs"' - enable strict-subs mode for bareword disambiguation
     if ($module eq 'strict') {
       my @args = map { $_->string } grep { $_->isa('PPI::Token::Quote') } $stmt->children;

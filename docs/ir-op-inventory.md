@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **769**
+* names exported: **771**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 769
+* with a machine-readable `Contract:` tail: **71** of 771
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -124,7 +124,7 @@ ir-spec §10 row **compiled regex (qr)** — a Regexp OBJECT, not a string: it c
 | `p-qr-from-parts` | macro | `(&rest args)` | insensitive | str | none | no | no | no | ppcre |
 | `p-regex-from-parts` | macro | `(&rest args)` | insensitive | str | none | no | no | no | ppcre |
 
-## compound-assignment (35)
+## compound-assignment (37)
 
 ir-spec §10 row **compound assignment** — read-modify-write; boxed macros store back via box-set/setf per place shape, `-raw` twins are `(setf slot NEW)` with the identical NEW form; `&&=`/`||=`/`//=` short-circuit and store the RHS unchanged
 
@@ -156,6 +156,8 @@ ir-spec §10 row **compound assignment** — read-modify-write; boxed macros sto
 | `p-decf-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-incf` | macro | `(place &optional (delta 1))` | — | — | — | — | — | — | — |
 | `p-incf-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
+| `p-op=` | macro | `(place value vars new slow)` | — | — | — | — | — | — | — |
+| `p-op=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-or-assign` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-str-bit-and=` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-str-bit-and=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
