@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -96,3 +96,11 @@ test_cl('/c ranked positional mapping past repl end',
 test_cl('/s leaves pass-through duplicates intact',
     'my $s="aabbccaa"; $s =~ tr/a/x/s; print "$s\n";',
     "xbbccx\n");
+
+# #1493 (fixed by s537a #4264): an IDENTICAL tr (a count) writes nothing back,
+# so a REFERENCE target stays a reference -- perl counts in the reference
+# text ("SCALAR(0x...)" has two A) without storing it.  INVERSE: main
+# 23f0f917 printed "2  " (both references stringified in place).
+test_cl(q{#1493: a count-only tr on a reference leaves the reference},
+    q{my $x = \"foo"; my $n = ($x =~ tr/A/A/); my $y = [1]; $y =~ tr/a-zA-Z//; print "$n ", ref($x), " ", ref($y), "\n";},
+    "2 SCALAR ARRAY\n");

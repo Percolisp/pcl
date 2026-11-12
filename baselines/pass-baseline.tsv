@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s537a (2026-11-12, Opus, EDITED BY HAND): tr.t 241/3 -> 242/2 -- "    doesn't stringify its argument" passes: #1493 fixed by #4264 (an IDENTICAL tr never writes its target); one-file run base 23f0f917 vs tree 312/3 -> 313/2.  loopctl.t stays 64 (s537a's own regression of it, [perl #73618], fixed forward before the merge).
 # s536e (2026-11-08, Opus, EDITED BY HAND): each.t 49/2 -> 51/0 -- rows 64 65 (each / values in list assignment) pass: #1027 = #4547, the file `my $a` across the `package Single` block section split (s536e `_own_name_cell_ok`).  TOTAL 18,784 -> 18,786.
 # s536f (2026-11-08, Opus, EDITED BY HAND): bop.t 487/22 -> 496/13 -- #4644 (the value of an assignment to a BOX place is the box): the nine unnamed rows 65 70 75 98 103 108 131 136 141 (`is(fetches($x), 2)` after `$x |= $y` / `&=` / `^=` on a TIED scalar, numeric and string) pass -- the compound store-back answered box-set's tie-STORE value, so `is(($x |= $y), 3)` read no second FETCH; perl FETCHes twice.  Measured: base ba7863a3 one-file sweep 487/22 with those nine failing, the tree 496/13.
 # s536b (2026-11-08, Opus, EDITED BY HAND): magic.t 158/31 -> 159/30 -- #4306 (a piped open whose program cannot be executed is undef): row 67 ($tn[5], the PVBM signal-handler child) opens `|-` on ./perl, which does not exist in perl-tests/; the open now fails as in perl, so `close` leaves $? alone and the row passes as perl would here (base ab0df658 158/31, tree 159/30, one-file runs scratch/s536b/magic-*.log).
@@ -606,7 +607,7 @@ study.t	OK	43	0	43
 sub.t	OK	56	2	65
 substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	241	3	317
+tr.t	PARTIAL	242	2	317
 translate.t	OK	257	0	257
 undef.t	OK	31	0	35
 unshift.t	OK	19	0	19
