@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 197;
+plan tests => 213;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -294,6 +294,26 @@ $! = 0; my $e4 = eval "scalar(() = stat ZZEVAL)";
 print "97=", ($@ ? "DIE" : $e4), " ", ($!+0), "\n";
 $! = 0; my $e5 = eval "-e CPATH";
 print "98=", ($@ ? "DIE" : (defined $e5 ? $e5 : "UNDEF")), "\n";
+# --- #3554: `_' after an LSTAT is the LINK's own record --------------------
+# The buffer remembers which stat filled it, and reading it re-reads with
+# THAT flavour: `-d _' after `lstat $link-to-dir' is false (File::Path's
+# `lstat $root; -d _' descends on it; PCL followed the link and remove_tree
+# aborted "changed before chdir").
+my $gd = "$tmp.d"; mkdir $gd; mkdir "$gd/real";
+open(my $kf, '>', "$gd/real/keep") or die; close($kf);
+symlink("$gd/real", "$gd/ln"); symlink("$gd/real/keep", "$gd/fl"); symlink("$gd/nope", "$gd/dang");
+lstat("$gd/ln");  print "99=", (-d _ ? 1 : 0), (-l _ ? 1 : 0), (-e _ ? 1 : 0), "\n";
+my $lk = -l "$gd/ln"; print "100=", (-d _ ? 1 : 0), "\n";
+lstat("$gd/dang"); print "101=", (-e _ ? 1 : 0), (-l _ ? 1 : 0), (-d _ ? 1 : 0), "\n";
+lstat("$gd/fl");  print "102=", (-f _ ? 1 : 0), (-s _ == 5 ? "target-size" : "link-size"), "\n";
+lstat("$gd/ln"); my @lm = stat(_); print "103=", (($lm[2] & 0170000) == 0120000 ? "lnk" : "other"), "\n";
+print "104=", ((-d -l "$gd/ln") ? 1 : 0), "\n";
+stat("$gd/ln");  print "105=", (-d _ ? 1 : 0), "\n";
+use File::Path ();
+mkdir "$gd/A"; symlink("$gd/real", "$gd/A/B");
+my $rt = eval { File::Path::remove_tree("$gd/A"); 1 };
+print "106=", ($rt ? "ok" : "DIED"), (-e "$gd/A" ? " A-left" : " A-gone"), (-e "$gd/real/keep" ? " kept" : " LOST"), "\n";
+File::Path::remove_tree($gd);
 close(FH);
 unlink $tmp;
 PERL
@@ -405,6 +425,15 @@ my %EXPECT = (
     '96' => '13',   #   runtime — which knows whether pl-SPATH is really
     '97' => '0 9',  #   there — decides.  Both answers survive it …
     '98' => '1',    #   … including a `use constant'.
+    # --- #3554: `_' after an lstat is the LINK's record ---------------------
+    '99' => '011',  # lstat a link to a dir: -d _ false, -l _ true, -e _ true
+    '100' => '0',   # `-l' is an lstat too
+    '101' => '110', # a DANGLING link: the lstat succeeded, so -e _ is true
+    '102' => '0link-size', # a link to a file: -f _ false, -s _ the link's size
+    '103' => 'lnk', # `stat _' hands back the lstat record
+    '104' => '0',   # the stacked spelling
+    '105' => '1',   # control: after a plain stat, -d _ follows the link
+    '106' => 'ok A-gone kept', # File::Path::remove_tree over a symlinked dir
 );
 
 my $n = 0;
@@ -414,7 +443,7 @@ for my $opt ('default', 'none') {
     $ENV{PCL_GUARD_FILE} = "$workdir/fh-" . $n++ . ".txt";
     my $out = run_pcl($PROG);
     my %got;
-    $got{$1} = $2 while $out =~ /^(\d\d)=(.*)$/mg;
+    $got{$1} = $2 while $out =~ /^(\d\d\d?)=(.*)$/mg;
     for my $k (sort keys %EXPECT) {
         is($got{$k} // "<MISSING; output was:\n$out>", $EXPECT{$k}, "[$opt] row $k");
     }

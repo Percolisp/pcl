@@ -24210,12 +24210,17 @@ would consume, so it dies naming the stream (rule 12)."
   ;; -l _` is legal, while `lstat $f; -T _; -l _` dies).
   (when (and *pcl-stat-cache-ok* (or (string= op "T") (string= op "B")))
     (setf *pcl-stat-cache-type* :stat))
+  ;; The third value is the FLAVOUR the buffer was filled by, and it is what
+  ;; re-reads the operand (task #3554): after `lstat $link` the buffer is the
+  ;; LINK's own record, so `-d _` / `-f _` / `-s _` / `stat _` answer for the
+  ;; link -- File::Path's `lstat $root; -d _` decides whether to descend on it.
   (cond
-    (*pcl-stat-cache-ok* (values *pcl-stat-cache-kind* *pcl-stat-cache-path*))
+    (*pcl-stat-cache-ok* (values *pcl-stat-cache-kind* *pcl-stat-cache-path*
+                                 (eq *pcl-stat-cache-type* :lstat)))
     ((and (eq *pcl-stat-cache-kind* :path)
           (or (string= op "T") (string= op "B")))
-     (values :path *pcl-stat-cache-path*))
-    (t (values :bad nil))))
+     (values :path *pcl-stat-cache-path* nil))
+    (t (values :bad nil nil))))
 
 (defun %p-stat-operand (arg op)
   "THE ONE resolution of a stat / lstat / filetest operand.  OP is the
@@ -24224,26 +24229,30 @@ would consume, so it dies naming the stream (rule 12)."
    `-X' handler is passed the letter, `-l' never accepts a handle, and only a
    filetest asks the overload at all.
 
-   Two values, the KIND and its payload:
+   Three values, the KIND, its payload and LSTATP:
      :over VALUE     a `-X' overload handler already answered; VALUE is it
      :fd   INTEGER   fstat(2) this descriptor
      :path STRING    stat(2) this pathname
      :bad  NIL       a HANDLE that is not open — perl's EBADF
+   LSTATP says which syscall reads the operand: OP's own flavour for a fresh
+   operand, and for `_` the flavour that FILLED the buffer (task #3554) -- so
+   no caller picks the syscall itself.
 
    Maintains the `_` cache: the marker reads the remembered operand (with its
    kind), anything else becomes the remembered operand.  An overloaded answer
    leaves the cache alone, as perl does."
   (let ((ov (%p-stat-overload-answer arg op)))
     (cond
-      ((not (eq ov :none)) (values :over ov))
+      ((not (eq ov :none)) (values :over ov nil))
       ((eq (if (p-box-p arg) (p-box-value arg) arg) '%pcl-stat-cache)
        (%p-stat-cache-operand op))
       (t
        (multiple-value-bind (kind val) (%p-stat-resolve arg op)
-         (setf *pcl-stat-cache-path* val
-               *pcl-stat-cache-kind* kind
-               *pcl-stat-cache-type* (%p-stat-flavour op))
-         (values kind val))))))
+         (let ((flavour (%p-stat-flavour op)))
+           (setf *pcl-stat-cache-path* val
+                 *pcl-stat-cache-kind* kind
+                 *pcl-stat-cache-type* flavour)
+           (values kind val (eq flavour :lstat))))))))
 
 (defun %p--path (kind val)
   "The pathname to hand the filesystem for a resolved operand, and — when
@@ -24296,14 +24305,14 @@ would consume, so it dies naming the stream (rule 12)."
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
    size atime mtime ctime blksize blocks) in LIST context, 1 or \"\" in scalar
    context (see %p-stat-answer).  Follows symlinks."
-  (multiple-value-bind (kind val) (%p-stat-operand file-or-fh "stat")
-    (%p-stat-answer (%p-stat-buf kind val nil))))
+  (multiple-value-bind (kind val lstatp) (%p-stat-operand file-or-fh "stat")
+    (%p-stat-answer (%p-stat-buf kind val lstatp))))
 
 (defun %p-lstat-impl (file)
   "Perl lstat — like stat but does NOT follow a symlink (reports the link).
    Unlike `-l' it DOES accept a filehandle (probed: `lstat FH' answers 1)."
-  (multiple-value-bind (kind val) (%p-stat-operand file "lstat")
-    (%p-stat-answer (%p-stat-buf kind val t))))
+  (multiple-value-bind (kind val lstatp) (%p-stat-operand file "lstat")
+    (%p-stat-answer (%p-stat-buf kind val lstatp))))
 
 ;;; ============================================================
 ;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z, …)
@@ -24332,18 +24341,19 @@ would consume, so it dies naming the stream (rule 12)."
   ;; The defined false IS perl's boolean false (#3242): PL_sv_no.
   (if *pcl-stat-cache-ok* (p-bool nil) *p-undef*))
 
-(defun %p--stat-test (file op pred &key lstat (flag t))
+(defun %p--stat-test (file op pred &key (flag t))
   "Shared body for every stat-based filetest: resolve FILE for OP through the
-   one operand resolver, stat (or lstat) it, and answer (funcall PRED struct).
+   one operand resolver, stat (or lstat -- the resolver says which: `-l`, or
+   `_` after an lstat) it, and answer (funcall PRED struct).
    A `-X' overload answers instead of the stat; a false PRED and a failed stat
    both answer through %p--false, which keeps them apart.  A pred's own 0 (the
    size `-s` reports for an empty file) is a VALUE and passes through.
    FLAG (the default): the test is a perl BOOLEAN, so a true PRED answers
    +p-yes+ (#3242: `is_bool(-e $f)` is true in perl 5.40); -s passes NIL."
-  (multiple-value-bind (kind val) (%p-stat-operand file op)
+  (multiple-value-bind (kind val lstatp) (%p-stat-operand file op)
     (if (eq kind :over)
         val
-        (let ((v (let ((st (%p-stat-buf kind val lstat)))
+        (let ((v (let ((st (%p-stat-buf kind val lstatp)))
                    (and st (funcall pred st)))))
           (cond ((null v) (%p--false))
                 (flag (p-bool t))
@@ -24356,10 +24366,10 @@ would consume, so it dies naming the stream (rule 12)."
    because perl's does: it is what fills `_` (op/filetest.t asserts
    `-T _` works after `-r $ioref`) and what makes a missing file answer ENOENT
    rather than access(2)'s own errno."
-  (multiple-value-bind (kind val) (%p-stat-operand file op)
+  (multiple-value-bind (kind val lstatp) (%p-stat-operand file op)
     (if (eq kind :over)
         val
-        (let ((v (and (%p-stat-buf kind val nil)
+        (let ((v (and (%p-stat-buf kind val lstatp)
                       (multiple-value-bind (path err) (%p--path kind val)
                         (if path
                             (%p-stat-try (progn (sb-posix:access path mode) (p-bool t)))
@@ -24414,8 +24424,7 @@ would consume, so it dies naming the stream (rule 12)."
   "Perl -l: test if file is a symbolic link (lstat, not stat).  It is the one
    filetest that NEVER takes a filehandle — see the resolver's `-l' rule."
   (%p--stat-test file "l"
-                 (lambda (st) (if (sb-posix:s-islnk (sb-posix:stat-mode st)) 1 nil))
-                 :lstat t))
+                 (lambda (st) (if (sb-posix:s-islnk (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--p-impl (file)
   "Perl -p: test if file is a named pipe (FIFO)"
