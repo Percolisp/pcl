@@ -56,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 sub run_cl {
     my ($code, %opt) = @_;
@@ -313,4 +313,38 @@ PL
     is(run_cl($prog), $perl,
        '#4281: a loop as the last statement answers its condition\'s last value (perl oracle)');
     is(run_cl($prog, opt => 'none'), $perl, '#4281: same under PCL_OPT=none');
+}
+
+# #4281 fix-forward (s537a, found by its own sweep: t/op/loopctl.t [perl #73618]
+# "constant optimization doesn't change return value"): a variable read ONLY as
+# the condition of a loop that ends its block was frozen to a raw STRING slot,
+# which reads an undef as "" -- harmless while the loop's value was discarded,
+# visible once it is the sub's value.  Such a condition is a VALUE read
+# (VarAnnotator _loop_cond_uctx): compound and modifier loops, `do {} while`,
+# nested in an if / bare / do / map block, an anonymous sub, `||`.  The two
+# loops followed by a statement keep the string slot (controls).  INVERSE: the
+# tree before the fix (e7ffae33) prints "" for every undef line.
+{
+    my $prog = <<'PL';
+no warnings;
+sub sh { my ($t, $v) = @_; print "$t=", (defined $v ? "[$v]" : "u"), "\n" }
+sub w0 { my $i = undef; while ($i) { } }
+sub w1 { my $i = undef; 1 while $i; }
+sub w2 { my $i = undef; do { 1 } while ($i); }
+sub w3 { my $i = undef; if (1) { while ($i) { } } }
+sub w4 { my $i = undef; my $j = undef; while ($i || $j) { } }
+sub w5 { my $i = undef; { until (!$i) { } } }
+sub w6 { my $i = "x"; $i = undef; while ($i) { } }
+sub w7 { my $i = undef; while ($i) { } sub inner { 1 } }
+sub k1 { my $i = undef; while ($i) { } 1 }
+sub k2 { my $s = undef; while ($s) { } return "r" }
+my $an = sub { my $i = undef; while ($i) { } };
+for my $f (qw(w0 w1 w2 w3 w4 w5 w6 w7 k1 k2)) { sh($f, scalar(&$f())) }   # not &$_(): #4807
+sh("anon", scalar($an->()));
+sh("do", scalar(do { my $i = undef; while ($i) { } }));
+my @m = map { my $i = undef; while ($i) { } } 1; sh("map", $m[0]);
+PL
+    my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
+    is(run_cl($prog), $perl,
+       '#4281: a loop that ends its block reads its condition as a VALUE (no string-slot freeze; perl oracle)');
 }

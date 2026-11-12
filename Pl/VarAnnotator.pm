@@ -1409,7 +1409,11 @@ sub _tw_stmt {
       if ($k->isa('PPI::Structure::Condition')) {
         # if/while/unless/until condition: the root expression is truth-
         # tested — 'bool' use class (licenses raw-string, blocks raw-numeric)
-        _tw_stmts($ctx, [$k->schildren], q{bool}, 1);   # same scope: the construct
+        # — except a while / until loop that ENDS its block, whose condition
+        # is also the loop's value (_loop_cond_uctx).
+        my $cu = ($kw && $kw->content =~ /^(?:while|until)$/)
+               ? _loop_cond_uctx($s) : q{bool};
+        _tw_stmts($ctx, [$k->schildren], $cu, 1);   # same scope: the construct
       }
       elsif ($k->isa('PPI::Structure::For')
           || $k->isa('PPI::Structure::List')
@@ -1455,6 +1459,30 @@ sub _tw_stmt {
 sub _semi {
   my ($e) = @_;
   return $e->isa('PPI::Token::Structure') && $e->content eq ';';
+}
+
+# THE USE CLASS OF A LOOP CONDITION (#4281, s537a; ir-spec §6.2).  A while /
+# until loop -- compound or statement modifier, `do {} while` included -- is
+# worth its condition's LAST VALUE, and that value is what a sub, a file or a
+# do / eval / map block whose last statement is the loop answers.  There the
+# condition is a VALUE read, not a truth test: a variable read only as `bool`
+# is frozen to a string slot that reads an undef as "" (t/op/loopctl.t
+# [perl #73618]: `my $i = undef; while ($i) { }` as a sub's body answered "").
+# "Ends its block" = no statement that RUNS follows it in the same block or
+# file -- a superset of the positions whose value reaches a reader, which only
+# costs a raw-string verdict.  Everywhere else the condition stays `bool`.
+sub _loop_cond_uctx {
+  my ($st) = @_;
+  return 'bool' if !$st;
+  for (my $n = $st->snext_sibling; $n; $n = $n->snext_sibling) {
+    next if _semi($n)
+         || $n->isa('PPI::Statement::Null')    || $n->isa('PPI::Statement::End')
+         || $n->isa('PPI::Statement::Data')    || $n->isa('PPI::Statement::Scheduled')
+         || $n->isa('PPI::Statement::Package') || $n->isa('PPI::Statement::Sub')
+         || ($n->isa('PPI::Statement::Include') && ($n->type // '') =~ /^(?:use|no)$/);
+    return 'bool';
+  }
+  return undef;   # opaque: the loop's value may be read
 }
 
 # `for ($x, $y) { $_ = … }` and its statement-modifier spelling
@@ -1572,7 +1600,9 @@ sub _tw_stmt_expr {
   # while/until/for modifiers lower whole-statement via v1 → same treatment.
   my ($expr, $mod, $cond) = Pl::Parser2::_split_modifier(\@parts);
   if ($mod) {
-    _tw_stmt_expr($ctx, $cond, 0, 'bool');
+    _tw_stmt_expr($ctx, $cond, 0,
+                  $mod =~ /^(?:while|until)$/ ? _loop_cond_uctx($parts[0]->parent)
+                                              : 'bool');
     if ($mod =~ /^for(?:each)?$/) {
       _ev_foreach_alias_list($ctx, $cond);
       # #1140: the modifier spelling's loop variable is always `$_` — a
