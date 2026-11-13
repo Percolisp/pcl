@@ -231,7 +231,8 @@
     pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
     pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
     pl-eq_array pl-eq_set pl-curr_test pl-subtest
-    pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
+    pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain
+    pl-todo_skip))
 (export *tap-api*)
 (dolist (s *tap-api*)
   (setf (gethash s *p-declared-subs*) :defined))
@@ -1110,6 +1111,23 @@
       (%tap-out "ok ~A # skip ~A~%" *test-count* r)))
   (p-last-dynamic "SKIP"))
 
+;;; todo_skip(why, count) (#4884): COUNT rows `not ok N # TODO & SKIP WHY` --
+;;; ->details reports each as ok 1, actual_ok 0, type todo_skip -- then `last
+;;; TODO`, as Test::More's does.  No COUNT (undef) is one row.
+(defun %test-todo-skip-row (why)
+  (incf *test-count*)
+  (%test-record-row t nil nil "todo_skip" why)
+  (%tap-out "not ok ~A # TODO & SKIP ~A~%" *test-count* why))
+
+(defun pl-todo_skip (reason &optional count)
+  (let ((n (if (and count (%pcl-definedp count)) (truncate (to-number count)) 1))
+        (r (to-string (unbox reason))))
+    (unless (or (and count (%pcl-definedp count)) *test-no-plan*)
+      (p-warn "todo_skip() needs to know $how_many tests are in the block"))
+    (dotimes (i n)
+      (%test-todo-skip-row r)))
+  (p-last-dynamic "TODO"))
+
 ;;; subtest NAME => CODE, ARGS (#1576).  Test::Builder's nested stream: the
 ;;; child has its OWN plan and numbering, written through the SAME %tap-out
 ;;; four spaces deeper (*tap-indent*), and is reported to the parent as ONE
@@ -1189,23 +1207,25 @@
     (push (subseq str start) result)
     (nreverse result)))
 
-;;; diag(msg)
-(defun pl-diag (&rest args)
-  ;; Test::More joins the flattened message list with '' and comments each
-  ;; LINE of the result (#3245's sibling: `diag(@lines)` printed ARRAY(0x..)).
+;;; diag(msg) / note(msg): Test::More joins the flattened message list with ''
+;;; and comments each LINE of the result (#3245's sibling: `diag(@lines)`
+;;; printed ARRAY(0x..)).  ONE trailing newline ends the last line rather than
+;;; starting an empty one (#4883, probed 5.40.3: `diag "x\n"` is `# x`, `note
+;;; "\n\n"` two `# ` lines, `diag ""` one).
+(defun %tap-comment (args)
   (when args
-    (dolist (line (split-string (format nil "~{~A~}" (mapcar #'to-string (%test-flat-values args)))
-                                '(#\Newline)))
-      (%tap-out "# ~A~%" line))))
+    (let ((msg (format nil "~{~A~}" (mapcar #'to-string (%test-flat-values args)))))
+      (when (and (plusp (length msg))
+                 (char= (char msg (1- (length msg))) #\Newline))
+        (setf msg (subseq msg 0 (1- (length msg)))))
+      (dolist (line (split-string msg '(#\Newline)))
+        (%tap-out "# ~A~%" line)))))
 
-;;; note(msg)
+(defun pl-diag (&rest args)
+  (%tap-comment args))
+
 (defun pl-note (&rest args)
-  ;; Test::More joins the flattened message list with '' and comments each
-  ;; LINE of the result (#3245's sibling: `note(@lines)` printed ARRAY(0x..)).
-  (when args
-    (dolist (line (split-string (format nil "~{~A~}" (mapcar #'to-string (%test-flat-values args)))
-                                '(#\Newline)))
-      (%tap-out "# ~A~%" line))))
+  (%tap-comment args))
 
 ;;; END hook: check test count.  Skipped entirely in a fork child (pid
 ;;; differs from plan time) — the parent owns the plan.  It is an END BLOCK,
@@ -1673,7 +1693,7 @@
                   '("parent" "expected_tests" "level" "in_todo" "todo"
                     "summary" "details" "no_plan" "BAIL_OUT" "BAILOUT"
                     "explain" "is_eq" "isnt_eq" "is_num" "isnt_num" "like"
-                    "unlike" "subtest"))
+                    "unlike" "subtest" "todo_skip"))
           (find-package "Test::Builder")))
 
 (defvar *test-builder-singleton* nil
@@ -1908,6 +1928,12 @@
 
 ;; ->in_todo: 1 while a $TODO is in force, else 0.  ->todo: its reason, or
 ;; undef (both read %current-todo, the rows' own TODO test).
+;; ->todo_skip(WHY): ONE `not ok N # TODO & SKIP WHY` row, no `last` (#4884).
+(defun |Test::Builder|::pl-todo_skip (self &optional reason &rest args)
+  (declare (ignore self args))
+  (%test-todo-skip-row (if reason (to-string (unbox reason)) ""))
+  1)
+
 (defun |Test::Builder|::pl-in_todo (self &rest args)
        (declare (ignore self args))
        (if (%current-todo) 1 0))

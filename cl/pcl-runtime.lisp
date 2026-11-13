@@ -156,7 +156,7 @@
    #:pl-skip #:pl-skip_all #:pl-diag #:pl-note #:pl-BAIL_OUT
    #:pl-eq_array #:pl-curr_test
    #:pl-is_deeply #:pl-use_ok #:pl-require_ok #:pl-isa_ok #:pl-can_ok
-   #:pl-explain #:pl-locales_enabled #:pl-_diag
+   #:pl-explain #:pl-todo_skip #:pl-locales_enabled #:pl-_diag
    ;; Value boxing
    #:p-box #:make-p-box #:p-box-p #:p-box-value
    #:unbox #:ensure-boxed #:p-copy-scalar-arg

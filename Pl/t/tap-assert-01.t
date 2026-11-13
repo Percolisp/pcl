@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 44;
+plan tests => 45;
 
 sub run_cl {
     my ($code) = @_;
@@ -696,3 +696,21 @@ SKIP: {
      "fasl-build|FASL HIT|TEXT|same|1..2\nok 1 - a\nok 2 - b\n",
      'the TAP layer: built, then a fasl hit, the text under PCL_NO_FASL_CACHE; same TAP (#4962)');
 }
+# 45. todo_skip (#4884): COUNT `not ok N # TODO & SKIP WHY` rows and `last
+# TODO`, the builder method one row, ->details type todo_skip; and note / diag
+# end their last line at ONE trailing newline (#4883).  Expected = perl 5.40.3.
+is(run_cl(q{use Test::More tests => 5;
+ok(1, "first");
+TODO: {
+  local $TODO = "not yet";
+  todo_skip "cannot run", 2;
+  ok(0, "never");
+}
+my $tb = Test::More->builder;
+$tb->todo_skip("builder one");
+ok(1, "last");
+my @d = $tb->details;
+for my $i (1, 3) { my $h = $d[$i]; print "# d$i ", join(",", map { "$_=$h->{$_}" } sort keys %$h), "\n" }
+note "x\n"; note "a\n\nb\n"; note ""; note "\n\n"; note "one", "two\n", "three";
+}), "1..5\nok 1 - first\nnot ok 2 # TODO & SKIP cannot run\nnot ok 3 # TODO & SKIP cannot run\nnot ok 4 # TODO & SKIP builder one\nok 5 - last\n# d1 actual_ok=0,name=,ok=1,reason=cannot run,type=todo_skip\n# d3 actual_ok=0,name=,ok=1,reason=builder one,type=todo_skip\n# x\n# a\n# \n# b\n# \n# \n# \n# onetwo\n# three\n",
+   'todo_skip rows / builder todo_skip / details type; note ends at one trailing newline (#4884 #4883)');

@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **769**
+* names exported: **770**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 769
+* with a machine-readable `Contract:` tail: **71** of 770
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -1072,7 +1072,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-defpackage` | macro | `(name &rest options)` | — | — | — | — | — | — | — |
 | `p-sub-frame` | macro | `(&body body)` | — | — | — | — | — | — | — |
 
-## tap (27)
+## tap (28)
 
 *No ir-spec §10 row.*  the Test::More layer (cl/pcl-test.lisp) — not part of the language
 
@@ -1102,6 +1102,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `pl-require_ok` | function(lazy) | `` | — | — | — | — | — | — | — |
 | `pl-skip` | function(lazy) | `` | — | — | — | — | — | — | — |
 | `pl-skip_all` | function(lazy) | `` | — | — | — | — | — | — | — |
+| `pl-todo_skip` | function(lazy) | `` | — | — | — | — | — | — | — |
 | `pl-unicode_to_native` | function | `(&optional cp)` | — | — | — | — | — | — | — |
 | `pl-unlike` | function(lazy) | `` | — | — | — | — | — | — | — |
 | `pl-use_ok` | function(lazy) | `` | — | — | — | — | — | — | — |
