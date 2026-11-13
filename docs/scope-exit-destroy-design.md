@@ -87,6 +87,20 @@ to be, because a test at the exits that already exist is free (§5).
 
 ## 4. Stage 0 — DESTROY at program exit (small, sound by construction)
 
+> **SHIPPED s538b (2026-11-13, task #2371; rules in `docs/ir-spec.md` §7.4a).**  As
+> designed, with three changes from measurement: (1) the destructor is resolved AT EXIT on
+> the object's current class, not cached per class at `bless` -- a re-bless, an `@ISA` change
+> and a late `DESTROY` are right by construction; `bless` instead pays a one-way gate
+> (`*p-destroy-live*`, opened by the first non-empty `DESTROY` / `AUTOLOAD`) and, once it is
+> open, one store into a weak vector; (2) `$@ $! $?` are NOT saved around a destructor --
+> perl 5.40.3 localizes none of them at global destruction, and a destructor's `$?` is the
+> exit status; (3) a die in a destructor is silent (perl's `(in cleanup)` is a default-off
+> warning).  Measured: A -- the s495 probe 11 of 11 calls (10 late), 3 of 11 with a forced
+> full GC as the last statement; 100,000 made-and-dropped objects give 9,727 calls at exit;
+> B -- a program with no destructor pays nothing measurable (one global read per
+> `bless`); with one, a `bless` costs ~22-35 ns more (+5-9 % on a bless-only loop);
+> C -- 100,000 live objects are destroyed in 0.052 s (perl 0.016-0.018 s).
+
 perl destroys every surviving object at exit; PCL can do exactly that without knowing
 anything about lifetimes.
 
