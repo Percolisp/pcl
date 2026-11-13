@@ -115,3 +115,4 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s540/resume-s540.md`,
 * #233 and #1361 stay OPEN with notes (the default-build location is the residue).  Open, filed by it: #4941 (`caller` inside `sub K::m {}` written in package main reports package "k") #4942.
 * s540c + s540d TOLD (rebase over `24988e35`).
 * RUNNING: s540c, s540d.  ONE SLOT FREE -> s539a next (+ #4962 the precompiled TAP layer, + #4790).
+* **s539a LAUNCHED 18:2x** (board whole-file losses part 2, the harness half; + #4962 the TAP layer through the extension fasl cache; + #4790 last, if its budget allows; generation v2-14800 if emission changes; a new isolated worktree; opus / xhigh).  RUNNING: s540c, s540d, s539a.  NEXT freed slot: s540e (the shim half of the speed list), s539c (PPI batch 9), s539b (+ #4822).
