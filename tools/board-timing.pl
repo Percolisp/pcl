@@ -14,7 +14,7 @@
 #        [--preload FASL] [--env K=V] [--variant NAME]   (a LEVER's A/B: a
 #        file loaded in front of the program, an environment setting for the
 #        transpile and the run, and the name its rows carry)
-#   tools/board-timing.pl --report [--top N] FILE.tsv...
+#   tools/board-timing.pl --report [--top N] [--norm] FILE.tsv...
 #
 # SELECTION (any combination; default = the whole board):
 #   --list FILE      the dist list (default baselines/cpan-board-dists.tsv)
@@ -109,6 +109,7 @@ my ($list, $modes, $repeat, $cache_root, $timeout, $timeouts_tsv, $hooks, $repor
   = ("$root/baselines/cpan-board-dists.tsv", 'cold,warm', 1, undef, 120,
      "$root/baselines/cpan-board-timeouts.tsv", 1, 0, 60);
 my ($perl_side, $cold_continue, $variant, @preload, %xenv) = (1, 0, q{});
+my $norm = 0;
 my @ARGV_COPY = @ARGV;
 my @positional;
 while (@ARGV) {
@@ -135,6 +136,7 @@ while (@ARGV) {
   elsif ($a eq '--sha')        { $sha = shift @ARGV }
   elsif ($a eq '--report')     { $report = 1 }
   elsif ($a eq '--top')        { $top = shift @ARGV }
+  elsif ($a eq q{--norm})       { $norm = 1 }
   elsif ($a =~ /^-/)           { die "board-timing.pl: unknown option $a\n" }
   else                         { push @positional, $a }
 }
@@ -516,9 +518,40 @@ sub s2 { my ($v) = @_; return sprintf '%.1f', num($v) }
 sub f2 { my ($v) = @_; return sprintf q{%.2f}, num($v) }
 sub ratio { my ($a, $b) = @_; return num($b) > 0 ? sprintf('%.1fx', num($a) / num($b)) : '-' }
 
+# LOAD NORMALISATION (--norm): CPU seconds inflate with the box's load (turbo
+# and shared cores: the same compile is 0.385 s at load 1 and ~1 s at load 13,
+# measured s540a).  Every Test::More file compiles the SAME TAP layer, so its
+# `tcompile` CPU is a fixed workload in the row itself: f = tcompile / the
+# quiet median (rows at load < 2.5), clamped to [1, 4]; a row without it takes
+# the median f of its load bucket.  Every CPU field of the row is divided by f.
+sub normalise {
+  my ($rows) = @_;
+  my @q = sort { $a <=> $b } map { num($_->{tcompile_c}) } grep { num($_->{tcompile_c}) > 0 && num($_->{load1}) < 2.5 } @$rows;
+  my $tq = @q >= 5 ? $q[$#q / 2] : 0.385;
+  my %bucket;
+  for my $r (@$rows) {
+    next unless num($r->{tcompile_c}) > 0;
+    my $f = num($r->{tcompile_c}) / $tq;
+    $r->{f} = $f < 1 ? 1 : $f > 4 ? 4 : $f;
+    push @{ $bucket{int(num($r->{load1}) / 2)} }, $r->{f};
+  }
+  my %bmed = map { my @s = sort { $a <=> $b } @{ $bucket{$_} }; ($_ => $s[$#s / 2]) } keys %bucket;
+  for my $r (@$rows) {
+    $r->{f} //= $bmed{int(num($r->{load1}) / 2)} // 1;
+    for my $k (qw(p_cpu c_cpu A_cpu B_cpu C_cpu gc), map { "${_}_c" } qw(modload tap tcompile mcompile scompile ecompile cfile evalrun)) {
+      $r->{$k} = num($r->{$k}) / $r->{f} if defined $r->{$k} && length $r->{$k};
+    }
+  }
+  return $tq;
+}
+
 sub report {
   my ($files, $topn) = @_;
   my ($rows, $taken) = read_rows($files);
+  if ($norm) {
+    my $tq = normalise([values %$rows]);
+    push @$taken, sprintf('CPU LOAD-NORMALISED (--norm): quiet TAP-layer compile %.3f s', $tq);
+  }
   my @warm = grep { $_->{mode} eq 'warm' } values %$rows;
   my %cold = map { ("$_->{dist}\t$_->{file}" => $_) } grep { $_->{mode} eq 'cold' } values %$rows;
   my @cmp = grep { $_->{cmp} eq 'C' } @warm;
