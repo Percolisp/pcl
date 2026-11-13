@@ -15065,14 +15065,24 @@ create the key on a read-only call, which perl does not.
          at)
         (t at)))))
 
+(defvar *p-amp-frames* nil
+  "The depths of the call frames made by `&name;' (p-amp-call), innermost
+   first: caller(N)'s hasargs is '' for exactly these (s539d, #233).")
+
 (defmacro p-amp-call (call)
   "Perl `&name;' / `&$code;' -- CALL with the caller's CURRENT @_, the same
    array (perlsub): the callee's `shift' / `push @_' / `@_ = ()' change the
    caller's @_.  CALL passes `@_' as its sole argument; the binding tells the
    callee's p-flatten-args to adopt that vector rather than spread it.  A
    callee that only COPIES its arguments (p-raw-params, `:copy') never asks,
-   and never changes @_'s shape either."
-  `(let ((*p-shared-args* @_)) ,call))
+   and never changes @_'s shape either.
+
+   It also records the depth of the frame the call makes (*p-amp-frames*), the
+   one call whose caller() hasargs perl answers '' for (s539d, #233): the cost
+   is on this rare spelling only, never on an ordinary call's frame."
+  `(let ((*p-shared-args* @_)
+         (*p-amp-frames* (cons (1+ *pcl-sub-call-depth*) *p-amp-frames*)))
+     ,call))
 
 (defun %p-flatten-hash-into (h result)
   "Spread the hash table H onto RESULT as its key/value pairs, the way a list
@@ -37176,9 +37186,9 @@ would consume, so it dies naming the stream (rule 12)."
      `caller(N)'         the eleven fields: package file line subname hasargs
                          wantarray evaltext is_require hints bitmask hinthash
    Past the outermost frame, at the top level, or for a negative N: the
-   empty list / undef (#3399).  hasargs is 1 (a frame is a call with an
-   argument list; `&name;' is not told apart); evaltext, is_require and the
-   three hint fields are undef -- PCL keeps none of them per frame."
+   empty list / undef (#3399).  hasargs is 1, '' for a frame `&name;' made
+   (*p-amp-frames*); evaltext, is_require and the three hint fields are
+   undef -- PCL keeps none of them per frame."
   (let* ((lvl (if (typep level 'fixnum)
                   level
                   ;; Any other level: its number, truncated; one too large
@@ -37196,7 +37206,8 @@ would consume, so it dies naming the stream (rule 12)."
           pkg
           (multiple-value-bind (file line) (%p-frame-location depth)
             (let ((fields (if level-p
-                              (list pkg file line (%p-frame-sub-name depth) 1
+                              (list pkg file line (%p-frame-sub-name depth)
+                                    (if (member depth *p-amp-frames*) "" 1)
                                     (%p-frame-wantarray depth)
                                     *p-undef* *p-undef* *p-undef* *p-undef* *p-undef*)
                               (list pkg file line))))

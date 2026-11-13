@@ -84,6 +84,7 @@ sub top { my @c = caller(5); print "e ", scalar(@c), "\n"; my @n = caller(-1); p
 my @t = caller; print "g ", scalar(@t), "\n";
 sub g1 { goto &f2 } g1();
 sub rec { my $n = shift; return rec($n - 1) if $n; my $d = 0; $d++ while caller($d); $d } print "h ", rec(300), "\n";
+sub ha { my @c = caller(0); print "i ", ($c[4] ? 1 : 0), "\n" } sub hb { &ha; ha(); &hc } sub hc { &ha } hb();
 PL
 a 3 main
 b main
@@ -98,6 +99,9 @@ f 0
 g 0
 c 11 main|main::f2|1|U|U|U
 h 301
+i 0
+i 1
+i 0
 OUT
 
 # -- 2. An anonymous sub that reads caller is a frame (every build). ---------
