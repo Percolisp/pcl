@@ -514,6 +514,17 @@ sub read_rows {
 }
 
 sub num { my ($v) = @_; return (defined $v && length $v) ? $v : 0 }
+
+# The run phase's subprocess CPU: SBCL's children beyond the transpile share
+# (already scaled by the row's load factor f when --norm ran).
+sub subproc {
+  my ($r) = @_;
+  my $child = num($r->{s_cpu}) - num($r->{s_self});
+  $child = 0 if $child < 0;
+  my $ab = num($r->{xpile}) + num($r->{evalx}) + num($r->{xserver});
+  my $x = $child - ($ab < $child ? $ab : $child);
+  return $x;
+}
 sub s2 { my ($v) = @_; return sprintf '%.1f', num($v) }
 sub f2 { my ($v) = @_; return sprintf q{%.2f}, num($v) }
 sub ratio { my ($a, $b) = @_; return num($b) > 0 ? sprintf('%.1fx', num($a) / num($b)) : '-' }
@@ -538,7 +549,7 @@ sub normalise {
   my %bmed = map { my @s = sort { $a <=> $b } @{ $bucket{$_} }; ($_ => $s[$#s / 2]) } keys %bucket;
   for my $r (@$rows) {
     $r->{f} //= $bmed{int(num($r->{load1}) / 2)} // 1;
-    for my $k (qw(p_cpu c_cpu A_cpu B_cpu C_cpu gc), map { "${_}_c" } qw(modload tap tcompile mcompile scompile ecompile cfile evalrun)) {
+    for my $k (qw(p_cpu c_cpu x_cpu s_cpu s_self A_cpu B_cpu C_cpu gc), map { "${_}_c" } qw(modload tap tcompile mcompile scompile ecompile cfile evalrun)) {
       $r->{$k} = num($r->{$k}) / $r->{f} if defined $r->{$k} && length $r->{$k};
     }
   }
@@ -577,6 +588,33 @@ sub report {
   $o .= sprintf "| PCL cold (%d files) | %s | %s |\n", $t{cold_n} // 0, s2($t{cold_wall}), s2($t{cold_cpu});
   $o .= sprintf "| GC (in C and B) | | %s |\n\nMB consed: %.0f\n\n", s2($t{gc}), num($t{mb_consed});
   $o .= "Buckets (wall / SBCL CPU, exclusive): " . join(', ', map { sprintf '%s %s/%s', $_, s2($t{$_}), s2($t{"${_}_c"}) } @B) . "\n\n";
+  # WHERE PCL'S CPU GOES over the compared files: one line per component,
+  # with the files and dists it is more than 0.05 s in.
+  my @comp = (
+    ['test file pl2cl (A)',         sub { num($_[0]{x_cpu}) }],
+    ['module transpiles (A)',       sub { num($_[0]{A_cpu}) - num($_[0]{x_cpu}) }],
+    ['SBCL start + hooks (B)', sub { my $r = shift; my $b = num($r->{B_cpu}); $b -= num($r->{"${_}_c"}) for qw(modload tap tcompile mcompile scompile ecompile cfile); $b }],
+    ['module loads, fasl/text run (B: modload)', sub { num($_[0]{modload_c}) + num($_[0]{tap_c}) }],
+    ['TAP layer compile (B: tcompile)',  sub { num($_[0]{tcompile_c}) }],
+    ['module text compile (B: mcompile)', sub { num($_[0]{mcompile_c}) }],
+    ['test file forms compile (B: scompile)', sub { num($_[0]{scompile_c}) }],
+    ['string-eval compile (B: ecompile)', sub { num($_[0]{ecompile_c}) }],
+    ['module fasl build (B: cfile)', sub { num($_[0]{cfile_c}) }],
+    ['run: SBCL itself (C)',        sub { num($_[0]{C_cpu}) - subproc($_[0]) }],
+    ['run: subprocesses (C)',       sub { subproc($_[0]) }],
+    ['perl, the whole file',        sub { num($_[0]{p_cpu}) }],
+  );
+  $o .= "## Where PCL's CPU goes (compared files)\n\n| component | CPU s | files > 0.05 s | dists |\n|---|---:|---:|---:|\n";
+  for my $c (@comp) {
+    my ($s, $nf, %nd) = (0, 0);
+    for my $r (@cmp) {
+      my $v = $c->[1]->($r);
+      $s += $v;
+      if ($v > 0.05) { $nf++; $nd{$r->{dist}}++ }
+    }
+    $o .= sprintf "| %s | %.1f | %d | %d |\n", $c->[0], $s, $nf, scalar keys %nd;
+  }
+  $o .= "\n";
   # per dist
   my %d;
   for my $r (@warm) {
