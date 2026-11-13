@@ -61,7 +61,7 @@ in detail why it exists.
 | `Clone` | `clone($ref [, $depth])` in Perl (#3826, s526w1): the walk of Clone.xs (deep copy, re-bless, CODE / GLOB / Regexp shared, cycles kept, depth limit), byte-identical output to the XS 0.47 on the guard program -- HTTP::Headers needs it |
 | `Digest::MD5`, `Digest::SHA` | every digest, HMAC and the OO interface, byte-identical to the XS modules (#2947, s514a); written fresh, every 32-bit step masked, SHA-512 kept in 32-bit halves.  About 400x (MD5), 640x (SHA-256) and 2000x (SHA-512) slower than XS on 1 MB (0.47 s / 1.9 s / 4.4 s against 0.001-0.003 s, s514a); `context`, `getstate`/`putstate` and partial-byte `add_bits` die by name (see [`not-supported.md`](not-supported.md)) |
 | `Storable` | perl's own binary format in both directions (#2948, s514a): `freeze`/`nfreeze`/`thaw`/`dclone`/`store`/`nstore`/`retrieve`/`*_fd`/`lock_*`; sharing, cycles, blessed, regexps, tied containers; byte-identical to perl for canonical structures except booleans and upgraded latin-1 strings.  Hooks (`STORABLE_freeze`), CODE and GLOB items die by name (see [`not-supported.md`](not-supported.md)) |
-| `Encode`, `PerlIO::encoding` | `Encode` (task #2946): plain Perl over three runtime primitives -- `builtin::encode_octets` / `decode_octets` (string <-> octets through the codec table `:encoding(NAME)` layers use, stopping at the first failure and returning its position) and `builtin::encoding_known`.  Covered: `encode` `decode` `encode_utf8` `decode_utf8` `from_to` `is_utf8` `_utf8_on` `_utf8_off` `find_encoding` `find_mime_encoding` `clone_encoding` `define_encoding` `resolve_alias` `encodings` `perlio_ok`, the constants and tags, and every CHECK mode (FB_DEFAULT, FB_CROAK, FB_QUIET, FB_WARN, FB_PERLQQ, FB_HTMLCREF, FB_XMLCREF, LEAVE_SRC, STOP_AT_PARTIAL, a CODE ref) with perl's substitution and message rules; strict `UTF-8` (no surrogates, no noncharacters) vs lax `utf8`.  Encodings: whatever SBCL has a codec for -- UTF-8, UTF-16/32 (LE, BE, and the BOM forms, written in the shim), UCS-2, ASCII, ISO-8859-1..16, cp125x, the DOS code pages, KOI8-R/U, MacRoman, Shift_JIS, EUC-JP, GBK.  Perl's own pure-Perl `Encode::Encoding` and `Encode::MIME::Name` are reused.  DIES `Unknown encoding 'NAME'`: big5, euc-kr, cp949, iso-2022-*, the MIME-* encodings (see [`not-supported.md`](not-supported.md)).  NOT perl's: `is_utf8` is 1 for every string (no UTF-8 flag, #1389); a CHECK on a read-only literal does not die; a croak carries no location (#233); the in-place remainder is lost when the caller's variable is a raw slot (#3060); `utf8_upgrade` / `utf8_downgrade` / `is_8bit` / `is_16bit` are listed in `@EXPORT_OK` and, as in perl's Encode 3.x, not defined.  `PerlIO::encoding`: a stub with perl's `$fallback`; the layer itself is the runtime's |
+| `Encode`, `PerlIO::encoding` | `Encode` (task #2946): plain Perl over three runtime primitives -- `builtin::encode_octets` / `decode_octets` (string <-> octets through the codec table `:encoding(NAME)` layers use, stopping at the first failure and returning its position) and `builtin::encoding_known`.  Covered: `encode` `decode` `encode_utf8` `decode_utf8` `from_to` `is_utf8` `_utf8_on` `_utf8_off` `find_encoding` `find_mime_encoding` `clone_encoding` `define_encoding` `resolve_alias` `encodings` `perlio_ok`, the constants and tags, and every CHECK mode (FB_DEFAULT, FB_CROAK, FB_QUIET, FB_WARN, FB_PERLQQ, FB_HTMLCREF, FB_XMLCREF, LEAVE_SRC, STOP_AT_PARTIAL, a CODE ref) with perl's substitution and message rules; strict `UTF-8` (no surrogates, no noncharacters) vs lax `utf8`.  Encodings: whatever SBCL has a codec for -- UTF-8, UTF-16/32 (LE, BE, and the BOM forms, written in the shim), UCS-2, ASCII, ISO-8859-1..16, cp125x, the DOS code pages, KOI8-R/U, MacRoman, Shift_JIS, EUC-JP, GBK, cp932 (s539a, #4167).  Perl's own pure-Perl `Encode::Encoding` and `Encode::MIME::Name` are reused.  DIES `Unknown encoding 'NAME'`, and `resolve_alias` / `find_encoding` both answer undef (an encoding with no codec is not advertised, #4167): big5, euc-kr, cp949, iso-2022-*, the MIME-* encodings (see [`not-supported.md`](not-supported.md)).  NOT perl's: `is_utf8` is 1 for every string (no UTF-8 flag, #1389); a CHECK on a read-only literal does not die; a croak carries no location (#233); the in-place remainder is lost when the caller's variable is a raw slot (#3060); `utf8_upgrade` / `utf8_downgrade` / `is_8bit` / `is_16bit` are listed in `@EXPORT_OK` and, as in perl's Encode 3.x, not defined.  `PerlIO::encoding`: a stub with perl's `$fallback`; the layer itself is the runtime's |
 | `File::Glob` | `bsd_glob` / `csh_glob`, the `GLOB_*` constants, `GLOB_ERROR`, `$DEFAULT_FLAGS`, the `:glob` / `:bsd_glob` / `:case` / `:nocase` / `:globally` tags (#3160, s514e): plain Perl over the ONE runtime glob engine `builtin::bsd_glob`, which is also CORE::glob's (csh flags: brace expansion, backslash quoting, case-insensitive order, `.`/`..`).  Flags: BRACE NOCASE MARK NOCHECK NOMAGIC QUOTE TILDE NOSORT ALPHASORT ERR; `GLOB_ALTDIRFUNC` and `GLOB_LIMIT` die by name.  `:bsd_glob` overrides the caller's `glob()` and `<*.c>`.  A facts overlay (`lib/PCL/Facts/File/Glob.pm`) carries the constants' `()` prototypes.  NOT perl's: csh_glob's quote grouping (#490) and the per-call-site scalar iterator (#489).  `Compress::Zlib` and the IO::Compress family load since s517b (the Compress::Raw::Zlib shim, #3161) |
 | `Compress::Raw::Zlib` | **TEMPORARY: libz via sb-alien until pclxs provides Compress::Raw::Zlib (USER s516).**  The module's API in Perl (#3161, s517b) -- `Compress::Raw::Zlib::Deflate` / `Inflate` -> `deflateStream` / `inflateStream` with `deflate` `flush` `deflateReset` `deflateParams` `deflateTune` `inflate` `inflateSync` `inflateReset` `set_Append` and the accessors, `_deflateInit` / `_inflateInit` (what Compress::Zlib calls), the Z_* status dualvars, `crc32` `adler32` `*_combine`, `zlib_version`, the constants and export lists, `-AppendOutput` `-ConsumeInput` `-LimitOutput` `-Bufsize` `-WindowBits` (zlib / raw / gzip / auto) `-Dictionary` -- over one `builtin::zlib_*` primitive per zlib function (docs/ir-spec.md "Host libraries"): zlib's own bytes, so output is byte-identical to perl's on the same libz.  Compress::Zlib, IO::Compress::Gzip / IO::Uncompress::Gunzip and IO::Zlib run unchanged over it; three facts overlays (`lib/PCL/Facts/IO/Compress/{Gzip,Zlib,Zip}/Constants.pm`) carry their constants' `()` prototypes.  What pclxs replaces: this whole file (the real XS module then loads) and the zlib primitives.  `InflateScan` dies by name; a box without libz dies at `use` ([`not-supported.md`](not-supported.md)) |
 | `attributes` | perl's Perl half over the runtime's ONE sub-attribute record (#3162, s514e): `get` (lvalue, method, const -- never the prototype), `reftype`, `use attributes PKG, \&f, LIST` (prototype(...) sets the prototype registry; lvalue/method recorded), MODIFY_/FETCH_CODE_ATTRIBUTES, "Invalid CODE attribute".  A named sub's attributes travel as the p-sub `:attributes` fact, an anonymous sub's as a `__pcl_set_attributes` wrap; a non-builtin one goes through `attributes->import` as in perl.  Setting `lvalue` at run time is recorded and ANNOUNCED (the lowering does not change); variable attributes are not ([`not-supported.md`](not-supported.md)) |
@@ -86,7 +86,7 @@ in detail why it exists.
 | `Math::BigInt::Calc` | see below |
 | `PerlIO::Layer` | a minimal `find`, since PCL has no PerlIO layer objects |
 | `warnings` | the query and emit functions (`warnings::enabled` and the rest), with every category reported as enabled; `use warnings` itself is a pragma and never loads it |
-| `Test::More` | prototypes only: it is never run (the runtime supplies Test::More, step 3 above), but the compiler reads the assertion functions' prototypes from it |
+| `Test::More` | prototypes only: it is never run (the runtime supplies Test::More, step 3 above), but the compiler reads the assertion functions' prototypes from it -- and `use_ok`'s IMPORT-DIRECTIVE fact (`sub use_ok ($;@) :pcl_import_directive;`, see "The import-directive fact" below; #4881) |
 
 ## Where a new replacement belongs
 
@@ -154,6 +154,7 @@ overlay is declarations, never code):
     package Foo::Bar::Other;             # then any package its FILE declares (#3521);
                                          #   the declarations after it are recorded there
     sub NAME (PROTO);   sub NAME;        # forward declarations, no body
+    sub NAME (PROTO) :pcl_import_directive;   # + the import-directive fact (below)
     our @EXPORT = qw(...);  our @EXPORT_OK = qw(...);
     our %EXPORT_TAGS = (tag => [qw(...)], ...);
     1;                                   # plus comments and POD
@@ -203,6 +204,44 @@ disagreement, the overlay's prototype is wrong.  Shipped today: File::Path,
 Sub::Quote, Moo::_Utils, IO::Socket::UNIX, Text::Wrap, Capture::Tiny, File::Glob,
 IO::Compress::Base::Common (s515a, #3205: the prototype scan skips every `IO::`
 module by name, so its `($)` subs reached callers unprototyped).
+
+### The import-directive fact (task #4881, ruled s541)
+
+**What it is.** A sub whose CALL imports from the module its first argument
+names, as `use MODULE LIST` would -- Test::More's `use_ok`.  Run in a BEGIN
+block (`BEGIN { use_ok('IO::Compress::Gzip::Constants') }`, 146 CPAN test
+files) it imports at BEGIN time, so perl parses the rest of the file with
+those imports: `GZIP_MIN_HEADER_SIZE + 1 .. N` is a `()` constant plus one.
+A static parse that does not know this reads the constant as a list-operator
+call that swallows `+ 1 .. N` (IO-Compress `cz-03zlib-v1.t`: four loops ran
+once, 72 rows never emitted).
+
+**How it is declared** (the DATA, with the module's declarations -- never a
+name in `Pl/` or `cl/`, rule 9a): a forward declaration carrying the
+attribute `:pcl_import_directive`, in a prototypes-only shim or a facts
+overlay -- files only PCL reads, since perl rejects an unknown attribute
+("Invalid CODE attribute"):
+
+    sub use_ok ($;@) :pcl_import_directive;      # lib/Test/More.pm
+
+In an overlay it may stand beside the module's own declaration of the same
+sub: the fact is added to that record (it is not part of the prototype's
+shape, so it is no conflict).  The fact travels with the prototype record
+through every merge.
+
+**The mechanism** (`Pl::Parser2::_import_directive_uses`, keyed on the fact):
+a call, as a statement directly in a BEGIN block's body, of a sub whose
+record carries it, with a LITERAL module name first, is `use MODULE LIST` at
+that statement FOR THE PARSE FACTS ONLY -- prototypes, `()` constants,
+block-form arguments, through the same merge a `use` takes.  Shapes:
+`NAME('M', LIST)` alone or as the first operand of `||` / `or` / `&&` /
+`and`, and the paren-less `NAME 'M', LIST;`.  Nothing is emitted from it: the
+call still runs and loads the module.  Outside a BEGIN the call runs after
+the parse, so it has no effect (perl sees no import there either); a
+non-literal first argument has no effect and no die.  Guards:
+`Pl/t/facts-overlay-01.t` rows 12-18 (a fixture module with its own
+directive sub, `Pl/t/lib/DirectiveFix.pm` + its overlay, and the real
+`BEGIN { use_ok(...) }` shape).
 
 ## Proposed, not built
 

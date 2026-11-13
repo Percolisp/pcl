@@ -649,7 +649,11 @@ is a REFERENCE, the proxy IS that reference to every consumer of one: a
 nested subscript (`$h{a}{b}`, `$a[0][1]`, also in argument and lvalue
 position) goes on into the referenced container, `ref()` and a method
 invocant read its class, and the proxy box carries the referent's blessing
-until the next STORE.  A LIST-context use reads
+until the next STORE.  A COPY of the proxy (`my $d = $_[0]`, `my ($d) = @_`,
+`shift`, a list copy `my @c = @tied`, `reftype` / `refaddr`'s one FETCH) is
+a copy of the VALUE FETCHed -- the reference itself, never a reference to it:
+`reftype` of a tied element holding a blessed hash is `HASH` (#3852).
+A LIST-context use reads
 the container's **view**: its element proxies in index order, or for a hash
 its keys (all `FIRSTKEY`/`NEXTKEY` first) each followed by its value proxy.
 `tie` / `tied` / `untie` on a scalar dereference `${EXPR}` take the scalar's

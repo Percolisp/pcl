@@ -950,11 +950,16 @@ matching lowercases first and so ACCEPTS it — valid-input only (principle 9).
 `:encoding(NAME)` layers use, which is SBCL's set of external formats.  An
 encoding perl's Encode knows and SBCL has no codec for — **big5 (big5-eten,
 big5-hkscs), euc-kr, cp949, cp950, euc-cn / gb2312, hz, johab, iso-2022-jp /
--kr, cp932, 7bit-jis**, and perl's `*-raw` / Mac* sets beyond MacRoman /
-MacCyrillic — is not decoded as something else (rule 12): `resolve_alias`
-still answers perl's canonical name, `find_encoding` answers undef, and
-`encode` / `decode` die perl's own `Unknown encoding 'big5'`.  A codec SBCL
-adds later is reached by adding its name to the shim's `%INFO`.
+-kr, 7bit-jis**, and perl's `*-raw` / Mac* sets beyond MacRoman /
+MacCyrillic — is not decoded as something else (rule 12), and since s539a
+(#4167) it is not ADVERTISED either: `resolve_alias` and `find_encoding` both
+answer undef (they agree, as in perl, where both know every name), and
+`encode` / `decode` die perl's own `Unknown encoding 'big5'`.  (s513i had kept
+perl's canonical name in `resolve_alias`; Pod-Simple read it and died at the
+decode.)  **cp932** is SBCL's codec too and is wired since s539a: its whole
+double-byte repertoire decodes, fails and round-trips as perl's does.  The
+missing tables, sized, are task #4885; a codec SBCL adds later is reached by
+adding its name to the shim's `%INFO`.
 
 Not shipped: **Encode::Guess**, the **MIME-Header / MIME-B / MIME-Q**
 encodings (Encode::MIME::Header), **Encode::Encoder**.  `use` of one fails at

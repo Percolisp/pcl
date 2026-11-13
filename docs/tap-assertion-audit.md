@@ -63,6 +63,7 @@ checkable and there is no row to attach a diagnostic to.
 | `eq_array` (feeds `ok`) | length + element compare | reachable |
 | `eq_hash` (feeds `ok`) | **type-errored on every call** (F2) | fixed |
 | `eq_set` (feeds `ok`) | refs in order + string-sorted rest, deep compare | reachable (#3432, s521c: was absent -- "Undefined subroutine") |
+| `todo_skip` | one-sided by definition (a TODO row) | added s539a (#4884): COUNT `not ok N # TODO & SKIP WHY` rows, `last TODO` |
 | `subtest` | the child's own verdict (failures, plan mismatch, no tests run) | reachable (#1576, s521c: was absent); `plan skip_all` inside is a parent SKIP row, never an exit; a die inside closes the child, reports the parent row and propagates (perl 5.40) |
 | the STREAM (every row above) | -- | since #3530 (s521c): Test::More's OWN dup of descriptor 1, taken at the first `use Test::More` (`*tap-stream*`), so closing or re-opening STDOUT loses no row; diagnostics stay on it (the board reads stdout alone, #3241); test.pl callers keep the current STDOUT |
 
@@ -257,3 +258,42 @@ stream.  A diagnostic you did not ask for is a corrupted result.
 the ones whose inverse is the interesting half carry it (a *usable* pattern
 still fails `unlike` when it matches; an unhandled `cmp_ok` operator does not
 abort the file; `scalar(@a)`/`scalar(%h)` are still the counts).
+
+## The Test::Builder methods (s539a: #3823, #3495, #4883, #4884, #4962)
+
+PCL's TAP layer IS the builder (no Test::Builder object behind it), so a
+method exists only where it reads state the layer already keeps.  s539a added
+the ones CPAN suites reached first: `parent` (undef: PCL never hands out a
+child builder), `expected_tests` (the plan, 0 for none; the setter plans),
+`level` (`$Test::Builder::Level`, 1 at load), `in_todo` / `todo`, `details`
+(perl's five fields -- `ok actual_ok name type reason` -- for every row kind:
+pass, fail, TODO fail / pass, skip, `todo_skip`, a subtest's parent row, a row
+with no name), `summary`, `no_plan`, `BAIL_OUT` / `BAILOUT`, `explain`,
+`is_eq` / `isnt_eq` / `is_num` / `isnt_num`, `like` / `unlike` (`maybe_regex`
+always), `subtest` and `todo_skip`; and Test::More's `todo_skip(WHY, COUNT)`
+(COUNT `not ok N # TODO & SKIP WHY` rows, then `last TODO`).  Every row is
+recorded in ONE place, `%test-record-row` (`*test-results*`, rebound per
+subtest), which `details` and `summary` read -- no second row log.
+
+`diag` / `note` share one formatter (`%tap-comment`): the message list joined,
+ONE trailing newline ending the last line (`diag "x\n"` is `# x`; `note
+"\n\n"` two `# ` lines; `diag ""` one), each line commented -- probed 5.40.3.
+
+**Census against perl's Test::Builder 1.302199** (`scratch/s539a/pr/tbm.pl` in
+the s539a worktree; public methods only): base 17, after s539a 36.  STILL
+ABSENT, each needing state the layer does not keep (task #4886): `child`,
+`create`, `reset`, `reset_outputs`, `finalize`, `name`, `is_fh`, `find_TODO`,
+`todo_start` / `todo_end`, `no_diag`, `no_ending`, `no_header`,
+`no_log_results`, `use_numbers`, `coordinate_forks`, the Test2 bridge
+`context` / `ctx`.  A call to one dies "Can't locate object method" (rule 12).
+
+**Where the layer loads from (#4962):** `p-ensure-test-lib` loads
+`cl/pcl-test.lisp` through the EXTENSION fasl cache (`%p-load-extension-file`,
+the path `cl/pcl-pack.lisp` takes since #1202) -- compiled once per content +
+runtime identity; a Test::More program measured 0.98 -> 0.32 s.
+`PCL_NO_FASL_CACHE=1` loads the text.  The gate harness and the sweep still
+`--load` the text first (`pl-ok` fbound short-circuits the lazy load).
+
+Guards: `Pl/t/tap-assert-01.t` rows 40-45, `Pl/t/glob-undef-01.t` row 12
+(Test::Warnings' `undef *{"main::done_testing"}` shadows the name in main,
+never unbinds the TAP function program-wide).
