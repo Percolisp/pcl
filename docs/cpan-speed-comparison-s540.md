@@ -12,20 +12,21 @@ ran), which moved no code they name.
 ## 0. The answer
 
 **It is compile, not run.**  Over the 638 board files PCL runs exactly as perl
-does (same plan, same ok count), perl spends **64.7 s of CPU** and PCL, on a
-warm cache, **2,169 s -- 33.5x** (coarse pass, CPU normalised to a quiet box;
-raw 2,715 s).  Of PCL's 2,169 s:
+does (same plan, same ok count), perl spends **64.9 s of CPU** and PCL, on a
+warm cache, **2,154 s -- 33.2x** (CPU normalised to a quiet box: the coarse pass
+for every file, the precise re-timing for the 65 heaviest; raw 2,645 s against
+perl's 71.0).  Of PCL's 2,154 s:
 
-* **82 % (1,783 s) is LOADING** -- and 1,423 s of that is SBCL compiling the
+* **82 % (1,767 s) is LOADING** -- and 1,412 s of that is SBCL compiling the
   TEXT of the distribution's own modules on every run (a module under `-I` /
   `lib` is never compiled to a fasl by default), 225 s compiling the
   Test::More layer `cl/pcl-test.lisp` from source in every file that uses it;
-* **10 % (225 s) is TRANSPILING** -- 203 s of it the test file's own `pl2cl`;
-* **7 % (161 s) is RUNNING** -- 109 s in SBCL itself (two thirds of it
-  JSON-PP's `099_binary*` files) and 52 s in the subprocesses the programs
+* **10 % (224 s) is TRANSPILING** -- 203 s of it the test file's own `pl2cl`;
+* **8 % (162 s) is RUNNING** -- 110 s in SBCL itself (most of it JSON-PP's
+  `099_binary*` files) and 52 s in the subprocesses the programs
   start (Capture-Tiny).  The run phase is 2.5x perl's whole time.
 
-A first run on an empty cache costs 3,216 s (+1,046 s: 1,362 module
+A first run on an empty cache costs 3,221 s (+1,067 s: 1,362 module
 transpiles, each a fresh `perl pl2cl`, and their fasl builds).  The two
 cheapest levers are each one setting or one load path, and both are measured
 (section 4, rows 1 and 2): compiling the dist's modules to fasls takes a
@@ -114,7 +115,8 @@ best of 3) is the reference, and the doc says which table is which.
 
 ## 2. Per distribution
 
-Coarse pass, warm, CPU seconds normalised to a quiet box (section 1a), over the
+Warm, CPU seconds normalised to a quiet box (section 1a; the 65 precise files from
+the quiet re-timing, the rest from the coarse pass), over the
 COMPARED files (`C`); `PE` / `S` / `X` count the files listed or left out.
 `(TAP)` is the part of B spent compiling `cl/pcl-test.lisp`; `cold` is the same
 files' CPU on a first run with an empty cache.  Sorted by excess (PCL - perl).
@@ -122,62 +124,144 @@ The whole per-file table is `baselines/board-timing-s540.tsv`.
 
 |dist | C | PE | S | X | perl | PCL | excess | ratio | A | B | (TAP) | C run | cold PCL |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---: |
-|Pod-Simple-3.47-0 | 64 | 0 | 1 | 9 | 2.7 | 494.1 | 491.4 | 182.5x | 25.1 | 465.9 | 23.4 | 2.9 | 495.3 |
-|Template-Toolkit-3.106-0 | 92 | 1 | 17 | 11 | 3.9 | 382.6 | 378.7 | 97.6x | 29.8 | 350.2 | 34.0 | 2.7 | 430.0 |
-|JSON-PP-4.18-0 | 63 | 0 | 0 | 2 | 21.5 | 189.7 | 168.1 | 8.8x | 13.2 | 106.5 | 22.5 | 69.9 | 250.7 |
-|Log-Log4perl-1.58-0 | 40 | 0 | 17 | 18 | 1.4 | 159.3 | 157.9 | 111.6x | 31.2 | 127.4 | 14.8 | 0.7 | 191.9 |
-|YAML-PP-v0.39.0-0 | 37 | 0 | 1 | 6 | 4.1 | 159.8 | 155.7 | 39.1x | 20.6 | 132.6 | 13.6 | 6.6 | 215.0 |
-|IO-Compress-2.214-0 | 36 | 1 | 14 | 42 | 2.1 | 153.8 | 151.7 | 74.1x | 19.2 | 132.1 | 13.3 | 2.4 | 171.8 |
-|Text-CSV-2.04 | 22 | 0 | 0 | 16 | 2.0 | 123.0 | 121.0 | 61.4x | 8.8 | 113.1 | 8.1 | 1.1 | 148.3 |
-|Capture-Tiny-0.50-0 | 21 | 0 | 0 | 3 | 17.4 | 111.2 | 93.8 | 6.4x | 4.7 | 37.8 | 7.8 | 68.7 | 169.0 |
+|Pod-Simple-3.47-0 | 64 | 0 | 1 | 9 | 2.8 | 491.9 | 489.2 | 178.1x | 25.0 | 463.8 | 23.5 | 2.9 | 495.6 |
+|Template-Toolkit-3.106-0 | 92 | 1 | 17 | 11 | 3.9 | 383.4 | 379.4 | 97.4x | 29.8 | 350.8 | 34.1 | 2.7 | 431.2 |
+|JSON-PP-4.18-0 | 63 | 0 | 0 | 2 | 21.9 | 190.6 | 168.6 | 8.7x | 13.2 | 106.6 | 22.5 | 70.8 | 251.1 |
+|Log-Log4perl-1.58-0 | 40 | 0 | 17 | 18 | 1.5 | 159.5 | 158.0 | 108.8x | 31.2 | 127.5 | 14.8 | 0.7 | 192.4 |
+|YAML-PP-v0.39.0-0 | 37 | 0 | 1 | 6 | 4.1 | 159.9 | 155.8 | 39.1x | 20.6 | 132.7 | 13.6 | 6.6 | 215.4 |
+|IO-Compress-2.214-0 | 36 | 1 | 14 | 42 | 2.1 | 146.3 | 144.3 | 70.9x | 19.2 | 124.6 | 13.4 | 2.4 | 172.2 |
+|Text-CSV-2.04 | 22 | 0 | 0 | 16 | 2.0 | 115.6 | 113.6 | 58.3x | 8.7 | 105.7 | 8.1 | 1.1 | 148.4 |
+|Capture-Tiny-0.50-0 | 21 | 0 | 0 | 3 | 17.1 | 111.6 | 94.5 | 6.5x | 4.7 | 37.9 | 7.8 | 69.0 | 169.4 |
 |HTTP-Tiny-0.090-0 | 26 | 0 | 4 | 2 | 1.2 | 59.3 | 58.1 | 48.6x | 6.8 | 51.9 | 9.5 | 0.6 | 128.7 |
-|URI-5.34-0 | 47 | 1 | 2 | 13 | 1.6 | 54.9 | 53.4 | 34.6x | 9.8 | 44.3 | 17.0 | 0.8 | 128.1 |
+|URI-5.34-0 | 47 | 1 | 2 | 13 | 1.6 | 55.1 | 53.5 | 34.6x | 9.8 | 44.4 | 17.1 | 0.8 | 128.4 |
 |Data-Dumper-2.183-0 | 19 | 0 | 1 | 6 | 0.7 | 42.1 | 41.4 | 63.7x | 5.3 | 36.2 | 6.8 | 0.6 | 50.2 |
-|Path-Tiny-0.150-0 | 21 | 1 | 1 | 7 | 1.0 | 34.4 | 33.4 | 35.2x | 6.0 | 28.0 | 7.7 | 0.4 | 102.0 |
-|HTTP-Message-7.01-0 | 14 | 0 | 2 | 7 | 0.6 | 30.7 | 30.1 | 51.5x | 4.2 | 26.3 | 5.2 | 0.3 | 91.5 |
-|Getopt-Long-2.58-0 | 8 | 0 | 0 | 0 | 0.1 | 22.8 | 22.7 | 156.3x | 1.8 | 20.8 | 0.7 | 0.2 | 29.4 |
-|Class-Method-Modifiers-2.15-0 | 26 | 1 | 0 | 2 | 0.9 | 23.1 | 22.2 | 26.5x | 6.1 | 16.7 | 9.5 | 0.2 | 70.6 |
-|Role-Tiny-2.002004-0 | 19 | 0 | 0 | 4 | 0.3 | 18.7 | 18.4 | 54.4x | 4.1 | 14.3 | 7.0 | 0.3 | 23.3 |
-|YAML-Tiny-1.74 | 10 | 1 | 0 | 2 | 0.7 | 17.0 | 16.3 | 25.5x | 3.1 | 13.6 | 3.7 | 0.2 | 87.8 |
-|Mojo-DOM58-3.002-0 | 4 | 0 | 0 | 1 | 0.4 | 15.4 | 15.0 | 41.6x | 7.3 | 7.5 | 1.5 | 0.7 | 80.7 |
-|Scalar-List-Utils-1.70-0 | 19 | 0 | 0 | 19 | 0.6 | 12.8 | 12.2 | 20.8x | 4.4 | 8.2 | 7.0 | 0.2 | 45.4 |
+|Path-Tiny-0.150-0 | 21 | 1 | 1 | 7 | 1.0 | 34.4 | 33.5 | 35.2x | 6.0 | 28.1 | 7.7 | 0.4 | 102.2 |
+|HTTP-Message-7.01-0 | 14 | 0 | 2 | 7 | 0.6 | 30.8 | 30.2 | 51.5x | 4.2 | 26.3 | 5.2 | 0.3 | 91.8 |
+|Getopt-Long-2.58-0 | 8 | 0 | 0 | 0 | 0.1 | 22.8 | 22.7 | 156.3x | 1.8 | 20.9 | 0.7 | 0.2 | 29.5 |
+|Class-Method-Modifiers-2.15-0 | 26 | 1 | 0 | 2 | 0.9 | 23.1 | 22.3 | 26.5x | 6.1 | 16.8 | 9.5 | 0.2 | 70.8 |
+|Role-Tiny-2.002004-0 | 19 | 0 | 0 | 4 | 0.4 | 18.6 | 18.2 | 48.7x | 4.1 | 14.2 | 7.0 | 0.2 | 23.4 |
+|YAML-Tiny-1.74 | 10 | 1 | 0 | 2 | 0.7 | 17.0 | 16.3 | 25.4x | 3.1 | 13.6 | 3.7 | 0.2 | 88.1 |
+|Mojo-DOM58-3.002-0 | 4 | 0 | 0 | 1 | 0.4 | 15.0 | 14.6 | 39.9x | 6.9 | 7.4 | 1.5 | 0.7 | 80.9 |
+|Scalar-List-Utils-1.70-0 | 19 | 0 | 0 | 19 | 0.6 | 12.9 | 12.2 | 20.8x | 4.4 | 8.2 | 7.0 | 0.2 | 45.5 |
 |Data-Dump-1.25-0 | 13 | 0 | 0 | 2 | 0.2 | 11.9 | 11.8 | 63.5x | 2.6 | 9.2 | 0.4 | 0.2 | 23.3 |
-|Text-Balanced-2.07-0 | 9 | 0 | 5 | 0 | 0.3 | 11.7 | 11.5 | 43.0x | 2.4 | 9.2 | 3.3 | 0.2 | 15.3 |
-|Try-Tiny-0.32-0 | 4 | 1 | 1 | 5 | 0.2 | 7.2 | 7.0 | 40.3x | 1.1 | 5.9 | 1.5 | 0.1 | 55.0 |
-|HTTP-Date-6.06-0 | 3 | 0 | 0 | 0 | 0.2 | 6.5 | 6.3 | 42.8x | 0.9 | 5.4 | 1.1 | 0.1 | 60.4 |
-|Class-Inspector-1.36-0 | 5 | 0 | 1 | 0 | 0.2 | 6.1 | 5.9 | 31.6x | 1.5 | 4.5 | 1.8 | 0.1 | 32.9 |
-|TimeDate-2.33-0 | 5 | 0 | 0 | 0 | 0.1 | 5.9 | 5.7 | 50.9x | 1.0 | 4.7 | 0.4 | 0.1 | 14.8 |
-|Sub-Uplevel-0.2800-0 | 3 | 0 | 0 | 7 | 0.1 | 5.7 | 5.5 | 37.7x | 0.8 | 4.8 | 1.1 | 0.1 | 52.6 |
-|File-Which-1.27-0 | 3 | 0 | 0 | 0 | 0.1 | 3.8 | 3.6 | 28.9x | 0.7 | 3.0 | 1.1 | 0.0 | 29.4 |
-|Algorithm-Diff-1.201-0 | 2 | 0 | 0 | 0 | 0.0 | 3.4 | 3.4 | 104.5x | 1.4 | 1.9 | 0.0 | 0.1 | 17.3 |
+|Text-Balanced-2.07-0 | 9 | 0 | 5 | 0 | 0.3 | 11.8 | 11.5 | 43.0x | 2.4 | 9.2 | 3.3 | 0.2 | 15.3 |
+|Try-Tiny-0.32-0 | 4 | 1 | 1 | 5 | 0.2 | 7.2 | 7.0 | 40.3x | 1.1 | 5.9 | 1.5 | 0.1 | 55.1 |
+|HTTP-Date-6.06-0 | 3 | 0 | 0 | 0 | 0.2 | 6.5 | 6.3 | 42.8x | 0.9 | 5.4 | 1.1 | 0.1 | 60.5 |
+|Class-Inspector-1.36-0 | 5 | 0 | 1 | 0 | 0.2 | 6.1 | 5.9 | 31.6x | 1.5 | 4.5 | 1.8 | 0.1 | 33.0 |
+|TimeDate-2.33-0 | 5 | 0 | 0 | 0 | 0.1 | 5.9 | 5.8 | 55.0x | 1.1 | 4.7 | 0.4 | 0.1 | 14.9 |
+|Sub-Uplevel-0.2800-0 | 3 | 0 | 0 | 7 | 0.2 | 5.7 | 5.5 | 37.7x | 0.8 | 4.8 | 1.1 | 0.1 | 52.6 |
+|File-Which-1.27-0 | 3 | 0 | 0 | 0 | 0.1 | 3.8 | 3.6 | 28.9x | 0.7 | 3.0 | 1.1 | 0.0 | 29.5 |
+|Algorithm-Diff-1.201-0 | 2 | 0 | 0 | 0 | 0.0 | 3.3 | 3.3 | 92.0x | 1.3 | 1.9 | 0.0 | 0.1 | 17.3 |
 |Safe-Isa-1.000010-0 | 2 | 0 | 0 | 0 | 0.1 | 1.6 | 1.5 | 26.2x | 0.7 | 0.9 | 0.7 | 0.0 | 3.1 |
 |Sort-Versions-1.62-0 | 1 | 0 | 0 | 0 | 0.0 | 0.7 | 0.6 | 22.3x | 0.2 | 0.4 | 0.4 | 0.0 | 1.8 |
-
-| **board** | **638** | **7** | **67** | **184** | **64.7** | **2,169.2** | **2,104.5** | **33.5x** | **224.8** | **1,783.4** | **224.9** | **160.5** | **3,215.6** |
+| **board** | **638** | **7** | **67** | **184** | **64.9** | **2,154.2** | **2,089.3** | **33.2x** | **224.4** | **1,767.4** | **225.4** | **161.8** | **3,221.4** |
 
 ## 3. The files with the most excess
 
+The 60 compared files with the most excess CPU (PCL - perl), normalised;
+`pass` says which measured the row: `precise` = the quiet re-timing (best of 3,
+the spread of the three beside it -- a large spread is the fasl cache still
+converging, row 7 of section 4: IO-Compress `999pod.t` needed five runs),
+`coarse` = the coarse pass.  Over the 65 re-timed files the normalised coarse
+CPU is 0.98x the precise one (p10 0.94, p90 1.03; the ten taken at load 6-13:
+0.85-1.11), which is what licenses the normalisation.  Fifty-eight of the sixty
+are load-bound (B over 75 % of the file): the module text compile is nearly the whole of
+the excess.
+
+| # | file | perl | PCL | excess | ratio | A | B | of B: module text / TAP | C run | pass |
+|---:|---|---:|---:|---:|---:|---:|---:|---|---:|---|
+| 1 | Pod-Simple-3.47-0/xhtml01.t | 0.05 | 8.64 | 8.60 | 176x | 0.74 | 7.84 | 7.33 / 0.37 | 0.06 | precise (spread 5 %) |
+| 2 | Pod-Simple-3.47-0/html02.t | 0.04 | 8.63 | 8.59 | 227x | 0.32 | 8.27 | 7.81 / 0.37 | 0.03 | precise (spread 1 %) |
+| 3 | Pod-Simple-3.47-0/search29.t | 0.04 | 8.53 | 8.49 | 219x | 0.37 | 8.13 | 7.28 / 0.37 | 0.03 | precise (spread 6 %) |
+| 4 | Pod-Simple-3.47-0/html01.t | 0.04 | 8.51 | 8.47 | 213x | 0.39 | 8.06 | 7.54 / 0.37 | 0.05 | precise (spread 8 %) |
+| 5 | Pod-Simple-3.47-0/search25.t | 0.05 | 8.42 | 8.37 | 168x | 0.42 | 7.96 | 7.11 / 0.37 | 0.03 | precise (spread 6 %) |
+| 6 | Pod-Simple-3.47-0/search12.t | 0.05 | 8.36 | 8.31 | 167x | 0.40 | 7.93 | 7.10 / 0.36 | 0.03 | precise (spread 8 %) |
+| 7 | Pod-Simple-3.47-0/pulltitl.t | 0.04 | 8.30 | 8.26 | 224x | 0.68 | 7.59 | 7.05 / 0.37 | 0.03 | precise (spread 5 %) |
+| 8 | Pod-Simple-3.47-0/html03.t | 0.04 | 8.26 | 8.22 | 223x | 0.30 | 7.93 | 7.48 / 0.37 | 0.02 | precise (spread 4 %) |
+| 9 | Pod-Simple-3.47-0/puller.t | 0.05 | 8.27 | 8.22 | 176x | 0.73 | 7.52 | 7.01 / 0.37 | 0.02 | precise (spread 3 %) |
+| 10 | Pod-Simple-3.47-0/search27.t | 0.04 | 8.26 | 8.22 | 212x | 0.40 | 7.81 | 6.96 / 0.37 | 0.04 | precise (spread 0 %) |
+| 11 | Pod-Simple-3.47-0/render.t | 0.13 | 8.34 | 8.21 | 64x | 0.49 | 7.62 | 7.07 / 0.36 | 0.23 | precise (spread 5 %) |
+| 12 | Pod-Simple-3.47-0/fcodes_l.t | 0.05 | 8.26 | 8.21 | 165x | 0.63 | 7.55 | 7.07 / 0.37 | 0.07 | precise (spread 3 %) |
+| 13 | Pod-Simple-3.47-0/verb_fmt.t | 0.04 | 8.20 | 8.16 | 205x | 0.54 | 7.58 | 7.11 / 0.37 | 0.08 | precise (spread 3 %) |
+| 14 | Pod-Simple-3.47-0/search28.t | 0.04 | 8.19 | 8.15 | 210x | 0.37 | 7.79 | 6.97 / 0.37 | 0.04 | precise (spread 9 %) |
+| 15 | Mojo-DOM58-3.002-0/dom.t | 0.25 | 8.39 | 8.14 | 33x | 5.98 | 1.77 | 0.89 / 0.37 | 0.64 | precise (spread 2 %) |
+| 16 | Pod-Simple-3.47-0/search26.t | 0.05 | 8.18 | 8.13 | 167x | 0.35 | 7.80 | 6.98 / 0.37 | 0.03 | precise (spread 0 %) |
+| 17 | Pod-Simple-3.47-0/reinit.t | 0.11 | 8.22 | 8.11 | 75x | 0.39 | 7.63 | 7.16 / 0.36 | 0.19 | precise (spread 1 %) |
+| 18 | Pod-Simple-3.47-0/search22.t | 0.05 | 8.11 | 8.06 | 173x | 0.42 | 7.65 | 6.83 / 0.37 | 0.03 | precise (spread 3 %) |
+| 19 | Pod-Simple-3.47-0/accept05.t | 0.04 | 8.05 | 8.01 | 201x | 0.42 | 7.56 | 7.09 / 0.37 | 0.06 | precise (spread 2 %) |
+| 20 | Pod-Simple-3.47-0/cbacks.t | 0.03 | 8.03 | 8.00 | 268x | 0.42 | 7.57 | 7.04 / 0.37 | 0.03 | precise (spread 1 %) |
+| 21 | Pod-Simple-3.47-0/eol2.t | 0.04 | 8.03 | 7.99 | 206x | 0.36 | 7.62 | 7.13 / 0.37 | 0.05 | precise (spread 2 %) |
+| 22 | Pod-Simple-3.47-0/search20.t | 0.04 | 8.03 | 7.99 | 178x | 0.41 | 7.58 | 6.73 / 0.37 | 0.04 | precise (spread 7 %) |
+| 23 | Pod-Simple-3.47-0/begin.t | 0.05 | 8.01 | 7.96 | 164x | 0.62 | 7.33 | 6.79 / 0.37 | 0.06 | precise (spread 1 %) |
+| 24 | Pod-Simple-3.47-0/items.t | 0.05 | 8.01 | 7.96 | 160x | 0.44 | 7.52 | 7.04 / 0.37 | 0.05 | precise (spread 2 %) |
+| 25 | Pod-Simple-3.47-0/whine.t | 0.04 | 7.99 | 7.95 | 210x | 0.36 | 7.59 | 7.12 / 0.37 | 0.04 | precise (spread 1 %) |
+| 26 | JSON-PP-4.18-0/099_binary15.t | 2.41 | 10.33 | 7.93 | 4x | 0.15 | 1.63 | 1.08 / 0.37 | 8.56 | precise (spread 1 %) |
+| 27 | Pod-Simple-3.47-0/heads.t | 0.05 | 7.94 | 7.89 | 159x | 0.37 | 7.50 | 7.04 / 0.36 | 0.06 | precise (spread 8 %) |
+| 28 | Pod-Simple-3.47-0/xhtml15.t | 0.03 | 7.89 | 7.86 | 272x | 0.32 | 7.54 | 7.09 / 0.37 | 0.03 | precise (spread 7 %) |
+| 29 | Pod-Simple-3.47-0/filter-html.t | 0.04 | 7.89 | 7.86 | 202x | 0.34 | 7.48 | 7.02 / 0.37 | 0.07 | precise (spread 5 %) |
+| 30 | Pod-Simple-3.47-0/eol.t | 0.04 | 7.89 | 7.85 | 202x | 0.37 | 7.47 | 6.99 / 0.37 | 0.05 | precise (spread 2 %) |
+| 31 | Pod-Simple-3.47-0/JustPod02.t | 0.04 | 7.88 | 7.83 | 197x | 0.37 | 7.46 | 6.95 / 0.37 | 0.05 | precise (spread 2 %) |
+| 32 | Pod-Simple-3.47-0/for.t | 0.04 | 7.87 | 7.83 | 197x | 0.41 | 7.42 | 6.95 / 0.37 | 0.04 | precise (spread 1 %) |
+| 33 | Pod-Simple-3.47-0/strpvbtm.t | 0.04 | 7.84 | 7.80 | 206x | 0.42 | 7.38 | 6.88 / 0.37 | 0.04 | precise (spread 5 %) |
+| 34 | Pod-Simple-3.47-0/xhtml-bkb.t | 0.03 | 7.83 | 7.80 | 279x | 0.31 | 7.46 | 7.00 / 0.37 | 0.05 | precise (spread 3 %) |
+| 35 | Pod-Simple-3.47-0/linkclas.t | 0.04 | 7.78 | 7.74 | 205x | 0.36 | 7.39 | 6.92 / 0.37 | 0.02 | coarse |
+| 36 | Pod-Simple-3.47-0/search10.t | 0.04 | 7.77 | 7.72 | 173x | 0.37 | 7.36 | 6.54 / 0.37 | 0.03 | precise (spread 4 %) |
+| 37 | Pod-Simple-3.47-0/items02.t | 0.04 | 7.76 | 7.72 | 204x | 0.35 | 7.37 | 6.91 / 0.37 | 0.04 | coarse |
+| 38 | Pod-Simple-3.47-0/enc-chars.t | 0.04 | 7.76 | 7.72 | 194x | 0.35 | 7.36 | 6.87 / 0.36 | 0.04 | coarse |
+| 39 | Pod-Simple-3.47-0/fornot.t | 0.05 | 7.75 | 7.70 | 155x | 0.39 | 7.30 | 6.84 / 0.36 | 0.06 | coarse |
+| 40 | Pod-Simple-3.47-0/encod02.t | 0.03 | 7.70 | 7.67 | 257x | 0.32 | 7.33 | 6.86 / 0.36 | 0.04 | coarse |
+| 41 | Pod-Simple-3.47-0/fcodes_e.t | 0.04 | 7.70 | 7.66 | 192x | 0.39 | 7.26 | 6.80 / 0.35 | 0.05 | coarse |
+| 42 | Pod-Simple-3.47-0/ac_d.t | 0.04 | 7.69 | 7.65 | 192x | 0.37 | 7.27 | 6.80 / 0.36 | 0.05 | coarse |
+| 43 | Pod-Simple-3.47-0/content_seen.t | 0.03 | 7.68 | 7.65 | 256x | 0.30 | 7.33 | 6.86 / 0.37 | 0.04 | coarse |
+| 44 | Pod-Simple-3.47-0/github_issue_79.t | 0.04 | 7.68 | 7.64 | 192x | 0.35 | 7.28 | 6.83 / 0.36 | 0.04 | coarse |
+| 45 | Pod-Simple-3.47-0/accept01.t | 0.06 | 7.69 | 7.63 | 128x | 0.37 | 7.27 | 6.79 / 0.36 | 0.04 | coarse |
+| 46 | Pod-Simple-3.47-0/basic.t | 0.04 | 7.67 | 7.63 | 192x | 0.39 | 7.25 | 6.79 / 0.36 | 0.03 | coarse |
+| 47 | Pod-Simple-3.47-0/emptylists.t | 0.04 | 7.67 | 7.63 | 192x | 0.32 | 7.33 | 6.84 / 0.36 | 0.02 | coarse |
+| 48 | Pod-Simple-3.47-0/encod01.t | 0.05 | 7.68 | 7.63 | 154x | 0.34 | 7.29 | 6.81 / 0.36 | 0.05 | coarse |
+| 49 | Pod-Simple-3.47-0/encod03.t | 0.05 | 7.68 | 7.63 | 154x | 0.33 | 7.31 | 6.83 / 0.37 | 0.04 | coarse |
+| 50 | Pod-Simple-3.47-0/JustPod01.t | 0.05 | 7.67 | 7.62 | 153x | 0.33 | 7.29 | 6.84 / 0.36 | 0.05 | coarse |
+| 51 | Pod-Simple-3.47-0/chunking.t | 0.04 | 7.66 | 7.62 | 192x | 0.33 | 7.27 | 6.82 / 0.36 | 0.06 | coarse |
+| 52 | Pod-Simple-3.47-0/end_over.t | 0.05 | 7.65 | 7.60 | 153x | 0.34 | 7.25 | 6.80 / 0.35 | 0.05 | coarse |
+| 53 | Pod-Simple-3.47-0/closeys.t | 0.04 | 7.63 | 7.59 | 191x | 0.33 | 7.26 | 6.80 / 0.36 | 0.04 | coarse |
+| 54 | Pod-Simple-3.47-0/fcodes.t | 0.04 | 7.62 | 7.58 | 190x | 0.39 | 7.19 | 6.74 / 0.35 | 0.04 | coarse |
+| 55 | Pod-Simple-3.47-0/filter.t | 0.05 | 7.63 | 7.58 | 153x | 0.34 | 7.24 | 6.78 / 0.37 | 0.04 | coarse |
+| 56 | Pod-Simple-3.47-0/itemstar.t | 0.04 | 7.61 | 7.57 | 200x | 0.34 | 7.23 | 6.77 / 0.37 | 0.04 | precise (spread 2 %) |
+| 57 | Pod-Simple-3.47-0/xhtml05.t | 0.04 | 7.60 | 7.57 | 217x | 0.31 | 7.26 | 6.79 / 0.37 | 0.03 | coarse |
+| 58 | Pod-Simple-3.47-0/fake-closers.t | 0.04 | 7.58 | 7.54 | 190x | 0.33 | 7.21 | 6.71 / 0.36 | 0.04 | coarse |
+| 59 | Pod-Simple-3.47-0/stree.t | 0.03 | 7.49 | 7.45 | 234x | 0.50 | 6.96 | 6.43 / 0.37 | 0.02 | coarse |
+| 60 | Pod-Simple-3.47-0/x_nixer.t | 0.04 | 7.46 | 7.43 | 213x | 0.39 | 7.04 | 6.56 / 0.37 | 0.03 | precise (spread 1 %) |
+
+**Partial-equal** (same rows reached and passed as perl, but failing rows perl
+fails too, or a shortfall at the same place -- listed, not compared): CMM
+`041-modify-parent.t`, IO-Compress `106prime-bzip2.t`, Path-Tiny `rel-abs.t`,
+TT `compile3.t`, Try-Tiny `context.t`, URI `mailto.t`, YAML-Tiny `86_fail.t`.
+
+**Both-skip files** (67: perl skips them too) cost perl 2.3 s and PCL 143 s --
+loading what the file needs to decide to skip; pure overhead, the same
+components as rows 1-3 of section 4.
+
 ## 4. THINGS THAT SHOULD BE FASTER, ranked by measured seconds over the board
 
-Seconds are the coarse pass's normalised CPU over the 638 compared files
-(warm), unless the row says otherwise; "files / dists" = where the component
+Seconds are normalised CPU over the 638 compared files (warm; the precise
+re-timing for the 65 heaviest, the coarse pass for the rest), unless the row
+says otherwise; "files / dists" = where the component
 is more than 0.05 s.  Every lever measurement named "taken" is on a quiet box
 (`heavy.sh ... bench`, load < 2, best of 3, `scratch/s540a/bench*.log`, each
 ending in its `END rc=0` line).
 
 | # | what | board s | files / dists | evidence | lever | discriminating measurement | size | owner |
 |---|---|---:|---|---|---|---|---|---|
-| 1 | **The distribution's own modules are compiled from TEXT on every run** (`mcompile`): a module under `-I` / `lib` / `PERL5LIB` is never compiled to a fasl by default (`%p-compile-module-p`, the s471 ruling: default = perl's installed dirs + PCL's `lib/`), so SBCL compiles its whole text in every file that loads it -- Pod::Simple 7.3 s per file, Text::CSV_PP 4.6 s, TT 3.4 s, Getopt::Long 3.1 s | **1,422.5** | 612 / 28 | load profiles (6 files, `--prof-from start`): SBCL's compiler -- constraint propagation 30-33 %, `ir1-optimize` 26-30 %, `ir1-convert` 10-13 % | compile `:local` modules to fasls too (the cache is already validated by mtime + size + the dependency manifest; the s471 text says "correctness is the manifest, this is a belt") | **taken** (`bench2b`): `PCL_COMPILE_DIRS='*'`, best of 3: Text-CSV `16_import.t` 5.29 -> 0.68 s, Getopt-Long `gol-load1.t` 3.82 -> 0.58, JSON-PP `000_load.t` 1.82 -> 0.37, Data-Dumper `bless.t` 2.49 -> 0.64, HTTP-Tiny `140_proxy.t` 2.70 -> 1.36; TT `config.t` 4.59 -> 2.31 and Log4perl `040Filter.t` 4.63 -> 4.38 had NOT converged in 3 runs (row 7).  A cheap compile POLICY instead (`compilation-speed 3`, `speed 0`, all run-time compiles) gave only -0..-25 % (Getopt 3.82 -> 3.17, JSON-PP 1.82 -> 1.44) | one session of code; **needs a ruling** (the default is the s471 ruling) | **#4961** (new) |
-| 2 | **The Test::More layer `cl/pcl-test.lisp` (1,822 lines) is SOURCE-loaded in every file that `use`s Test::More** (`p-ensure-test-lib` calls `load` on the `.lisp`) | **224.9** | 611 / 29 | `tcompile` = 0.37 s quiet in every Test::More file; the fixed workload section 1a calibrates with | load it through the extension fasl cache (`%p-load-extension-file`, the path `pcl-pack` / `pcl-mro` take) | **taken** (`bench1`): the TAP layer preloaded from a fasl, best of 3 on 6 files of 6 dists: -0.37..-0.41 s each (CMM `003-basic.t` 0.77 -> 0.39 s, File-Which `01_use.t` 0.64 -> 0.25 s); the fasl load itself < 10 ms | one session | **#4962** (new) |
-| 3 | **The test file's own transpile** (phase A: `pl2cl` per run) | **203.0** | 638 / 30 | NYTProf over `pl2cl` of 8 test files (`scratch/s540a/nyt-groups.txt`): PPI 40-47 % (`PPI::Node::find` 21-26 %), PExpr 11-21 %, Parser2 10-13 %, `UNIVERSAL::isa` 6-8 % (up to 11 million calls), code generation 4-8 % | `pcl`'s script cache already skips it on a repeated run of an unchanged file; the transpile itself is the parser program's | CONFIRMS #2423's 0.17 s + 2.5-3 ms per line and the s525 / s526 PPI share (40-47 % here vs 46-60 % there on Calc.pm) | several | #2423, #3694 |
-| 4 | **Subprocesses**: a Perl `fork` under PCL | **51.7** | 16 / 4 (Capture-Tiny 50 s) | strace of Capture-Tiny `06-stdout-closed.t` (`scratch/s540a/probe/`): the same 391 perl `execve`s as perl, but 631 process forks (perl 391) and **481 thread creations with 512 MB stacks** -- `%p-fork-process` stops and restarts the signal-relay thread and `sb-posix:fork` the finalizer thread, in parent AND child | do not restart threads in a child that will `exec`; a cheaper spawn for `system` | **taken** (`bench1`): 200 x `fork`+`exec 'true'` perl 0.18 / PCL 0.85 s CPU (+3.4 ms per fork); 200 x `system('true')` 0.16 / 0.29 | one session | **#4965** (new) |
-| 5 | **JSON::PP's encode / decode** (the `099_binary*` round trips) | **~48** (run 69.9 vs perl 21.5) | 16 / 1 | profile `099_binary15.t`: 85 % under method calls, then a SPREAD: boxes (`box-set` + `%make-p-box` 8 % self, 25 % of allocation), EQUAL-table lookups 8 % (object fields and the own-method cache), `string=*` 3 %, GC 2 %, string concatenation 21 % and `subseq` 17 % of allocation | none single: object representation (#1890's per-object EQUAL table) + the method cache (#4523 / #4524) + allocation per character | **taken**: `micro/jsonpp.pl` (40 round trips of a 200-string array) perl 0.18 / PCL 0.84 s (4.6x); `micro/substr1.pl` (2 M one-character `substr`) 0.11 / 0.12 = PAR, so `substr` is NOT the lever | several | **#4967** (new: the profile hunt, this micro as its row) |
-| 6 | **String-eval compile** (`ecompile`, plus `evalx` transpiles) | **42.1** | 201 / 19 | -- | a cheap compile policy for eval'd code | CONFIRMS #2421's lever area; on the board it is small, and the global cheap policy of row 1 measured -0..-25 % | one session | #2421 |
-| 7 | **Fasl builds in the SECOND run** (`cfile`): a module first loaded INSIDE another module's fasl build loads from its text and gets its own fasl only on a later run, so the cache needs one run per nesting level to converge | **33.2** (warm rows) | 65 / 21 | Log4perl `040Filter.t` on a fresh cache, default policy: run 1 builds 5 / text 27, run 2 hits 5 / builds 1, run 3+ hits 6 (`PCL_FASL_DEBUG`); under row 1's `'*'` TT and Log4perl were still building at run 3 | build the deferred fasls after the outer build returns (in the same run) | the convergence count above (taken); after the fix every second run must show 0 builds | one session | **#4963** (new) |
-| 8 | **A `require`d / `do`ne `.pl` file is transpiled and compiled from text on EVERY run** (`%p-load-module-uncached`): IO-Compress's test helper | **21.8** transpile + its compile | 103 / 7 (IO-Compress 82 files) | warm rows still run 96 module transpiles, 82 of them IO-Compress's one helper per file; `105oneshot-*` compile `oneshot.pl` 2.5-6.7 s per run, and 2 of 9 rows died with no hook record (heap exhaustion) | cache a required `.pl` like a module | CONFIRMS #4643 (its "loaded UNCACHED from text every run") | one session | #4643 |
+| 1 | **The distribution's own modules are compiled from TEXT on every run** (`mcompile`): a module under `-I` / `lib` / `PERL5LIB` is never compiled to a fasl by default (`%p-compile-module-p`, the s471 ruling: default = perl's installed dirs + PCL's `lib/`), so SBCL compiles its whole text in every file that loads it -- Pod::Simple 7.3 s per file, Text::CSV_PP 4.6 s, TT 3.4 s, Getopt::Long 3.1 s | **1,411.8** | 610 / 28 | load profiles (6 files, `--prof-from start`): SBCL's compiler -- constraint propagation 30-33 %, `ir1-optimize` 26-30 %, `ir1-convert` 10-13 % | compile `:local` modules to fasls too (the cache is already validated by mtime + size + the dependency manifest; the s471 text says "correctness is the manifest, this is a belt") | **taken** (`bench2b`): `PCL_COMPILE_DIRS='*'`, best of 3: Text-CSV `16_import.t` 5.29 -> 0.68 s, Getopt-Long `gol-load1.t` 3.82 -> 0.58, JSON-PP `000_load.t` 1.82 -> 0.37, Data-Dumper `bless.t` 2.49 -> 0.64, HTTP-Tiny `140_proxy.t` 2.70 -> 1.36; TT `config.t` 4.59 -> 2.31 and Log4perl `040Filter.t` 4.63 -> 4.38 had NOT converged in 3 runs (row 7).  A cheap compile POLICY instead (`compilation-speed 3`, `speed 0`, all run-time compiles) gave only -0..-25 % (Getopt 3.82 -> 3.17, JSON-PP 1.82 -> 1.44) | one session of code; **needs a ruling** (the default is the s471 ruling) | **#4961** (new) |
+| 2 | **The Test::More layer `cl/pcl-test.lisp` (1,822 lines) is SOURCE-loaded in every file that `use`s Test::More** (`p-ensure-test-lib` calls `load` on the `.lisp`) | **225.4** | 611 / 29 | `tcompile` = 0.37 s quiet in every Test::More file; the fixed workload section 1a calibrates with | load it through the extension fasl cache (`%p-load-extension-file`, the path `pcl-pack` / `pcl-mro` take) | **taken** (`bench1`): the TAP layer preloaded from a fasl, best of 3 on 6 files of 6 dists: -0.37..-0.41 s each (CMM `003-basic.t` 0.77 -> 0.39 s, File-Which `01_use.t` 0.64 -> 0.25 s); the fasl load itself < 10 ms | one session | **#4962** (new) |
+| 3 | **The test file's own transpile** (phase A: `pl2cl` per run) | **202.7** | 638 / 30 | NYTProf over `pl2cl` of 8 test files (`scratch/s540a/nyt-groups.txt`): PPI 40-47 % (`PPI::Node::find` 21-26 %), PExpr 11-21 %, Parser2 10-13 %, `UNIVERSAL::isa` 6-8 % (up to 11 million calls), code generation 4-8 % | `pcl`'s script cache already skips it on a repeated run of an unchanged file; the transpile itself is the parser program's | CONFIRMS #2423's 0.17 s + 2.5-3 ms per line and the s525 / s526 PPI share (40-47 % here vs 46-60 % there on Calc.pm) | several | #2423, #3694 |
+| 4 | **Subprocesses**: a Perl `fork` under PCL | **52.0** | 15 / 3 (Capture-Tiny 50 s) | strace of Capture-Tiny `06-stdout-closed.t` (`scratch/s540a/probe/`): the same 391 perl `execve`s as perl, but 631 process forks (perl 391) and **481 thread creations with 512 MB stacks** -- `%p-fork-process` stops and restarts the signal-relay thread and `sb-posix:fork` the finalizer thread, in parent AND child | do not restart threads in a child that will `exec`; a cheaper spawn for `system` | **taken** (`bench1`): 200 x `fork`+`exec 'true'` perl 0.18 / PCL 0.85 s CPU (+3.4 ms per fork); 200 x `system('true')` 0.16 / 0.29 | one session | **#4965** (new) |
+| 5 | **JSON::PP's encode / decode** (the `099_binary*` round trips) | **~49** (run 70.8 vs perl 21.9) | 16 / 1 | profile `099_binary15.t`: 85 % under method calls, then a SPREAD: boxes (`box-set` + `%make-p-box` 8 % self, 25 % of allocation), EQUAL-table lookups 8 % (object fields and the own-method cache), `string=*` 3 %, GC 2 %, string concatenation 21 % and `subseq` 17 % of allocation | none single: object representation (#1890's per-object EQUAL table) + the method cache (#4523 / #4524) + allocation per character | **taken**: `micro/jsonpp.pl` (40 round trips of a 200-string array) perl 0.18 / PCL 0.84 s (4.6x); `micro/substr1.pl` (2 M one-character `substr`) 0.11 / 0.12 = PAR, so `substr` is NOT the lever | several | **#4967** (new: the profile hunt, this micro as its row) |
+| 6 | **String-eval compile** (`ecompile`, plus `evalx` transpiles) | **42.0** | 203 / 18 | -- | a cheap compile policy for eval'd code | CONFIRMS #2421's lever area; on the board it is small, and the global cheap policy of row 1 measured -0..-25 % | one session | #2421 |
+| 7 | **Fasl builds in the SECOND run** (`cfile`): a module first loaded INSIDE another module's fasl build loads from its text and gets its own fasl only on a later run, so the cache needs one run per nesting level to converge | **27.3** (warm rows) | 63 / 20 | Log4perl `040Filter.t` on a fresh cache, default policy: run 1 builds 5 / text 27, run 2 hits 5 / builds 1, run 3+ hits 6 (`PCL_FASL_DEBUG`); under row 1's `'*'` TT and Log4perl were still building at run 3 | build the deferred fasls after the outer build returns (in the same run) | the convergence count above (taken); after the fix every second run must show 0 builds | one session | **#4963** (new) |
+| 8 | **A `require`d / `do`ne `.pl` file is transpiled and compiled from text on EVERY run** (`%p-load-module-uncached`): IO-Compress's test helper | **21.7** transpile + its compile | 103 / 7 (IO-Compress 82 files) | warm rows still run 96 module transpiles, 82 of them IO-Compress's one helper per file; `105oneshot-*` compile `oneshot.pl` 2.5-6.7 s per run, and 2 of 9 rows died with no hook record (heap exhaustion) | cache a required `.pl` like a module | CONFIRMS #4643 (its "loaded UNCACHED from text every run") | one session | #4643 |
 | 9 | **`Symbol::gensym` builds the whole stash view of `Symbol::`** on every call (`delete $$genpkg{$name}` -> `p-stash` -> `%p-stash-add-variable-names` + `package-iter-step` over every symbol the package can see) -- every `IO::Handle->new`, `IO::File->new`, File::Temp handle | ~10 (Capture-Tiny run) | 21 / 1 on the board; every IO::* user | Capture-Tiny `06` / `03`: `p-stash` 21-24 % of the run | a stash ELEMENT op (`exists` / `delete` / fetch of `$Pkg::{NAME}`) that does not materialise the view, or a view cached until the package changes | **taken** (`bench2b`): 20,000 x `gensym` perl 0.010 / PCL 1.63 s (**81 us per call, 160x**); 5,000 x `IO::Handle->new` 0.010 / 0.51 s | one session | **#4964** (new) |
 | 10 | **`s///` on a string built by `.=`**: the target is an adjustable string buffer, so cl-ppcre's literal-prefix `search` and character reads go through hairy-vector access | ~4 (YAML-PP, Mojo) | 6 / 2 | YAML-PP `43.indent.t`: `search` 27.6 % + `vector-hairy-data-vector-ref` 7.9 %; `20.dump.t` 18.5 %; Mojo `dom.t` 12.8 % | hand cl-ppcre a SIMPLE string (coerce once per match call) | SUBSTBUF (filled from bench P2) | small | **#4966** (new) |
-| 11 | **Cold first run** (empty cache): 1,362 module transpiles, each a fresh `perl pl2cl` | **1,046** (cold - warm) | all | raw over all 896 files: the transpiles 1,161 s of wall, the fasl builds 405 s, string-eval transpiles 209 s | transpile modules through ONE resident `pl2cl` (the string-eval server exists) | CONFIRMS #2423 ("every script/module transpile at run time spawns a fresh perl pl2cl") | several | #2423 |
+| 11 | **Cold first run** (empty cache): 1,362 module transpiles, each a fresh `perl pl2cl` | **1,067** (cold - warm) | all | raw over all 896 files: the transpiles 1,161 s of wall, the fasl builds 405 s, string-eval transpiles 209 s | transpile modules through ONE resident `pl2cl` (the string-eval server exists) | CONFIRMS #2423 ("every script/module transpile at run time spawns a fresh perl pl2cl") | several | #2423 |
 
 ## 5. The known levers: confirmed or not shown
 
