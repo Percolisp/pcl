@@ -82,8 +82,13 @@
 # --prof cpu|alloc: sb-sprof from the main program's compile->run boundary
 # (p-run-compile-phase-blocks) to exit, one report per run in --prof-dir.
 #
-# --report: the summary tables (markdown) over one or more TSVs; a later# file's row for the same (dist, file, mode) replaces an earlier one, and with
-# --repeat the best rep (least CPU) is the row, its spread beside it.
+# --report: the summary tables (markdown) over one or more TSVs; a later
+# file's row for the same (dist, file, mode) replaces an earlier one, and with
+# --repeat the best rep (least CPU) is the row, its spread beside it.  A
+# --variant whose name starts with `precise` is a RE-TIMING of the base (a
+# quiet bench): its rows replace the base rows; any other variant (a lever's
+# A/B) is its own population -- report it from its own TSV.  --norm: CPU
+# normalised for load (see normalise()); --table OUT.tsv: the per-file table.
 
 use strict;
 use warnings;
