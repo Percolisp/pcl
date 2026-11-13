@@ -5,6 +5,22 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-13: **Your own modules are compiled once, like installed ones**
+  (#4986, #4963, #4987).  A module found through `use lib`, `-I`, `PERL5LIB`
+  or `.` used to be compiled again from its cached text on every run; now it
+  gets a compiled file that is reused until the module, or a module it uses,
+  changes (`PCL_NO_COMPILE_DIRS=DIR` keeps a directory's modules as text).  A
+  module first loaded while another one was being compiled gets its compiled
+  file in the same run, so the second run of a program loads everything
+  compiled.  A program that uses PCL's own bundled PPI as a library no longer
+  re-transpiles it on every run (about 110 seconds each time before).
+  **Faster `tr///`, `$|`, `{...}` and constants** (#4981, #4983, #4984,
+  #4982): `tr///` prepares its character lists once per site instead of on
+  every call (a Data::Dumper program 7.5 s -> about 0.6 s); setting `$|` no
+  longer slows every later print; a hash constructor is made at its final
+  size; a `use constant` with a literal value is the literal at its uses, as
+  perl compiles it.
+
 - 2026-11-15: **`Test::Builder`'s own methods; `use_ok` in `BEGIN`; tied
   references** (#3823, #3495, #4884, #4881, #3852, #4167, #4962).
   `Test::Builder->new` answers `parent`, `expected_tests`, `details`,
