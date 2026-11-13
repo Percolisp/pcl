@@ -35,7 +35,7 @@ tables below carry the numbers).
    #2610 detector table, at the default policy and a cheap one.
 8. Start-up: the one number, re-measured; not designed (parked, #2422 / #1862 / #2421).
 9. Timings ran as `heavy.sh s540b bench` legs (exclusive, load < 2 at start, each < 15 min):
-   `legs/leg1.log` .. `legs/leg4.log`.  A gain inside 2x its row's C/A band is "not measurable".
+   `legs/leg1.log` .. `legs/leg5.log` (leg6: the `:alloc` profiles and the #4987 manifest diff, a bounded leg).  A gain inside 2x its row's C/A band is "not measurable".
 10. "Low-hanging" = one session at most, no representation change, no ruling, correctness
    unchanged by construction or held by an existing guard, a measured gain on ordinary code.
 
@@ -48,7 +48,7 @@ hand-edited copy of one emitted file, run against the unedited file (`ab.pl --em
 
 | # | shape | count (what the scan matched) | measurement | verdict |
 |---|---|---|---|---|
-| P1 | a literal `use constant` used as a CALL: `(p-scalar-ctx (pl-DEBUG))` | 33 literal constant subs, 45 call sites in the sample (42 in JSON::PP); 1,613 `use constant` declarations in 321 of 3,797 .pm files of perl's lib + the board dists | the call replaced by its literal, 3 M iterations of `DEBUG > 2 and print`: 0.116 -> 0.035 s, **-70.2 %** (perl 0.04 s) | **LEVER** (THE LIST #4, task #4982) |
+| P1 | a literal `use constant` used as a CALL: `(p-scalar-ctx (pl-DEBUG))` | 33 literal constant subs, 45 call sites in the sample (42 in JSON::PP); 1,613 `use constant` declarations in 321 of 3,797 .pm files of perl's lib + the board dists | the call replaced by its literal, 3 M iterations of `DEBUG > 2 and print`: 0.116 -> 0.035 s, **-70.2 %** (perl 0.04 s) | **LEVER** (THE LIST #4, #4982) |
 | P2 | a constant sub installed by a glob in BEGIN (`*DEBUG = sub () {0} unless defined &DEBUG`, Pod::Simple's idiom) | 199 `(p-scalar-ctx (...::pl-DEBUG))` in Pod::Simple + BlackBox | the same loop with a `use constant` sub instead: **-26.9 %** -- the anonymous sub's frame (`p-flatten-args` + three special bindings + `p-sub-frame`) | not foldable at transpile time (a BEGIN effect); the cost is the FRAME -> s539d's subject, not filed here |
 | P3 | the context bind around a call the compiler cannot prove insensitive (codegen review C4) | `p-scalar-ctx` 296 / 1,117, `p-list-ctx` 206 / 179, `p-void-ctx` 98 / 258, `p-caller-ctx` 28 / 230 (everyday / modules); 296 of the modules' 1,117 scalar binds wrap a method call | the void bind removed around `f($i)` (f's tail is a call), 3 M calls: **-2.2 %**, ~4 ns a bind | **REFUTED as a speed lever** -- below the bar; C4 stays an IR-clarity item at most |
 | P4 | a scalar lexical kept in a box | 120 of 370 everyday names raw (32 %), 417 of 1,308 module names (32 %); sole reasons of the boxed: `write-list` 57 / 104 (`my ($a, $b) = ...`), `write-shape` 46 / 256 (the value can be a reference or a box), `handle-viv-arg` 32 everyday, `eval-in-region` 50 modules; 67 / 343 have several reasons (PCL_B_DEBUG over both populations) | not measured as one edit -- a raw slot cannot hold a REFERENCE in today's representation, and that is the largest class (`$self`, `$r`, `$ar`, `$o`) | **not low-hanging**: a representation decision (ir-spec §2.2's "a raw slot holds a host number or string, never a box"); `%make-p-box` + `box-set` are 3-17 % of every profile in part 2 |
@@ -59,7 +59,35 @@ hand-edited copy of one emitted file, run against the unedited file (`ab.pl --em
 **What each EXISTING transform holds** (`optdiff.pl`: which of the 75 bench rows' emission changes
 under `PCL_OPT=-NAME`; then `optab.pl`: those rows timed default vs `-NAME`, startup subtracted, best of 3):
 
-REGISTRYTABLE
+| registry name | rows whose emission changes | B/A with the name OFF (k=3; legs/leg3.log, leg5.log, leg4.log) | holds |
+|---|---:|---|---|
+| `raw-slot` | 74 of 75 | (the base of everything; see `none`) | everything |
+| `foreach-range` | 72 | (counting loops; see `none`) | everything |
+| `str-buffer` | 6 | `strcat` (20 M `.=`) did not finish in 4 min with it off (killed) -- O(n) -> O(n^2); `accum` (30 k `.=` of a line) 0.0058 -> 1.350 s, 230x | everything on its rows |
+| `classic-sort` | 2 | sortnum +341 %, sortstr +373 % | a lot |
+| `sig-classic` | 1 | sigarith +425 % | a lot |
+| `foreach-arrays` | 5 | feread +95 %, feread2 +315 %, feread3 +337 %; subste -3.1, lcbytes +1.0 | a lot |
+| `symref-const` | 1 | symref +136 % | a lot |
+| `list-decl-split` | 2 | listdeclcat +99 %; textproc +2.1 | a lot (on its shape) |
+| `local-push` | 2 | pushloc +80 %, arrhash-k +9.7 | a lot |
+| `numeric-slot` | 4 | sigarith +60 %, cfor +18 %; collatz +2.7, regexg +3.2 | yes |
+| `foreach-raw` | 7 | powdigit +40 %; textproc +0.7 | yes |
+| `tail-return` | 9 | subret +23 %, methret +11 %, gcdret +10 %; fibret -2.4, feargs -1.4 | yes |
+| `args-copy` | 1 | passarr +9.9 % | yes |
+| `raw-op-family`, `raw-numeric`, `raw-topic` | 12 / 10 / 19 | not timed one by one (their rows are inside `none`) | -- |
+| `insensitive-call` | 3 | subret +4.0, sigarith +3.7, localvar +1.3 | **not measurable** at k=3 (~4 ns a bind -- P3) |
+| `elem-setf` | 2 | arrhash +3.3, tiehash -4.0 | **not measurable** |
+| `raw-return-family` | 7 | subret -1.2, methret -4.9, methinh +0.2, methpoly -1.3, moo-objs -2.0, localvar +0.9 | **not measurable** |
+| `raw-block-eval`, `raw-closure-capture` | **0** | no bench row reaches them | **unknown on the bench** |
+| `dyn-loop-exit`, `fh-scope-close`, `line-track` | 0 / 1 / 0 | semantics switches, not speed (`line-track` default off) | -- |
+| **`none`** (everything off) | 75 | intloop+= +2,439 %, fib(27)x +280 %, methret +213 %, arrhash +191 %, fhprint +120 %, textproc +11 %, json-rt +0.3 % (its time is inside JSON::PP, loaded from the module cache) (`legs/leg4.log`) | -- |
+
+A transform that "holds nothing measurable" here is not dead code: `raw-return-family`,
+`elem-setf` and `insensitive-call` LICENSE other verdicts (a raw slot downstream) and remove binds
+whose cost is a few ns, and the bench rows were not written for them.  #4992 measures the five
+(those three + the two no-row coverage narrowings) on the everyday corpus and the four modules with
+`PCL_OPT=-NAME` corpus-diff counts first -- deleting one is the decision that measurement supports or
+not.  The registry otherwise holds what it claims: nine names are worth 10-425 % on their rows.
 
 ## Part 2 -- the runtime's hot helpers
 
@@ -96,7 +124,42 @@ Also read and NOT a finding: `p-true-p`'s slow path already has the plain-box ar
 `%p-sv-stash`, `%p-stash-deleted-p`, `%p-live-sub-p` and `*p-tie-table*` are count-guarded; `p-print`
 / `p-say` lists are stack-allocated (#2771); the regex engine is parked (ONE engine, USER s476).
 
-PART3
+## Part 3 -- the shims against perl's XS
+
+`shimbench.pl`: per-call time (ns; the timed closure's call overhead, ~40 ns in perl, is in every
+column) on ordinary inputs, best of 3 inside one process, three columns: perl with its XS modules,
+perl running PCL's OWN shim text (`-I` a copy of `lib/` where the shim loads under perl), and PCL.
+`legs/leg4.log` (load 1.1-1.4).  Call sites counted by a perl scan over perl's lib + `~/.cpan/build`
+(the board's dists) + `everyday/` -- the pattern is the function's name followed by `(` or `{` (so
+`min`/`max`/`first` overcount a little).
+
+| export | perl XS | perl, PCL's shim | PCL | PCL / XS | sites (files) | cheap route | verdict |
+|---|---:|---:|---:|---:|---|---|---|
+| `md5_hex` (1 KB) | 1,162 | 264,922 | **356,030** | 306x | 93 (30) | sb-md5 is already loaded: **6,650 ns** a call, digest identical | **#4988** |
+| `sha1_hex` / `sha256_hex` (1 KB) | 1,231 / 2,400 | 500,151 / 1,296,160 | **705,627 / 1,462,831** | 573x / 609x | 92 (16) | none in SBCL | not low-hanging (a Lisp SHA is new code) |
+| `encode_base64` (1 KB) | 529 | 129,053 | **125,956** | 238x | 56 (23) | a `builtin::` (a few dozen lines) | **#4990** |
+| `decode_base64` (16 chars) | 45 | 2,394 | **18,556** | 412x | (same) | #4981's `tr` cache; then the primitive | #4981 + #4990 |
+| `dclone` (small nested hash) | 1,707 | -- (the shim needs PCL builtins) | **420,045** | 246x | 48 (18) | the Clone shim's copy: 3,000 copies 1.390 s -> 0.084 s whole run (perl 0.013) | **#4989** |
+| `freeze` / `thaw` | 1,296 / 1,000 | -- | 174,108 / 233,932 | 134x / 234x | 45 (6) | -- (the format IS the job) | not filed |
+| `Dumper` (small hash) | 7,098 | -- | **1,117,145** | 157x | 159 (91) | #4981 (`tr/\0-\377//c` per value) | #4981 |
+| `strftime` | 1,948 | -- | **15,543** | 8.0x | 80 (21) | one tzset; or libc strftime | **#4991** |
+| `catfile` / `catdir` | 454 / 228 | -- | **4,509 / 2,385** | 9.9x / 10.5x | 1,565 (259) | canonpath guard (-69 %, `legs/leg2.log`) | **#4985** |
+| `reduce` | 240 | 2,097 | **11,167** | 47x | 70 (14) | `caller` -> s539d | pointer |
+| `shuffle` / `uniq` / `pairs` | 216 / 408 / 360 | 2,145 / 885 / 504 | 2,884 / 1,589 / 1,756 | 13x / 3.9x / 4.9x | 9 / 39 / 76 | -- | PCL ~= perl on the same text; the shim algorithm is the cost; not common |
+| `sum` / `max` / `min` / `first` / `any` | 44 / 39 / 2 / 101 / 170 | 226 / 279 / 277 / 378 / 804 | 260 / 396 / 390 / 553 / 858 | -- | 36 / 75 / 67 / 83 | -- | sub-microsecond; not a lever |
+| `blessed` / `reftype` / `refaddr` | 58 / 19 / 16 | -- | 85 / 96 / 145 | 1.5x / 5x / 9x | 643 / 285 / 562 | `refaddr` = part 2 R5 | not low-hanging (an id slot) |
+| `looks_like_number` / `weaken` | 24 / 44 | -- | 418 / 240 | 17x / 5.5x | 125 / 247 | -- | sub-microsecond |
+| `floor` / `ceil` | 18 / 17 | -- | 101 / 92 | 5.5x | 49 | -- | not a lever |
+| `getcwd` | 701 | -- | 1,152 | 1.6x | 205 | -- | fine |
+| `encode_utf8` / `decode_utf8` / `encode('UTF-8')` | 50 / 375 / 981 | -- | 240 / 5,120 / 8,329 | 5x / 14x / 8.5x | 46 / 223 | -- | measured, not profiled: a candidate for the next review |
+| JSON::PP `encode` / `decode` | 9,792 / 20,179 (perl runs JSON::PP too) | -- | 17,960 / 25,916 | 1.8x / 1.3x | 71 (25) | -- | fine |
+
+The reading: where PCL is far behind, it is because the SHIM's algorithm is pure Perl (perl
+running the same text is within 1.5x of PCL on MD5, SHA, base64 and the List::Util bodies, `reduce`
+(`caller`) aside) -- the
+lever is a primitive, not PCL's execution.  The two exceptions are `decode_base64` (PCL 7.8x perl on the same text) and Data::Dumper (the
+pure-Perl path: `dumper.pl` 7.12 s under PCL, 0.12 s under perl with `$Data::Dumper::Useperl = 1`, 60x):
+both are #4981.
 
 ## Part 4 -- the compile pipeline
 
@@ -169,3 +232,80 @@ warm **36.3 ms**, of which compiling the Perl launcher (`perl -c pcl`) is **17.8
 the 53 MB core and exiting **4.4 ms**; `pcl -e 1` (never cached, #1862) **166.0 ms**.  s509 read
 53 / 27 / 6.5 / 243 ms at load 5 and s499 43-48 ms quiet: unchanged in kind -- the launcher is still
 about half of a warm one-liner.  Parked by the USER (2026-09-27, 2026-10-06): #2422, #1862, #2421.
+
+## THE LIST -- the low-hanging levers of all five parts, ranked
+
+Ranked by the time a program that USES the construct gets back (the USER's measure: absolute
+time on ordinary programs), with how widely the construct is used beside it.  Every row's
+discriminating measurement was taken; every row is filed.
+
+| rank | lever | where | measured (population) | reach | size | risk | task |
+|---:|---|---|---|---|---|---|---|
+| 1 | cache `tr///`'s expansion per op; no O(n^2) complement; count-only without building a string | `cl/` `do-tr` | Data::Dumper program **7.120 -> 0.591 s (-91.7 %)**; Pod::Text -16.2 %; Text::Balanced -3.1 % (leg1) | 746 `tr` sites in 383 files; every Data::Dumper call | S, runtime only | low (op immutable per site) | #4981 |
+| 2 | Digest::MD5 over the sb-md5 the runtime already loads | `lib/Digest/MD5.pm` + a `builtin::` | **356 us per KB -> 6.65 us** with sb-md5 (perl XS 1.16 us) (leg4) | 93 sites / 30 files | S-M | low (digest identical; test vectors) | #4988 |
+| 3 | dclone by direct copy, freeze+thaw only for hooks / CODE / tied | `lib/Storable.pm` | **3,000 copies 1.390 s -> 0.084 s** whole run through the Clone path (perl 0.013 s) (leg4) | 48 sites / 18 files | S-M | medium (Storable's edge cases) | #4989 |
+| 4 | fold a LITERAL `use constant` at its uses after the declaration | `Pl/ExprToCL.pm` (a Kind-A name) | constant-check loop **0.116 -> 0.035 s (-70.2 %)**, ~30 ns a use (leg1) | 1,613 declarations in 321 of 3,797 .pm | S-M, emission | low-medium (position-aware; perl itself inlines) | #4982 |
+| 5 | `$|`'s autoflush mark without a weak-table probe on every print | `cl/` `%p-maybe-autoflush` | 1 M prints after `$| = 1`: **0.134 -> 0.074 s (+81 % today)**, ~60 ns a print (leg2) | every print in every script that sets `$|` | S | low | #4983 |
+| 6 | base64 encode/decode as a `builtin::` primitive | `lib/MIME/Base64.pm` | encode 1 KB **126 us** (perl XS 0.53 us; perl running the same shim text 129 us) (leg4); decode is #4981 | 56 sites / 23 files | S | low | #4990 |
+| 7 | canonpath returns an already-clean path unchanged | `lib/File/Spec.pm` | **1.53 -> 0.47 us a call (-69 %)**, perl 0.27 -> 0.24 (leg2) | 1,565 catfile / catdir sites / 259 files | S | low (15 probe paths) | #4985 |
+| 8 | strftime: one tzset, fields normalised without a zone (or libc strftime) | `lib/POSIX.pm` (+ a `builtin::`) | **15.5 us** a call, perl 1.9 us (leg4); fstatat 24 % of the loop | 80 sites / 21 files | S-M | low | #4991 |
+| 9 | the anonymous-hash constructor presizes, no flattening copy | `cl/` `p-hash` | 10-key `{...}` loop **-15.4 %**; moo-objs / podtext not measurable (leg2) | every `{...}` with 8+ keys | S | low | #4984 |
+
+Not on the list because they did not pay (measured, recorded so nobody retries them blind):
+the string comparisons' plain-scalar arm (R4: -3.6 / +10.7 / -0.2 %), the void-position context
+bind (P3 / C4: -2.2 % on 3 M calls), emptying the #2610 detector table (1-4 % of a fasl build,
+nothing at run time).
+
+## Not low-hanging -- listed with what each waits for
+
+| item | measured | waits for |
+|---|---|---|
+| a program's OWN modules are compiled from text on every run | 2,434-line local module: 0.530 s per run vs 0.055 s fasl'd (perl 0.009) | a ruling on the s471 default (#4986) |
+| a cheaper `compile-file` policy for generated code | `compile-file` -53..-82 % (JSON::PP 1.16 -> 0.55 s, Pod::Simple::BlackBox 4.03 -> 0.72) | its RUN-time price measured; and it pays only on first runs / string evals / local modules -- parked (#2420, #2421) or #4986 |
+| the vendored PPI used as a library rebuilds every run | 98-116 s a run (PCL_COMPILE_DIRS='*' too) | the cause (#4987; leg6's manifest diff) |
+| inherited method lookup by name per call | s534a: 3.9-7.9x perl, the fix 1.3-1.7x | the USER (#4523-#4525) |
+| the sub frame (five special bindings, `&rest`, `@_` built per call); a glob-installed `sub () {0}` is 27 % slower than a `use constant` sub | leg1 (P2) | s539d's frame measurement, running |
+| `caller` in shims (List::Util `reduce` / `first` / `pairmap` find the caller's `$a`/`$b` through `caller`) | backtrace walk 49 % of a reduce loop; reduce 45x perl | s539d's cheap `caller` tier |
+| boxes for lexicals that hold a reference | 32 % of scalar names raw in both populations; `%make-p-box` + `box-set` 3-17 % of every profile | a representation decision (a raw slot holding a reference) |
+| ref identity (`refaddr`, `HASH(0x...)`, `==` on refs) through a weak + synchronized table | refaddr 145 ns vs perl 16 ns (leg4) | a representation decision (an id slot on the referent) |
+| Digest::SHA in pure Perl | sha1 706 us, sha256 1.46 ms per KB (perl 1.2 / 2.4 us) (leg4) | a Lisp SHA-1/SHA-2 implementation -- new code, no primitive to route to (or pclxs) |
+| a string eval re-run in a loop recompiles | #2191: 0.57 ms per re-execution | the parked string-eval work (#2191, #1410, #2421) |
+| the regex engine (cl-ppcre scanners 10-27 % of json-rt / textproc / podtext / wordfreq) | profiles, part 2 | ONE regex engine (USER s476, #71 parked) |
+| start-up: the launcher is half of a warm one-liner | 36.3 ms warm, 17.8 ms of it `perl -c pcl` | the USER's start-up ruling (#2422, #1862, #2421) |
+
+## The older worklists, item by item
+
+Every OPEN item of `docs/faster-codegen-suggestions.md` §12 (and its §0.5 catalogue),
+`docs/where-the-time-goes.md` §5, `docs/speed-review-s509.md`, and the speed items of the
+two s525 / s526 reviews -- one line each, as of `05806e16`.
+
+| item | source | status | the line |
+|---|---|---|---|
+| S1 string-append buffer | fcs §12.1 | DONE | #62 `str-buffer`; registry name, 6 bench rows change under `-str-buffer` |
+| M1 method cache | fcs §12.2, wttg §5.8 | STILL TRUE (inherited half) | own-class cache shipped (s473s); the inherited half is #4523-#4525, the s534a recommendation awaiting the USER; the per-call-site cache stays REJECTED (USER s444) |
+| N1 raw-numeric verdict | fcs §12.3, wttg §5.6 | DONE | `raw-numeric` / `raw-slot`; but the verdict fires for 32 % of scalar names only (part 1, P4) |
+| P1 pack / sprintf template memo | fcs §12.4 (#74) | PARKED | pack is parked until the XS decision (USER 2026-09-05); sprintf's constant-format half partly done (#3220) |
+| A1/A3 aggregates | fcs §12.5, wttg §5.7 | DONE | boxed-aggregates flip (raw elements), `local-push` (#1140), `foreach-arrays` |
+| F1 `dynamic-extent @_` | fcs §12.6, wttg §5.3 | PARTLY DONE | `p-print`/`p-say` lists are stack-allocated (#2771); `p-sub`'s own `&rest` and `p-method-call`'s are heap -- that is s539d's frame measurement, not repeated here |
+| N2 / #811 in-place box write | fcs §12.7 | DONE | #811 completed |
+| T1 return-family transfer | fcs §12.7b (#77) | DONE | `raw-return-family` |
+| X1 block-compile the runtime | fcs §12.8, wttg §5.10 | PARTLY DONE | `(declaim (optimize (speed 3)))` over the runtime (#950); no block compilation; no lever measured here |
+| R1 constant regex once | fcs §12.9 | DONE | #1250 / #770 (`%p-op-once`) -- but `tr///` re-expands its tables per call: THE LIST #1 (#4981) |
+| O2 constant-fold operands | fcs §12.9 | STILL TRUE | a literal `use constant` is a full call at every use: THE LIST #4 (#4982, -70 % on a constant-check loop) |
+| O1 fixnum behind a range proof | fcs §12.10 | STILL TRUE, low value | `numeric-slot` drops the overload guard; no fixnum declarations; not measured here |
+| 5.1 FPU modes, 5.2 R1 inline ops | wttg | DONE | 2026-07-02 |
+| 5.4 R2 calling convention | wttg | PARTLY DONE | `insensitive-call`, `sig-classic`, `args-copy`; the void-position half (codegen review C4) measured below: ~4 ns a call, REFUTED as a speed lever |
+| 5.5 classic sort comparators | wttg | DONE | `classic-sort` (Kind B) |
+| 5.9 inferred flags | wttg | PARTLY DONE | "no overload anywhere" is a run-time fact (`%p-no-overload-possible-p`); closed world not done |
+| 5.11 map/grep deforestation | wttg | STILL TRUE | not measured here; `p-map-flat` (#3122) removed one intermediate |
+| 5.12 profile-guided specialisation | wttg | NOT STARTED | long game, no lever |
+| 5.13 regex engine | wttg | PARKED | ONE regex engine (USER s476, #71); cl-ppcre scanners are 10-27 % of json-rt / textproc / podtext |
+| 5.14 GC / allocation hygiene | wttg | STILL TRUE | `%make-p-box` + `box-set` are 3-17 % of every profile here; a representation question (part 1 P4) |
+| #2770-#2773 levers A-D | s509 | DONE | rounds 40-47 |
+| #3301 lcbytes chain, #3302 join one-vector | s509 §2 | STILL TRUE, under the 15 % bar | unchanged |
+| #2422 / #1862 / #2421 / #2420 / #2423 start-up + first run | s509 §1, fcs §0.2r | PARKED (USER 2026-09-27, 2026-10-06) | start-up re-measured in part 5 |
+| C4 void-position bind | codegen review s526 | REFUTED as speed | -2.2 % on 3 M void calls of a two-call body (~4 ns a bind, `legs/leg1.log`); keep it, if at all, as IR clarity |
+| C5 constructor macros | codegen review s526 | NOT A SPEED ITEM | macros expand to the same code |
+| R1 numification flag | runtime review s525 | DONE (box face) | s525u |
+| R3 one typed entry per op family | runtime review s525 | STILL TRUE | the structural candidate; the string-compare arm (part 2 R4) is a one-family probe of it and did NOT pay |
+| R5 rule-10 splits, R6 default arms | runtime review s525 | R6 DONE, R5 partial | not speed |
