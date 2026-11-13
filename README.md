@@ -287,13 +287,12 @@ The [IR manual](docs/ir-spec.md) documents every form.
   flushed at exit, but do not rely on a destructor running at a given
   moment (scope guards for locks, restoring state at the end of a block),
   and close your filehandles explicitly.  A filehandle that leaves the block
-  that opened it (returned, passed to a sub, stored) is closed when the
-  garbage collector finds nothing holding it, or at exit: a lock it held is
-  released before the program can wait on its own lock, and running out of
-  descriptors collects first.  What it wrote reaches the file at that
-  collection, before the next child process (`system`, `fork`, a pipe) or at
-  exit, never at the drop: read back by the same program before then, and by
-  an `END` block, the file is short.
+  that opened it (returned, passed to a sub, stored) is closed once the
+  garbage collector finds nothing holding it, at the point where the program
+  would otherwise wait on its own lock or run out of descriptors, or at exit.
+  What it wrote reaches the file there, before the next child process
+  (`system`, `fork`, a pipe) or at exit, never at the drop: read back by the
+  same program before then, and by an `END` block, the file is short.
 * **Regex code blocks** `(?{ })` are removed from the pattern with a
   warning at compile time. The match runs without them.
 * **`format`/`write`**, **perl 5.38 `class`/`field`/`method`** and

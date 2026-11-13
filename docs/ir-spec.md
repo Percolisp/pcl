@@ -3894,60 +3894,66 @@ block binds and the construct's own `let` stores into:
     (p-print :fh $o "x")))
 ```
 
-### 6.5b An ESCAPING handle: the collector closes what nothing reaches (normative, s540c, task #2006 PART 2)
+### 6.5b An ESCAPING handle: closed at a trigger or at exit, once nothing reaches it (normative, s540c, task #2006 PART 2)
 
 A handle that escapes its block (returned, passed to a callee, stored, captured)
-is not closed by §6.5.  The runtime closes it when the garbage collector finds
-its stream unreachable: every descriptor stream an opener installs (`open`,
+is not closed by §6.5.  Every descriptor stream an opener installs (`open`,
 `sysopen`, a `&` dup, both ends of `pipe`, a binmode rebuild — the one
-registration is `%p-install-fh`) carries a finalizer that writes out
-what an OUTPUT-ONLY stream's buffer still holds and closes the descriptor —
-which releases a `flock` held through it.  It touches no perl state (`$!`,
-`$?`), runs no perl code, and never signals (a failed close is one `PCL:`
-line on stderr).  Never finalized: the standard handles, an fdopen (`<&=N`,
-`>&=FH`: another opener's descriptor), a fork-pipe's parent end (its child is
-reaped by `close`), a socket object, an in-memory handle.  An explicit `close`
-cancels the finalizer, so nothing is closed twice.
+registration is `%p-install-fh`) carries a finalizer; when the garbage
+collector finds the stream unreachable, the finalizer only RECORDS it (its
+descriptor, an OUTPUT-ONLY stream's buffer, the opening process).  The record
+is acted on in the program's thread, never on SBCL's finalizer thread:
 
-**What is promised is the RESULT at two points, not a moment.**  A collection
-happens when SBCL decides; the runtime forces one only where the program would
-otherwise fail or block on a handle it dropped, and then tries once more:
-
+* a `PerlIO_flush(NULL)` site (before `fork`, `system`, `exec`, backticks, a
+  pipe open) writes every recorded buffer, so the bytes reach the file before
+  a child starts and are written once (a fork child inherits the records, not
+  the duty);
 * a `flock` lock request is tried with `LOCK_NB` first; on EWOULDBLOCK, when
-  this process has locked the same file (device and inode) before or the
-  collector has finalizers queued, the collector runs and the program's own
-  call follows (blocking or not, as written).  A file only another process
-  locks costs one `fstat`, never a collection;
-* an opener (`open`, `sysopen`, a dup, `pipe`, `opendir`, `socket`,
-  `accept`) failing with EMFILE or ENFILE collects and retries once.
+  this process has locked the same file (device and inode) before or
+  finalizers are queued, a full collection runs and the recorded descriptors
+  OF THAT FILE are closed — which releases a lock held through them — and the
+  program's own call follows (blocking or not, as written).  A file only
+  another process locks costs one `fstat`, never a collection;
+* an opener (`open`, `sysopen`, a dup, `pipe`, `opendir`, `socket`, `accept`)
+  failing with EMFILE or ENFILE collects, closes every recorded descriptor and
+  retries once;
+* the exit hook, after the `END` blocks, writes and closes every record.
+
+**Why not close at the collection.**  SBCL keeps no dead variable alive, so a
+lexical still IN SCOPE but never used again — a lock guard, `my $guard =
+lock_it(); work();` — is as unreachable as a dropped handle; closing at the
+collection released such a guard's lock at a random moment (Path-Tiny
+`locking.t`, s541).  Closing only at the triggers keeps that divergence where
+perl itself would block on its own lock or fail for want of a descriptor.
 
 The trigger's collection runs with SBCL's finalizer thread STOPPED (its own
-conservatively scanned stack held a dropped stream alive) and runs the queued
-finalizers itself before it returns, with the three runtime tables that hold a
-read stream (`$.`'s last-read handle, the line counters, the end-of-file
-marks) weakened for its length — so after a trigger `$.` of a dropped
-last-read handle reads undef, as in perl.  The exit hook and every
-`PerlIO_flush(NULL)` site (before fork, `system`, `exec`, backticks, a pipe
-open) run any finalizer still queued, so a dropped handle's bytes reach the
-file before a child starts and are written once (a fork child inherits the
-registration, not the duty: its finalizer only closes its own descriptor).
+conservatively scanned stack held a dropped stream alive), with the three
+runtime tables that hold a read stream (`$.`'s last-read handle, the line
+counters, the end-of-file marks) weakened for its length — so after a trigger
+`$.` of a dropped last-read handle reads undef, as in perl.  Nothing here
+touches perl state (`$!`, `$?`) or runs perl code; a failed write-out or close
+is one `PCL:` line on stderr.  Never registered: the standard handles, an
+fdopen (`<&=N`, `>&=FH`: another opener's descriptor), a fork-pipe's parent end
+(its child is reaped by `close`), a socket object, an in-memory handle.  An
+explicit `close` cancels the finalizer, so nothing is closed twice.  SBCL's own
+`open` finalizer — which closed a collected stream at once and WITHOUT
+writing its buffer — is cancelled.
 
 **When a dropped write handle's bytes reach the file** — the first of: a
-collection that finds the stream (its finalizer then runs on SBCL's thread,
-or at once inside a trigger); the next `PerlIO_flush(NULL)` site, which
-flushes every open handle, dropped or not, before a child starts; exit, after
-the `END` blocks.  Never at the drop, which is perl's moment: a read of the
-file right after the drop, or an `END` block, sees it short.  No byte of an
-output-only handle is lost; a READ-WRITE handle's unflushed writes are
-(task #5003).  A `fork` copies a dropped handle that is not yet collected
-into the child, descriptor and any `flock` it holds included (task #5004).
+trigger; the next `PerlIO_flush(NULL)` site (which flushes every open handle,
+dropped or not); exit, after the `END` blocks.  Never at the drop, which is
+perl's moment: a read of the file right after the drop, or an `END` block,
+sees it short.  No byte of an output-only handle is lost; a READ-WRITE
+handle's unflushed writes are (task #5003).  A `fork` copies a dropped handle
+whose descriptor is not closed yet into the child, with any `flock` it holds
+(task #5004).
 
 ```perl
 sub fh { open my $fh, "<", $f or die; flock($fh, LOCK_SH) or die; return $fh }
 sub slurp { my $fh = fh(); local $/; return scalar <$fh> }
 slurp();
 open my $o, ">>", $f or die;
-flock($o, LOCK_EX);        # perl: the slurp handle is gone; PCL: collected here
+flock($o, LOCK_EX);        # perl: the slurp handle is gone; PCL: closed here
 ```
 
 ## 7. Packages, variables, and OO

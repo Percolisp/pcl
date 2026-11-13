@@ -2458,41 +2458,50 @@ NOT escape its block is closed at the block's exit exactly as perl does
 condition-`my` handle at the ENCLOSING block's exit; `undef $fh` /
 `$fh = undef` right there) — `docs/ir-spec.md` §6.5.  A filehandle that
 ESCAPES the block that opened it — passed to a sub, stored, returned,
-captured, `select`ed, a method called on it — is closed when the GARBAGE
-COLLECTOR finds it unreachable, or at exit (§6.5b).  Two places force that
-collection: a `flock` that would block on a file this program has locked
-before (Path::Tiny's `slurp`, then a locked `append` — its
-`t/input_output*.t` hung there until s540c), and an opener out of
-descriptors (a loop over more files than `ulimit -n`).  What stays different
-from perl, measured s540c:
+captured, `select`ed, a method called on it — is closed once the GARBAGE
+COLLECTOR finds it unreachable, at one of two triggers or at exit (§6.5b): a
+`flock` that would block on a file this program has locked before closes the
+dropped handles of THAT file (Path::Tiny's `slurp`, then a locked `append` —
+its `t/input_output*.t` hung there until s540c), and an opener out of
+descriptors closes them all (a loop over more files than `ulimit -n`).  What
+stays different from perl, measured s540c / s541:
 * **the MOMENT**: perl closes at the last reference.  PCL writes a dropped
-  handle's bytes at the first of: a collection that finds it, the next
-  `system` / `fork` / `exec` / backticks / piped open (every open handle is
-  flushed before a child starts), exit (after the `END` blocks).  A file
-  written through a dropped handle and read back by the same program before
-  any of those is SHORTER, and an `END` block sees it short too (Path-Tiny
+  handle's bytes at the first of: a trigger, the next `system` / `fork` /
+  `exec` / backticks / piped open (every open handle is flushed before a
+  child starts), exit (after the `END` blocks).  A file written through a
+  dropped handle and read back by the same program before any of those is
+  SHORTER, and an `END` block sees it short too (Path-Tiny
   `input_output*.t`'s 8 `openw`/`opena` -> `openr` rows, which also fail
   on task #5005; a `{ my $fh = $f->openw; print $fh ...; }` block followed
   by a read).  Close it explicitly when another step reads the file.  No
-  byte of an output-only handle is lost: a collected handle's buffer is
-  written by its finalizer, and everything left is flushed at exit;
-* a READ-WRITE handle (`+<`, `+>`, `+>>`) the collector reaches before exit
-  loses its unflushed writes (task #5003: SBCL's read-write buffer state
-  cannot be read once the stream is gone);
+  byte of an output-only handle is lost;
+* a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
+  until one of the triggers or exit; only a blocking `flock` on the same file
+  and running out of descriptors are triggers;
+* a lexical still IN SCOPE but never used again (a lock guard: `my $guard =
+  lock_it(); work();`) looks dropped to the collector, so at a trigger PCL
+  closes it too: a blocking `flock` of the SAME file proceeds where perl
+  blocks on its own guard, and running out of descriptors releases every such
+  guard's lock where perl's open fails.  It is never closed at a collection
+  (that released a guard's lock at a random moment: Path-Tiny `locking.t`,
+  s541 -- and SBCL's own finalizer did so on main for `open`-spelled guards);
+* a READ-WRITE handle (`+<`, `+>`, `+>>`) closed by a trigger or at exit after
+  the collector found it loses its unflushed writes (task #5003: SBCL's
+  read-write buffer state cannot be read once the stream is gone);
 * a PIPE handle with a child (`open my $p, "-|", …`) is not collected: the
   child is reaped at `close` or exit (perl reaps it at the drop);
 * a GLOB handle (`Symbol::gensym`, `IO::File->new`, or any handle a `*$fh`
   dereference made a glob for) is named in the handle table, so it stays open
   until exit;
-* `$.` keeps a dropped last-read handle's count until a forced collection
-  (perl: undef as soon as the handle is freed);
+* `$.` keeps a dropped last-read handle's count until a trigger (perl: undef
+  as soon as the handle is freed);
 * the collector is CONSERVATIVE: a stale word on a stack can keep a dropped
   handle alive through a collection, and then the old behaviour holds (the
   lock is kept, the descriptor stays used).
-* a `fork` while a dropped handle is not yet collected copies its descriptor,
-  and any `flock` held through it, into the child: a child's `LOCK_NB` lock
-  of that file fails, and a child's BLOCKING lock while the parent waits for
-  the child deadlocks (task #5004; perl closed the handle at the drop).
+* a `fork` while a dropped handle's descriptor is still open copies it, and
+  any `flock` held through it, into the child: a child's `LOCK_NB` lock of
+  that file fails, and a child's BLOCKING lock while the parent waits for the
+  child deadlocks (task #5004; perl closed the handle at the drop).
 
 **Owner:** #2006 (the moment: refcount semantics are #2370's, parked);
 #5003 (read-write buffers); #5004 (fork after a dropped lock).
