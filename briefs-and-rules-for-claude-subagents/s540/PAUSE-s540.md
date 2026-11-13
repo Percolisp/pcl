@@ -70,3 +70,9 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s540/resume-s540.md`,
 * s539d TOLD (rebase over `05806e16`, base re-extracted, every A/B re-taken on it); s540a TOLD (the three hanging files stay out of its table).
 * **s540b LAUNCHED 14:3x** (#4788; a new isolated worktree; opus / xhigh).  RUNNING: s540a, s539d, s540b.  No code batch but s539d is in flight.
 * NEXT freed slot: **s540c** (to write: #2006 part 2 + #4866), then s539a, s539c, s539b (+ #4822).
+
+## 14:5x -- BRIEF WRITTEN, not launched (three agents run): `s540/s540c-prompt.md` = the two lifetime bugs behind board rows.
+* MEMBER 1 = #2006 PART 2, designed as a run-time BELT: a finalizer on the handle's identity object flushes + closes an unreachable handle's stream; two triggers run the collector and retry once -- a `flock` that would block, an opener that hits EMFILE.  Five measurements first (what holds the handle object, which object is the identity, when finalizers run on 2.5.2 / 2.6.0, how often a full collection frees the Path-Tiny handle, the cost per open).  WHY NOT a returned-handle licence: `f()` may hand out a handle it also keeps, and only the collector knows nothing holds it.  Three stop-rules.
+* MEMBER 2 = #4866 (module-mode `local $h{K} = V` on a file-level `my %h`): find the cause (the cell's identity across compile-file and load), fix it there.
+* IDs 5001-5019; v2-14500.  Acceptance: Path-Tiny input_output x3 to their plans (ten runs each), the `ulimit -n 1024` loop, Try-Tiny finally.t rows 17 18 23.
+* CI GREEN on `67b56704` (the s537b merge); the s538a merge `2fee42cd` is running.
