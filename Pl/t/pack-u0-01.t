@@ -74,4 +74,19 @@ print join(",", unpack('U*', pack('U*', 0x41, 0xe9, 0x263a))), "\n";
 PL
 is($pcl, $perl, 'unpack: a leading U reads characters, a later U reads UTF-8 bytes');
 
+# s538a: pack 'w' of a DIGIT STRING above UV_MAX is perl's w_string (div128 on
+# the decimal digits).  cl/pack-impl.pl's `$v >>= 7` loop was exact on a
+# bignum only while the compound shift was signed; #3781 made `>>=` read a UV
+# as perl's does and pack.t row 10 failed.  Every 'w' site (a count, a '/'
+# length, the elements) is the one encoder _pack_ber now.
+($perl, $pcl) = both('packw', <<'PL');
+for my $x (0, 130, 268435455, 2**33, '4503599627365785', 18446744073709551615,
+           '18446744073709551616', '23728385234614992549757750638446',
+           ' +340282366920938463463374607431768211456 ', '00012') {
+  print unpack("H*", pack("w", $x)), "\n" }
+print unpack("H*", pack("w*", 1, '99999999999999999999999', 2)), "\n";
+print unpack("H*", pack("w/a*", "abc")), "\n";
+PL
+is($pcl, $perl, "pack 'w': a digit string above UV_MAX is encoded exactly (s538a)");
+
 done_testing;
