@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 47;
+plan tests => 48;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -457,6 +457,39 @@ print "\n";
 { local $/; local @ARGV = ($f, $e, $f); my @g; while (<>) { push @g, length($_) . ":$." } print "argv: @g\n"; }
 { local $/; local @ARGV = ($e, $e); my @l = <>; print "argv-list: ", scalar(@l), "\n"; }
 system("rm", "-rf", $d);
+PERL
+}
+
+# --- Test 21d (#660): the same rule on PIPES, and the locked-append shape ---
+# A pipe is a handle like any other: an empty child's output (exited or not),
+# `read` to EOF then a slurp, an empty `pipe()` are "" once, then undef; a
+# slurp loop ends; a child still running is waited for.  Then Path::Tiny's
+# locked append written out (sysopen + flock + truncate + print + close) and an
+# empty file's slurp.  Every lock is NON-blocking: a held lock reports instead
+# of hanging the row (the s539 review's ask -- the Path-Tiny input_output hang
+# was a lock held by a RETURNED handle, #2006 PART 2, not a pipe read).
+{
+    test_io('slurp at EOF on pipes + the locked-append shape (#660)', <<'PERL');
+use Fcntl qw(:flock O_WRONLY O_CREAT);
+sub sh { print $_[0], "=", (defined $_[1] ? "'$_[1]'" : "undef"), " " }
+{ local $/; open my $p, "-|", "true" or die; sleep 1; sh("empty", scalar <$p>); sh("again", scalar <$p>); close $p }
+{ local $/; open my $p, "-|", "printf x; sleep 1; printf y" or die; sh("running", scalar <$p>); sh("again", scalar <$p>); close $p }
+{ local $/; open my $p, "-|", "printf 'l1\\nl2\\n'" or die; my @l = <$p>; print "list=", scalar(@l), " "; close $p }
+{ local $/; open my $p, "-|", "true" or die; my @l = <$p>; print "elist=", scalar(@l), " "; close $p }
+{ open my $p, "-|", "printf abc" or die; my $b = ""; 1 while read($p, $b, 2, length $b); local $/;
+  sh("read", $b); sh("then", scalar <$p>); sh("again", scalar <$p>); close $p }
+{ local $/; open my $p, "-|", "true" or die; my $k = 0; while (defined(my $x = <$p>)) { last if ++$k > 3 } print "loop=$k "; close $p }
+{ local $/; pipe(my $r, my $w) or die; close $w; sh("pipe()", scalar <$r>); sh("again", scalar <$r>); close $r }
+print "\n";
+my $f = "/tmp/pcl_660p_$$";
+sub app { my ($trunc, @d) = @_; my $fh;
+  if ($trunc) { sysopen($fh, $f, O_WRONLY | O_CREAT) or die } else { open $fh, ">>", $f or die }
+  flock($fh, LOCK_EX | LOCK_NB) or return "EX-HELD"; truncate($fh, 0) if $trunc; print {$fh} @d; close $fh; "ok" }
+sub slurp { open my $fh, "<", $f or die; flock($fh, LOCK_SH | LOCK_NB) or return "SH-HELD"; local $/; scalar <$fh> }
+print "app=", app(0, "L1\n", "L2\n"), " "; sh("slurp", length slurp());
+print "trunc=", app(1, "T\n"), " "; sh("slurp", slurp());
+print "empty=", app(1), " "; sh("slurp", slurp()); print "\n";
+unlink $f;
 PERL
 }
 

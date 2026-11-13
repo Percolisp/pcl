@@ -2437,7 +2437,12 @@ at the ENCLOSING block's exit; `undef $fh` / `$fh = undef` right there) —
 passed to a sub, stored, returned, captured, `select`ed, a method called on
 it, or declared in a region with a string eval — is closed when the program
 exits, not at its last reference.  Close it explicitly when another step of
-the same program reads the file.  A file-level `open(my $fh, …)` is closed
+the same program reads the file.  A `flock` taken through such a handle is
+held until the handle closes, so a later BLOCKING `flock` on the same file
+from the same program waits for itself forever: a sub that opens, locks and
+RETURNS the handle, and a caller that reads it and lets it go (Path::Tiny's
+`slurp`, then a locked `append` / `spew` -- its `t/input_output*.t` hang
+there, s538a).  A file-level `open(my $fh, …)` is closed
 at exit, which is also perl's answer for a file-scope lexical.  No data is
 lost either way: every open handle is flushed at exit.
 
