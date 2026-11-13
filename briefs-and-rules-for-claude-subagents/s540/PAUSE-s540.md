@@ -19,3 +19,11 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s540/resume-s540.md`,
 
 ## 11:5x -- `docs/STATUS.md` board row = the s539 round (641 / 161 / 27 / 67 of 896; 109,797 ok / 1,740 not ok, the twelve load timeouts counted by their one-file re-runs).  CLAUDE.md's CURRENT NUMBERS gets the same at the first merge.
 * STATE: all three slots held (s537a gate-SET scan, s537b #4461 scan, s538a `leg660b`); s537a's exclusive bench queued behind its scan.
+
+## 12:0x -- s537a's agent DIED on an API login error (~11:57); the USER logged in again; RESUMED by message.  On disk at the cut: `gss.log` END rc=0 (gate-SET IDENTICAL, 638 x 2), `bench3.log` END rc=0 11:56 (taken at load 1-2).  It owes only reading the bench + records.  s537b (legs A B running, D E queued -- it re-takes them: ask why in its report) and s538a (the hang DIAGNOSED per its STOP.md; `legsweep` running at HEAD `1b524cb2`) were not cut, as far as their slots show.
+
+## 12:1x -- THE USER asked for TWO SPEED TASKS; FILED + BRIEFS WRITTEN (not launched; no free slot):
+* **#4787** = `s540/s540a-prompt.md`: the CPAN board timed under perl and PCL file by file (a checked-in `tools/board-timing.pl`; a coarse CPU-time pass in bounded chunks, a precise exclusive pass over the top ~40), the excess split transpile / load / run, the heaviest files profiled, ONE ranked list of things that should be faster, each filed with its measurement.  IDs 4961-4979.  No code change.
+* **#4788** = `s540/s540b-prompt.md`: the rest of PCL read for low-hanging speed fruit in five parts (emitted shapes, runtime hot helpers, shims vs XS, the compile pipeline, start-up re-measured only), each suspicion measured on a scratch copy; the list + a "not low-hanging" table + the status of the older worklists' items.  IDs 4981-4999.  No code change.
+* #4621 stays the umbrella (noted).
+* **ORDER FOR FREED SLOTS now: s538b -> s540a (the USER's newest ask) -> s539d -> s540b -> s539a -> s539c; s539b only after s537b's merge.**  s540a's precise pass is exclusive in 15-minute chunks; s540b reads s540a's list if it is on main by then.
