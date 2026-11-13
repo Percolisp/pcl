@@ -93,3 +93,7 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s540/resume-s540.md`,
 * **dclone**: the USER asked whether it must serialise -- answered (no: a deep copy; the format path stays for hooks / CODE / tied / globs / regexps).
 * **"Put this speed fixing as a normal task"** -> TWO BRIEFS WRITTEN, in the normal queue: `s540/s540d-prompt.md` (runtime / compiler: #4981 #4983 #4984 #4982 #4986 #4987; IDs 5021-5039; v2-14600) and `s540/s540e-prompt.md` (shims: #4989 #4988 #4990 #4985 #4991; IDs 5041-5059; no generation expected).
 * **FREED-SLOT ORDER now: s540d -> s539a -> s540e -> s539c -> s539b (+ #4822).**  (One speed batch at a time beside the correctness ones.)
+
+## 17:4x -- THE USER, two follow-ups (briefs + DECIDED `## s540` + task notes edited; neither brief was launched yet):
+* **#4982: nothing is built for code that MODIFIES a constant** -- Perl code is assumed correct (principle 9), in eval'ed code too.  The refusal + read-only requirement is OUT of `s540d-prompt.md`; the fold is the literal at its position; the three probe files only have to end no worse than a tidy failure.
+* **#4989: if `dclone` works, the FASTEST implementation** -- `s540e-prompt.md` member 1 measures the Perl walk against one generic runtime deep-copy primitive (shared with the Clone shim) and ships the faster.
