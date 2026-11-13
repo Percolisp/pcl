@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s540 (the reviewing session, 2026-11-13) from the merge-review probes of s538a (#3781).  PRE-EXISTING: main d1678177 and the s538a tree print the same.\n\nREPRODUCER (perl 5.40.3; ~/pcl-agent-scratch/s540/review/c/p5.pl, the `block:` line):\n\n    { use integer; print 2 ** 0.5 > 1 ? \"pow-float\" : \"pow-int\", \"\\n\" }      # perl: pow-int     PCL: pow-float\n\nMEASURE FIRST which half is wrong: `use integer; print 2 ** 0.5` (perl prints 1) and `use integer; print 1.5 > 1` (perl: integer comparison, false).  perlop: under `use integer` the operands of the arithmetic AND the numeric comparison operators are truncated; `**` and the comparisons are in that set.  #3781 (s538a) moved the pragma to regions and covered the compound assignments; check the binary-operator table it reads for `**` and for `< > <= >= == != <=>`.  LOW (rare in real code), but a silent wrong.",
+   "id" : "4789",
+   "status" : "pending",
+   "subject" : "`**` under `use integer` is perl's INTEGER power (pp_i_pow is not a thing -- perl truncates the operands: `use integer; 2 ** 0.5` is 1); PCL answers the float 1.414... -- pre-existing, LOW"
+}
