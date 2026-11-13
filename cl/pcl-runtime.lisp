@@ -22009,7 +22009,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((r *p-finalizer-drain*))
     (and r (symbol-value (svref r 5)) t)))
 
-(defun %p-run-dead-handle-finalizers ()
+(defun %p-run-dead-handle-finalizers (&optional collect)
   "Run, in THIS thread, every finalizer a collection has queued, and return
    only when none is running anywhere.  SBCL runs finalizers on its own thread,
    so a caller that must see the descriptors closed NOW (a retried `flock' or
@@ -22017,14 +22017,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    thread already took may still be running when that returns.  Stopping the
    thread joins it -- an in-flight finalizer completes -- then the queue is
    drained here and the thread restarted from this thread, so it inherits this
-   thread's signal mask (%p-sig-relay-start relies on the same)."
+   thread's signal mask (%p-sig-relay-start relies on the same).
+
+   COLLECT true runs the full collection WHILE THE THREAD IS STOPPED (the
+   trigger's case).  That order is measured, not tidiness (s540c): the
+   finalizer thread walks every registered object to rehash the finalizer
+   table, and a pointer it left on its own (conservatively scanned) stack kept
+   a dropped stream alive through a collection -- Path::Tiny's input_output.t
+   hung on that every time; a stopped thread has no stack."
   (let ((r *p-finalizer-drain*))
     (if (null r)
-        (sb-kernel:run-pending-finalizers)
+        (progn (when collect (sb-ext:gc :full t))
+               (sb-kernel:run-pending-finalizers))
         (let ((running (typep (symbol-value (svref r 4)) 'sb-thread:thread)))
           (when running (funcall (svref r 0)))
           (unwind-protect
-               (progn (funcall (svref r 2))
+               (progn (when collect (sb-ext:gc :full t))
+                      (funcall (svref r 2))
                       (loop while (funcall (svref r 3))))
             (when running (funcall (svref r 1)))))))
   (values))
@@ -22057,8 +22066,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                               (eofs (%p-weaken-pins *p-eof-seen*)))
                           (setf *p-last-read-handle* nil)
                           (unwind-protect
-                               (progn (sb-ext:gc :full t)
-                                      (%p-run-dead-handle-finalizers))
+                               (%p-run-dead-handle-finalizers t)
                             (%p-restore-pins *p-fh-lines* lines)
                             (%p-restore-pins *p-eof-seen* eofs)
                             (unless *p-last-read-handle*
@@ -28122,7 +28130,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-14400"
+(defparameter *pcl-cache-generation* "v2-14500"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
