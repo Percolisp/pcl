@@ -35358,8 +35358,15 @@ would consume, so it dies naming the stream (rule 12)."
    goes from 1 to 0, and a name that was only FORWARD-declared, `sub d;`,
    likewise).  *p-declared-subs* is the other half of the slot, not a cache:
    `defined &foo` reads it, and a forward declaration lives ONLY there, so the
-   entry goes whether or not the symbol was fbound."
-  (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
+   entry goes whether or not the symbol was fbound.
+
+   The symbol is PKG's OWN (%p-own-code-symbol): a name PKG only INHERITS is
+   :pcl's, and unbinding it undefined the runtime's function PROGRAM-WIDE --
+   Test::Warnings' import runs `undef *{\"main::done_testing\"}` and every
+   later call of the TAP layer's done_testing died (#3823).  perl's undef
+   clears main's stash entry only; shadowing gives PKG an empty slot of its
+   own and leaves the inherited function to every other package."
+  (let ((sym (%p-own-code-symbol pkg (%pcl-uname-to-sub uname) nil)))
     (when (fboundp sym) (fmakunbound sym))
     (remhash sym *p-declared-subs*)))
 

@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 39;
+plan tests => 43;
 
 sub run_cl {
     my ($code) = @_;
@@ -590,4 +590,79 @@ SKIP: {
   is(run_cl(q{eval "use Test::Pod 1.00";
 print $@ ? "FAIL: " . substr($@, 0, 200) . "\n" : "loaded\n";
 }), "loaded\n", 'the installed Test::Pod loads (its import calls exported_to and an empty plan, #4186)');
+}
+
+# ── s539a, tasks #3823 #3495: the builder's state reads and delegations ─────
+# Test::Warnings asks ->parent ("in a subtest?") in done_testing and
+# ->expected_tests in its END block; Test::NoWarnings' warning record asks
+# ->details.  Before: "Can't locate object method" -- URI escape.t and
+# IO-Compress 112utf8-zip.t stopped there.  Every expected text below is the
+# perl 5.40.3 (Test::Builder 1.302199) output of the same program.
+is(run_cl(q{use Test::More;
+my $tb = Test::Builder->new;
+sub show { my $w = shift; my $b = Test::Builder->new;
+  printf "# %s: parent=%s expected=%s current=%s has_plan=%s level=%s in_todo=%s todo=%s is_passing=%s\n", $w,
+    (defined $b->parent ? ref($b->parent) : 'undef'), $b->expected_tests, $b->current_test,
+    (defined $b->has_plan ? $b->has_plan : 'undef'), $b->level, ($b->in_todo ? 1 : 0),
+    (defined $b->todo ? $b->todo : 'undef'), $b->is_passing; }
+show("start");
+ok(1, "one");
+subtest inner => sub { plan tests => 2; show("in-subtest"); ok(1); ok(1); };
+{ our $TODO; local $TODO = "later"; show("todo"); }
+my @s = $tb->summary; print "# summary=@s\n";
+print "# same=", (Test::Builder->new == $tb ? 1 : 0), "\n";
+done_testing;
+show("end");
+}), "# start: parent=undef expected=0 current=0 has_plan=undef level=1 in_todo=0 todo=undef is_passing=1\nok 1 - one\n# Subtest: inner\n    1..2\n# in-subtest: parent=Test::Builder expected=2 current=0 has_plan=2 level=1 in_todo=0 todo=undef is_passing=1\n    ok 1\n    ok 2\nok 2 - inner\n# todo: parent=undef expected=0 current=2 has_plan=undef level=1 in_todo=1 todo=later is_passing=1\n# summary=1 1\n# same=1\n1..2\n# end: parent=undef expected=2 current=2 has_plan=2 level=1 in_todo=0 todo=undef is_passing=1\n",
+   'Test::Builder parent / expected_tests / level / in_todo / todo / summary answer as perl (#3823)');
+{
+  my $out = run_cl(q{use Test::More;
+my $tb = Test::Builder->new;
+ok(1, "a pass");
+ok(0, "a fail");
+ok(1);
+TODO: { local $TODO = "not yet"; ok(0, "todo fail"); ok(1, "todo pass"); }
+SKIP: { skip "no reason", 2; }
+subtest "sub one" => sub { ok(1, "inner"); };
+subtest "sub skip" => sub { plan skip_all => "skipping sub"; };
+ok(0, "is fails");
+pass();
+my @d = $tb->details;
+for my $i (0 .. $#d) {
+  my $h = $d[$i];
+  print "# $i: ", join(", ", map { "$_=" . (defined $h->{$_} ? "<$h->{$_}>" : "undef") } sort keys %$h), "\n";
+}
+print "# summary=", join(",", $tb->summary), "\n";
+print "# scalar details=", scalar($tb->details), "\n";
+done_testing;
+});
+  is(join("", grep { /^# (\d+:|summary|scalar)/ } split /^/, $out),
+     "# 0: actual_ok=<1>, name=<a pass>, ok=<1>, reason=<>, type=<>\n# 1: actual_ok=<0>, name=<a fail>, ok=<0>, reason=<>, type=<>\n# 2: actual_ok=<1>, name=<>, ok=<1>, reason=<>, type=<>\n# 3: actual_ok=<0>, name=<todo fail>, ok=<1>, reason=<not yet>, type=<todo>\n# 4: actual_ok=<1>, name=<todo pass>, ok=<1>, reason=<not yet>, type=<todo>\n# 5: actual_ok=<1>, name=<>, ok=<1>, reason=<no reason>, type=<skip>\n# 6: actual_ok=<1>, name=<>, ok=<1>, reason=<no reason>, type=<skip>\n# 7: actual_ok=<1>, name=<sub one>, ok=<1>, reason=<>, type=<>\n# 8: actual_ok=<1>, name=<sub skip>, ok=<1>, reason=<skipping sub>, type=<skip>\n# 9: actual_ok=<0>, name=<is fails>, ok=<0>, reason=<>, type=<>\n# 10: actual_ok=<1>, name=<>, ok=<1>, reason=<>, type=<>\n# summary=1,0,1,1,1,1,1,1,1,0,1\n# scalar details=11\n",
+     'Test::Builder->details: the five fields of every row kind, summary, scalar count (#3495)');
+}
+is(run_cl(q{use Test::Builder;
+my $tb = Test::Builder->new;
+$tb->expected_tests(7);
+print "# expected=", $tb->expected_tests, " has_plan=", $tb->has_plan, "\n";
+$tb->is_eq("a", "a", "is_eq");
+$tb->isnt_eq("a", "b", "isnt_eq");
+$tb->is_num(undef, undef, "is_num undef");
+$tb->is_num("1.0", 1, "is_num numeric");
+$tb->isnt_num(1, 2, "isnt_num");
+$tb->like("abc", "/B/i", "builder like reads /RE/");
+$tb->unlike("abc", qr/z/, "builder unlike");
+my @e = $tb->explain([1]);
+print "# explain lines=", scalar(@e), "\n";
+print "# level=", $tb->level, "\n";
+{ local $Test::Builder::Level = $Test::Builder::Level + 2; print "# level+2=", $tb->level, "\n"; }
+}), "1..7\n# expected=7 has_plan=7\nok 1 - is_eq\nok 2 - isnt_eq\nok 3 - is_num undef\nok 4 - is_num numeric\nok 5 - isnt_num\nok 6 - builder like reads /RE/\nok 7 - builder unlike\n# explain lines=1\n# level=1\n# level+2=3\n",
+   'Test::Builder expected_tests(N) / is_eq / isnt_eq / is_num / isnt_num / like / unlike / explain / $Level (#3823)');
+SKIP: {
+  # Looked up, never loaded: Test::Warnings' own END block would add a row
+  # to THIS file.
+  skip 'Test::Warnings is not installed for this perl', 1
+    if !grep { !ref($_) && -f "$_/Test/Warnings.pm" } @INC;
+  is(run_cl(q{use Test::More; use Test::Warnings; ok(1); done_testing;
+}), "ok 1\nok 2 - no (unexpected) warnings (via done_testing)\n1..2\n",
+     'the installed Test::Warnings: its done_testing row and plan, as perl (#3823)');
 }

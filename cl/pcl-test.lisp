@@ -115,6 +115,20 @@
   "Description of the last assertion that ran. Used by the exit hook for crash
    localization: when a file aborts mid-run, this names the last test that
    completed, so the next assertion (~test *test-count*+1) is the crash site.")
+(defvar *test-results* (make-array 0 :adjustable t :fill-pointer 0)
+  "Test::Builder's Test_Results (#3495): one entry per row of the CURRENT
+   stream, (OK ACTUAL-OK NAME TYPE REASON) as ->details and ->summary report
+   them.  A subtest rebinds it (the child keeps its own rows; the parent gets
+   the one row %subtest-report writes).  Written ONLY by %test-record-row.")
+
+(defun %test-record-row (pass actual-pass name type reason)
+  "Record one row as Test::Builder's details see it: PASS / ACTUAL-PASS are
+   generalized booleans (a failing TODO row is ok but not actual_ok), NAME the
+   row's display name or NIL, TYPE \"\" / \"todo\" / \"skip\", REASON the TODO
+   or skip reason or NIL.  The one place a row is recorded (rule 11)."
+  (vector-push-extend (list (if pass 1 0) (if actual-pass 1 0) (or name "")
+                            type (or reason ""))
+                      *test-results*))
 
 ;;; ─── Structured failure log (opt-in via PCL_TEST_LOG_DIR) ───────────────────
 ;;; When the env var PCL_TEST_LOG_DIR names a directory, `test-ok` appends one
@@ -424,6 +438,7 @@
   (let ((todo (%current-todo)))
     (when todo
       (let ((dn (test-display-value name)))
+        (%test-record-row t pass dn "todo" todo)
         (cond
           ((not pass)
            (incf *test-todo*)
@@ -439,6 +454,8 @@
   (let ((entry (%skip-registry-lookup name)))
     ;; Registry says this test is documented not-supported.
     (when entry
+      (%test-record-row t pass (test-display-value name)
+                        (if pass "" "skip") (and (not pass) (third entry)))
       (cond
         ((not pass)
          ;; Expected failure -> emit a real TAP skip (counts as neither pass nor fail).
@@ -457,6 +474,7 @@
          (%tap-out "# REGISTRY-STALE: ~A test ~A now passes; drop skip-registry pattern ~S~%"
                    *current-test-file* *test-count* (fourth entry))
          (return-from test-ok t)))))
+  (%test-record-row pass pass (test-display-value name) "" nil)
   (let* ((display-name (test-display-value name))
          (out (if display-name
                   (format nil "~A ~A - ~A"
@@ -620,13 +638,16 @@
          (if (ppcre:scan scanner got-str) t nil)))
       (t (if (ppcre:scan (to-string regex) got-str) t nil)))))
 
-(defun %test-like (got regex name negated)
+(defun %test-like (got regex name negated &optional builder)
   "Body of like (NEGATED nil) and unlike (NEGATED t) — one matcher, one
-   error policy: an unusable pattern is NOT a verdict in either direction."
+   error policy: an unusable pattern is NOT a verdict in either direction.
+   BUILDER: called as Test::Builder's own ->like / ->unlike, which reads a
+   string pattern through maybe_regex whoever the caller is."
   (let* ((got (test-to-scalar got))
          (got-str (if got (to-string got) ""))
          (pattern (%test-regex-pattern-text regex))
-         (tm (and (not (p-regex-match-p (unbox regex))) (%test-more-caller-p)))
+         (tm (and (not (p-regex-match-p (unbox regex)))
+                  (or builder (%test-more-caller-p))))
          (err nil))
     (multiple-value-bind (tm-pattern tm-mods)
         (if tm (%test-more-maybe-regex pattern) (values nil nil))
@@ -1081,6 +1102,7 @@
         (r (to-string (unbox reason))))
     (dotimes (i n)
       (incf *test-count*)
+      (%test-record-row t t nil "skip" r)
       (%tap-out "ok ~A # skip ~A~%" *test-count* r)))
   (p-last-dynamic "SKIP"))
 
@@ -1129,6 +1151,7 @@
   (cond
     (skip
      (incf *test-count*)
+     (%test-record-row t t name "skip" skip)
      (%tap-out "ok ~A # skip ~A~%" *test-count* skip))
     (t (test-ok pass (or row-name name)))))
 
@@ -1140,7 +1163,8 @@
          (let ((*tap-indent* (concatenate 'string *tap-indent* "    "))
                (*test-subtest-depth* (1+ *test-subtest-depth*))
                (*test-count* 0) (*test-planned* nil) (*test-no-plan* nil)
-               (*test-failures* 0) (*test-skipped* 0) (*test-todo* 0))
+               (*test-failures* 0) (*test-skipped* 0) (*test-todo* 0)
+               (*test-results* (make-array 0 :adjustable t :fill-pointer 0)))
            (unwind-protect
                 (setf skip (catch '%subtest-skip-all
                              (apply #'p-funcall-ref code args)
@@ -1621,7 +1645,11 @@
 ;;; meaning a Test::Builder-based module calls (ok diag note plan done_testing
 ;;; current_test cmp_ok exported_to maybe_regex -- #3346 #4186 #4203; the
 ;;; census of Test::Pod / Test::Warn / Test::Deep / Test::Fatal /
-;;; Test::NoWarnings / Test::LeakTrace is in task #4186).  Every OTHER Test::Builder method is deliberately absent: method dispatch
+;;; Test::NoWarnings / Test::LeakTrace is in task #4186), and since s539a the
+;;; state reads and delegations at the end of this file (parent
+;;; expected_tests level in_todo todo details summary no_plan BAIL_OUT is_eq
+;;; isnt_eq is_num isnt_num like unlike explain subtest -- #3823 #3495; the census against
+;;; perl's method list is in docs/tap-assertion-audit.md).  Every OTHER Test::Builder method is deliberately absent: method dispatch
 ;;; then dies "Can't locate object method \"X\" via package \"Test::Builder\"",
 ;;; naming the gap, instead of a stub returning a plausible wrong value that
 ;;; would silently corrupt a file's counts (CLAUDE.md rule 12).
@@ -1634,6 +1662,14 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (shadow '("PL-SKIP" "PL-SKIP_ALL" "PL-OK" "PL-DIAG" "PL-NOTE" "PL-PLAN"
             "PL-DONE_TESTING" "PL-CMP_OK")
+          (find-package "Test::Builder"))
+  ;; The #3823 / #3495 methods: every name shadowed, so a defun below can
+  ;; never redefine a :pcl function a user package inherits (pl-like, …).
+  (shadow (mapcar #'%pcl-cl-sub-name
+                  '("parent" "expected_tests" "level" "in_todo" "todo"
+                    "summary" "details" "no_plan" "BAIL_OUT" "BAILOUT"
+                    "explain" "is_eq" "isnt_eq" "is_num" "isnt_num" "like"
+                    "unlike" "subtest"))
           (find-package "Test::Builder")))
 
 (defvar *test-builder-singleton* nil
@@ -1743,9 +1779,10 @@
 ;; it does not leave a SKIP block.
 (defun |Test::Builder|::pl-skip (self &optional reason &rest args)
        (declare (ignore self args))
-       (incf *test-count*)
-       (%tap-out "ok ~A # skip~@[ ~A~]~%" *test-count*
-                 (and reason (to-string (unbox reason))))
+       (let ((why (and reason (to-string (unbox reason)))))
+         (incf *test-count*)
+         (%test-record-row t t nil "skip" why)
+         (%tap-out "ok ~A # skip~@[ ~A~]~%" *test-count* why))
        1)
 
 ;; ->is_passing: 1 while no assertion has failed, else 0.
@@ -1819,4 +1856,141 @@
        (when args
          (p-die "PCL: Test::Builder->current_test(N) (setting the counter) is not supported"))
        *test-count*)
+
+;;; ----- #3823 / #3495: the state reads and the one-line delegations -------
+;;; Measured against perl's Test::Builder 1.302199 (the method census is in
+;;; docs/tap-assertion-audit.md "Test::Builder's methods").  Each is a read of
+;;; state the TAP layer keeps or a call of the function Test::More's own sub
+;;; delegates to; a method that would need NEW state stays absent (it dies
+;;; naming itself) and is filed there.
+
+;; ->parent (#3823): undef at the top level; inside a subtest the builder of
+;; the enclosing stream.  PCL has ONE builder object, whose methods answer
+;; the CURRENT stream (as perl's Test::Builder->new does inside a subtest), so
+;; the answer is that object: its truth is what the census's callers ask
+;; (Test::Warnings: "are we in a subtest?", Test::Needs the same).
+(defun |Test::Builder|::pl-parent (self &rest args)
+       (declare (ignore self args))
+       (if (plusp *test-subtest-depth*) (%test-builder) (p-undef)))
+
+;; ->expected_tests([N]) (#3823): the declared plan, 0 for none (no plan yet,
+;; or no_plan); done_testing's count once it ran.  With N it IS plan(N).
+(defun |Test::Builder|::pl-expected_tests (self &rest args)
+       (declare (ignore self))
+       (let ((n (%test-flat-values args)))
+         (when n
+           (let ((max (to-string (first n))))
+             (unless (ppcre:scan "\\A\\+?\\d+\\z" max)
+               (p-die (format nil "Number of tests must be a positive integer.  You gave it '~A'"
+                              max)))
+             (pl-plan (parse-integer max :start (if (char= (char max 0) #\+) 1 0))))))
+       (if (and *test-planned* (not *test-no-plan*))
+           (truncate (to-number *test-planned*))
+           0))
+
+;; ->level([N]): $Test::Builder::Level (1 unless a caller localized it).
+(defun |Test::Builder|::pl-level (self &rest args)
+       (declare (ignore self))
+       (let ((n (%test-flat-values args)))
+         (when (and n (%pcl-definedp (first n)))
+           (%p-symref-scalar-set "Test::Builder::Level" (first n))))
+       (or (%p-symref-scalar-value "Test::Builder::Level") (p-undef)))
+
+;; Test::Builder's `our $Level = 1', at load.  A program that names the
+;; variable has its cell already (p-defcell runs before the `use'), holding
+;; undef: that is the cell to fill.
+(unless (%pcl-definedp (%p-symref-scalar-value "Test::Builder::Level"))
+  (%p-symref-scalar-set "Test::Builder::Level" 1))
+
+;; ->in_todo: 1 while a $TODO is in force, else 0.  ->todo: its reason, or
+;; undef (both read %current-todo, the rows' own TODO test).
+(defun |Test::Builder|::pl-in_todo (self &rest args)
+       (declare (ignore self args))
+       (if (%current-todo) 1 0))
+
+(defun |Test::Builder|::pl-todo (self &rest args)
+       (declare (ignore self args))
+       (or (%current-todo) (p-undef)))
+
+;; ->details (#3495): one hash per row of the current stream -- ok, actual_ok,
+;; name, type, reason, exactly the five fields perl gives (a failing TODO row
+;; is ok 1 / actual_ok 0 / type "todo"; a skip row type "skip"; a subtest's
+;; skip row carries the subtest's name).  ->summary: the ok fields.  Scalar
+;; context: the number of rows.
+(defun %test-results-list (fn)
+  (if (eq *wantarray* t)
+      (map 'vector fn *test-results*)
+      (length *test-results*)))
+
+(defun |Test::Builder|::pl-details (self &rest args)
+       (declare (ignore self args))
+       (%test-results-list
+        (lambda (r)
+          (destructuring-bind (ok actual name type reason) r
+            (make-p-box (p-hash "ok" ok "actual_ok" actual "name" name
+                                "type" type "reason" reason))))))
+
+(defun |Test::Builder|::pl-summary (self &rest args)
+       (declare (ignore self args))
+       (%test-results-list #'first))
+
+;; ->no_plan is plan('no_plan'); ->BAIL_OUT / ->BAILOUT is BAIL_OUT.
+(defun |Test::Builder|::pl-no_plan (self &rest args)
+       (declare (ignore self args))
+       (pl-plan "no_plan"))
+
+(defun |Test::Builder|::pl-BAIL_OUT (self &optional reason &rest args)
+       (declare (ignore self args))
+       (pl-BAIL_OUT (if reason (to-string reason) "")))
+
+(defun |Test::Builder|::pl-BAILOUT (self &optional reason &rest args)
+       (declare (ignore self args))
+       (pl-BAIL_OUT (if reason (to-string reason) "")))
+
+;; The assertions Test::More's own subs delegate to: is -> is_eq, isnt ->
+;; isnt_eq, like / unlike (maybe_regex on a string pattern, whoever calls),
+;; explain, subtest.
+(defun |Test::Builder|::pl-is_eq (self got expected &optional name &rest args)
+       (declare (ignore self args))
+       (pl-is got expected name))
+
+(defun |Test::Builder|::pl-isnt_eq (self got expected &optional name &rest args)
+       (declare (ignore self args))
+       (pl-isnt got expected name))
+
+;; ->is_num / ->isnt_num: Test::Builder's numeric pair -- undef matches only
+;; undef (an undef on either side is that test, with is's diagnostic), else
+;; cmp_ok with == / !=.
+(defun %test-builder-num (got expected name negated)
+  (let ((got (test-to-scalar got)) (expected (test-to-scalar expected)))
+    (if (or (test-undef-p got) (test-undef-p expected))
+        (let ((both (and (test-undef-p got) (test-undef-p expected))))
+          (if negated
+              (pl-isnt got expected name)
+              (if both (test-ok t name) (pl-is got expected name))))
+        (pl-cmp_ok got (if negated "!=" "==") expected name))))
+
+(defun |Test::Builder|::pl-is_num (self got expected &optional name &rest args)
+       (declare (ignore self args))
+       (%test-builder-num got expected name nil))
+
+(defun |Test::Builder|::pl-isnt_num (self got expected &optional name &rest args)
+       (declare (ignore self args))
+       (%test-builder-num got expected name t))
+
+(defun |Test::Builder|::pl-like (self got regex &optional name &rest args)
+       (declare (ignore self args))
+       (%test-like got regex name nil t))
+
+(defun |Test::Builder|::pl-unlike (self got regex &optional name &rest args)
+       (declare (ignore self args))
+       (%test-like got regex name t t))
+
+(defun |Test::Builder|::pl-explain (self &rest args)
+       (declare (ignore self))
+       (apply #'pl-explain args))
+
+(defun |Test::Builder|::pl-subtest (self name code &rest args)
+       (declare (ignore self))
+       (apply #'pl-subtest name code args))
 

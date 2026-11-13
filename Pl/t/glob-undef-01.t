@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run.
 sub run_cl {
@@ -326,3 +326,25 @@ PERL
  . "8 after-assign ARRAY=ref\n"
  . "9 local-fh read=1\n",
    '#1727: inside local *G the aggregate slots read ABSENT, as perl says');
+
+# ---- s539a, #3823: undef of a name the package only INHERITS --------------
+# Test::Warnings' import runs `undef *{"main::done_testing"}`.  The TAP
+# functions are :pcl's, inherited by every package, and the clear unbound
+# THAT symbol: the runtime's done_testing died for the whole program.  perl
+# clears main's stash entry only; another package that imported Test::More
+# keeps its functions (probed perl 5.40.3).
+is(run_cl(<<'PERL'), "main is: gone\nmain done_testing: gone\nOther is: defined\nok 1 - Other's is still works\n1..1\n",
+use Test::More;
+package Other;
+use Test::More;
+package main;
+undef *main::done_testing;
+undef *{"main::is"};
+print "main is: ", (defined &main::is ? "defined" : "gone"), "\n";
+print "main done_testing: ", (defined &main::done_testing ? "defined" : "gone"), "\n";
+print "Other is: ", (defined &Other::is ? "defined" : "gone"), "\n";
+package Other;
+is(1, 1, "Other's is still works");
+done_testing();
+PERL
+   '#3823: undef *main::NAME of an inherited runtime function clears main only');
