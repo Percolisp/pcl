@@ -1724,7 +1724,7 @@ comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
 comp/use.t	87	0	47	40	DIFF	s497b: 42/45 -> 47/40, strict refs enforced (#2103): the five "ver decl enables refs" / "explicit use strict" rows | s492a: 40/47 -> 42/45 (#1999 second half, `use builtin LIST` IMPORTS -- perl aliases each named builtin into the calling package): rows 35 `builtin funcs not removed after use v5.36` and 36 `imported true is eq "1"`.  Rows 33/34, the VERSION-declaration spelling that enables builtins implicitly, still fail (#1690).  This restores the count s488a's #1249(7) change had taken it down from.  Serial re-run, base 5316d666 vs tree.
 comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/4204 at 614c6af)	0
-io/argv.t	52	1	28	23	DIFF	s507c PART TWO #2703/#2666 (eof(), ARGV aliasing): 27/26 -> 28/23	0
+io/argv.t	52	1	30	23	DIFF	s507c PART TWO #2703/#2666 (eof(), ARGV aliasing): 27/26 -> 28/23; s538a #660: the in-place `while (<>)` over an EMPTY second file runs its body once as perl does (slurp at EOF is "" once), so the file numbers like perl: 28/23 -> 30/23 (rows 13 14 25 26 pass, 15 16 = #4846 visible)	0
 io/binmode.t	9	0	9	0	OK		0
 io/bom.t	3	0	1	2	DIFF		0
 io/closepid.t	3	0	3	0	OK		0

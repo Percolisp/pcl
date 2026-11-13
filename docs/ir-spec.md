@@ -406,6 +406,15 @@ $a[0] = "Z";                 # no STORE into $t
 A Perl array is an **adjustable vector with a fill pointer** (growable,
 ordered, integer-indexed).
 
+**An index whose slot array would wrap `size_t` is REFUSED, trappably, as
+perl's `av_extend` does** (s538a): extending to an index of 2^61 or more dies
+`Out of memory during array extend`, to 2^61-1 dies `panic: memory wrap`; a
+smaller absurd index is an allocation failure in perl and in SBCL alike (both
+fatal).  Every extending spelling (`$#a = N`, an element store, a `\$#a`
+write) asks the one check in `%p-extend-to`.  Example: `my @a; eval
+q($#a>>=1)` -- the shift reads a UV, so `$#a` would be 2^63-1 -- leaves
+`$@` = `Out of memory during array extend at (eval 1) line 1.`
+
 **Element storage: RAW by default, promoted to a box at an alias event**
 (s457ai, `docs/boxed-aggregates-design-s455.md`).  A slot holds one of three
 things:

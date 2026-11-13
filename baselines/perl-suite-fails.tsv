@@ -1483,14 +1483,10 @@ comp/utf.t	16	ok	not ok	UTF-16LE 0 1 chrs 0xff	#1693
 comp/utf.t	24	ok	not ok	UTF-16LE 0 1 chrs 0xfff	#1693
 comp/utf.t	32	ok	not ok	UTF-16LE 0 1 chrs 0xffff	#1693
 comp/utf.t	40	ok	not ok	UTF-16LE 0 1 chrs 0xfffff	#1693
-io/argv.t	0	(none)	renumbered	*summary*	#1710
 io/argv.t	33	ok	not ok	<<>> does not open empty string in ARGV	#1710
 io/argv.t	34	ok	not ok	<<>> does not treat ...| as fork	#1710
 io/argv.t	35	ok	not ok	<<>> does not treat ...| as fork after eof	#1710
 io/argv.t	32	ok	not ok	<> does not open empty string in ARGV	#1710
-io/argv.t	13	ok	not ok [PCL #15]	[at t/io/argv.t line 119]	#1710
-io/argv.t	25	ok	(missing)	[at t/io/argv.t line 163]	#1710
-io/argv.t	26	ok	(missing)	[at t/io/argv.t line 164]	#1710
 io/argv.t	50	ok	not ok	check for warning for  - |	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/argv.t	52	ok	not ok	check for warning for  - |	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/argv.t	42	ok	not ok	check for warning for  -|	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
@@ -1507,7 +1503,8 @@ io/argv.t	45	ok	not ok	check for warning for | -	NS:Warnings-gated diagnostics a
 io/argv.t	47	ok	not ok	check for warning for | -	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/argv.t	37	ok	not ok	check for warning for |-	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/argv.t	39	ok	not ok	check for warning for |-	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
-io/argv.t	14	ok	not ok [PCL #16]	eof() true on unopened filehandle	#1710
+io/argv.t	15	ok	not ok	STDIN has something	#4846 (after <> exhausted @ARGV, `@ARGV = (); eof()` never falls back to STDIN -- pre-existing, newly visible: s538a #660: the in-place `while (<>)` over an EMPTY second file runs its body once as perl does (slurp at EOF is "" once), so the file numbers like perl)
+io/argv.t	16	ok	not ok	[at t/io/argv.t line 130]	#4846 (the same: the next `<>` reads undef, perl reads STDIN)
 io/bom.t	2	ok	not ok	BOM indicates UTF-16BE	#1710
 io/bom.t	3	ok	not ok	BOM indicates UTF-16LE	#1710
 io/crlf.t	6	ok	not ok	[at t/io/crlf.t line 34]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
