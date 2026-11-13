@@ -31,6 +31,11 @@ open my $t, '>', "$dist/t/a.t" or die $!;
 print $t "use strict;\nuse Test::More tests => 3;\nuse BtMod;\n"
        . "is(BtMod::f(), 42, 'module');\nmy \$x = eval \"1 + 1\";\nis(\$x, 2, 'eval');\nok(1, 'three');\n";
 close $t;
+# An hour old: the runtime's module cache is valid only when its entry is
+# NEWER than the source, in whole seconds -- a module written in the same
+# second as the cold run's entry would be transpiled again by the warm run.
+my $old = time - 3600;
+utime $old, $old, "$dist/lib/BtMod.pm", "$dist/t/a.t" or die "utime: $!";
 open my $l, '>', "$tmp/list.tsv" or die $!;
 print $l "$dist\t-\ts540a\tthe fixture\n";
 close $l;
