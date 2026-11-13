@@ -85,6 +85,11 @@ answered the generated `.lisp` file and a Lisp form offset).
 replaced frame recorded of its call, so the target's frame records the
 ORIGINAL call.
 
+hasargs is not a slot: `&name;` (`p-amp-call`, which shares the caller's
+`@_`) pushes the depth of the frame it makes onto `*p-amp-frames*`, and
+`caller` answers `''` for exactly those depths -- the rare spelling pays a
+cons and a binding, an ordinary call nothing.
+
 ## The location: only where it is recorded
 
 A frame stores the location REGISTERS as they stood at the call.  The
@@ -135,7 +140,6 @@ no `, <FH> line N` tail.
 | file / line in the default build | needs a per-statement or per-call-site register write | text +17.9 % (all statements) / ≥ +1.5 % (call sites) |
 | a frame for every anonymous sub | +3.5 ns on a 28 ns anonymous call (+12 %), the anoncall row +4 % | measured, left out |
 | `eval {}` / `eval STRING` / `require` frames (`(eval)`, evaltext, is_require) | each would be the same prologue as an anonymous frame, on every eval execution | ~+3.5 ns per eval (the anonymous frame's number) |
-| hasargs '' for `&name;` | the frame does not record how it was called | one more slot store |
 | hints / bitmask / hinthash (fields 8-10) | PCL keeps no per-frame pragma state | — |
 | `@DB::args`, `CORE::GLOBAL::caller`, frames `Sub::Uplevel` hides | tier 2, a design (docs/not-supported.md ns-caller-fidelity) | — |
 

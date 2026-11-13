@@ -4482,7 +4482,7 @@ at the call).  `caller(N)` answers frame `depth - N`:
 |---|---|
 | scalar context | the calling package |
 | `caller` (no EXPR) | `(PACKAGE FILE LINE)` |
-| `caller(N)` | eleven fields: package, file, line, subname, hasargs (always 1), wantarray (1 / `""` / undef), then evaltext, is_require, hints, bitmask, hinthash (all undef) |
+| `caller(N)` | eleven fields: package, file, line, subname, hasargs (1; `""` for a frame `&name;` made, which p-amp-call records), wantarray (1 / `""` / undef), then evaltext, is_require, hints, bitmask, hinthash (all undef) |
 | past the outermost frame, a negative N | the empty list / undef |
 
 FILE and LINE are the location registers, so they are perl's only where the

@@ -5,6 +5,17 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-13: **`caller` reads a call-frame stack; `croak` reports its
+  caller** (#233, #1361).  `caller` with no argument answers three fields and
+  `caller(N)` eleven (the sub's name, hasargs, wantarray); an anonymous sub
+  that calls `caller` is a frame (with its `Sub::Util::set_subname` name);
+  `# line N "FILE"` moves `__LINE__`, `__FILE__` and `die` / `warn`
+  locations; `croak` / `carp` / `confess` follow perl's Carp rules.  The file
+  and line of a call site are perl's under `PCL_OPT=line-track` (default
+  off: recording them by default costs 18 % more emitted code); otherwise a
+  frame says `- line 0`.  Sub calls got faster (the frame is a vector slot,
+  no allocation): the call-heavy bench rows 8 to 45 % quicker.
+
 - 2026-11-12: **`DESTROY` at program exit** (#2371).  After the `END` blocks,
   every object still in memory gets its `DESTROY` (or its class's `AUTOLOAD`),
   as perl's global destruction does: temporary files are removed, buffered

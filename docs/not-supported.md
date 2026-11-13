@@ -495,8 +495,9 @@ reports its caller's location by perl's algorithm.  What is NOT:
 - **`eval` / `require` frames** — `(eval)`, evaltext, is_require.  The same
   prologue on every eval execution (~+3.5 ns each); not built.  caller(N)
   across an `eval {}` counts one frame fewer than perl.
-- **hasargs** is 1 for every frame (`&name;` is not told apart); the hint
-  fields 8-10 are undef.
+- **The hint fields 8-10** (hints, bitmask, hinthash) are undef: PCL keeps
+  no per-frame pragma state.  (hasargs is right: `''` for a frame `&name;`
+  made, which `p-amp-call` records -- that spelling's cost only.)
 - **Tier 2, not scheduled:** frames a program can hide (`Sub::Uplevel`, which
   `Test::Exception` is built on), the `*CORE::GLOBAL::caller` override,
   `@DB::args` (so a Carp backtrace names each sub without its arguments).
