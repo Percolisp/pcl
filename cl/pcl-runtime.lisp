@@ -1314,31 +1314,44 @@
 ;;; the record is the function's own name, so creating a closure costs
 ;;; nothing more than before (a closure shares its code object's name).
 ;;; builtin::sub_stash reads it (%p-sub-stash-of, lib/B.pm).
-(defmacro p-anon-sub (pkg lambda-form)
+(defmacro p-anon-sub (pkg &rest args)
   "`sub {...}` compiled in package PKG (a string): LAMBDA-FORM, named
    \"PKG::__ANON__\" so the function carries its home package.
+   (p-anon-sub PKG LAMBDA-FORM) or (p-anon-sub PKG :frame LAMBDA-FORM).
 
-   IT IS A CALL FRAME (s539d, task #233 item 3): the body runs under
-   p-frame-bind with the function ITSELF as the frame's sub, so caller()
-   inside it sees the frame and names it at caller() time
+   WITH :frame IT IS A CALL FRAME (s539d, task #233 item 3): the body runs
+   under p-frame-bind with the function ITSELF as the frame's sub, so
+   caller() inside it sees the frame and names it at caller() time
    (%p-frame-sub-name: a Sub::Util::set_subname name, else PKG::__ANON__).
    The function reaches itself through a LABELS name, which costs nothing
    per call (the closure is already in hand) and changes nothing about which
    evaluations of `sub {...}` give one object -- a lambda with no free
    variable is still one constant, a closure still one per evaluation
    (#1083).  The LABELS name is an uninterned symbol spelled PKG::__ANON__,
-   the function's debug name, which %p-anon-sub-package reads."
-  (destructuring-bind (head lambda-list &body body) lambda-form
-    (unless (and (eq head 'lambda) (stringp pkg))
-      (error "p-anon-sub: expected a package string and a LAMBDA form, not ~S ~S"
-             pkg lambda-form))
-    (let ((self (make-symbol (concatenate 'string pkg "::__ANON__")))
-          (decls (loop while (and (consp (first body)) (eq (first (first body)) 'declare))
-                       collect (pop body))))
-      `(labels ((,self ,lambda-list
-                  ,@decls
-                  (p-frame-bind ((function ,self)) ,@body)))
-         (function ,self)))))
+   the function's debug name, which %p-anon-sub-package reads.
+
+   The compiler asks for the frame only where the body can READ it -- it
+   calls `caller' or runs a string eval (Pl::Parser::anon_body_reads_frames)
+   -- because the frame is not free: +3.5 ns on a 28 ns anonymous call
+   (+12 %; the anoncall bench row +4 %), measured s539d.  An anonymous sub
+   without one is not a level of caller()'s walk, as before s539d."
+  (let* ((frame (when (eq (first args) :frame) (pop args) t))
+         (lambda-form (first args)))
+    (destructuring-bind (head lambda-list &body body) lambda-form
+      (unless (and (eq head 'lambda) (stringp pkg) (null (rest args)))
+        (error "p-anon-sub: expected a package string, an optional :FRAME and a LAMBDA form, not ~S ~S"
+               pkg args))
+      (if (not frame)
+          `(sb-int:named-lambda ,(concatenate 'string pkg "::__ANON__") ,lambda-list
+             ,@body)
+          (let ((self (make-symbol (concatenate 'string pkg "::__ANON__")))
+                (decls (loop while (and (consp (first body))
+                                        (eq (first (first body)) 'declare))
+                             collect (pop body))))
+            `(labels ((,self ,lambda-list
+                        ,@decls
+                        (p-frame-bind ((function ,self)) ,@body)))
+               (function ,self)))))))
 
 (defun %p-anon-sub-package (fn)
   "The package the anonymous sub FN was compiled in (p-anon-sub's name), or NIL.
@@ -18951,17 +18964,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun %p-frame-location (depth)
   "Frame DEPTH's CALL SITE as (values FILE LINE): the location registers as
-   they stood when the call was made.  A frame whose call recorded no line
-   -- every frame of a program compiled without `line-track', which writes
-   no register -- answers PCL's one placeholder for an unknown location,
-   `(eval 0)' line 0: the text a runtime-raised die carries in the same
-   build (%p-die-error).  Perl numbers its first eval 1, so no real location
-   reads like it."
-  (let ((line (%p-frame-slot depth 3)))
-    (declare (fixnum line))
-    (if (zerop line)
-        (values "(eval 0)" 0)
-        (values (%p-src-file-name (%p-frame-slot depth 2)) line))))
+   they stood when the call was made, read as the registers are read
+   everywhere (%p-src-file-name).  A program compiled without `line-track'
+   writes no register, so its frames answer what the registers hold there:
+   line 0, and the file `-' -- or `(eval N)' for a call made from a string
+   eval's code, whose file id p-eval sets in every build.  Line 0 is never a
+   real line (PPI numbers from 1), so it says that no location was recorded."
+  (values (%p-src-file-name (%p-frame-slot depth 2))
+          (%p-frame-slot depth 3)))
 
 (defun %p-frame-sub-name (depth)
   "Frame DEPTH's sub name, perl's (caller(N))[3]: a named sub's qualified
@@ -27809,7 +27819,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-13900"
+(defparameter *pcl-cache-generation* "v2-14400"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

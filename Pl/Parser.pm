@@ -4972,7 +4972,10 @@ sub parse_block_as_function {
   if ($anon_named) {
     my $home = ($self->environment && $self->environment->current_package)
                ? $self->environment->current_package : 'main';
-    $self->_emit("(p-anon-sub \"$home\"");
+    # ... and is a call frame where its body reads one (s539d, #233 item 3;
+    # the ONE predicate is Pl::Parser2::anon_reads_frames).
+    my $frame = ($block && Pl::Parser2::anon_reads_frames($block)) ? ' :frame' : '';
+    $self->_emit("(p-anon-sub \"$home\"$frame");
   }
   if ($return_lambda) {
     $self->_emit("(lambda ($params_cl)");

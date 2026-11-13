@@ -12997,7 +12997,7 @@ sub _lower_embedded_anon {
                          ['list', '*pcl-caller-wantarray*', '*wantarray*']],
                  ['p-sub-frame',
                   ['block', 'nil', @$forms]]]];
-  $lambda = $self->_anon_sub_named($lambda);
+  $lambda = $self->_anon_sub_named($lambda, $block);
   return _anon_compiles_at_runtime($block) ? ['p-cloned-sub', $lambda] : $lambda;
 }
 
@@ -13258,8 +13258,33 @@ sub _anon_home_pkg_binding {
 # builtin::sub_stash learn perl's CvSTASH (cl/pcl-runtime.lisp p-anon-sub).
 # The v1 text twin is Pl::Parser::parse_block_as_function's $is_anon_sub arm.
 sub _anon_sub_named {
-  my ($self, $lambda) = @_;
-  return ['p-anon-sub', '"' . $self->_anon_home_pkg . '"', $lambda];
+  my ($self, $lambda, $block) = @_;
+  return ['p-anon-sub', '"' . $self->_anon_home_pkg . '"',
+          ($block && anon_reads_frames($block) ? (':frame') : ()), $lambda];
+}
+
+# Does an anonymous sub's BODY read the call frames (s539d, task #233 item
+# 3)?  Then its p-anon-sub carries :frame and it is a frame of caller()'s
+# walk, as perl's anonymous subs always are.  Only where it can be READ,
+# because the frame costs +3.5 ns per call (the measurement is in
+# p-anon-sub's docstring): the body calls the `caller' builtin, or compiles
+# perl at run time (_anon_compiles_at_runtime: a string eval and its
+# kin), whose code may.  A sub the body CALLS that calls caller(1) does not
+# see this frame unless the body itself reads one -- the residue
+# docs/not-supported.md ns-caller-fidelity names.  ONE predicate: the v1
+# seam's anonymous-sub arm (Pl::Parser::parse_block_as_function) asks it too.
+sub anon_reads_frames {
+  my ($block) = @_;
+  my $calls = $block->find(sub {
+    my $e = $_[1];
+    return '' unless $e->isa('PPI::Token::Word');
+    my $c = $e->content;
+    return '' unless $c eq 'caller' || $c eq 'CORE::caller';
+    my $p = $e->sprevious_sibling;
+    return !($p && $p->isa('PPI::Token::Operator') && $p->content eq '->');
+  });
+  return 1 if $calls;
+  return _anon_compiles_at_runtime($block) ? 1 : 0;
 }
 
 # Embed-safety scan — shared implementation lives in Pl::CLForm (PExpr's
