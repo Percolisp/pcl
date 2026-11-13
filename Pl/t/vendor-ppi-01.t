@@ -89,8 +89,8 @@ SKIP: {
   require PCLPaths;
   my $foreign = "/nonexistent/other-pcl-tree";
   local $Pl::VendorPPI::LIB = "$vend/lib";
-  local $Pl::VendorPPI::ADDED = 1;
-  my @got = PCLPaths::program_inc($foreign, "$vend/lib", "/x/user-lib", "/y/perl5lib");
+  local $Pl::VendorPPI::ADDED = 1;      # the loader put it there (#4987)
+  my @got = PCLPaths::program_inc($foreign, "/x/user-lib", "$vend/lib", "/y/perl5lib");
   ok(!grep({ $_ eq "$vend/lib" } @got),
      "program_inc drops the loader's own vendor/PPI/lib even when the program root is another tree")
     or diag "@got";
