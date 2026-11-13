@@ -24,7 +24,7 @@
 # merges they become FIXED and leave by edit, citing s492c.
 #
 # area/name<TAB>verdict<TAB>first-diff-line<TAB>cause
-idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY is never called at scope exit
+idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY runs at program exit since s538b (#2371), never at scope exit (#2370, parked): "after" prints before "destroyed "
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)

@@ -88,7 +88,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`@_` argument aliasing](#_-argument-aliasing--partial-plain-my-lexicals-only) — partial: `$_[0] = 42` writes back to the caller's variable, array element or hash element; an element reached through a reference (`f($r->{k})`) gets a copy, and so can a number-only variable passed to a code reference or a method.
 * [`tie` on a filehandle](#tie-on-a-filehandle--announced-not-silent-scalar-array-and-hash-tie-work) — announced, not silent; `tie` on a scalar, an array and a hash works.
 * [Regex code blocks `(?{…})`](#regex-code-blocks-code-and-code) — CL-PPCRE has no equivalent.
-* [`DESTROY` at GC time](#destroy-called-by-garbage-collector) — no deterministic finalizer timing on a GC'd host.
+* [`DESTROY` at GC time](#destroy-called-by-garbage-collector) — called at program exit only (global destruction), never at the last reference.
 * [Warnings-gated diagnostics](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled) — `use warnings` is not modelled yet.
 * [Error message text](#error-message-text-and-format) — die/`$@` *behaviour* matches; the wording is not a goal.
 * [`format` / `write`](#format--write-report-formatting) and [source filters](#source-filters-filterutilcall-filtersimple-use-switch-).
@@ -2372,37 +2372,50 @@ handled via `is_valid_error()` skip, so they count as passes once the error is t
 <a id="ns-destroy-gc"></a>
 ## `DESTROY` called by garbage collector
 
-> **A staged design exists (s495): `docs/scope-exit-destroy-design.md`** — DESTROY at program exit (sound, small), then scope-owned objects (a static licence, no reference counts).  **USER ruling s495: DESTROY at program exit is on the todo list (#2371); the scope-owned stage is PARKED as not worth the trouble (#2370).**  Nothing of it is built yet; the text below is still what PCL does.
+> **Since s538b (task #2371) `DESTROY` runs at PROGRAM EXIT** — perl's global destruction, after the `END` blocks (`docs/ir-spec.md` §7.4a).  What stays unsupported is the TIMING: `DESTROY` at scope exit or at the last reference (Stage 2 of `docs/scope-exit-destroy-design.md` = #2370, PARKED by the USER, s495 and s539).
 
-**Perl behaviour:** When a blessed object goes out of scope and its reference count drops
-to zero, Perl calls the `DESTROY` method (if defined).  Code that relies on deterministic
-destruction (e.g. releasing a file lock, closing a handle, decrementing a counter) puts
-this logic in `DESTROY`.
+**Perl behaviour:** When a blessed object's reference count drops to zero — at the end of
+its block, at `undef $obj`, when its container is cleared — Perl calls its `DESTROY` method
+(or its class's `AUTOLOAD`) at that moment.  Objects still alive when the program ends
+are destroyed at exit (global destruction).  Code that relies on deterministic destruction
+(releasing a lock, closing a handle, a scope guard, a "was it released" counter) puts this
+logic in `DESTROY`.
 
-**PCL behaviour:** `DESTROY` is never called automatically.  SBCL's garbage collector
-runs asynchronously and PCL has no finalizer hook wired to blessed objects.  A `DESTROY`
-method can be defined and called explicitly (`$obj->DESTROY()`), but the implicit GC-driven
-call does not happen.
+**PCL behaviour:** memory is reclaimed by SBCL's garbage collector, not by reference
+counting, so nothing happens at the last reference.  At program exit, after the `END`
+blocks, every object still in memory gets its `DESTROY` (or `AUTOLOAD`), newest first, each
+at most once — the same exit path for `exit`, falling off the end, an uncaught `die`, `exit`
+in an `END` block and a forked child's exit; `exec` and `POSIX::_exit` run nothing.  Two
+consequences, both measured (s538b):
+* an object perl would have destroyed earlier gets its `DESTROY` LATE, at exit — after the
+  code that checks for it has run;
+* an object the garbage collector reclaimed before exit gets NONE: in a loop that made and
+  dropped 100,000 objects, 9,727 were still there at exit (perl: 100,000 calls, each at its
+  scope exit), and an object held only by a variable that is never read again can be
+  reclaimed early too.
+perl also destroys an object held by a file-level lexical before the `END` blocks; PCL
+destroys it after them.  perl calls `IO::Handle::DESTROY` / `UNIVERSAL::DESTROY` for the
+standard handles' IO objects at exit; PCL does not.
 
-**Rationale:** CL's GC does not guarantee finalizer order or timing.  Wiring DESTROY would
-require `trivial-garbage` or SBCL-specific finalizer APIs with non-deterministic execution.
-Most CPAN modules that use `DESTROY` do so for resource cleanup that is irrelevant when the
-whole CL image exits anyway.  CPAN code that depends on DESTROY running while the program is
-still running (e.g. `Scope::Guard`, `File::Temp`) is out of scope for now.
+**Rationale:** a GC finalizer runs after the object is gone (no `$self` to pass), and
+reference counts on every container would tax every program (`docs/scope-exit-destroy-design.md`
+§3–§5).  A strong registry would pin every object until exit (unbounded memory in a loop).
 
-**Affected tests:** `perl-tests/ref.t` (tests 63–64), `perl-tests/grep.t` (tests 69–76),
-`perl-tests/bless.t` (a few object-lifetime tests).  Do not attempt to fix these —
-the only real fix is a GC finalizer integration.
+**Affected tests — the rows that need SCOPE timing, still failing:** `perl-tests/`
+hash.t (timely hash destruction, freed elements), pos.t "Timely scalar destruction",
+delete.t `[perl #30733]`, closure.t RT #1028 / RT #10085, caller.t `` leak rows,
+method.t "AUTOLOAD called for DESTROY" (it asserts before exit), postfixderef.t "no stooges
+outlast their scope", ref.t "STDOUT destructor" (the IO-object destructor above); on the
+CPAN board IO-Compress `104destroy-*.t` (the compressor is checked right after its block),
+Try-Tiny `finally.t` rows 10–12 (the `finally` blocks run at exit, after the row that counts
+their warnings), Path-Tiny `temp.t`, YAML-PP `49.include.t`, Log-Log4perl `016Export.t`,
+Template-Toolkit `leak.t`.  NOW PASSING (s538b): ref.t "DESTROY called on array elem" /
+"on closure variable" (global destruction proper), Try-Tiny `context.t` (whole).
 
-**The rows are MISSING, not failing, when the assertion is inside the
-destructor — costed s473t1.**  `perl-tests/ref.t`'s whole 3-row hole is this:
-the `is`/`isnt` pair at lines 310/313 lives inside `DESTROY {…}` (fired in
-perl when the last reference is overwritten at line 304), and line 440's
-`like` lives inside a `$SIG{__DIE__}` handler that only fires because
-`DESTROY { $_[0] = 'foo' }` runs.  `perl-tests/postfixderef.t` loses 4 the
-same way (Shemp / Larry / Curly / Moe, printed by four `*::DESTROY` subs at
-scope exit).  Probed: with `sub DESTROY` and a last-reference overwrite, perl
-prints the destructor's line and PCL prints nothing.
+**Rows MISSING, not failing, when the assertion is inside a destructor.**  A destructor that
+runs at exit can produce its row after the plan's other rows, or after the harness has
+counted; a row asserted inside a `DESTROY` fired by a last-reference overwrite (ref.t lines
+310/313, postfixderef.t's four `*::DESTROY` subs) still runs at the wrong moment.
 
 ---
 

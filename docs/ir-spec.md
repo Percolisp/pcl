@@ -4457,7 +4457,11 @@ END block, a fork child's exit) runs, in order: the END blocks
 `${^GLOBAL_PHASE}` = `DESTRUCT`, then the handle flushes, then the exit with
 `$? & 255`.  `exec` and `POSIX::_exit` run none of it.  There is no other
 moment at which PCL calls `DESTROY`: not at scope exit, not at the last
-reference, not at `undef $obj` (Stage 2 = #2370, parked).
+reference, not at `undef $obj` (Stage 2 = #2370, parked).  perl's order
+differs in one respect: it destroys an object held by a FILE-LEVEL lexical
+when the main program's scope ends (phase `RUN`, BEFORE the END blocks) and
+only what package globals hold at `DESTRUCT`; PCL destroys all of them after
+the END blocks, so an END block still sees every object alive.
 
 **The registry.**  `p-bless` registers the REFERENT it stamps (the hash
 table, the array vector, the function, the scalar's box, the glob, the

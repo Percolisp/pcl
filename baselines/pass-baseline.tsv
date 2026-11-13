@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s538b (2026-11-13, Opus, EDITED BY HAND): ref.t 204/11 -> 206/9 -- the two global-destruction rows "DESTROY called on array elem" / "DESTROY called on closure variable" pass: #2371 (DESTROY at program exit).  Sweep on the tree (rebased onto a435a391, code 53dd73da): TOTAL 18,796 -> 18,798, GATE clean; ref.t stays PARTIAL (ran 242 of 245, the same stop).
 # s537a (2026-11-12, Opus, EDITED BY HAND): tr.t 241/3 -> 242/2 -- "    doesn't stringify its argument" passes: #1493 fixed by #4264 (an IDENTICAL tr never writes its target); one-file run base 23f0f917 vs tree 312/3 -> 313/2.  loopctl.t stays 64 (s537a's own regression of it, [perl #73618], fixed forward before the merge).
 # s536e (2026-11-08, Opus, EDITED BY HAND): each.t 49/2 -> 51/0 -- rows 64 65 (each / values in list assignment) pass: #1027 = #4547, the file `my $a` across the `package Single` block section split (s536e `_own_name_cell_ok`).  TOTAL 18,784 -> 18,786.
 # s536f (2026-11-08, Opus, EDITED BY HAND): bop.t 487/22 -> 496/13 -- #4644 (the value of an assignment to a BOX place is the box): the nine unnamed rows 65 70 75 98 103 108 131 136 141 (`is(fetches($x), 2)` after `$x |= $y` / `&=` / `^=` on a TIED scalar, numeric and string) pass -- the compound store-back answered box-set's tie-STORE value, so `is(($x |= $y), 3)` read no second FETCH; perl FETCHes twice.  Measured: base ba7863a3 one-file sweep 487/22 with those nine failing, the tree 496/13.
@@ -591,7 +592,7 @@ recurse.t	OK	26	2	28
 #   file's 31 failing rows are the SAME 31 (their numbers shift by 2), so fail-baseline.tsv is
 #   unchanged; baselines/row-shortfall.tsv perl-tests/magic.t 19 -> 21 in the same commit.
 # s521d (2026-10-18, Opus): flip.t 12 -> 13 passing by EDIT -- `$. = 15; ok(scalar(15..0))` passes now that `$.` keeps an assigned value with no current handle (#3518; the flip-flop compares with $.); one-file runs base 68aeebf5 12/2, tree 13/1.
-ref.t	PARTIAL	204	11	245
+ref.t	PARTIAL	206	9	245
 reset.t	OK	21	1	45
 reverse.t	OK	25	0	25
 scalar.t	OK	91	25	128
