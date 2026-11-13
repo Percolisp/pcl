@@ -58,3 +58,114 @@ hand-edited copy of one emitted file, run against the unedited file (`ab.pl --em
 
 **What each EXISTING transform holds** (`optdiff.pl`: which of the 75 bench rows' emission changes
 under `PCL_OPT=-NAME`; then `optab.pl`: those rows timed default vs `-NAME`, startup subtracted, best of 3):
+
+REGISTRYTABLE
+
+## Part 2 -- the runtime's hot helpers
+
+Profiles (`sb-sprof :cpu`, 0.5 ms) of nine programs on `05806e16` (`scratch/s540b/prof/*.cpu.prof`;
+whole-run wall times from the same harness, warm module cache).  Self-time leaders per program:
+
+| program | perl | PCL | where PCL's time is (self % unless "total") |
+|---|---:|---:|---|
+| dumper (Data::Dumper, 300 records x 10) | 0.03 s (XS) / 0.12 s (`Useperl`) | 7.8 s | **`do-tr` 77 % total**: `vector-remove-duplicates*` 65 % total, `%find-position` 23 %, `eql` 12 % |
+| podtext (Pod::Text, perlfunc.pod) | 0.16 s | 0.87 s | `p-method-call` 91 % total (dispatch); cl-ppcre scanners ~20 %; **`do-tr` 11 % total**; `grow-hash-table` 5 % total |
+| json-rt (bench) | 0.99 s | 1.74 s | cl-ppcre 12 %; `box-set` 3.4 + `%make-p-box` 2.9; `%p-str-eq-slow` 7.4 % total; `%p-true-p-slow` 2.4 |
+| textproc (bench) | 0.50 s | 1.02 s | cl-ppcre 27 % total; `do-regex-match` 6.6; `ub32-bash-copy` 5.2; `%p-split-literal` 3.5 |
+| moo-objs (bench) | 0.06 s | 0.61 s | EQUAL hash tables (`gethash/equal` 4.6 + `%sxhash-string` 3.5); `p-method-call` 85 % total; fasl loading 12.7 % total |
+| wordfreq (split + hash count + sort) | 0.04 s | 0.15 s | `cl-ppcre:split` 35 % total; `gethash/equal` 14 % total; `%p-read-record-1` 12.5 % total |
+| tbal (Text::Balanced) | 0.04 s | 0.12 s | spread thin, nothing over 6 % |
+| m-reduce (`List::Util::reduce`, 30 k) | 0.014 s | 0.46 s | **`map-backtrace` 49 % total** (`caller` in the shim walks SBCL's backtrace), `%p-symref-box` + `gethash/weak` 12 % |
+| m-strftime (`POSIX::strftime`, 30 k) | 0.07 s | 0.64 s | **`fstatat` 24 %** (two `tzset` per call: `mktime` + `localtime`), `%make-p-box` 10.5 |
+
+The suspicions read in `cl/pcl-runtime.lisp`, each with its measurement (`ab.pl --lever`: a
+redefinition loaded as a fasl in front of the unchanged program, best of 5, C/A = base vs base):
+
+| # | where | what is avoidable | measurement | verdict |
+|---|---|---|---|---|
+| R1 | `do-tr` (~42116) | every call re-runs `expand-tr-chars` on both lists, builds a fresh EQL table, and for `/c` sorts a `remove-duplicates` (O(n^2)) of the search list; a count-only tr builds the whole result string to count | `lev/tr-cache.lisp` (expansion cached per op, sorted list from the table keys, count-only path): **dumper 7.120 -> 0.591 s (-91.7 %)**, podtext -16.2 %, tbal -3.1 % (C/A <= 0.7 %; `legs/leg1.log`) | **LEVER** #4981 |
+| R2 | `%p-maybe-autoflush` (~4084) | once any handle has `$|` set, every print to any handle probes the WEAK table `*p-autoflush-handles*` (global lock) -- a #4061 sibling | 1 M `print $fh` with vs without `$| = 1` on STDOUT: **0.074 -> 0.134 s (+81 %)**, ~60 ns a print (`legs/leg2.log`) | **LEVER** #4983 |
+| R3 | `p-hash` (~16477) | conses a full copy of the pairs (`append`), then grows an unsized EQUAL table (SBCL's default size is 7) | `lev/hash-presize.lisp`: 10-key constructor loop **-15.4 %**; moo-objs +1.8 % (C/A 0.8: not measurable); podtext 0 (`legs/leg2.log`) | **LEVER** (small) #4984 |
+| R4 | `%def-overloaded-str-cmp` slow path (`eq ne lt gt le ge`) | no plain-scalar arm (the numeric comparisons got one in #2513): a boxed string `eq` pays four guarded lookups plus two UNguarded `nomethod` lookups | `lev/str-cmp.lisp` (plain arm first): json-rt -3.6 %, **textproc +10.7 %**, podtext -0.2 % (`legs/leg1.log`) | **REFUTED as written** -- mixed and inside 2x the band on two rows; not filed.  A one-family probe of runtime review R3 that did not pay |
+| R5 | `object-address` (refaddr, `==` on refs, `HASH(0x...)`) | every call probes `*p-object-id-table*`, weak AND `:synchronized` | shimbench: `refaddr` 131 ns vs perl 18 ns | not low-hanging: a stable id needs a slot ON the referent (a hash table / vector has none) -- a representation decision |
+| R6 | `p-method-call`'s `&rest` + `apply`, `p-sub`'s `&rest` + `p-flatten-args` + five special bindings | a method call conses its argument list twice and builds `@_` | s534a (lookup) and s539d (the frame) own these measurements | pointers only: #4523-#4525, s539d |
+| R7 | `caller` in shims (List::Util `reduce` / `first`'s `$a`/`$b` via `caller`) | `caller` walks the SBCL backtrace (49 % of a reduce loop); reduce is 45x perl, perl running the SAME shim text is 7x | m-reduce profile; shimbench | s539d's cheap `caller` tier is the lever; nothing filed here |
+| R8 | `%p-symref-box` / `%p-stash-live-sym` | guarded by a count -- but once ANY stash delete ran (namespace::clean, Moo), every symbolic ref probes a weak table | -- | #4525 / #4501's family, already filed |
+
+Also read and NOT a finding: `p-true-p`'s slow path already has the plain-box arms (#2513, #2772);
+`%p-sv-stash`, `%p-stash-deleted-p`, `%p-live-sub-p` and `*p-tie-table*` are count-guarded; `p-print`
+/ `p-say` lists are stack-allocated (#2771); the regex engine is parked (ONE engine, USER s476).
+
+PART3
+
+## Part 4 -- the compile pipeline
+
+**The perl side** (`pl2cl`, a fresh perl each, no server; best of 3, `legs/leg2.log`, load 1.3):
+
+| file | source lines | `pl2cl` | per 1,000 lines |
+|---|---:|---:|---:|
+| everyday `moo-class.pl` | 16 | 0.258 s | (the ~0.17 s fixed cost + Moo's prototype record from the proto cache) |
+| JSON/PP.pm | 3,142 | 3.219 s | 1.02 s |
+| Text/Balanced.pm | 2,434 | 1.866 s | 0.77 s |
+| Math/BigInt/Calc.pm | 2,566 | 4.336 s | 1.69 s |
+| Pod/Simple/BlackBox.pm | 2,437 | 4.143 s | 1.70 s |
+| PPI/Tokenizer.pm (vendored) | 1,584 | 3.860 s | 2.44 s |
+
+Where it goes (NYTProf 6.15, subs only, `calls=0`, of the Calc.pm transpile, exclusive time grouped
+by package -- `comp/phases.pl`; the profiler inflates small subs, so read the SHARES): PPI's own parse
+and tree 27 %, `PPI::Node::find` 26 %, `UNIVERSAL::isa` 11 % (11.1 M calls -- 4,300 per source line,
+nearly all from `find`'s wanted-closures), Parser2's other subs 14 % (`_interp_token_candidate`,
+`_interp_token_text`, `_elem_within`: 0.7 s each under the profiler), PExpr 7 %, the rename passes
+4 %, Binder 2.4 %, CLForm printing 1.5 %, VarAnnotator 1.1 %, ExprToCL 0.7 %.  Everything above
+the PExpr line is #3694's (PPI::Node::find, the re-parsing passes, the scope walks) -- nothing new
+for this review except that the `isa` count belongs to `find` and dies with it.
+
+**What #3694 does NOT own**, checked one by one:
+
+| item | finding |
+|---|---|
+| per-module work repeated per PROGRAM | the prototype/export scan of every `use`d module is cached (`~/.pcl-cache/proto/`, content-keyed); `moo-class.pl` (16 lines, `use Moo`) transpiles in 0.258 s against ~0.17 s for a one-liner.  Nothing to take. |
+| a module transpile spawned as a new perl | the runtime spawns `pl2cl --module` per module cache MISS; it is served by `pl2cl --xserver` only when `PCL_XSERVER` is set (the gate sets it, `pcl` does not).  Misses are first-run cost -- PARKED by the USER's ruling (#2420 / #2423). |
+| a cache that misses when it could hit -- LOCAL modules | **a module under `use lib` / -I / `.` is never fasl-compiled by default (the s471 trust class): its cached TEXT is compiled by SBCL on EVERY run.**  One 2,434-line local module: 0.530 s per run vs 0.055 s with `PCL_COMPILE_DIRS='*'` (perl 0.009; `legs/leg1.log`) -- ~0.2 s per 1,000 lines of a program's own modules, every invocation.  A ruling, so not on THE LIST: #4986. |
+| a cache that misses when it could hit -- the vendored PPI as a library | a program `use`-ing `vendor/PPI/lib` re-transpiles PPI's modules on EVERY run (cache entries rewritten each run; 98-116 s a run, s534a's "3 s per parse" excluded load); with `PCL_COMPILE_DIRS='*'` `PPI.pm` is a `fasl-build` on every run and its 100 dependencies load from TEXT under the nested-build rule.  Cause not found: #4987 |
+| emitted size as the driver of SBCL compile time | by top-level form over the sample (1.64 MB): `p-sub` 52.6 %, `p-eval-always` 20.3 % -- of which the **#2610 detector tables are 254,512 of the modules' 1,199,790 bytes (21 %)**, `p-let` 8 %, `p-defcell` 3.7 %, comments 2.4 %.  SBCL side below. |
+| `compile-file` policy | generated code compiles at `(speed 2) (safety 1) (debug 0)` (the runtime's last declaim, saved in the core); a cheaper policy is measured below -- it matters for FIRST runs and string evals only (both parked) |
+| the fasl cache's own load time | below |
+
+**The SBCL side** (`comp/comp-leg.pl`: per unit, `compile-file` best of 3 in a fresh image, fasl
+load best of 5 in a fresh image, both timed inside SBCL; `-nodet` = the same unit with its
+detector table emptied; `fast` = `(speed 1) (compilation-speed 2) (space 1)`; `legs/leg3.log`):
+
+| unit | emitted lines | Lisp bytes | `compile-file` | fasl bytes | fasl load | compile, `fast` policy |
+|---|---:|---:|---:|---:|---:|---:|
+| everyday `moo-class` (a program) | 336 | 10,197 | 1.275 s | 75,310 | 0.564 s | 0.719 s |
+| same, detector table emptied | 286 | 8,566 | 1.078 s | 74,524 | 0.566 s | |
+| JSON::PP | 3,961 | 178,575 | 1.160 s | 1,069,684 | 0.177 s | **0.548 s** |
+| same, emptied | 3,044 | 139,262 | 1.116 s | 1,051,739 | 0.176 s | |
+| Text::Balanced | 3,047 | 155,339 | 0.806 s | 617,396 | 0.017 s | **0.374 s** |
+| same, emptied | 2,424 | 126,998 | 0.790 s | 605,453 | 0.016 s | |
+| Math::BigInt::Calc | 4,345 | 217,379 | 3.074 s | 1,222,874 | 0.015 s | **1.054 s** |
+| same, emptied | 3,495 | 175,692 | 3.183 s | 1,205,908 | 0.014 s | |
+| Pod::Simple::BlackBox | 5,354 | 302,306 | 4.027 s | 948,427 | 0.207 s | **0.719 s** |
+| same, emptied | 4,148 | 239,183 | 3.950 s | 925,582 | 0.205 s | |
+
+(PPI::Tokenizer did not compile outside a program that puts `vendor/PPI/lib` on `@INC`; left out.
+A fasl LOAD here includes the unit's own `use`s loading from the module cache, which is why
+JSON::PP and BlackBox read ~0.2 s and Text::Balanced 0.017 s; a one-module fasl itself loads in ~15-28 ms per MB of fasl.)
+
+Readings: **the #2610 detector table is cheap** -- 21 % of the bytes, 1-4 % of the compile time
+(once, at the fasl build), ~1-2 % of the fasl, nothing at load: it is quoted data, compiled as one
+constant, and the run-time side is one `push` per unit (the tables are built lazily, only when the
+compile phase installs a sub).  **Not a lever.**  The emitted BYTES are not what drives SBCL's compile
+time; the POLICY is: the `fast` policy cuts `compile-file` by 53-82 %.  That is the cost every
+FIRST run (a module's fasl build), every string eval (#2421) and every run of a program with LOCAL
+modules (#4986) pays -- all three parked or a ruling -- and its RUN-time price was not measured
+here, so it is in the "not low-hanging" table, not on THE LIST.
+
+## Part 5 -- start-up (parked; the one number re-measured)
+
+`startup.pl`, best of 15 interleaved, `legs/leg1.log` (load 1.3): `perl hi.pl` **2.0 ms**; `pcl hi.pl`
+warm **36.3 ms**, of which compiling the Perl launcher (`perl -c pcl`) is **17.8 ms** and SBCL booting
+the 53 MB core and exiting **4.4 ms**; `pcl -e 1` (never cached, #1862) **166.0 ms**.  s509 read
+53 / 27 / 6.5 / 243 ms at load 5 and s499 43-48 ms quiet: unchanged in kind -- the launcher is still
+about half of a warm one-liner.  Parked by the USER (2026-09-27, 2026-10-06): #2422, #1862, #2421.
