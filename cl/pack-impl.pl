@@ -278,6 +278,38 @@ sub _pack_emit_int {
     return $result;
 }
 
+# A BER-compressed integer ('w'), the bytes pp_pack.c writes: up to UV_MAX its
+# UV loop, above it its `w_string` -- div128 on the DECIMAL digits, exact at
+# any size (perl takes that path for a digit string; for an NV above UV_MAX
+# its floor division gives the same bytes, such an NV being an exact integer).
+# DIGITS is the source's decimal text when it was a digit string.  The loop's
+# `>>= 7` reads a UV (perl's rule, and PCL's since #3781), so it must never see
+# a value above UV_MAX: before s538a this file shifted a bignum exactly only by
+# the accident of a signed compound shift.  ONE encoder for every 'w' site.
+sub _pack_ber {
+    my ($v, $digits) = @_;
+    return chr(0) if $v == 0;
+    my @bytes;
+    if ($v > 18446744073709551615) {
+        $digits = sprintf('%.0f', $v) if !defined $digits;
+        while (1) {
+            my ($q, $r) = ('', 0);
+            for my $d (split //, $digits) {
+                $r = $r * 10 + $d;
+                my $qd = int($r / 128);
+                $q .= $qd if length($q) || $qd;
+                $r -= $qd * 128;
+            }
+            unshift @bytes, $r;
+            last if $q eq '';
+            $digits = $q;
+        }
+    } else {
+        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+    }
+    return join('', map { chr($_ | 0x80) } @bytes[0 .. $#bytes - 1]) . chr($bytes[-1]);
+}
+
 # Read nbytes from $s at $si as integer.
 sub _unpack_read_int {
     my ($s, $si, $nbytes, $be, $signed) = @_;
@@ -475,13 +507,7 @@ sub _pack_tmpl {
                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);
                 } elsif ($ch eq 'w') {
                     my $v = $actual_count;
-                    if ($v == 0) { $$result_ref .= chr(0); }
-                    else {
-                        my @bytes;
-                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                        $$result_ref .= chr($bytes[-1]);
-                    }
+                    $$result_ref .= _pack_ber($v);
                 }
                 # Pack the data using actual_count as the length
                 _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref);
@@ -505,13 +531,7 @@ sub _pack_tmpl {
                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);
                 } elsif ($ch eq 'w') {
                     my $v = $actual_count;
-                    if ($v == 0) { $$result_ref .= chr(0); }
-                    else {
-                        my @bytes;
-                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                        $$result_ref .= chr($bytes[-1]);
-                    }
+                    $$result_ref .= _pack_ber($v);
                 }
                 # Pack the elements
                 my $dbe_eff = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe);
@@ -530,24 +550,12 @@ sub _pack_tmpl {
                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));
                 } elsif ($ch eq 'w') {
                     my $v = $actual_count;
-                    if ($v == 0) { $$result_ref .= chr(0); }
-                    else {
-                        my @bytes;
-                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                        $$result_ref .= chr($bytes[-1]);
-                    }
+                    $$result_ref .= _pack_ber($v);
                 }
                 # Pack BER elements
                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {
                     my $v = $args_ref->[$$ai_ref++] + 0;
-                    if ($v == 0) { $$result_ref .= chr(0); }
-                    else {
-                        my @bytes;
-                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                        $$result_ref .= chr($bytes[-1]);
-                    }
+                    $$result_ref .= _pack_ber($v);
                 }
             }
             next;
@@ -707,11 +715,7 @@ sub _pack_tmpl {
                 die "Can only compress unsigned integers in pack\n"
                     if $orig_s =~ /[eE]/ && $v >= 2**64;
                 $v = int($v);
-                if ($v == 0) { $$result_ref .= chr(0); next }
-                my @bytes;
-                while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                $$result_ref .= chr($bytes[-1]);
+                $$result_ref .= _pack_ber($v, $orig_s =~ /^\s*\+?\s*(\d+)(?:\.\d*)?\s*$/ ? $1 : undef);
             }
             next;
         }
