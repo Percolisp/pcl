@@ -708,7 +708,10 @@ sub _proto_shape_key {
     my ($rec) = @_;
     require Data::Dumper;
     my %r = %$rec;
-    delete @r{qw(at from_module from_attr attr_text from_overlay overlay_unit)};
+    # import_directive (#4881) is a fact ABOUT the sub, not its prototype: an
+    # overlay may add it to a prototype the source declares.
+    delete @r{qw(at from_module from_attr attr_text from_overlay overlay_unit
+                 import_directive)};
     local $Data::Dumper::Sortkeys = 1;
     local $Data::Dumper::Indent   = 0;
     local $Data::Dumper::Terse    = 1;

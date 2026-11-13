@@ -1318,7 +1318,7 @@ sub _premerge_include_prototypes {
   # the pragma list / lib).  `use feature` in particular reaches PPI shapes
   # the module transpiler warns about ("Handle single node of unknown
   # type") — and pl2cl's stderr must stay clean: test harnesses capture it.
-  my $skip = $PRAGMA_INCLUDES;
+  # ($PRAGMA_INCLUDES, read by _premerge_one_include.)
   # `use lib "dir"` paths must reach the TRANSPILE-TIME search list before
   # the extraction loop below, or a module the file itself puts on @INC is
   # never found and its prototypes (block-form `(&@)` etc.) are silently
@@ -1346,42 +1346,11 @@ sub _premerge_include_prototypes {
       }
     }
   }
-  for my $u (Pl::Parser::use_statements_of($doc)) {
-    my ($inc, $at) = @$u;
-    my $type = $inc->type // '';
-    # #2871: what this statement imports is in force from HERE (#3184: a
-    # BEGIN-eval'd `use` from its BEGIN statement).
-    local $self->environment->{reg_site} = Pl::Parser::use_reg_site($at);
-    # ... and in the PACKAGE it compiles in (task #3143): an import lands in
-    # that package's stash, and the in-parse re-merge registers it there --
-    # registered under `main` here, the re-merge of a later `require` became
-    # the package's FIRST record and hid every call above it.
-    local $fp->environment->package_stack->[-1] = _package_of_element($at);
-    if ($type eq 'use') {
-      my $module = $inc->module or next;
-      next if $module =~ $skip;
-      my $menv = $fp->_extract_module_prototypes($module) or next;
-      my @imports = $fp->_parse_use_import_list($inc);
-      $fp->_merge_module_prototypes($menv, \@imports, $module,
-                                    none => Pl::Parser::use_imports_nothing($inc));
-      # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
-      $fp->_merge_bare_quote_imports($inc, $menv, scalar @imports, $module);
-    } elsif ($type eq 'require') {
-      if (my $module = $inc->module) {
-        my $menv = $fp->_extract_module_prototypes($module) or next;
-        $fp->_merge_module_prototypes($menv, undef, $module);
-        next;
-      }
-      my ($q) = grep { $_->isa('PPI::Token::Quote') } $inc->schildren;
-      next unless $q;
-      my $interpolating = $q->isa('PPI::Token::Quote::Double')
-                       || $q->isa('PPI::Token::Quote::Interpolate');
-      my $path = $q->string;
-      next if $interpolating && $path =~ /[\$\@]/;   # runtime-computed → v1 rule: skip
-      my $fenv = $fp->_extract_file_prototypes($path) or next;
-      $fp->_merge_module_prototypes($fenv, undef);
-    }
-  }
+  $self->_premerge_one_include($_) for Pl::Parser::use_statements_of($doc);
+  # A call that IS a `use` for the parse (#4881) -- read AFTER the loop above,
+  # because whether a name carries the import-directive fact is itself an
+  # imported fact (`use Test::More` brings `use_ok`'s record).
+  $self->_premerge_one_include($_) for $self->_import_directive_uses($doc);
   # The module's OWN unit reads its facts overlay at its `package` statement
   # (task #2878, Pl::Parser::register_unit_overlay).
   return if !$self->has_filename;
@@ -1390,6 +1359,125 @@ sub _premerge_include_prototypes {
     $fp->register_unit_overlay($name, $self->filename,
                                Pl::Parser::use_reg_site($pkg));
   }
+}
+
+# One [INCLUDE, ANCHOR, ...] of _premerge_include_prototypes: the include's
+# prototype facts merged at ANCHOR's site and package.
+sub _premerge_one_include {
+  my ($self, $u) = @_;
+  my ($inc, $at) = @$u;
+  my $fp   = $self->fallback_parser;
+  my $type = $inc->type // '';
+  # #2871: what this statement imports is in force from HERE (#3184: a
+  # BEGIN-eval'd `use` from its BEGIN statement).
+  local $self->environment->{reg_site} = Pl::Parser::use_reg_site($at);
+  # ... and in the PACKAGE it compiles in (task #3143): an import lands in
+  # that package's stash, and the in-parse re-merge registers it there --
+  # registered under `main` here, the re-merge of a later `require` became
+  # the package's FIRST record and hid every call above it.
+  local $fp->environment->package_stack->[-1] = _package_of_element($at);
+  if ($type eq 'use') {
+    my $module = $inc->module or return;
+    return if $module =~ $PRAGMA_INCLUDES;
+    my $menv = $fp->_extract_module_prototypes($module) or return;
+    my @imports = $fp->_parse_use_import_list($inc);
+    $fp->_merge_module_prototypes($menv, \@imports, $module,
+                                  none => Pl::Parser::use_imports_nothing($inc));
+    # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
+    $fp->_merge_bare_quote_imports($inc, $menv, scalar @imports, $module);
+  } elsif ($type eq 'require') {
+    if (my $module = $inc->module) {
+      my $menv = $fp->_extract_module_prototypes($module) or return;
+      $fp->_merge_module_prototypes($menv, undef, $module);
+      return;
+    }
+    my ($q) = grep { $_->isa('PPI::Token::Quote') } $inc->schildren;
+    return unless $q;
+    my $interpolating = $q->isa('PPI::Token::Quote::Double')
+                     || $q->isa('PPI::Token::Quote::Interpolate');
+    my $path = $q->string;
+    return if $interpolating && $path =~ /[\$\@]/;   # runtime-computed → v1 rule: skip
+    my $fenv = $fp->_extract_file_prototypes($path) or return;
+    $fp->_merge_module_prototypes($fenv, undef);
+  }
+  return;
+}
+
+# THE IMPORT-DIRECTIVE MECHANISM (task #4881, ruled s541): a call, as a
+# statement directly in a BEGIN block's body, of a sub whose record carries the
+# import-directive fact (Pl::Parser::_with_import_directive -- data a shim or
+# a facts overlay declares, never a name here), with a LITERAL module name as
+# its first argument, is `use MODULE LIST` at that statement FOR THE PARSE
+# FACTS ONLY: `BEGIN { use_ok('M') }` imports M's `()` constants and
+# prototypes at BEGIN time in perl, so a later `CONST + 1 .. N` is a term
+# there.  The call itself still runs and loads M; nothing is emitted from
+# this.  Outside a BEGIN the call runs after the parse and imports nothing
+# the parse could see -- no effect, as in perl.  Shapes (the 146-file census,
+# s539a): `NAME(LIT, ...)` alone or followed by `||` / `or` / `&&` / `and`
+# (the call is the expression's first operand, always run), and the
+# paren-less `NAME LIT, ...` to the statement's end.  A non-literal first
+# argument (`use_ok($class)`) is computed: no effect, no die.  Returns
+# [INCLUDE, ANCHOR, KEEP] triples like Pl::Parser::use_statements_of.
+my %DIRECTIVE_TAIL_OPS = map { $_ => 1 } qw(|| or && and);
+
+sub _import_directive_uses {
+  my ($self, $doc) = @_;
+  my $env = $self->environment;
+  my @out;
+  for my $sch (@{ $doc->find('PPI::Statement::Scheduled') || [] }) {
+    next if ($sch->type // '') ne 'BEGIN';
+    my ($blk) = grep { $_->isa('PPI::Structure::Block') } $sch->schildren;
+    next if !$blk;
+    for my $st ($blk->schildren) {
+      next if ref $st ne 'PPI::Statement';
+      my ($word, @rest) = $st->schildren;
+      next if !$word || !$word->isa('PPI::Token::Word');
+      local $env->package_stack->[-1] = _package_of_element($st);
+      my $rec = $env->raw_prototype($word->content);
+      next if ref($rec) ne 'HASH' || !$rec->{import_directive};
+      my $text = _directive_use_text(\@rest) // next;
+      my $frag = Pl::Parser::fragment_doc($text) or next;
+      my @fs = $frag->schildren;
+      next if @fs != 1 || !$fs[0]->isa('PPI::Statement::Include');
+      push @out, [$fs[0], $st, $frag];
+    }
+  }
+  return @out;
+}
+
+# The `use MODULE LIST;` text a directive call's argument tokens (everything
+# after the sub's name) spell, or undef when they are not one of the shapes
+# above.
+sub _directive_use_text {
+  my ($rest) = @_;
+  my @r = @$rest;
+  pop @r if @r && $r[-1]->isa('PPI::Token::Structure') && $r[-1]->content eq ';';
+  return undef if !@r;
+  my @args;
+  if ($r[0]->isa('PPI::Structure::List')) {
+    return undef if @r > 1 && !($r[1]->isa('PPI::Token::Operator')
+                                && $DIRECTIVE_TAIL_OPS{ $r[1]->content });
+    my @in = $r[0]->schildren;
+    return undef if @in != 1 || !$in[0]->isa('PPI::Statement::Expression');
+    @args = $in[0]->schildren;
+  } else {
+    return undef if grep { $_->isa('PPI::Token::Operator')
+                           && $DIRECTIVE_TAIL_OPS{ $_->content } } @r;
+    @args = @r;
+  }
+  my $mod = shift @args;
+  return undef if !$mod->isa('PPI::Token::Quote');
+  return undef if !($mod->isa('PPI::Token::Quote::Single')
+                    || $mod->isa('PPI::Token::Quote::Literal'))
+                  && $mod->string =~ /[\$\@\\]/;
+  my $name = $mod->string;
+  return undef if $name !~ /\A[A-Za-z_]\w*(?:::\w+)*\z/;
+  return "use $name;" if !@args;
+  my $comma = shift @args;
+  return undef if !($comma->isa('PPI::Token::Operator')
+                    && ($comma->content eq ',' || $comma->content eq '=>'));
+  return @args ? 'use ' . $name . ' ' . join(' ', map { $_->content } @args) . ';'
+               : "use $name;";
 }
 
 sub _source {

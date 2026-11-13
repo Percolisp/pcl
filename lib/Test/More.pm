@@ -39,7 +39,11 @@ sub unlike  ($$;$);
 sub cmp_ok  ($$$;$);
 sub isa_ok  ($$;$);
 sub can_ok  ($@);    # #3245: the CLASS slot is `$` -- can_ok(@a) reads the COUNT
-sub use_ok  ($;@);
+# `use_ok(MODULE, LIST)` imports from MODULE as `use MODULE LIST` would, so in
+# a BEGIN block (`BEGIN { use_ok('Foo') }`) its imports are in force for the
+# rest of the parse: the IMPORT-DIRECTIVE fact (task #4881,
+# docs/shipped-modules.md).  The attribute is PCL's: perl never loads this file.
+sub use_ok  ($;@) :pcl_import_directive;
 sub require_ok ($);
 sub BAIL_OUT ($);
 

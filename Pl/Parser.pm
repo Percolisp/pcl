@@ -1436,6 +1436,25 @@ sub collect_prototypes {
   return 1;
 }
 
+# THE IMPORT-DIRECTIVE FACT (task #4881, ruled s541; docs/shipped-modules.md
+# "The import-directive fact"): a sub DECLARED in a shim or a facts overlay with
+# the attribute `:pcl_import_directive` --
+#     sub use_ok ($;@) :pcl_import_directive;
+# -- is one whose CALL imports from the module its first argument names, the
+# remaining arguments being the import list (Test::More's `use_ok`).  The walk
+# puts the fact on the sub's prototype record, which travels with the record
+# through every merge; Parser2::_import_directive_uses is its one consumer.
+# A module PERL loads cannot carry an unknown attribute ("Invalid CODE
+# attribute"), so the declaration lives where only PCL reads it.
+our $IMPORT_DIRECTIVE_ATTR = 'pcl_import_directive';
+
+sub _with_import_directive {
+  my ($self, $stmt, $sig_info) = @_;
+  return $sig_info if ref($sig_info) ne 'HASH'
+    || !grep { $_ eq $IMPORT_DIRECTIVE_ATTR } $self->sub_attr_names($stmt);
+  return { %$sig_info, import_directive => 1 };
+}
+
 sub _walk_prototype_facts {
   my ($self, $node) = @_;
   # A `package NAME;` lasts to the end of the enclosing block, so the
@@ -1459,6 +1478,7 @@ sub _walk_prototype_facts {
     if ($child->isa('PPI::Statement::Sub') && !$child->isa('PPI::Statement::Scheduled')) {
       my ($name, $prototype, $is_sig_syntax, $block) = $self->_sub_head($child);
       my $sig_info = $self->_sub_sig_info($child, $prototype, $is_sig_syntax);
+      $sig_info = $self->_with_import_directive($child, $sig_info);
       $self->_register_sub_prototype($child, $name, $sig_info, $prototype, $is_sig_syntax);
       $self->_walk_prototype_facts($block) if $block;
     }
@@ -9418,6 +9438,9 @@ sub _merge_facts_overlay {
     if ($src && !$module_env->is_builtin_seed_record($name, $src)) {
       Pl::Environment::overlay_conflict_check("${module}::$name", $rec, $overlay,
                                               $src, $module_path);
+      # The source's record stands; a fact the overlay ADDS to an agreeing
+      # prototype (the import directive, #4881) joins it.
+      _carry_import_directive($module_env, $name, $module) if $rec->{import_directive};
       next;
     }
     $module_env->prototypes->{$name} = _imported_record($rec);
@@ -9434,6 +9457,19 @@ sub _merge_facts_overlay {
     $sets{$k} = [ grep { !$seen{$_}++ } @{ $sets{$k} || [] }, @{ $osets->{$k} } ];
   }
   $module_env->import_sets(\%sets);
+  return;
+}
+
+# The import-directive fact on the module's own record of NAME: the flat entry
+# and the module package's entry (the one a merge's `$own` lookup reads).
+sub _carry_import_directive {
+  my ($module_env, $name, $module) = @_;
+  my $flat = $module_env->prototypes->{$name};
+  $module_env->prototypes->{$name} = { %$flat, import_directive => 1 }
+    if ref($flat) eq 'HASH';
+  my $per = $module_env->pkg_prototypes->{$name} || {};
+  $per->{$module} = { %{ $per->{$module} }, import_directive => 1 }
+    if ref($per->{$module}) eq 'HASH';
   return;
 }
 

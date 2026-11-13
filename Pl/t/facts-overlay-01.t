@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 18;
 
 sub write_pl {
     my ($code) = @_;
@@ -180,3 +180,80 @@ PL
        && grep({ $_ eq 'blk' } @{ $env->import_sets->{':all'} || [] }),
        'the overlay facts are merged into the module facts');
 }
+
+# 12-18: THE IMPORT-DIRECTIVE FACT (task #4881, ruled s541).  The fixture
+# Pl/t/lib/DirectiveFix.pm's import_from(MODULE, LIST) installs MODULE's
+# names into its caller -- plain Perl, Test::More's use_ok shape -- and its
+# overlay declares `sub import_from :pcl_import_directive;` (the source
+# declares the same prototype-less sub: the overlay ADDS the fact).  A call of
+# it directly in a BEGIN body is `use MODULE LIST` for the parse, so a `()`
+# constant it imports is a TERM after it.  Rows 12-15 and 18 FAIL on the base
+# (the constant read as a list-operator call that swallowed `+ 1 ..` /
+# `- 1, 7`).  Row 17 is the negative: outside a BEGIN nothing changes.
+
+# 12. The parenthesised call, no list: DirectiveConsts' @EXPORT (TWO).
+both_agree(<<'PL', 'BEGIN { DIRECTIVE(LIT) }: an imported () constant is a term');
+use DirectiveFix qw(import_from);
+BEGIN { import_from('DirectiveConsts') }
+my $n = 0;
+for (TWO + 1 .. 5) { $n++ }
+print "$n\n";
+PL
+
+# 13. The paren-less call with an explicit list.
+both_agree(<<'PL', 'BEGIN { DIRECTIVE LIT, LIST }: the paren-less form');
+use DirectiveFix qw(import_from);
+BEGIN { import_from 'DirectiveConsts', qw(THREE) }
+print THREE + 1, "\n";
+PL
+
+# 14. The call as the first operand of `||` (always run).
+both_agree(<<'PL', 'BEGIN { DIRECTIVE(LIT, LIST) || die }: the call is still a use');
+use DirectiveFix qw(import_from);
+BEGIN { import_from('DirectiveConsts', 'TWO') || die "no" }
+my @l = (TWO - 1, 7);
+print "@l\n";
+PL
+
+# 15. A NON-literal module name is computed: no parse effect, and no die.
+both_agree(<<'PL', 'BEGIN { DIRECTIVE($var) }: no effect and no die');
+use DirectiveFix qw(import_from);
+my $m;
+BEGIN { $m = 'DirectiveConsts'; import_from($m, 'TWO') }
+print TWO() + 1, "\n";
+PL
+
+# 16. The real shape: Test::More's use_ok carries the fact (lib/Test/More.pm).
+both_agree(<<'PL', 'BEGIN { use_ok(LIT, LIST) } imports for the parse');
+use Test::More tests => 2;
+BEGIN { use_ok('DirectiveConsts', 'TWO') }
+my $n = 0;
+$n++ for TWO + 1 .. 5;
+is($n, 3, 'the loop runs from TWO + 1');
+PL
+
+# 17. OUTSIDE a BEGIN the call runs after the parse, so the parse sees no
+# import (perl reads TWO as an unknown word there).  The compiler's own record
+# of the call site -- the #2610 detector table in the emission -- says how it
+# read TWO: unknown after the plain call, a `()` term after the BEGIN form.
+{
+    my $src = "use lib '$fixlib';\nuse DirectiveFix qw(import_from);\n%s\n"
+            . "my \@l = (TWO, 7);\nprint \"\@l\\n\";\n";
+    my $plain = PCLCore::transpile("$pl2cl " . write_pl(sprintf $src,
+                  "import_from('DirectiveConsts', 'TWO');"));
+    my $begin = PCLCore::transpile("$pl2cl " . write_pl(sprintf $src,
+                  "BEGIN { import_from('DirectiveConsts', 'TWO') }"));
+    ok($plain =~ /\("main" "TWO" 4 "unknown"\)/
+       && $begin =~ /\("main" "TWO" 4 "proto:"\)/,
+       'outside a BEGIN the directive call leaves the parse alone')
+      or diag "plain: " . join("|", $plain =~ /(\("main" "TWO"[^)]*\))/g)
+            . " begin: " . join("|", $begin =~ /(\("main" "TWO"[^)]*\))/g);
+}
+
+# 18. The no-list use_ok imports the module's default list.
+both_agree(<<'PL', 'BEGIN { use_ok(LIT) }: the default import list');
+use Test::More tests => 2;
+BEGIN { use_ok('DirectiveConsts') }
+my @l = (TWO - 1, 7);
+is("@l", "1 7", 'TWO is a term');
+PL
