@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s538a (Opus, 2026-11-13) while fixing pack 'w' above UV_MAX (cl/pack-impl.pl _pack_ber).  PRE-EXISTING: main\n381d9063 (MAIN-READY-89) and the s538a tree answer the same.\n\nREPRODUCER (perl 5.40.3; the s538a worktree's scratch/s538a/pr2/packw-nv.pl):\n\n    print unpack(\"H*\", pack(\"w\", 2**70)), \"\\n\";      # perl: 8180808080808080808000\n    print unpack(\"H*\", pack(\"w\", 1e20)), \"\\n\";       # perl: 8aebe3d7c5d698c08000\n\n  PCL: dies \"Can only compress unsigned integers in pack\" at the first line.\n\npp_pack.c's 'w': an IOK value or one below UV_MAX_P1 takes the UV loop; a POK string takes w_string (is_an_int:\ndigits, spaces, a leading '+', a '.'-fraction ignored -- \"1e21\" is refused); an NOK value above UV_MAX takes the\nNV floor-division loop and is NEVER refused for its exponent.  cl/pack-impl.pl stringifies the argument first\n(`my $orig_s = \"$raw\"`) and refuses `$orig_s =~ /[eE]/ && $v >= 2**64`, so a NUMBER whose perl stringification uses\nan exponent dies.  The pack implementation cannot ask perl's POK/NOK flags; PCL's values do carry the difference (a\nLisp number vs a string) -- the runtime could pass it, or pack-impl could test `$raw` with the one\nnumber-vs-string predicate PCL already has.  _pack_ber (s538a) already encodes such an NV exactly (sprintf '%.0f' ->\ndiv128) once the refusal lets it through.  LOW (huge NV operands to 'w' are rare).  Family: pack.t's 'w' rows.",
+   "id" : "4845",
+   "status" : "pending",
+   "subject" : "DIVERGENCE (pre-existing): `pack(\"w\", N)` of a NUMBER above 2**64 whose string form has an exponent (`2**70`, `1e20`) dies \"Can only compress unsigned integers in pack\"; perl encodes it (its NV floor-division path) -- the check meant for a STRING like \"1e21\" cannot tell a number from a string in cl/pack-impl.pl"
+}
