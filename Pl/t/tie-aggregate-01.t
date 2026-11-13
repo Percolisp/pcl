@@ -317,6 +317,19 @@ op("h:bool-scalar", sub { require Tie::Hash; my %x; tie %x, 'BS'; $x{a} = 1; my 
 op("s:env-array", sub { local $ENV{PCLT_LIST} = "a:b:c"; require Env; Env->import(qw(@PCLT_LIST));
   my @o = (scalar(@main::PCLT_LIST), "@main::PCLT_LIST"); push @main::PCLT_LIST, "d"; push @o, $ENV{PCLT_LIST};
   $main::PCLT_LIST[0] = "z"; push @o, $ENV{PCLT_LIST}; "@o" });
+# s539a (#3852): a tied array's element holding a BLESSED reference, read as
+# `reftype` / an argument copied by `my ($d) = @_` / `shift` / a list copy /
+# a recursive walk -- the reference itself, never a reference to the
+# reference (YAML-PP 52.preserve.t died "Not a SCALAR reference" in its walk)
+package B3852; sub new { bless { v => $_[1] }, $_[0] } package main;
+sub _rt { my $r = Scalar::Util::reftype($_[0]); defined $r ? $r : "undef" }
+sub _cp1 { my ($d) = @_; _rt($d) } sub _cp2 { my $d = shift; _rt($d) }
+sub _walk { my ($d) = @_; my $t = Scalar::Util::reftype($d) or return "s";
+  $t eq "ARRAY" ? "[" . join(",", map { _walk($_) } @$d) . "]"
+  : $t eq "HASH" ? "h" : $t eq "REF" ? "r" . _walk($$d) : lc $t }
+op("a:blessed-elem-copy", sub { require Scalar::Util; require Tie::Array; my @x; tie @x, 'Tie::StdArray';
+  my $o = B3852->new(1); @x = ($o, [2], \"s", $o); my @c = @x;
+  join ",", _rt($x[0]), _cp1($x[0]), _cp2($x[0]), _rt($c[0]), (map { _cp1($_) } @x), _walk(\@x) });
 PERL
 
 compare_program('hash', $hash_prog);

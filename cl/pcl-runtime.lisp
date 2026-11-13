@@ -3823,6 +3823,9 @@
   (cond
     ((not (p-box-p val)) (make-p-box val))
     ((%pcl-dualvar-p val) (%p-dualvar-copy val))
+    ;; A tied element proxy reads a reference as its WRAPPER box: box-set
+    ;; copies through it (#3852), where a box around it nested one level deep.
+    ((%p-tielem-box-p val) (let ((b (make-p-box nil))) (box-set b val) b))
     (t
      (let ((b (make-p-box (unbox val))))
        (setf (p-box-is-ref b) (p-box-is-ref val)
@@ -4442,6 +4445,18 @@
 ;;; Box accessors with lazy caching
 ;;; ------------------------------------------------------------
 
+(declaim (inline %p-plain-box-copy-value))
+(defun %p-plain-box-copy-value (value)
+  "What a copy reads out of VALUE, a box that is neither tied nor magic.  If
+   it holds a box, this is a reference: VALUE itself when it is a ref wrapper
+   (from p-backslash), else the box it holds -- a variable box containing a
+   reference gives that reference, avoiding the double-boxing that breaks
+   recursive reference passing.  Otherwise its value."
+  (let ((inner (p-box-value value)))
+    (if (p-box-p inner)
+        (if (p-box-is-ref value) value inner)
+        inner)))
+
 (defun box-set (box value)
   "Set box value, invalidating caches. Pre-caches if already typed.
    If value is a box containing a primitive, unbox it (Perl copy semantics).
@@ -4535,14 +4550,15 @@
                     (unbox (%p-tie-fetch value inner)))
                    ;; Magic source ($c = $$arylen_ref): copy the getter's VALUE,
                    ;; not the magic cell itself (else $c would alias the magic).
+                   ;; A TIED ELEMENT's getter answers a reference as its
+                   ;; WRAPPER box (%p-tie-elem-value): copy what the wrapper
+                   ;; holds, as from an untied element -- storing the wrapper
+                   ;; made `my $d = $_[0]` of `$tied[0]` a reference to the
+                   ;; reference (reftype REF, "Not a SCALAR reference", #3852).
                    ((p-magic-cell-p inner)
-                    (funcall (p-magic-cell-getter inner)))
-                   ;; If inner is a box, this is a reference.
-                   ;; If value itself is a ref-wrapper (from p-backslash), preserve it as-is.
-                   ;; If value is a variable box containing a reference, use inner directly
-                   ;; to avoid the double-boxing that breaks recursive reference passing.
-                   ((p-box-p inner) (if (p-box-is-ref value) value inner))
-                   (t inner)))
+                    (let ((got (funcall (p-magic-cell-getter inner))))
+                      (if (p-box-p got) (%p-plain-box-copy-value got) got)))
+                   (t (%p-plain-box-copy-value value))))
                value)))
     ;; Perl: @arr in scalar context gives element count.
     ;; A raw adjustable vector (bare @arr, not wrapped in make-p-box) in a scalar assignment
@@ -9737,7 +9753,9 @@ per element."
         ((or (p-box-class v) (p-box-is-ref v)
              (let ((x (p-box-value v)))
                (or (hash-table-p x) (and (vectorp x) (not (stringp x))) (functionp x))))
-         v)
+         ;; a tied element proxy whose getter ran carries the class: still a
+         ;; COPY, never the proxy (a write would STORE through it, #3852)
+         (if (p-magic-cell-p (p-box-value v)) (p-copy-scalar-arg v) v))
         (t (p-copy-scalar-arg v))))
 ;;; ...and so the ARGUMENT LIST need not alias either (task #2515 (i)).  The
 ;;; general @_ builder, p-flatten-args, hands a callee the caller's element
@@ -9828,9 +9846,16 @@ per element."
           ;; Copying its VALUE would turn every hole a list walk flattened into
           ;; a present undef: measured, it cost perl-tests/reverse.t six rows
           ;; about deleted elements surviving a reverse.
+          ;; A TIED ELEMENT's getter answers a reference as its WRAPPER box
+          ;; (%p-tie-elem-value): store it as the element it is, through the
+          ;; reference arm -- a box around the wrapper was a reference to the
+          ;; reference (`my @c = @tied` of a blessed ref: reftype REF, #3852).
           ((and (p-magic-cell-p inner)
                 (not (eq (p-magic-cell-kind inner) :defelem)))
-           (%p-vpush (make-p-box (funcall (p-magic-cell-getter inner))) arr))
+           (let ((got (funcall (p-magic-cell-getter inner))))
+             (if (p-box-p got)
+                 (%p-array-store-scalar arr got)
+                 (%p-vpush (make-p-box got) arr))))
           ;; A TIED scalar is the same case for the same reason: perl's
           ;; `[$t]` / `@a = ($t)` / push FETCHes ONCE and copies the VALUE.
           ;; Storing a box around the PROXY made the element ALIAS the tied
@@ -34293,10 +34318,13 @@ would consume, so it dies naming the stream (rule 12)."
    of ONE FETCH.  perl's introspection primitives (ref, reftype, refaddr,
    blessed) run get-magic ONCE per call (SvGETMAGIC); a primitive that reads
    its argument twice calls this first (#3672: reftype unboxed, then asked
-   p-ref, which unboxed again; refaddr read the raw slot, i.e. the proxy)."
+   p-ref, which unboxed again; refaddr read the raw slot, i.e. the proxy).
+   A TIED CONTAINER's element proxy (`reftype($tied[0])`, a :tielem cell) is
+   get-magic too: read as-is, a blessed reference in it answered REF (#3852)."
   (if (and (p-box-p x)
-           (p-tie-proxy-p (p-box-value x))
-           (not (%p-suppressed-proxy x)))
+           (or (and (p-tie-proxy-p (p-box-value x))
+                    (not (%p-suppressed-proxy x)))
+               (%p-tielem-box-p x)))
       (let ((c (make-p-box nil)))
         (box-set c x)
         c)
