@@ -28,5 +28,6 @@ idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
-programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
+programs/carp-attribution	DIFF	1	not-supported.md#ns-caller-fidelity -- croak reports its caller's location by perl's rule since s539d (#1361), but the default build records no line (`at - line 0.`, line-track off): "other-line(0 vs 11)"
+programs/goto-sub-caller	DIFF	2	not-supported.md#ns-caller-fidelity -- `(caller)[2] > 0` reads the call site's LINE, which only PCL_OPT=line-track records (s539d, #233): the default build answers 0 -- before s539d a positive LISP form offset made the check pass by accident: "main::whoami noline main defined nosuch"
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
