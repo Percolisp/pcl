@@ -14389,9 +14389,24 @@ per element."
 ;;; a read-only array it dies as perl does (task #159).  Inline: this is the
 ;;; element-write path.  (#387 family 37, s413 — the loop six writers spelled.)
 (declaim (inline %p-extend-to))
+;;; perl's own refusal of an index whose slot array would wrap size_t
+;;; (av_extend's MEM_WRAP_CHECK, probed 5.40.3): an index of 2^61 or more dies
+;;; "Out of memory during array extend" and 2^61-1 dies "panic: memory wrap",
+;;; both TRAPPABLE; a smaller absurd index is an allocation failure in both
+;;; (perl exits "Out of memory in perl:util:safesysmalloc", SBCL exhausts its
+;;; heap).  `$#a >>= 1` on an empty @a is 2^63-1 since the compound shift
+;;; reads a UV (#3781; bop.t's `eval q($#a>>=1)` row).  The range sibling is
+;;; %p-range-size-check.  Asked only on the EXTENSION path of %p-extend-to.
+(defun %p-array-extend-check (i)
+  (cond ((>= i #.(expt 2 61))
+         (p-die (make-p-box "Out of memory during array extend") nil))
+        ((= i #.(1- (expt 2 61)))
+         (p-die (make-p-box "panic: memory wrap") nil))))
+
 (defun %p-extend-to (a i)
   (when (>= i (length a))
     (%p-check-array-writable a)
+    (%p-array-extend-check i)
     (loop repeat (- (1+ i) (length a))
           do (vector-push-extend nil a)))
   a)

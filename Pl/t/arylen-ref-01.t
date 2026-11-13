@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -83,3 +83,19 @@ test_cl('numeric context through ref',
 # copying the deref ($c = $$r) copies the VALUE, not an alias to the magic cell
 test_cl('copy of deref is a value snapshot',
     q{my @a=(1..4); my $r=\$#a; my $c=$$r; $$r=6; print "$c $$r\n";}, "3 6\n");
+
+# perl REFUSES an index whose slot array would wrap size_t (av_extend's
+# MEM_WRAP_CHECK, probed 5.40.3): 2^61 and up die "Out of memory during array
+# extend", 2^61-1 dies "panic: memory wrap" -- TRAPPABLE.  PCL tried to
+# allocate and exhausted the heap; since #3781 made `>>=` read a UV, bop.t's
+# `eval q($#a>>=1)` on an empty @a (2^63-1) reached it (s538a, the sweep's
+# LOST row).  Every extending spelling goes through %p-extend-to.
+test_cl('an index past 2^61 dies trappably, as perl does (s538a)',
+    q{sub t { my ($n, $c) = @_; my $r = eval { $c->(); 1 }; print "$n ", ($r // "undef"), " ", ($@ =~ s/ at .*//sr), "\n" }
+t(1, sub { my @b; $#b = 9223372036854775807 });
+t(2, sub { my @b; $#b = 2305843009213693951 });
+t(3, sub { my @b; $b[4611686018427387904] = 1 });
+t(4, sub { my $r = []; my $l = \$#$r; $$l = 2305843009213693952 });
+t(5, sub { my @a; eval q($#a>>=1); die $@ if $@ });
+my @c; $#c = 9; print "6 ", scalar(@c), "\n";},
+    "1 undef Out of memory during array extend\n2 undef panic: memory wrap\n3 undef Out of memory during array extend\n4 undef Out of memory during array extend\n5 undef Out of memory during array extend\n6 10\n");
