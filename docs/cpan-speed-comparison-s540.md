@@ -4,12 +4,33 @@ The USER's question (s540, paraphrased): run the CPAN modules PCL's board uses
 under perl and under PCL, compare the time file by file, find out where PCL is
 slower, and make the list of things that should be faster (task #4787, the
 first concrete piece of #4621).  This is a MEASUREMENT: nothing under `Pl/`,
-`cl/` or `lib/` changed.  Every number is of main's code sha **`381d9063`**
-(generation v2-13750, MAIN-READY-89).
+`cl/` or `lib/` changed.  Every TIME in the tables is of main's code sha
+**`381d9063`** (generation v2-13750, MAIN-READY-89); the PROFILES (section 4's
+evidence) were taken on **`05806e16`** (MAIN-READY-91, main's code when they
+ran), which moved no code they name.
 
 ## 0. The answer
 
-(filled from the measurements)
+**It is compile, not run.**  Over the 638 board files PCL runs exactly as perl
+does (same plan, same ok count), perl spends **64.7 s of CPU** and PCL, on a
+warm cache, **2,169 s -- 33.5x** (coarse pass, CPU normalised to a quiet box;
+raw 2,715 s).  Of PCL's 2,169 s:
+
+* **82 % (1,783 s) is LOADING** -- and 1,423 s of that is SBCL compiling the
+  TEXT of the distribution's own modules on every run (a module under `-I` /
+  `lib` is never compiled to a fasl by default), 225 s compiling the
+  Test::More layer `cl/pcl-test.lisp` from source in every file that uses it;
+* **10 % (225 s) is TRANSPILING** -- 203 s of it the test file's own `pl2cl`;
+* **7 % (161 s) is RUNNING** -- 109 s in SBCL itself (two thirds of it
+  JSON-PP's `099_binary*` files) and 52 s in the subprocesses the programs
+  start (Capture-Tiny).  The run phase is 2.5x perl's whole time.
+
+A first run on an empty cache costs 3,216 s (+1,046 s: 1,362 module
+transpiles, each a fresh `perl pl2cl`, and their fasl builds).  The two
+cheapest levers are each one setting or one load path, and both are measured
+(section 4, rows 1 and 2): compiling the dist's modules to fasls takes a
+board file from 5.3 s to 0.7 s, and a compiled TAP layer saves 0.37-0.41 s in
+every Test::More file.
 
 ## 1. How it was measured
 
@@ -75,9 +96,15 @@ coarse rows (`scratch/s540a/inflation.txt`):
 
 | 1-min load at the file's start | rows | median `tcompile` CPU s | p10 | p90 |
 |---|---:|---:|---:|---:|
-(INFLATION TABLE)
+| 0-2 | 728 | 0.368 | 0.359 | 0.391 |
+| 2-4 | 586 | 0.428 | 0.386 | 0.498 |
+| 4-6 | 163 | 0.500 | 0.439 | 0.583 |
+| 6-8 | 98 | 0.608 | 0.482 | 0.830 |
+| 8-10 | 85 | 0.764 | 0.627 | 0.939 |
+| 10-12 | 43 | 0.857 | 0.689 | 0.980 |
+| 12+ | 8 | 0.916 | 0.720 | 1.122 |
 
-**The same compile costs 2.4x the CPU at load 8+ that it costs at load < 2.**
+**The same compile costs 2.1-2.5x the CPU at load 8 and above that it costs at load < 2** (the coarse rows ran at a median 1-minute load of 2.2, p90 7.2, max 13.4).
 Two consequences: (1) the coarse pass's CPU seconds are comparable across
 chunks only after normalising each row by its own `tcompile` against the quiet
 median (`tools/board-timing.pl --report --norm`; a row without Test::More takes
@@ -86,6 +113,47 @@ normalised that way; (2) the precise pass (an exclusive bench at load < 2,
 best of 3) is the reference, and the doc says which table is which.
 
 ## 2. Per distribution
+
+Coarse pass, warm, CPU seconds normalised to a quiet box (section 1a), over the
+COMPARED files (`C`); `PE` / `S` / `X` count the files listed or left out.
+`(TAP)` is the part of B spent compiling `cl/pcl-test.lisp`; `cold` is the same
+files' CPU on a first run with an empty cache.  Sorted by excess (PCL - perl).
+The whole per-file table is `baselines/board-timing-s540.tsv`.
+
+|dist | C | PE | S | X | perl | PCL | excess | ratio | A | B | (TAP) | C run | cold PCL |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---: |
+|Pod-Simple-3.47-0 | 64 | 0 | 1 | 9 | 2.7 | 494.1 | 491.4 | 182.5x | 25.1 | 465.9 | 23.4 | 2.9 | 495.3 |
+|Template-Toolkit-3.106-0 | 92 | 1 | 17 | 11 | 3.9 | 382.6 | 378.7 | 97.6x | 29.8 | 350.2 | 34.0 | 2.7 | 430.0 |
+|JSON-PP-4.18-0 | 63 | 0 | 0 | 2 | 21.5 | 189.7 | 168.1 | 8.8x | 13.2 | 106.5 | 22.5 | 69.9 | 250.7 |
+|Log-Log4perl-1.58-0 | 40 | 0 | 17 | 18 | 1.4 | 159.3 | 157.9 | 111.6x | 31.2 | 127.4 | 14.8 | 0.7 | 191.9 |
+|YAML-PP-v0.39.0-0 | 37 | 0 | 1 | 6 | 4.1 | 159.8 | 155.7 | 39.1x | 20.6 | 132.6 | 13.6 | 6.6 | 215.0 |
+|IO-Compress-2.214-0 | 36 | 1 | 14 | 42 | 2.1 | 153.8 | 151.7 | 74.1x | 19.2 | 132.1 | 13.3 | 2.4 | 171.8 |
+|Text-CSV-2.04 | 22 | 0 | 0 | 16 | 2.0 | 123.0 | 121.0 | 61.4x | 8.8 | 113.1 | 8.1 | 1.1 | 148.3 |
+|Capture-Tiny-0.50-0 | 21 | 0 | 0 | 3 | 17.4 | 111.2 | 93.8 | 6.4x | 4.7 | 37.8 | 7.8 | 68.7 | 169.0 |
+|HTTP-Tiny-0.090-0 | 26 | 0 | 4 | 2 | 1.2 | 59.3 | 58.1 | 48.6x | 6.8 | 51.9 | 9.5 | 0.6 | 128.7 |
+|URI-5.34-0 | 47 | 1 | 2 | 13 | 1.6 | 54.9 | 53.4 | 34.6x | 9.8 | 44.3 | 17.0 | 0.8 | 128.1 |
+|Data-Dumper-2.183-0 | 19 | 0 | 1 | 6 | 0.7 | 42.1 | 41.4 | 63.7x | 5.3 | 36.2 | 6.8 | 0.6 | 50.2 |
+|Path-Tiny-0.150-0 | 21 | 1 | 1 | 7 | 1.0 | 34.4 | 33.4 | 35.2x | 6.0 | 28.0 | 7.7 | 0.4 | 102.0 |
+|HTTP-Message-7.01-0 | 14 | 0 | 2 | 7 | 0.6 | 30.7 | 30.1 | 51.5x | 4.2 | 26.3 | 5.2 | 0.3 | 91.5 |
+|Getopt-Long-2.58-0 | 8 | 0 | 0 | 0 | 0.1 | 22.8 | 22.7 | 156.3x | 1.8 | 20.8 | 0.7 | 0.2 | 29.4 |
+|Class-Method-Modifiers-2.15-0 | 26 | 1 | 0 | 2 | 0.9 | 23.1 | 22.2 | 26.5x | 6.1 | 16.7 | 9.5 | 0.2 | 70.6 |
+|Role-Tiny-2.002004-0 | 19 | 0 | 0 | 4 | 0.3 | 18.7 | 18.4 | 54.4x | 4.1 | 14.3 | 7.0 | 0.3 | 23.3 |
+|YAML-Tiny-1.74 | 10 | 1 | 0 | 2 | 0.7 | 17.0 | 16.3 | 25.5x | 3.1 | 13.6 | 3.7 | 0.2 | 87.8 |
+|Mojo-DOM58-3.002-0 | 4 | 0 | 0 | 1 | 0.4 | 15.4 | 15.0 | 41.6x | 7.3 | 7.5 | 1.5 | 0.7 | 80.7 |
+|Scalar-List-Utils-1.70-0 | 19 | 0 | 0 | 19 | 0.6 | 12.8 | 12.2 | 20.8x | 4.4 | 8.2 | 7.0 | 0.2 | 45.4 |
+|Data-Dump-1.25-0 | 13 | 0 | 0 | 2 | 0.2 | 11.9 | 11.8 | 63.5x | 2.6 | 9.2 | 0.4 | 0.2 | 23.3 |
+|Text-Balanced-2.07-0 | 9 | 0 | 5 | 0 | 0.3 | 11.7 | 11.5 | 43.0x | 2.4 | 9.2 | 3.3 | 0.2 | 15.3 |
+|Try-Tiny-0.32-0 | 4 | 1 | 1 | 5 | 0.2 | 7.2 | 7.0 | 40.3x | 1.1 | 5.9 | 1.5 | 0.1 | 55.0 |
+|HTTP-Date-6.06-0 | 3 | 0 | 0 | 0 | 0.2 | 6.5 | 6.3 | 42.8x | 0.9 | 5.4 | 1.1 | 0.1 | 60.4 |
+|Class-Inspector-1.36-0 | 5 | 0 | 1 | 0 | 0.2 | 6.1 | 5.9 | 31.6x | 1.5 | 4.5 | 1.8 | 0.1 | 32.9 |
+|TimeDate-2.33-0 | 5 | 0 | 0 | 0 | 0.1 | 5.9 | 5.7 | 50.9x | 1.0 | 4.7 | 0.4 | 0.1 | 14.8 |
+|Sub-Uplevel-0.2800-0 | 3 | 0 | 0 | 7 | 0.1 | 5.7 | 5.5 | 37.7x | 0.8 | 4.8 | 1.1 | 0.1 | 52.6 |
+|File-Which-1.27-0 | 3 | 0 | 0 | 0 | 0.1 | 3.8 | 3.6 | 28.9x | 0.7 | 3.0 | 1.1 | 0.0 | 29.4 |
+|Algorithm-Diff-1.201-0 | 2 | 0 | 0 | 0 | 0.0 | 3.4 | 3.4 | 104.5x | 1.4 | 1.9 | 0.0 | 0.1 | 17.3 |
+|Safe-Isa-1.000010-0 | 2 | 0 | 0 | 0 | 0.1 | 1.6 | 1.5 | 26.2x | 0.7 | 0.9 | 0.7 | 0.0 | 3.1 |
+|Sort-Versions-1.62-0 | 1 | 0 | 0 | 0 | 0.0 | 0.7 | 0.6 | 22.3x | 0.2 | 0.4 | 0.4 | 0.0 | 1.8 |
+
+| **board** | **638** | **7** | **67** | **184** | **64.7** | **2,169.2** | **2,104.5** | **33.5x** | **224.8** | **1,783.4** | **224.9** | **160.5** | **3,215.6** |
 
 ## 3. The files with the most excess
 
