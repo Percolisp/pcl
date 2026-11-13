@@ -11,6 +11,9 @@
 #   tools/board-timing.pl [SELECTION] [--modes cold,warm] [--repeat N]
 #        [--cache-root DIR] [--cold-continue] [--out FILE.tsv] [--timeout S]
 #        [--no-hooks] [--no-perl] [--prof cpu|alloc --prof-dir DIR]
+#        [--preload FASL] [--env K=V] [--variant NAME]   (a LEVER's A/B: a
+#        file loaded in front of the program, an environment setting for the
+#        transpile and the run, and the name its rows carry)
 #   tools/board-timing.pl --report [--top N] FILE.tsv...
 #
 # SELECTION (any combination; default = the whole board):
@@ -105,7 +108,7 @@ my (@want_dist, $only_rx, $files_list, $out, $prof, $prof_dir, $core, $sha);
 my ($list, $modes, $repeat, $cache_root, $timeout, $timeouts_tsv, $hooks, $report, $top)
   = ("$root/baselines/cpan-board-dists.tsv", 'cold,warm', 1, undef, 120,
      "$root/baselines/cpan-board-timeouts.tsv", 1, 0, 60);
-my ($perl_side, $cold_continue) = (1, 0);
+my ($perl_side, $cold_continue, $variant, @preload, %xenv) = (1, 0, q{});
 my @ARGV_COPY = @ARGV;
 my @positional;
 while (@ARGV) {
@@ -123,6 +126,9 @@ while (@ARGV) {
   elsif ($a eq '--no-hooks')   { $hooks = 0 }
   elsif ($a eq '--no-perl')    { $perl_side = 0 }
   elsif ($a eq '--cold-continue') { $cold_continue = 1 }
+  elsif ($a eq q{--preload}) { push @preload, abs_path(shift @ARGV) }
+  elsif ($a eq q{--env})     { my ($k, $v) = split /=/, shift(@ARGV), 2; $xenv{$k} = $v }
+  elsif ($a eq q{--variant}) { $variant = shift @ARGV }
   elsif ($a eq '--prof')       { $prof = shift @ARGV }
   elsif ($a eq '--prof-dir')   { $prof_dir = shift @ARGV }
   elsif ($a eq '--core')       { $core = shift @ARGV }
@@ -171,7 +177,7 @@ my @COLS = qw(sha mode rep dist file load1 timeout
   A_wall B_wall C_wall A_cpu B_cpu C_cpu
   modload tap tcompile mcompile scompile ecompile cfile xpile evalx xserver evalrun
   modload_c tap_c tcompile_c mcompile_c scompile_c ecompile_c cfile_c evalrun_c
-  n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec cpu_v);
+  n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec cpu_v variant);
 my $ofh = \*STDOUT;
 if (defined $out) {
   my $new = !-s $out;
@@ -348,7 +354,7 @@ sub pcl_run {
   my %r = (mode => $mode, rep => $rep, w => $w, load => load1(), to => $to);
   my ($xst, $xw, $xc) = timed("timeout -k 5 $to perl -I$root " . inc_flags($w)
                               . " $root/pl2cl --lenient-ppi $w->{t} >$lisp 2>$xerr </dev/null",
-                              $w->{dist}, { PCL_CACHE_DIR => $cache });
+                              $w->{dist}, { PCL_CACHE_DIR => $cache, %xenv });
   @r{qw(x_wall x_cpu lisp_kb)} = ($xw, $xc, int((-s $lisp // 0) / 1024));
   if ($xst != 0) {
     @r{qw(class rc ok notok plan)} = ($xst >> 8 == 124 ? 'TIMEOUT' : 'XFAIL', $xst >> 8, 0, 0, '');
@@ -356,9 +362,10 @@ sub pcl_run {
   }
   my $left = $to - $xw;
   $left = 10 if $left < 10;
-  my $loads = $hooks_fasl ? "--load $hooks_fasl " : '';
+  my $loads = ($hooks_fasl ? "--load $hooks_fasl " : '') . join('', map { "--load $_ " } @preload);
   my %env = (PCL_CACHE_DIR => $cache, PERL5LIB => perl5lib($w), PCL_BT_OUT => $rec,
              PCL_BT_PROF => undef, PCL_BT_PROF_OUT => undef);
+  @env{keys %xenv} = values %xenv;
   if ($prof && $mode ne 'warmup') {
     File::Path::make_path($prof_dir);
     (my $stem = $w->{rel}) =~ s{/}{__}g;
@@ -440,7 +447,7 @@ sub emit {
   my ($r, $p) = @_;
   my $w = $r->{w};
   my $f = sub { my $v = shift; return '' if !defined $v; return $v =~ /^-?\d+\.\d+(?:e-?\d+)?$/i ? sprintf('%.3f', $v) : $v };
-  my %row = (sha => $sha, mode => $r->{mode}, rep => $r->{rep}, dist => $w->{base}, file => $w->{tname},
+  my %row = (sha => $sha, mode => $r->{mode}, rep => $r->{rep}, variant => $variant, dist => $w->{base}, file => $w->{tname},
              load1 => $r->{load}, timeout => $r->{to},
              c_class => $r->{class}, cmp => compare_class($r, $p), c_rc => $r->{rc},
              c_ok => $r->{ok}, c_notok => $r->{notok}, c_plan => $r->{plan},
@@ -481,7 +488,7 @@ sub read_rows {
         $r{A_cpu} = num($r{x_cpu}) + $xchild;
         $r{C_cpu} = num($r{C_cpu}) + $child - $xchild;
       }
-      my $k = "$r{dist}\t$r{file}\t$r{mode}";
+      my $k = "$r{dist}\t$r{file}\t$r{mode}\t" . ($r{variant} // q{});
       if (($src{$k} // '') ne $f) { $reps{$k} = []; $src{$k} = $f }
       $r{src} = basename($f);
       push @{ $reps{$k} }, \%r;
