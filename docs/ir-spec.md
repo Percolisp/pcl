@@ -4967,6 +4967,9 @@ Two consequences a translator must implement or lose output:
   a handle that answered a line or a slurp, a LIST-context read (the empty
   list) and a read FAILURE answer undef.  A `seek` does not reset it; an open,
   a dup and each file `<>` moves to do.  `$.` counts the "" as a record.
+  Every kind of handle follows it: a file, a pipe (an exited or a running
+  child, `pipe()`), an in-memory string, a `read` / `getc` / `eof` before
+  it changes nothing.
   Example: on an empty file `local $/; my $x = <$h>; my $y = <$h>` leaves $x
   "" and $y undef, and `while (<$h>)` runs once.
 * **A SYMBOLIC glob name resolves like a static one** (#4310): an unqualified
