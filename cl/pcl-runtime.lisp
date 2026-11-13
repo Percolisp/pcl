@@ -1316,17 +1316,39 @@
 ;;; builtin::sub_stash reads it (%p-sub-stash-of, lib/B.pm).
 (defmacro p-anon-sub (pkg lambda-form)
   "`sub {...}` compiled in package PKG (a string): LAMBDA-FORM, named
-   \"PKG::__ANON__\" so the function carries its home package."
+   \"PKG::__ANON__\" so the function carries its home package.
+
+   IT IS A CALL FRAME (s539d, task #233 item 3): the body runs under
+   p-frame-bind with the function ITSELF as the frame's sub, so caller()
+   inside it sees the frame and names it at caller() time
+   (%p-frame-sub-name: a Sub::Util::set_subname name, else PKG::__ANON__).
+   The function reaches itself through a LABELS name, which costs nothing
+   per call (the closure is already in hand) and changes nothing about which
+   evaluations of `sub {...}` give one object -- a lambda with no free
+   variable is still one constant, a closure still one per evaluation
+   (#1083).  The LABELS name is an uninterned symbol spelled PKG::__ANON__,
+   the function's debug name, which %p-anon-sub-package reads."
   (destructuring-bind (head lambda-list &body body) lambda-form
     (unless (and (eq head 'lambda) (stringp pkg))
       (error "p-anon-sub: expected a package string and a LAMBDA form, not ~S ~S"
              pkg lambda-form))
-    `(sb-int:named-lambda ,(concatenate 'string pkg "::__ANON__") ,lambda-list
-                          ,@body)))
+    (let ((self (make-symbol (concatenate 'string pkg "::__ANON__")))
+          (decls (loop while (and (consp (first body)) (eq (first (first body)) 'declare))
+                       collect (pop body))))
+      `(labels ((,self ,lambda-list
+                  ,@decls
+                  (p-frame-bind ((function ,self)) ,@body)))
+         (function ,self)))))
 
 (defun %p-anon-sub-package (fn)
-  "The package the anonymous sub FN was compiled in (p-anon-sub's name), or NIL."
-  (let ((name (ignore-errors (sb-kernel:%fun-name fn))))
+  "The package the anonymous sub FN was compiled in (p-anon-sub's name), or NIL.
+   The debug name is (LABELS #:|PKG::__ANON__| :IN ...) -- p-anon-sub's
+   LABELS (s539d) -- or the plain string PKG::__ANON__ (its NAMED-LAMBDA
+   before that)."
+  (let* ((name (ignore-errors (sb-kernel:%fun-name fn)))
+         (name (if (and (consp name) (eq (first name) 'labels) (symbolp (second name)))
+                   (symbol-name (second name))
+                   name)))
     (and (stringp name)
          (> (length name) 10)
          (string= "::__ANON__" name :start2 (- (length name) 10))
@@ -18299,7 +18321,7 @@ what changes is that the element is the raw counter rather than a fresh box."
                (*pcl-current-package*
                 (if (plusp ,d) (%p-frame-slot ,d 0) *pcl-current-package*))
                (*pcl-sub-call-depth* (if (plusp ,d) (1- ,d) 0)))
-           (when (plusp ,d) (%p-loc-unpack (%p-frame-slot ,d 2)))
+           (when (plusp ,d) (%p-frame-restore-location ,d))
            ;; This frame's @_ is a `&name;' caller's very array (p-amp-call
            ;; adopted it, so it is EQ to the sole argument): hand THAT array
            ;; on, shared, so the target's shift reaches the caller (#2632).
@@ -18855,71 +18877,76 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; ============================================================
 ;;; perl keeps one context-stack entry per sub call (the CV, gimme, and
 ;;; blk_oldcop = PL_curcop at the call) and caller(N) reads the Nth one down.
-;;; PCL's entry is FOUR slots of ONE preallocated simple-vector, indexed by
+;;; PCL's entry is FIVE slots of ONE preallocated simple-vector, indexed by
 ;;; the call depth every sub frame binds (*pcl-sub-call-depth*): frame D's
-;;; slots are 4D .. 4D+3 (D >= 1; depth 0 is the top level, which has none).
+;;; slots are 5D .. 5D+4 (D >= 1; depth 0 is the top level, which has none).
 ;;;
 ;;;   +0  the CALLER's package: *pcl-current-package* at the call (a string)
 ;;;   +1  the frame's SUB: the qualified name of a named sub (a string), or
 ;;;       the FUNCTION of an anonymous one -- its name can change after the
 ;;;       call (Sub::Util::set_subname), so it is read at caller() time
-;;;   +2  the CALL SITE: the two location registers above, packed into one
-;;;       fixnum (%p-loc-pack); its line is 0 when nothing was recorded
-;;;   +3  the frame's CONTEXT: *wantarray* at the call (T / NIL / :VOID)
+;;;   +2  the CALL SITE's file id   } the two location registers above as
+;;;   +3  the CALL SITE's line      } they stood at the call; line 0 = none
+;;;   +4  the frame's CONTEXT: *wantarray* at the call (T / NIL / :VOID)
 ;;;
 ;;; A STORE into a slot replaces what used to be two conses and two dynamic
 ;;; bindings per call (*pcl-caller-pkg-stack* / *pcl-caller-subname-stack*,
-;;; read with `nth`).  The slots above the current depth are dead: a
-;;; non-local exit unwinds the depth binding and nothing reads above it.  ONE
-;;; vector, not one per thread, because perl code runs only on the main
-;;; thread -- the signal relay thread INTERRUPTS main to run a handler, which
-;;; then pushes its own frame one above whatever main had bound.  So a frame
-;;; binds its depth FIRST and stores after: an interrupt between the two
-;;; writes one slot higher, never into the slots being filled.
-(sb-ext:defglobal *p-frames* (make-array 256 :initial-element 0))
+;;; read with `nth`).  The two location slots are fixnums, so their stores
+;;; take no GC card mark, and they are two slots rather than one packed
+;;; fixnum because packing a full fixnum id took the generic (bignum) path.
+;;; The slots above the current depth are dead: a non-local exit unwinds the
+;;; depth binding and nothing reads above it.  ONE vector, not one per
+;;; thread, because perl code runs only on the main thread -- the signal
+;;; relay thread INTERRUPTS main to run a handler, which then pushes its own
+;;; frame one above whatever main had bound.  So a frame binds its depth
+;;; FIRST and stores after: an interrupt between the two writes one frame
+;;; higher, never into the slots being filled.
+(sb-ext:defglobal *p-frames* (make-array 320 :initial-element 0))
 (declaim (type simple-vector *p-frames*))
-
-(declaim (inline %p-loc-pack))
-(defun %p-loc-pack ()
-  "The two location registers as ONE fixnum: file id above bit 32 (a
-   negative id is a string eval's `(eval N)`), line in the low 32 bits."
-  (logior (ash *p-src-file-id* 32) (logand *p-src-line* #xFFFFFFFF)))
 
 (defun %p-frames-grow (top)
   "Make *p-frames* hold slot TOP: double it (the old slots are copied, so a
    deep recursion keeps every frame below it)."
   (declare (fixnum top))
   (let* ((old *p-frames*)
-         (new (make-array (max (* 2 (length old)) (+ top 4)) :initial-element 0)))
+         (new (make-array (max (* 2 (length old)) (+ top 5)) :initial-element 0)))
     (replace new old)
     (setf *p-frames* new)))
 
 (declaim (inline %p-frame-enter))
 (defun %p-frame-enter (depth caller-pkg sub ctx)
-  "Fill frame DEPTH's four slots (the header above).  Called by every sub
-   frame right after it has bound *pcl-sub-call-depth* to DEPTH."
-  (declare (fixnum depth))
-  (let ((i (ash depth 2)))
-    (declare (fixnum i))
-    (let ((v (if (< (+ i 3) (length *p-frames*)) *p-frames* (%p-frames-grow (+ i 3)))))
-      (declare (simple-vector v))
-      (setf (svref v i) caller-pkg
-            (svref v (+ i 1)) sub
-            (svref v (+ i 2)) (%p-loc-pack)
-            (svref v (+ i 3)) ctx))
+  "Fill frame DEPTH's five slots (the header above).  Called by every sub
+   frame right after it has bound *pcl-sub-call-depth* to DEPTH.
+
+   INLINE at SAFETY 0, and both are measured (s539d): it is expanded into
+   every sub, so its size is paid once per sub in every fasl.  Inline at the
+   default safety (bounds-checked stores, an overflow-checked index) cost
+   +232 bytes per sub -- Math::BigInt::Calc's fasl +1.2 % -- for the same
+   call time; a full call instead was 1-5 ns slower per call.  The bounds
+   are the explicit test against the vector's length, which also grows it."
+  (declare (type (integer 0 #.(floor most-positive-fixnum 8)) depth)
+           (optimize (speed 3) (safety 0)))
+  (let* ((i (* depth 5))
+         (v (if (< (+ i 4) (length *p-frames*)) *p-frames* (%p-frames-grow (+ i 4)))))
+    (declare (fixnum i) (simple-vector v))
+    (setf (svref v i) caller-pkg
+          (svref v (+ i 1)) sub
+          (svref v (+ i 2)) *p-src-file-id*
+          (svref v (+ i 3)) *p-src-line*
+          (svref v (+ i 4)) ctx)
     nil))
 
 (declaim (inline %p-frame-slot))
 (defun %p-frame-slot (depth slot)
-  "Slot SLOT (0..3) of call frame DEPTH."
+  "Slot SLOT (0..4) of call frame DEPTH."
   (declare (fixnum depth slot))
-  (svref *p-frames* (+ (ash depth 2) slot)))
+  (svref *p-frames* (+ (* depth 5) slot)))
 
-(defun %p-loc-unpack (loc)
-  "Set the two location registers from LOC, a %p-loc-pack value."
-  (declare (fixnum loc))
-  (setq *p-src-file-id* (ash loc -32)
-        *p-src-line* (logand loc #xFFFFFFFF))
+(defun %p-frame-restore-location (depth)
+  "Set the two location registers back to what frame DEPTH recorded of its
+   call site (goto &sub: the frame that replaces DEPTH keeps its call site)."
+  (setq *p-src-file-id* (%p-frame-slot depth 2)
+        *p-src-line* (%p-frame-slot depth 3))
   nil)
 
 (defun %p-frame-location (depth)
@@ -18930,12 +18957,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    `(eval 0)' line 0: the text a runtime-raised die carries in the same
    build (%p-die-error).  Perl numbers its first eval 1, so no real location
    reads like it."
-  (let* ((loc (%p-frame-slot depth 2))
-         (line (logand loc #xFFFFFFFF)))
-    (declare (fixnum loc line))
+  (let ((line (%p-frame-slot depth 3)))
+    (declare (fixnum line))
     (if (zerop line)
         (values "(eval 0)" 0)
-        (values (%p-src-file-name (ash loc -32)) line))))
+        (values (%p-src-file-name (%p-frame-slot depth 2)) line))))
 
 (defun %p-frame-sub-name (depth)
   "Frame DEPTH's sub name, perl's (caller(N))[3]: a named sub's qualified
@@ -18954,7 +18980,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun %p-frame-wantarray (depth)
   "Frame DEPTH's context as perl's (caller(N))[5]: 1 list, \"\" scalar,
    undef void -- the answer wantarray() gives inside that frame."
-  (let ((ctx (%p-frame-slot depth 3)))
+  (let ((ctx (%p-frame-slot depth 4)))
     (cond ((eq ctx t) 1)
           ((null ctx) "")
           ((eq ctx :void) *p-undef*)
