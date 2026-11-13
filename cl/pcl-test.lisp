@@ -141,6 +141,13 @@
 (defvar *test-log-stream* :unopened
   "Cached output stream for the failure log, or NIL if logging is disabled.")
 
+;; Declared HERE, above its first readers below, so the file compiles clean as
+;; a fasl (task #4962): read before its defvar it was an undefined variable to
+;; compile-file -- three WARNINGs, and a build that reports failure.
+(defvar *current-test-file* nil
+  "Basename (e.g. \"tr.t\") of the perl-tests file being run; set per-file by the
+   sweep / tools/runt so the skip-registry can be consulted.")
+
 (defun %test-log-clean (s)
   "Make S safe for one TSV field: stringify and collapse tab/newline to space."
   (let ((str (if (stringp s) s (princ-to-string s))))
@@ -193,9 +200,6 @@
 ;;; ONLY converts a FAILING assertion into a real TAP `# skip`; an entry whose test
 ;;; unexpectedly PASSES is flagged stale (so accidental real fixes surface).  The
 ;;; underlying assertion still runs — nothing is weakened (CLAUDE.md principle 5).
-(defvar *current-test-file* nil
-  "Basename (e.g. \"tr.t\") of the perl-tests file being run; set per-file by the
-   sweep / tools/runt so the skip-registry can be consulted.")
 (defvar *skip-registry* (make-hash-table :test 'equal)
   "basename string -> list of (scanner category reason raw-pattern) entries.")
 

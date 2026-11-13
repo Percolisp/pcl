@@ -31196,12 +31196,17 @@ would consume, so it dies naming the stream (rule 12)."
   "Load the Test::More TAP layer (cl/pcl-test.lisp) on demand, exactly once.
   This is what lets the runner stop preloading the test infrastructure for every
   program: it is pulled in only when a script `use`s Test::More.  Idempotent —
-  if the harness already loaded it (pl-ok is fbound) this is a no-op."
+  if the harness already loaded it (pl-ok is fbound) this is a no-op.
+  It loads through the EXTENSION fasl cache (task #4962), the path
+  cl/pcl-pack.lisp takes: compiled once per content + runtime identity, then
+  a fasl load (< 10 ms) where SBCL compiled the whole file in every program
+  that said `use Test::More` (0.37 s, 611 CPAN-board files).
+  PCL_NO_FASL_CACHE=1 loads the text; an edit of the file is a new entry."
   (unless (or *pcl-test-lib-loaded* (fboundp 'pl-ok))
     (let ((path (and *pcl-runtime-directory*
                      (merge-pathnames "pcl-test.lisp" *pcl-runtime-directory*))))
       (when (and path (probe-file path))
-        (load path))))
+        (%p-load-extension-file "pcl-test" path))))
   (setf *pcl-test-lib-loaded* t
         *p-test-builder-used* t))
 

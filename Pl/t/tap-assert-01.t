@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 43;
+plan tests => 44;
 
 sub run_cl {
     my ($code) = @_;
@@ -665,4 +665,34 @@ SKIP: {
   is(run_cl(q{use Test::More; use Test::Warnings; ok(1); done_testing;
 }), "ok 1\nok 2 - no (unexpected) warnings (via done_testing)\n1..2\n",
      'the installed Test::Warnings: its done_testing row and plan, as perl (#3823)');
+}
+# 44. The TAP layer loads through the EXTENSION FASL CACHE (task #4962): built
+# once per content + runtime identity, a fasl hit after that, the text with
+# PCL_NO_FASL_CACHE=1 -- and the same TAP all three ways.  (Before: `load` of
+# the text in every program that said `use Test::More`, no extension line.)
+{
+  require File::Temp;
+  my $cache = File::Temp::tempdir(CLEANUP => 1);
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $fh qq{use Test::More tests => 2;\nok(1, "a");\nis(2, 2, "b");\n};
+  close $fh;
+  my $cl_code = `$pl2cl $pl_file 2>/dev/null`;
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+  print $cl_fh $cl_code;
+  close $cl_fh;
+  my $run = sub {
+    my ($no_fasl) = @_;
+    local $ENV{PCL_CACHE_DIR}  = $cache;
+    local $ENV{PCL_FASL_DEBUG} = 1;
+    local $ENV{PCL_NO_FASL_CACHE};
+    $ENV{PCL_NO_FASL_CACHE} = 1 if $no_fasl;
+    my $o = `sbcl @sbcl_rt --load $cl_file 2>&1`;
+    my ($how) = $o =~ /extension pcl-test -> (fasl-build|FASL HIT|TEXT)/;
+    my $tap = join '', grep { /^(?:ok|not ok|1\.\.)/ } split /^/, $o;
+    return ($how // 'no extension line', $tap);
+  };
+  my @r = ($run->(0), $run->(0), $run->(1));
+  is(join('|', @r[0, 2, 4]) . '|' . ($r[1] eq $r[3] && $r[3] eq $r[5] ? 'same' : 'DIFF') . "|$r[1]",
+     "fasl-build|FASL HIT|TEXT|same|1..2\nok 1 - a\nok 2 - b\n",
+     'the TAP layer: built, then a fasl hit, the text under PCL_NO_FASL_CACHE; same TAP (#4962)');
 }
