@@ -247,7 +247,7 @@ sub select_work {
             : $dname =~ m{/}  ? "$root/$dname" : "$ENV{HOME}/.cpan/build/$dname";
     -d "$dir/t" or die "board-timing.pl: no dist directory $dir\n";
     my $base = basename($dir);
-    next if @want_dist && !grep { index($base, $_) == 0 } @want_dist;
+    next if @want_dist && !grep { $base =~ /^\Q$_\E(?:-v?\d|$)/ } @want_dist;   # NAME or NAME-VERSION, never Data-Dump for Data-Dumper
     my ($ndl, @inc) = (0);
     for my $fl (split ' ', $flags // '') {
       if    ($fl eq '--no-dist-lib') { $ndl = 1 }
