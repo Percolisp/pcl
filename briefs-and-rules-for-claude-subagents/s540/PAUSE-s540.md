@@ -76,3 +76,6 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s540/resume-s540.md`,
 * MEMBER 2 = #4866 (module-mode `local $h{K} = V` on a file-level `my %h`): find the cause (the cell's identity across compile-file and load), fix it there.
 * IDs 5001-5019; v2-14500.  Acceptance: Path-Tiny input_output x3 to their plans (ten runs each), the `ulimit -n 1024` loop, Try-Tiny finally.t rows 17 18 23.
 * CI GREEN on `67b56704` (the s537b merge); the s538a merge `2fee42cd` is running.
+
+## 16:3x -- ALL THREE AGENTS WERE CUT by the account's usage limit (~14:5x .. 16:0x; it reset 16:30) and RESUMED BY MESSAGE: s540a (its coarse driver had kept running chunks without it: told to check which chunk logs have END lines before relaunching anything), s539d (`sweep.log` END rc=1 = its sweep's gate FAILED -- told to read it first; its acceptance leg has held slot 3 since 16:06), s540b (checkpoint 15:50; legs 1-3 done, 4 5 6 owed, task drafts not yet in the store).  Main did not move meanwhile (code `05806e16`).  CI GREEN on `2fee42cd` (the s538a merge) and `e784c184`.
+* A usage-limit cut loses nothing that is on disk, but a leg driver that keeps queueing chunks runs unattended: the resume message names what ran.

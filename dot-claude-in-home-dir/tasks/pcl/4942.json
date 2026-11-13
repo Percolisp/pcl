@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FOUND by s539d (#233 item 4 probes); PRE-EXISTING on main 05806e16 (probed on the extraction), unchanged by s539d.\n\n    my $q = eval \"die 'zz'\"; print \"h $@\";\n\n    perl:  h zz at (eval 1) line 1.\n    PCL:   h zz at - line 1.\n\nAn explicit die/warn carries `:loc \"FILE line N\"` built at compile time (Pl/ExprToCL.pm, the p-die/p-warn branch; ir-spec 6.3b).  In EVAL MODE the compile-time file is the environment's source_file (\"-\"), while perl names the eval `(eval N)`, a number known only at run time.  p-eval already sets *p-src-file-id* to -N for the evaluation in EVERY build (not gated on line-track), so the cheap shape is an eval-mode :loc that names the register's file at run time (%p-src-file-name) -- zero cost outside evals.  A `# line N \"FILE\"` directive inside the eval text already wins (s539d: the constant then names the directive's file).",
+   "id" : "4942",
+   "status" : "pending",
+   "subject" : "an explicit die inside a string eval reports `at - line N.` where perl reports `at (eval N) line N.` -- the :loc constant names the compile-time file, and an eval has none"
+}

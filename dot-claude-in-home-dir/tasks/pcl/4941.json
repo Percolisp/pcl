@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FOUND by s539d (#233) while probing caller(); PRE-EXISTING on main 05806e16 (probed on the extraction), unchanged by s539d.  SILENT WRONG (a diagnostic, and the target package of a caller-driven import).\n\n    sub show { join \"|\", @_ }\n    sub f11 { my @c = caller(0); print show(@c[0..3]), \"\\n\" }\n    my $obj = bless {}, 'K'; sub K::m { main::f11() } $obj->m;\n\n    perl:  main|p.pl|3|main::f11\n    PCL:   k|...|main::f11\n\nTWO faces, ONE place: p-sub's per-sub constant %%home-pkg = (pcl-pkg-perl-name (symbol-package local-sym)), the package of the sub's NAME symbol.  (1) perl's code inside `sub K::m {...}` runs in the package it was COMPILED in (CopSTASH = main), not the package the name is installed in; (2) the CL package of a single-segment Perl package that no `package K;` statement ever named reads through :invert as \"k\", and *pcl-pkg-name-map* has no entry for it, so the case is lost too.  Fix shape: the emitter knows the compiling package of every `sub NAME` and could hand it to p-sub (a FACT, only on a QUALIFIED sub name, so a few bytes per such sub) -- measure.  Probe: s539d scratch pr/p1.pl row J.",
+   "id" : "4941",
+   "status" : "pending",
+   "subject" : "caller inside `sub K::m {...}` written in package main reports package \"k\" (the lower-cased package of the NAME) where perl reports the compiling package \"main\""
+}
