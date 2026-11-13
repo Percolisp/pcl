@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s539d (2026-11-13, Opus, EDITED BY HAND): caller.t 27/84 -> 32/79 -- five rows pass: "anonymous subroutine name" + "hasargs true with anon sub" (caller(0) inside an anonymous sub that reads caller is a frame, #233 item 3), "hasargs true with callf()" + both "hasargs true with deleted sub" (caller(N) answers eleven fields, #233 item 2); the second instances of the first two stay failing (caller(1) through an anonymous sub that does NOT read caller: not a frame, the measured residue)
 # s538b (2026-11-13, Opus, EDITED BY HAND): ref.t 204/11 -> 206/9 -- the two global-destruction rows "DESTROY called on array elem" / "DESTROY called on closure variable" pass: #2371 (DESTROY at program exit).  Sweep on the tree (rebased onto a435a391, code 53dd73da): TOTAL 18,796 -> 18,798, GATE clean; ref.t stays PARTIAL (ran 242 of 245, the same stop).
 # s537a (2026-11-12, Opus, EDITED BY HAND): tr.t 241/3 -> 242/2 -- "    doesn't stringify its argument" passes: #1493 fixed by #4264 (an IDENTICAL tr never writes its target); one-file run base 23f0f917 vs tree 312/3 -> 313/2.  loopctl.t stays 64 (s537a's own regression of it, [perl #73618], fixed forward before the merge).
 # s536e (2026-11-08, Opus, EDITED BY HAND): each.t 49/2 -> 51/0 -- rows 64 65 (each / values in list assignment) pass: #1027 = #4547, the file `my $a` across the `package Single` block section split (s536e `_own_name_cell_ok`).  TOTAL 18,784 -> 18,786.
@@ -466,7 +467,7 @@ bless.t	OK	106	0	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
 bop.t	PARTIAL	496	13	510
-caller.t	OK	27	84	112
+caller.t	OK	32	79	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
 chop.t	OK	144	0	148
