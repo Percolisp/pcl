@@ -230,7 +230,10 @@ sub select_work {
     chomp;
     next if /^\s*(#|$)/;
     my ($dname, $flags) = split /\t/;
-    my $dir = $dname =~ m{/} ? "$root/$dname" : "$ENV{HOME}/.cpan/build/$dname";
+    # cpan-board.sh's rule (a path with a `/` is under the tree, a bare name
+    # under ~/.cpan/build), plus an absolute path as itself (tools/t's fixture).
+    my $dir = $dname =~ m{^/} ? $dname
+            : $dname =~ m{/}  ? "$root/$dname" : "$ENV{HOME}/.cpan/build/$dname";
     -d "$dir/t" or die "board-timing.pl: no dist directory $dir\n";
     my $base = basename($dir);
     next if @want_dist && !grep { index($base, $_) == 0 } @want_dist;
