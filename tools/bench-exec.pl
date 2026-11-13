@@ -218,6 +218,10 @@ my @benches = (
   # stream call, which is what a representation change moves.
   ['fhprint',   "$HN my \$f = (\$ENV{TMPDIR}||'/tmp') . \"/pcl-bench-fhprint.\$\$\"; open(my \$fh, '>', \$f) or die; for (1..\$n) { print {\$fh} \"x\\n\" } close(\$fh); my \$sz = -s \$f; unlink \$f; print \"\$sz\\n\";", 2_000_000, 0],
   ['fhread',    "$HN my \$f = (\$ENV{TMPDIR}||'/tmp') . \"/pcl-bench-fhread.\$\$\"; open(my \$w, '>', \$f) or die; print {\$w} \"line\\n\" for 1..2000; close(\$w); my \$s=0; for (1..\$n) { open(my \$fh, '<', \$f) or die; while (defined(my \$l = readline(\$fh))) { \$s += length(\$l) } close(\$fh) } unlink \$f; print \"\$s\\n\";", 300, 0],
+  # s540c (#2006 PART 2): an OPEN per iteration -- open, read one line, drop
+  # (the block's exit closes it).  What the collector adds to every open: the
+  # finalizer that replaces SBCL's own, cancelled again by the close.
+  ['fhopen',    "$HN my \$f = (\$ENV{TMPDIR}||'/tmp') . \"/pcl-bench-fhopen.\$\$\"; open(my \$w, '>', \$f) or die; print {\$w} \"line\\n\" for 1..3; close(\$w); my \$s=0; for (1..\$n) { open(my \$fh, '<', \$f) or die; my \$l = <\$fh>; \$s += length(\$l) } unlink \$f; print \"\$s\\n\";", 100_000, 0],
   # #883: the SAME read-only foreach over a MULTI-array list.  `for my $x
   # (@a, @b)` lowers to p-foreach-raw over (p-flatten-args (list @a @b)), and
   # the flattener promotes every source slot as it builds the flattened

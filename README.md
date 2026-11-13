@@ -286,7 +286,13 @@ The [IR manual](docs/ir-spec.md) documents every form.
   guard object. So temporary files are removed and buffered compressors
   flushed at exit, but do not rely on a destructor running at a given
   moment (scope guards for locks, restoring state at the end of a block),
-  and close your filehandles explicitly.
+  and close your filehandles explicitly.  A filehandle that leaves the block
+  that opened it (returned, passed to a sub, stored) is closed when the
+  garbage collector finds nothing holding it, or at exit: a lock it held is
+  released before the program can wait on its own lock, and running out of
+  descriptors collects first, but a file written through it can still be
+  short when the same program reads it back (12 of the 57 rows of
+  Path::Tiny's `input_output.t`).
 * **Regex code blocks** `(?{ })` are removed from the pattern with a
   warning at compile time. The match runs without them.
 * **`format`/`write`**, **perl 5.38 `class`/`field`/`method`** and

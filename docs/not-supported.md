@@ -165,7 +165,7 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Objects and OO
 
 * [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
-* [A filehandle that ESCAPES its block is closed at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-at-exit-not-at-its-last-reference) — owner #2006 PART 2
+* [A filehandle that ESCAPES its block is closed by the collector or at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-by-the-collector-or-at-exit-not-at-its-last-reference) — owner #2006 (the moment), #5003
 * [Perl 5.38 `class` / `field` / `method` syntax — DEFERRED](#perl-538-class--field--method-syntax--deferred--future-version)
 * [Indirect object syntax with a SCALAR invocant — MAYBE LATER](#indirect-object-syntax-with-a-scalar-invocant-method-obj-list--maybe-later--user-decision-s425)
 * [`tie` on a filehandle — announced, not silent](#tie-on-a-filehandle--announced-not-silent-scalar-array-and-hash-tie-work)
@@ -2445,32 +2445,50 @@ counted; a row asserted inside a `DESTROY` fired by a last-reference overwrite (
 ---
 
 <a id="ns-escaping-filehandle"></a>
-## A filehandle that ESCAPES its block is closed at exit, not at its last reference
+## A filehandle that ESCAPES its block is closed by the collector or at exit, not at its last reference
 
 **Perl behaviour:** a lexical handle is freed — closed and flushed — when its
 last reference goes: for `open(my $fh, …)` in a block that is the block's
 exit; for a handle passed to a helper, stored, returned or captured by a
 closure it is whenever the LAST holder lets go.
 
-**PCL behaviour (task #2006 (b), s494h):** a handle that does NOT escape its
-block is closed at the block's exit exactly as perl does (normal exit,
-`return`, `next`/`last`, a die unwinding through it; a condition-`my` handle
-at the ENCLOSING block's exit; `undef $fh` / `$fh = undef` right there) —
-`docs/ir-spec.md` §6.5.  A filehandle that ESCAPES the block that opened it —
-passed to a sub, stored, returned, captured, `select`ed, a method called on
-it, or declared in a region with a string eval — is closed when the program
-exits, not at its last reference.  Close it explicitly when another step of
-the same program reads the file.  A `flock` taken through such a handle is
-held until the handle closes, so a later BLOCKING `flock` on the same file
-from the same program waits for itself forever: a sub that opens, locks and
-RETURNS the handle, and a caller that reads it and lets it go (Path::Tiny's
-`slurp`, then a locked `append` / `spew` -- its `t/input_output*.t` hang
-there, s538a).  A file-level `open(my $fh, …)` is closed
-at exit, which is also perl's answer for a file-scope lexical.  No data is
-lost either way: every open handle is flushed at exit.
+**PCL behaviour (task #2006 (b), s494h; PART 2, s540c):** a handle that does
+NOT escape its block is closed at the block's exit exactly as perl does
+(normal exit, `return`, `next`/`last`, a die unwinding through it; a
+condition-`my` handle at the ENCLOSING block's exit; `undef $fh` /
+`$fh = undef` right there) — `docs/ir-spec.md` §6.5.  A filehandle that
+ESCAPES the block that opened it — passed to a sub, stored, returned,
+captured, `select`ed, a method called on it — is closed when the GARBAGE
+COLLECTOR finds it unreachable, or at exit (§6.5b).  Two places force that
+collection: a `flock` that would block on a file this program has locked
+before (Path::Tiny's `slurp`, then a locked `append` — its
+`t/input_output*.t` hung there until s540c), and an opener out of
+descriptors (a loop over more files than `ulimit -n`).  What stays different
+from perl, measured s540c:
+* **the MOMENT**: perl closes at the last reference, PCL at the next
+  collection.  A file written through a dropped handle and read back by the
+  same program before any collection is SHORTER (Path-Tiny
+  `input_output*.t`'s 12 `openw`/`opena` -> `openr` rows; a
+  `{ my $fh = $f->openw; print $fh ...; }` block followed by a read).  Close
+  it explicitly when another step reads the file.  No byte is lost: a
+  collected handle's buffer is written by its finalizer, and everything left
+  is flushed at exit;
+* a READ-WRITE handle (`+<`, `+>`, `+>>`) the collector reaches before exit
+  loses its unflushed writes (task #5003: SBCL's read-write buffer state
+  cannot be read once the stream is gone);
+* a PIPE handle with a child (`open my $p, "-|", …`) is not collected: the
+  child is reaped at `close` or exit (perl reaps it at the drop);
+* a GLOB handle (`Symbol::gensym`, `IO::File->new`, or any handle a `*$fh`
+  dereference made a glob for) is named in the handle table, so it stays open
+  until exit;
+* `$.` keeps a dropped last-read handle's count until a forced collection
+  (perl: undef as soon as the handle is freed);
+* the collector is CONSERVATIVE: a stale word on a stack can keep a dropped
+  handle alive through a collection, and then the old behaviour holds (the
+  lock is kept, the descriptor stays used).
 
-**Owner:** #2006 PART 2 (a finalizer on the handle object holding the stream,
-plus an EMFILE retry) — designed, not built.
+**Owner:** #2006 (the moment: refcount semantics are #2370's, parked);
+#5003 (read-write buffers).
 
 ---
 

@@ -3894,6 +3894,53 @@ block binds and the construct's own `let` stores into:
     (p-print :fh $o "x")))
 ```
 
+### 6.5b An ESCAPING handle: the collector closes what nothing reaches (normative, s540c, task #2006 PART 2)
+
+A handle that escapes its block (returned, passed to a callee, stored, captured)
+is not closed by §6.5.  The runtime closes it when the garbage collector finds
+its stream unreachable: every descriptor stream an opener installs (`open`,
+`sysopen`, a `&` dup, both ends of `pipe`, a binmode rebuild — the one
+registration is `%p-install-fh`) carries a finalizer that writes out
+what an OUTPUT-ONLY stream's buffer still holds and closes the descriptor —
+which releases a `flock` held through it.  It touches no perl state (`$!`,
+`$?`), runs no perl code, and never signals (a failed close is one `PCL:`
+line on stderr).  Never finalized: the standard handles, an fdopen (`<&=N`,
+`>&=FH`: another opener's descriptor), a fork-pipe's parent end (its child is
+reaped by `close`), a socket object, an in-memory handle.  An explicit `close`
+cancels the finalizer, so nothing is closed twice.
+
+**What is promised is the RESULT at two points, not a moment.**  A collection
+happens when SBCL decides; the runtime forces one only where the program would
+otherwise fail or block on a handle it dropped, and then tries once more:
+
+* a `flock` lock request is tried with `LOCK_NB` first; on EWOULDBLOCK, when
+  this process has locked the same file (device and inode) before or the
+  collector has finalizers queued, the collector runs and the program's own
+  call follows (blocking or not, as written).  A file only another process
+  locks costs one `fstat`, never a collection;
+* an opener (`open`, `sysopen`, a dup, `pipe`, `opendir`, `socket`,
+  `accept`) failing with EMFILE or ENFILE collects and retries once.
+
+The trigger's collection runs with SBCL's finalizer thread STOPPED (its own
+conservatively scanned stack held a dropped stream alive) and runs the queued
+finalizers itself before it returns, with the three runtime tables that hold a
+read stream (`$.`'s last-read handle, the line counters, the end-of-file
+marks) weakened for its length — so after a trigger `$.` of a dropped
+last-read handle reads undef, as in perl.  The exit hook and every
+`PerlIO_flush(NULL)` site (before fork, `system`, `exec`, backticks, a pipe
+open) run any finalizer still queued, so a dropped handle's bytes reach the
+file before a child starts and are written once.  Bytes of a dropped write
+handle are otherwise in the file "at the next collection or at exit" — never
+lost, and never at the drop (perl's moment).
+
+```perl
+sub fh { open my $fh, "<", $f or die; flock($fh, LOCK_SH) or die; return $fh }
+sub slurp { my $fh = fh(); local $/; return scalar <$fh> }
+slurp();
+open my $o, ">>", $f or die;
+flock($o, LOCK_EX);        # perl: the slurp handle is gone; PCL: collected here
+```
+
 ## 7. Packages, variables, and OO
 
 ### 7.1 Namespaces and case
