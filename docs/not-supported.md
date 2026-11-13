@@ -2410,7 +2410,9 @@ CPAN board IO-Compress `104destroy-*.t` (the compressor is checked right after i
 Try-Tiny `finally.t` rows 10–12 (the `finally` blocks run at exit, after the row that counts
 their warnings), Path-Tiny `temp.t`, YAML-PP `49.include.t`, Log-Log4perl `016Export.t`,
 Template-Toolkit `leak.t`.  NOW PASSING (s538b): ref.t "DESTROY called on array elem" /
-"on closure variable" (global destruction proper), Try-Tiny `context.t` (whole).
+"on closure variable" (global destruction proper); Try-Tiny `context.t` and `finally.t` now run
+all their rows (`context.t` passes all 25), but both still exit with Test::More's count
+taken in its `END` block, before the `finally` blocks ran at exit.
 
 **Rows MISSING, not failing, when the assertion is inside a destructor.**  A destructor that
 runs at exit can produce its row after the plan's other rows, or after the harness has
