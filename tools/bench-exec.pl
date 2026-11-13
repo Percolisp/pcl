@@ -127,6 +127,10 @@ my @benches = (
   # nothing else in it — no recursion depth, no method dispatch.  3M calls
   # puts perl at ~0.9 s, well above the ~1 s constant term's spread.
   ['subret',    "$HN sub add1 { my \$x = shift; return \$x + 1 } my \$s=0; for my \$i (1..\$n) { \$s += add1(\$i) } print \"\$s\\n\";", 3_000_000, 0],
+  # The same protocol behind an ANONYMOUS sub called through a code ref
+  # (s539d, #233): the anon wrapper's frame is the one `caller` inside a
+  # closure reads, so its per-call cost is measured on its own row.
+  ['anoncall',  "$HN my \$f = sub { \$_[0] + 1 }; my \$s=0; \$s = \$f->(\$s) for 1 .. \$n; print \"\$s\\n\";", 3_000_000, 0],
   # The same protocol behind a METHOD call, which is ~15x a plain call
   # (section 7 of docs/faster-codegen-suggestions.md) — so N is smaller and
   # the return's share of the row is correspondingly smaller.  That contrast
@@ -454,6 +458,18 @@ if (defined $RT_B && $RT_B =~ m{\A(.*)/cl/pcl-runtime\.lisp\z} && -x "$1/pl2cl")
   $PL2CL_B = "$1/pl2cl";
 }
 
+# WHOLE-TREE A/B (s539d).  BENCH_EMIT_B=1 makes B TRANSPILE with its own tree's
+# pl2cl (found as above) instead of running A's emission on B's runtime, so a
+# change that moves BOTH the emission and the runtime -- a new frame shape
+# whose macro and whose emitted wrapper change together -- is timed end to
+# end: A = this tree, B = the other tree, still interleaved on one box.
+# BENCH_OPT_A / BENCH_OPT_B set PCL_OPT for that side's transpile (the cost of
+# a Kind-A gate, e.g. BENCH_RT_B=<this tree's runtime> BENCH_OPT_B=line-track).
+my $EMIT_B = $ENV{BENCH_EMIT_B};
+die "bench-exec: BENCH_EMIT_B needs BENCH_RT_B=<tree>/cl/pcl-runtime.lisp beside an executable <tree>/pl2cl\n"
+  if $EMIT_B && !defined $PL2CL_B;
+sub opt_env { my ($v) = @_; defined $v ? "PCL_OPT='$v' " : '' }
+
 # INTERLEAVED best-of-K over several (command, N) series at once.  Every series
 # gets its round-r sample before any series gets its round-(r+1) sample, so a
 # drift in machine load during the row — a sibling agent starting a sweep — hits
@@ -490,6 +506,9 @@ sub run_out {
 
 printf "PCL v2 vs Perl — execution time (startup subtracted), best-of-%d\n", $K;
 printf "runtime B: %s\n", $RT_B if defined $RT_B;
+printf "emission B: %s\n", $PL2CL_B if $EMIT_B;
+printf "PCL_OPT A: %s\n", $ENV{BENCH_OPT_A} if defined $ENV{BENCH_OPT_A};
+printf "PCL_OPT B: %s\n", $ENV{BENCH_OPT_B} if defined $ENV{BENCH_OPT_B};
 print "\n";
 if (defined $RT_B) {
   printf "%-11s %10s %10s %10s %9s %9s\n",
@@ -512,10 +531,16 @@ for my $b (@benches) {
 
   my ($lfh, $lfile) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
   close $lfh;
-  system("$PL2CL $pfile > $lfile 2>/dev/null");
+  system(opt_env($ENV{BENCH_OPT_A}) . "$PL2CL $pfile > $lfile 2>/dev/null");
   my $pcl_cmd = "$SBCL --load $lfile";
   my $lfile_b = $lfile;
-  if (defined $PL2CL_B) {
+  if ($EMIT_B || defined $ENV{BENCH_OPT_B}) {
+    (my $bfh, $lfile_b) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    close $bfh;
+    my $b_pl2cl = $EMIT_B ? $PL2CL_B : $PL2CL;
+    system(opt_env($ENV{BENCH_OPT_B}) . "$b_pl2cl $pfile > $lfile_b 2>/dev/null");
+  }
+  elsif (defined $PL2CL_B) {
     open my $in, '<', $lfile or die "bench-exec: $lfile: $!";
     my $text = do { local $/; <$in> };
     close $in;

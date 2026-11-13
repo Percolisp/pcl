@@ -384,10 +384,10 @@
    #:p-list-ctx #:p-scalar-ctx #:p-void-ctx #:p-caller-ctx
    #:p-sort-cmp
    #:*pcl-caller-wantarray*
-   ;; Call depth tracking (for p-caller at top level)
+   ;; Call depth = the current frame of the call-frame stack caller() reads (s539d)
    #:*pcl-sub-call-depth*
-   ;; Current/caller package tracking (for caller() package, __PACKAGE__-at-runtime)
-   #:*pcl-current-package* #:*pcl-caller-pkg-stack* #:*pcl-caller-subname-stack*
+   ;; Current package tracking (for caller() package, __PACKAGE__-at-runtime)
+   #:*pcl-current-package*
    #:p-set-current-package #:p-register-pkg-name
    ;; END blocks
    #:*end-blocks* #:*unitcheck-blocks* #:*check-blocks* #:*init-blocks*
@@ -497,9 +497,12 @@
 ;;; package variables are defined as they are parsed, allowing BEGIN
 ;;; blocks to call subs defined before them in source order.
 
-;;; Tracks how many PCL user subs deep we are (0 = top level).
-;;; Used by p-caller to distinguish "called from a sub" vs "top level".
+;;; How many sub frames deep we are (0 = top level): the index of the
+;;; current frame in the call-frame stack caller() reads (*p-frames*, the
+;;; "CALL-FRAME STACK" section beside the location registers).  Bound by
+;;; every sub frame (p-frame-bind), named or anonymous.
 (defvar *pcl-sub-call-depth* 0)
+(declaim (type fixnum *pcl-sub-call-depth*))
 
 ;;; Original-case Perl package name of the lexically-current code.  PCL upcases
 ;;; single-segment package names into CL packages (Foo -> CL package "FOO"), so
@@ -508,16 +511,23 @@
 ;;; p-sub rebinds it per call to the sub's own package.  Read by p-caller.
 (defvar *pcl-current-package* "main")
 
-;;; Stack of caller packages.  At each p-sub entry the caller's
-;;; *pcl-current-package* is pushed; p-caller(N) reads (nth N ...) for the
-;;; package from which the Nth frame's sub was called.
-(defvar *pcl-caller-pkg-stack* nil)
-
-;;; Parallel stack of the entered sub's fully-qualified Perl name ("Pkg::name").
-;;; p-caller(N) reads (nth N ...) for (caller(N))[3].  SBCL can't name our subs —
-;;; they are anonymous lambdas installed via (setf (symbol-function ...)) — so the
-;;; name is recorded here at p-sub entry instead of recovered from the backtrace.
-(defvar *pcl-caller-subname-stack* nil)
+;;; THE CALLER'S PACKAGE AND THE SUB'S NAME per frame live in the call-frame
+;;; stack (s539d): p-frame-bind stores *pcl-current-package* (the CALLER's,
+;;; before the frame rebinds it) and the sub's name into the frame's slots.
+;;; They used to be two consed stacks, *pcl-caller-pkg-stack* and
+;;; *pcl-caller-subname-stack*, pushed by two dynamic bindings per call.
+(defmacro p-frame-bind ((sub) &body body)
+  "Run BODY as call frame *pcl-sub-call-depth* + 1, whose sub is SUB -- the
+   ONE prologue a named sub (p-sub) and an anonymous one (p-anon-sub)
+   share.  It binds the depth FIRST and then fills the frame's slots
+   (%p-frame-enter), both BEFORE BODY's own bindings change
+   *pcl-current-package*: slot 0 is the CALLER's package."
+  (let ((d (gensym "DEPTH")))
+    `(let* ((,d (1+ *pcl-sub-call-depth*))
+            (*pcl-sub-call-depth* ,d))
+       (declare (fixnum ,d))
+       (%p-frame-enter ,d *pcl-current-package* ,sub *wantarray*)
+       ,@body)))
 
 ;;; Maps a CL package-name string (e.g. "FOO") to the original-case Perl name
 ;;; (e.g. "Foo").  Populated by p-set-current-package as `package` statements run.
@@ -572,7 +582,7 @@
 (defun %p-sub-perl-name (name)
   "Fully-qualified Perl name 'Pkg::subname' for a PCL sub symbol (Pkg::PL-SUBNAME).
    Strips the runtime's PL- prefix and uses the package's original-case Perl name.
-   Recorded on *pcl-caller-subname-stack* at p-sub entry for (caller(N))[3]."
+   Stored in each call frame of p-sub for (caller(N))[3]."
   (if (and name (symbolp name))
       (concatenate 'string (pcl-pkg-perl-name (symbol-package name)) "::"
                    (or (%p-sub-bare-name name) (symbol-name name)))
@@ -1416,15 +1426,11 @@
              (setf (symbol-function local-sym)
                    (lambda ,params
                      ,@decls
-                     (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
-                                                          *pcl-caller-pkg-stack*))
-                            (*pcl-caller-subname-stack* (cons %%perl-name
-                                                              *pcl-caller-subname-stack*))
-                            (*pcl-current-package* %%home-pkg)
-                            (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
-                            (*pcl-caller-wantarray* *wantarray*))
-                       (p-sub-frame
-                        ,@body))))
+                     (p-frame-bind (%%perl-name)
+                                   (let ((*pcl-current-package* %%home-pkg)
+                                         (*pcl-caller-wantarray* *wantarray*))
+                                     (p-sub-frame
+                                      ,@body)))))
              (%p-record-sub-name (symbol-function local-sym) %%perl-name)
              ,@register
              ,@(when attrs
@@ -18269,8 +18275,10 @@ what changes is that the element is the raw counter rather than a fresh box."
    of the goto-ing sub, not the goto-ing sub itself (Perl semantics — e.g.
    Moo::Role::import does `goto &Role::Tiny::import` and Role::Tiny relies on
    `caller` reporting the original `use`r's package).  So pop the goto-ing sub's
-   frame and restore *pcl-current-package* to its caller before applying FN;
-   FN's own p-sub prologue then pushes that caller as FN's calling frame.
+   frame -- the depth goes one down, *pcl-current-package* and the location
+   registers go back to what that frame recorded of its call -- before
+   applying FN; FN's own frame prologue then records the ORIGINAL call (its
+   package and its call site) in the very slots the goto-ing frame held.
 
    The TARGET expression is evaluated FIRST, in the CURRENT (un-popped) frame:
    `goto &{EXPR}` runs EXPR before the frame is replaced, so Exporter's
@@ -18282,19 +18290,16 @@ what changes is that the element is the raw counter rather than a fresh box."
    the target inherits the ORIGINAL caller's context — `sub f { goto &g }` in
    list context must run g in list context (s329 review; same restore p-return
    does for its argument)."
-  (let ((target (gensym "GOTO-TARGET")))
-    `(let ((,target ,fn))
+  (let ((target (gensym "GOTO-TARGET"))
+        (d (gensym "DEPTH")))
+    `(let ((,target ,fn)
+           (,d *pcl-sub-call-depth*))
        (throw :p-return
          (let ((*wantarray* *pcl-caller-wantarray*)
                (*pcl-current-package*
-                (if *pcl-caller-pkg-stack*
-                    (car *pcl-caller-pkg-stack*) *pcl-current-package*))
-               (*pcl-caller-pkg-stack*
-                (if *pcl-caller-pkg-stack*
-                    (cdr *pcl-caller-pkg-stack*) *pcl-caller-pkg-stack*))
-               (*pcl-caller-subname-stack*
-                (if *pcl-caller-subname-stack*
-                    (cdr *pcl-caller-subname-stack*) *pcl-caller-subname-stack*)))
+                (if (plusp ,d) (%p-frame-slot ,d 0) *pcl-current-package*))
+               (*pcl-sub-call-depth* (if (plusp ,d) (1- ,d) 0)))
+           (when (plusp ,d) (%p-loc-unpack (%p-frame-slot ,d 2)))
            ;; This frame's @_ is a `&name;' caller's very array (p-amp-call
            ;; adopted it, so it is EQ to the sole argument): hand THAT array
            ;; on, shared, so the target's shift reaches the caller (#2632).
@@ -18816,15 +18821,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (and (plusp *p-src-line*)
        (format nil "~A line ~D" (%p-src-file-name) *p-src-line*)))
 
-(defun %p-src-file-name ()
-  "The name the current file id denotes.  A NEGATIVE id is perl's `(eval N)`:
+(defun %p-src-file-name (&optional (id *p-src-file-id*))
+  "The name file id ID (default: the current one) denotes.  A NEGATIVE id is
+   perl's `(eval N)`:
    a string eval has no file, and giving it an entry in the table would grow
    that table once per eval EXECUTION (an eval in a loop is unbounded), so the
    eval's sequence number rides in the id itself.  It is a fixnum either way,
    which is what lets p-loc-save save and restore it for nothing."
-  (cond ((minusp *p-src-file-id*) (format nil "(eval ~D)" (- *p-src-file-id*)))
-        ((< *p-src-file-id* (fill-pointer *p-src-files*))
-         (aref *p-src-files* *p-src-file-id*))
+  (declare (fixnum id))
+  (cond ((minusp id) (format nil "(eval ~D)" (- id)))
+        ((< id (fill-pointer *p-src-files*))
+         (aref *p-src-files* id))
         (t "-")))
 
 (defmacro p-loc-save (&body body)
@@ -18842,6 +18849,117 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (multiple-value-prog1 (progn ,@body)
          (unless (and (= ,l *p-src-line*) (= ,f *p-src-file-id*))
            (setq *p-src-file-id* ,f *p-src-line* ,l))))))
+
+;;; ============================================================
+;;; THE CALL-FRAME STACK (s539d, task #233) — what caller() reads
+;;; ============================================================
+;;; perl keeps one context-stack entry per sub call (the CV, gimme, and
+;;; blk_oldcop = PL_curcop at the call) and caller(N) reads the Nth one down.
+;;; PCL's entry is FOUR slots of ONE preallocated simple-vector, indexed by
+;;; the call depth every sub frame binds (*pcl-sub-call-depth*): frame D's
+;;; slots are 4D .. 4D+3 (D >= 1; depth 0 is the top level, which has none).
+;;;
+;;;   +0  the CALLER's package: *pcl-current-package* at the call (a string)
+;;;   +1  the frame's SUB: the qualified name of a named sub (a string), or
+;;;       the FUNCTION of an anonymous one -- its name can change after the
+;;;       call (Sub::Util::set_subname), so it is read at caller() time
+;;;   +2  the CALL SITE: the two location registers above, packed into one
+;;;       fixnum (%p-loc-pack); its line is 0 when nothing was recorded
+;;;   +3  the frame's CONTEXT: *wantarray* at the call (T / NIL / :VOID)
+;;;
+;;; A STORE into a slot replaces what used to be two conses and two dynamic
+;;; bindings per call (*pcl-caller-pkg-stack* / *pcl-caller-subname-stack*,
+;;; read with `nth`).  The slots above the current depth are dead: a
+;;; non-local exit unwinds the depth binding and nothing reads above it.  ONE
+;;; vector, not one per thread, because perl code runs only on the main
+;;; thread -- the signal relay thread INTERRUPTS main to run a handler, which
+;;; then pushes its own frame one above whatever main had bound.  So a frame
+;;; binds its depth FIRST and stores after: an interrupt between the two
+;;; writes one slot higher, never into the slots being filled.
+(sb-ext:defglobal *p-frames* (make-array 256 :initial-element 0))
+(declaim (type simple-vector *p-frames*))
+
+(declaim (inline %p-loc-pack))
+(defun %p-loc-pack ()
+  "The two location registers as ONE fixnum: file id above bit 32 (a
+   negative id is a string eval's `(eval N)`), line in the low 32 bits."
+  (logior (ash *p-src-file-id* 32) (logand *p-src-line* #xFFFFFFFF)))
+
+(defun %p-frames-grow (top)
+  "Make *p-frames* hold slot TOP: double it (the old slots are copied, so a
+   deep recursion keeps every frame below it)."
+  (declare (fixnum top))
+  (let* ((old *p-frames*)
+         (new (make-array (max (* 2 (length old)) (+ top 4)) :initial-element 0)))
+    (replace new old)
+    (setf *p-frames* new)))
+
+(declaim (inline %p-frame-enter))
+(defun %p-frame-enter (depth caller-pkg sub ctx)
+  "Fill frame DEPTH's four slots (the header above).  Called by every sub
+   frame right after it has bound *pcl-sub-call-depth* to DEPTH."
+  (declare (fixnum depth))
+  (let ((i (ash depth 2)))
+    (declare (fixnum i))
+    (let ((v (if (< (+ i 3) (length *p-frames*)) *p-frames* (%p-frames-grow (+ i 3)))))
+      (declare (simple-vector v))
+      (setf (svref v i) caller-pkg
+            (svref v (+ i 1)) sub
+            (svref v (+ i 2)) (%p-loc-pack)
+            (svref v (+ i 3)) ctx))
+    nil))
+
+(declaim (inline %p-frame-slot))
+(defun %p-frame-slot (depth slot)
+  "Slot SLOT (0..3) of call frame DEPTH."
+  (declare (fixnum depth slot))
+  (svref *p-frames* (+ (ash depth 2) slot)))
+
+(defun %p-loc-unpack (loc)
+  "Set the two location registers from LOC, a %p-loc-pack value."
+  (declare (fixnum loc))
+  (setq *p-src-file-id* (ash loc -32)
+        *p-src-line* (logand loc #xFFFFFFFF))
+  nil)
+
+(defun %p-frame-location (depth)
+  "Frame DEPTH's CALL SITE as (values FILE LINE): the location registers as
+   they stood when the call was made.  A frame whose call recorded no line
+   -- every frame of a program compiled without `line-track', which writes
+   no register -- answers PCL's one placeholder for an unknown location,
+   `(eval 0)' line 0: the text a runtime-raised die carries in the same
+   build (%p-die-error).  Perl numbers its first eval 1, so no real location
+   reads like it."
+  (let* ((loc (%p-frame-slot depth 2))
+         (line (logand loc #xFFFFFFFF)))
+    (declare (fixnum loc line))
+    (if (zerop line)
+        (values "(eval 0)" 0)
+        (values (%p-src-file-name (ash loc -32)) line))))
+
+(defun %p-frame-sub-name (depth)
+  "Frame DEPTH's sub name, perl's (caller(N))[3]: a named sub's qualified
+   name as its frame stored it; for an anonymous sub the name it carries NOW
+   -- Sub::Util::set_subname's (%pcl-sub-names), else PKG::__ANON__ for the
+   package it was compiled in (p-anon-sub)."
+  (let ((sub (%p-frame-slot depth 1)))
+    (cond ((stringp sub) sub)
+          ((functionp sub)
+           (or (gethash sub %pcl-sub-names)
+               (concatenate 'string (or (%p-anon-sub-package sub) "main")
+                            "::__ANON__")))
+          (t (error "PCL internal: call frame ~D holds ~S, not a sub name or a function"
+                    depth sub)))))
+
+(defun %p-frame-wantarray (depth)
+  "Frame DEPTH's context as perl's (caller(N))[5]: 1 list, \"\" scalar,
+   undef void -- the answer wantarray() gives inside that frame."
+  (let ((ctx (%p-frame-slot depth 3)))
+    (cond ((eq ctx t) 1)
+          ((null ctx) "")
+          ((eq ctx :void) *p-undef*)
+          (t (error "PCL internal: call frame ~D's context is ~S, not T / NIL / :VOID"
+                    depth ctx)))))
 
 ;;; Exception condition for object-based die
 ;;; When Perl dies with a blessed reference, we preserve it in $@
@@ -37012,62 +37130,37 @@ would consume, so it dies naming the stream (rule 12)."
         (t (error "PCL internal: wantarray: the caller's context is ~S, not T / NIL / :VOID"
                   *pcl-caller-wantarray*))))
 
-(defun p-caller (&optional (level 0))
-  "Perl caller - return information about the calling subroutine.
-   In scalar context, returns package name.
-   In list context, returns (package filename line subroutine).
-   Returns nil when called from the top level (not inside any PCL sub)."
-  ;; At top level (depth 0), caller() always returns undef/nil in Perl.
-  ;; This is the common case: 'run_tests() unless caller' at top level.
-  (when (zerop *pcl-sub-call-depth*)
-    (return-from p-caller (%p-no-answer)))
-  ;; Package of the frame's caller comes from the dynamic caller stack pushed at
-  ;; each p-sub entry (the only source that preserves Perl package case).
-  (let ((lvl (if (p-box-p level) (truncate (to-number level)) level)))
-    ;; A NEGATIVE level names no frame: perl answers the empty list / undef
-    ;; (Error::TypeTiny::throw_cb reads `caller($level - 1)` at level 0, #3399);
-    ;; `nth` of a negative index was a raw CL type error.
-    (when (or (minusp lvl) (>= lvl (length *pcl-caller-pkg-stack*)))
+(defun p-caller (&optional (level 0 level-p))
+  "Perl caller(), read from the call-frame stack (see its header; s539d,
+   task #233).  Frame N counts down from the current sub: caller(0) is the
+   current sub's own frame -- the package and the CALL SITE it was called
+   from, its own name and context.
+     scalar context      the calling package
+     `caller' (no EXPR)  (PACKAGE FILE LINE) -- three fields, as perl
+     `caller(N)'         the eleven fields: package file line subname hasargs
+                         wantarray evaltext is_require hints bitmask hinthash
+   Past the outermost frame, at the top level, or for a negative N: the
+   empty list / undef (#3399).  hasargs is 1 (a frame is a call with an
+   argument list; `&name;' is not told apart); evaltext, is_require and the
+   three hint fields are undef -- PCL keeps none of them per frame."
+  (let* ((lvl (if (typep level 'fixnum) level (truncate (to-number level))))
+         (depth (- *pcl-sub-call-depth* lvl)))
+    (declare (fixnum lvl depth))
+    (when (or (minusp lvl) (< depth 1))
       (return-from p-caller (%p-no-answer)))
-    (setf level lvl))
-  (let* ((caller-package (nth level *pcl-caller-pkg-stack*))
-         ;; Subroutine name (caller(N))[3] comes from the dedicated subname stack;
-         ;; SBCL's backtrace can't name our subs (anonymous lambdas).
-         (caller-subname (or (nth level *pcl-caller-subname-stack*) "(unknown)"))
-         (frame-info nil)
-         (current-level 0)
-         (target-level (+ level 2)))  ; Skip p-caller itself and its caller
-    ;; Walk the backtrace for best-effort filename/line (documented unreliable).
-    (sb-debug::map-backtrace
-     (lambda (frame)
-       (when (= current-level target-level)
-         (let ((code-loc (sb-di:frame-code-location frame)))
-           (setf frame-info
-                 (list caller-package  ; Package of the calling frame (from stack)
-                       (or (ignore-errors
-                             (sb-di:debug-source-namestring
-                              (sb-di:code-location-debug-source code-loc)))
-                           "-")  ; Filename
-                       (or (ignore-errors
-                             (sb-di:code-location-toplevel-form-offset code-loc))
-                           0)  ; Line number approximation
-                       caller-subname))))
-       (incf current-level)
-       ;; Return nil to continue, non-nil would stop
-       nil))
-    ;; The package/subname always come from the caller stacks (above); if the
-    ;; backtrace walk couldn't locate a matching frame for filename/line, still
-    ;; report package + subname with placeholder location info.
-    (unless frame-info
-      (setf frame-info (list caller-package "-" 0 caller-subname)))
-    (if (eq *wantarray* t)
-        ;; List context: Perl returns (package, filename, line, subname, ...).
-        ;; Return a PCL list-vector (like p-localtime) — NOT (values-list ...),
-        ;; whose extra CL values get truncated to one by the calling form, which
-        ;; is why (caller(N))[3] (e.g. Exporter::as_heavy) used to read undef.
-        (make-array (length frame-info) :initial-contents frame-info
-                    :adjustable t :fill-pointer t)
-        (first frame-info))))  ; Scalar context: just package
+    (let ((pkg (%p-frame-slot depth 0)))
+      (if (not (eq *wantarray* t))
+          pkg
+          (multiple-value-bind (file line) (%p-frame-location depth)
+            (let ((fields (if level-p
+                              (list pkg file line (%p-frame-sub-name depth) 1
+                                    (%p-frame-wantarray depth)
+                                    *p-undef* *p-undef* *p-undef* *p-undef* *p-undef*)
+                              (list pkg file line))))
+              ;; A PCL list-vector (like p-localtime): a CL multiple value would
+              ;; be cut to one by the calling form.
+              (make-array (length fields) :initial-contents fields
+                          :adjustable t :fill-pointer t)))))))
 
 ;; Prototype registry: function object -> prototype string.  Populated by
 ;; p-__pcl_set-prototype, which the transpiler's :prototype(...) attribute
