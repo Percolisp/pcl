@@ -64,6 +64,7 @@ not-supported.md → only then probe.*
 - **`# line N "FILE"` is honoured** (`Pl::Environment::src_location`, PPI's logical line / file): `__LINE__`, `__FILE__`, die / warn `:loc`, the line-track constants -> ir-spec §6.3b.
 - **Carp = perl's Carp 1.54 algorithm over `caller`** (#1361; short_error_loc / long_error_loc / trusts / CarpLevel / @CARP_NOT): exact in a line-track build, `at - line 0.` in the default build (perl's SHAPE), backtrace frames without arguments -> `lib/Carp.pm` header.
 - **Not built, with the reason**: eval / require frames (the anon frame's cost on every eval), hint fields, tier 2 (Sub::Uplevel, CORE::GLOBAL::caller, @DB::args) -> not-supported `ns-caller-fidelity`.
+- **everyday programs/goto-sub-caller is an EXPLAINED row, FLAGGED** (`(caller)[2] > 0` passed before on a positive Lisp form offset; the default build now answers line 0, the honest "not recorded") -> `baselines/everyday-baseline.tsv`, ns-caller-fidelity.
 - Filed #4941 (`sub K::m` in package main reports caller package "k"), #4942 (string-eval die names `-` not `(eval N)`).
 
 ## s538a (2026-11-12 .. 11-13, Opus; resumed in s540) -- CPAN-board whole-file losses part 1: #660 #3554 #3781 #3615 #3618 fixed; the Path-Tiny input_output*.t hang is POINT 4 (#2006 PART 2), not a #660 regression; #4841-#4846 filed; generation v2-13900
