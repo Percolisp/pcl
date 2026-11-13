@@ -16,7 +16,7 @@
 # perl-tests/pack.t is OK with 8,997 of 14,722 planned rows never produced;
 # the companion's 10 TRANSPILE files are one line each and 2,031 rows behind
 # them.  Neither is visible in any other bucket.
-# s537b (2026-11-13, Opus) -- t/op/svleak.t 156 -> 156 BY HAND, CAUSE re-pointed: the file compiles since #4662 and skips itself without XS::APItest (one-file run scratch/s537b/comp.log); perf/optree.t's NEW 2285 not added (perf/ is outside the default dirs).
+# s537b (2026-11-13, Opus) -- t/op/svleak.t 156 -> 156 BY HAND, CAUSE re-pointed: the file compiles since #4662 and skips itself without XS::APItest (one-file run scratch/s537b/comp.log); t/perf/optree.t 2285 ADDED BY EDIT as its first measurement (s540, comp3.log; NS:ns-perl-internals-readouts).
 # s535 (2026-11-08, Opus 5.5, the reviewing session) -- TWO rows edited BY HAND from the round attribution (~/pcl-agent-scratch/s535/bisect/comp-59317afd.log vs comp-0f2db817.log, one-file runs): t/op/lexsub.t 13 -> 12 and t/op/write.t 505 -> 503 = s532e (MAIN-READY-69: §60 #3983 `my sub y :prototype()` and §40 #3745 the format stripper deleted -- rows it had wiped are produced).
 # s531d (2026-11-02, Opus, s532 resume) -- FOUR rows edited BY HAND from the round attribution of the MAIN-READY-63 companion's SHORTFALL block: t/op/coreamp.t 711 -> 476 (s530c #3859 / #4362), t/op/decl-refs.t 195 -> 187 (s527c), t/op/lexsub.t 14 -> 13 (s527g), t/op/symbolcache.t 1 -> 0 = row LEFT (s531a #3831).
 # taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (t/op/closure.t,
@@ -263,6 +263,7 @@ t/op/try.t	2	#1942 + NS:Lvalue subroutines [DEFERRED] (#930) -- the two never-pr
 t/op/undef.t	51	NS:DESTROY called by garbage collector (50 rows) + NS:Read-only constants via `\undef` stash tricks (1).  NOT an early stopper: the file runs to its LAST row.  50 of the 51 are `X::DESTROY`'s five assertions x 10 keys, reached in perl only because `undef %hash` frees the blessed values; the remaining row is `undef constants preserve identity`, behind the `BEGIN { $::{z} = \undef }` stash-constant trick whose bareword `z` dies as an undefined sub
 t/op/write.t	503	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
 t/opbasic/magic_phase.t	2	UNEXPLAINED
+t/perf/optree.t	2285	NS:ns-perl-internals-readouts -- the file inspects perl's own optree through B (svref_2object, the OPpASSIGN_COMMON_* flags); PCL's B shim exports none of those constants, so its `use B qw(...)` aborts the file (aborted-forms 12) before any row -- until s537b #314 F-F the transpile refused the file ("state outside a named sub": `sub{state($foo,@fit,%far); ...}`)
 t/re/alpha_assertions.t	250	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
 t/re/anyof.t	1187	NS:DynaLoader / XS binary extensions -- Storable
 t/re/charset.t	2776	NS:Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`) -- the SEMANTICS stay ignored; #1715 fixed the inline group's compile (2776 -> 5552 rows produced)
