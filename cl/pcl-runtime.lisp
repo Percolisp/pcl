@@ -1343,7 +1343,7 @@
                pkg args))
       (if (not frame)
           `(sb-int:named-lambda ,(concatenate 'string pkg "::__ANON__") ,lambda-list
-             ,@body)
+                                ,@body)
           (let ((self (make-symbol (concatenate 'string pkg "::__ANON__")))
                 (decls (loop while (and (consp (first body))
                                         (eq (first (first body)) 'declare))
@@ -37179,7 +37179,14 @@ would consume, so it dies naming the stream (rule 12)."
    empty list / undef (#3399).  hasargs is 1 (a frame is a call with an
    argument list; `&name;' is not told apart); evaltext, is_require and the
    three hint fields are undef -- PCL keeps none of them per frame."
-  (let* ((lvl (if (typep level 'fixnum) level (truncate (to-number level))))
+  (let* ((lvl (if (typep level 'fixnum)
+                  level
+                  ;; Any other level: its number, truncated; one too large
+                  ;; (or NaN / Inf) names no frame, as in perl.
+                  (let ((x (to-number level)))
+                    (if (and (realp x) (< (abs x) 1d15))
+                        (truncate x)
+                        most-positive-fixnum))))
          (depth (- *pcl-sub-call-depth* lvl)))
     (declare (fixnum lvl depth))
     (when (or (minusp lvl) (< depth 1))

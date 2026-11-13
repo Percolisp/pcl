@@ -1,243 +1,147 @@
-# `caller()` — package tracking implementation
+# `caller()` — the call-frame stack
 
-How PCL makes `caller()` report the **package of the calling frame**, the
-problem it solves, where the code lives, and what it costs.
-
-> Scope note: this document is about the **package** field of `caller`. The
-> filename/line fields remain best-effort (`"at (unknown) line 0"`) — that is a
-> separate, deliberately-deferred item (see `docs/not-supported.md`,
-> "`caller()` filename and line number"). The list-context return of the full
-> 4-tuple also has a known `wantarray`-propagation gap on `(caller(0))[N]`
-> slices (noted at the end).
+How PCL answers `caller`, what each field holds, what the frame costs, and
+what is left out and why.  Rewritten s539d (task #233 tier 1 + #1361; the
+USER's ruling of s539: make `caller` better where that is cheap in execution
+time and code size).  The normative statement is `docs/ir-spec.md` §7.3c; the
+measurements are in the s539d section of `docs/session-log.md`.
 
 ---
 
-## The problem
+## What perl does
 
-`caller` in scalar context returns the package name of the code that called the
-current sub. Real CPAN modules rely on this at **import time** to discover the
-*target* package they are being used from:
+perl keeps one context-stack entry per sub call: the CV, the context the
+call was made in (`gimme`), and `blk_oldcop` — the statement that was
+running when the call was made.  `caller(N)` reads the Nth entry down:
 
-```perl
-# Class::Method::Modifiers, Exporter, and many installer modules do this:
-sub around { _install_modifier(scalar(caller), 'around', @_) }
-sub import { my $target = caller; *{"${target}::thing"} = \&...; }
-```
+| field | perl |
+|---|---|
+| 0 package | the package the CALL was compiled in |
+| 1 file, 2 line | the call site (`blk_oldcop`), after any `# line` directive |
+| 3 subname | the called sub's name; `PKG::__ANON__` for an anonymous sub; `(eval)` for an eval frame |
+| 4 hasargs | 1 for a call with an argument list, '' for `&name;` |
+| 5 wantarray | 1 list, '' scalar, undef void |
+| 6 evaltext, 7 is_require | an eval / require frame's |
+| 8-10 hints, bitmask, hinthash | the call site's pragmas |
 
-Before this change `p-caller` **hard-coded the package as `"main"`**:
+`caller` with no argument is the first three fields of `caller(0)`; past
+the outermost frame it is the empty list.
+
+## What PCL keeps: ONE frame vector
+
+`cl/pcl-runtime.lisp`, section "THE CALL-FRAME STACK":
 
 ```lisp
-(setf frame-info (list "main" ...))   ; Package (simplified - always "main")
+(sb-ext:defglobal *p-frames* (make-array 320 :initial-element 0))
+;; frame D (1 = the outermost sub call) is slots 5D .. 5D+4:
+;;   +0 the CALLER's package    *pcl-current-package* at the call
+;;   +1 the frame's sub         a named sub's "Pkg::name", or an anonymous sub's FUNCTION
+;;   +2 the call site's file id } the location registers (ir-spec §6.3b)
+;;   +3 the call site's line    } as they stood at the call
+;;   +4 the frame's context     *wantarray* at the call
 ```
 
-So `use Class::Method::Modifiers` inside `package Foo` installed the modifiers
-into `main` instead of `Foo`, and CMM died with *"method 'greet' is not found in
-the inheritance hierarchy for class main"*. Any caller-driven module was
-silently misdirected.
+Every frame binds `*pcl-sub-call-depth*` to one more than its caller's and
+fills its five slots (`p-frame-bind` → `%p-frame-enter`, inline).  Nothing is
+pushed or popped: the depth is a dynamic binding, so a non-local exit
+unwinds it and the slots above it are simply dead.  `caller(N)` reads frame
+`depth - N`.
 
-### Why we can't just read the CL package
+This REPLACES the two consed stacks (`*pcl-caller-pkg-stack*`,
+`*pcl-caller-subname-stack*`: two conses and two dynamic bindings per call)
+and the `sb-debug` backtrace walk `caller` used for its file and line (which
+answered the generated `.lisp` file and a Lisp form offset).
 
-PCL upcases **single-segment** Perl package names into CL packages: `package
-Foo;` becomes CL package `FOO` (multi-segment names like `Try::Tiny` are
-pipe-quoted and keep their case). At runtime `(package-name *package*)` for code
-in `Foo` is `"FOO"` — the original case `"Foo"` is **gone**. `caller` must
-report `"Foo"`, so the original case has to be carried out-of-band; it cannot be
-recovered from the CL package object.
+* **Why a vector, one per process.**  A slot store costs no allocation and
+  no binding-stack traffic.  Perl code runs only on the main thread; the
+  signal relay thread INTERRUPTS main to run a handler, which pushes its own
+  frame one above whatever main had bound.  A frame binds its depth before it
+  stores, so an interrupt between the two writes one frame higher.
+* **Why five slots, the location unpacked.**  The two location slots are
+  fixnums, so their stores take no GC card mark.  A packed `(file << 32) |
+  line` fixnum went through the generic (bignum) arithmetic path.
+* **Why `%p-frame-enter` is inline at safety 0.**  It is expanded into every
+  sub, so its size is paid per sub in every fasl.  At the default safety it
+  was +232 bytes per sub (Math::BigInt::Calc's fasl +1.2 %); as a full call
+  it was 1-5 ns slower per call.  The bounds are the explicit length test,
+  which also grows the vector.
 
-(The Perl-level case *is* still correct everywhere a literal is emitted —
-`__PACKAGE__`, `ref`, `bless "Foo"` — because the parser emits those as literal
-strings. Only runtime introspection that goes through the CL package object
-loses it.)
+### Who pushes a frame
 
----
+* every NAMED sub (`p-sub`);
+* an ANONYMOUS sub whose body reads a frame — it calls the `caller` builtin
+  or compiles perl at run time (a string eval and its kin) — marked
+  `(p-anon-sub "PKG" :frame (lambda …))` by the compiler
+  (`Pl::Parser2::anon_reads_frames`, the one predicate both emitters ask).
+  Its frame names the function itself, so `(caller(0))[3]` is the name it
+  carries NOW: a `Sub::Util::set_subname` name (`%pcl-sub-names`), else
+  `PKG::__ANON__`.  The function reaches itself through a `labels` name —
+  free per call, and the identity rules of #1083 are unchanged.
+* NOT `eval {}`, `eval STRING`, `require`, `sort` blocks, `map`/`grep`
+  blocks — perl has frames for the first three, PCL does not (see below).
 
-## The mechanism
+`goto &sub` replaces the frame: the depth goes one down, and
+`*pcl-current-package*` and the location registers go back to what the
+replaced frame recorded of its call, so the target's frame records the
+ORIGINAL call.
 
-Three dynamic variables and one setter in `cl/pcl-runtime.lisp`, plus emission
-from `Pl/Parser.pm`.
+## The location: only where it is recorded
 
-### Runtime (`cl/pcl-runtime.lisp`)
+A frame stores the location REGISTERS as they stood at the call.  The
+registers are written by the `line-track` emission (`(p-line N)` per
+statement, `(p-file …)` per file run bucket and sub body; ir-spec §6.3b),
+which is **DEFAULT OFF**.  So:
 
-```lisp
-(defvar *pcl-current-package* "main")     ; orig-case Perl name of current code
-(defvar *pcl-caller-pkg-stack* nil)        ; caller packages, pushed per sub call
-(defvar *pcl-pkg-name-map* (make-hash-table :test 'equal))  ; CL name -> Perl name
+* compiled with `PCL_OPT=line-track`: `caller`'s file and line are perl's —
+  the call site, through `goto &sub`, a string eval (`(eval N)`), an
+  anonymous sub, a `# line` directive;
+* in the default build no register is written: a frame answers file `-`,
+  line 0 (or `(eval N)` line 0 for a call made from a string eval's code,
+  whose file id `p-eval` sets in every build).  Line 0 is never a real
+  line; it says "not recorded".
 
-(defun p-set-current-package (pkg perl-name) ...)  ; register + set current
-(defun pcl-pkg-perl-name (cl-pkg) ...)             ; CL package -> orig Perl name
-```
+Recording the location by default is NOT cheap, and is left out (measured
+s539d): `line-track` on is +17.9 % emitted text on Math::BigInt::Calc
+(221,629 → 261,201 bytes) and +4..6 % on the counting-loop bench rows
+(s473c).  A narrower emission — a line store only before a statement that
+can make a call — still writes one form per call site: Calc.pm has ~280
+of them, ≥ +1.5 % text against a +0.5 % bar.
 
-- **`p-set-current-package`** is called by generated code at each `package`
-  statement. It records `CL-name → original-case` in `*pcl-pkg-name-map*` and
-  sets `*pcl-current-package*` to the original case.
-- **`p-sub`** (the macro that wraps every Perl sub body) now binds, per call:
+## `# line N "FILE"`
 
-  ```lisp
-  (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package* *pcl-caller-pkg-stack*))
-         (*pcl-current-package*  (pcl-pkg-perl-name (symbol-package ',name)))
-         (*pcl-sub-call-depth*   (1+ *pcl-sub-call-depth*))
-         (*pcl-caller-wantarray* *wantarray*))
-    (catch :p-return ,@body))
-  ```
+PPI applies perlsyn's directive rule while it indexes locations
+(`PPI::Document::_logical_line_and_file`); `Pl::Environment::src_location`
+is the ONE reading of a node's location after any directive, used for
+`__LINE__`, `__FILE__` and an explicit `die`/`warn`'s `:loc` (every build),
+and for the `line-track` constants (which also write the file register when
+a directive changes the file).  No run-time cost: the constants change.
 
-  i.e. it **pushes the caller's current package** onto the stack, then rebinds
-  current to the sub's *own* package (looked up via the registry, so the case is
-  right for deeper `caller` calls too). The bindings are dynamic, so they unwind
-  automatically when the sub returns.
+## Carp (#1361)
 
-- **`p-caller`** reads `(nth level *pcl-caller-pkg-stack*)` for the package
-  instead of the hard-coded `"main"`. Out-of-range levels return `nil` (Perl
-  `undef`), matching the existing top-level behaviour.
+`lib/Carp.pm` is perl's Carp 1.54 algorithm over this `caller`:
+`short_error_loc` (the first call whose caller does not trust the called
+package: `%CarpInternal`, `%Internal`, `@CARP_NOT` / `@ISA`, `$CarpLevel`),
+`long_error_loc`, `ret_summary`, `ret_backtrace`.  So croak / carp report
+their caller's location as perl does — exactly in a `line-track` build,
+`at - line 0.` in the default build (perl's message SHAPE, which a test
+matching `\s+at` or normalising ` at \S+ line \d+` reads).  A backtrace line
+names the sub without its arguments (`@DB::args` is not kept), and there is
+no `, <FH> line N` tail.
 
-### Module loads must not leak their package
+## What is not kept, and why
 
-`*pcl-current-package*` is set imperatively by `p-set-current-package` as each
-`package` statement executes. When a module is loaded mid-execution (`use`/
-`require` → `p-load-module-cached`), the loaded file runs its *own* `package`
-statements and would leave `*pcl-current-package*` pointing at that module's
-last package after the load returns — corrupting the caller's view (and any
-`caller()` / `overload::import` that reads it). So `p-load-module-cached`
-**dynamically rebinds `*pcl-current-package*` around the load**:
-
-```lisp
-(let ((*pcl-current-package* *pcl-current-package*))   ; restored after load
-  ... load the module ...)
-```
-
-The orig-case **name map** (`*pcl-pkg-name-map*`) is a separate global hash and
-is intentionally *not* rebound — the loaded module's package→case mappings must
-persist so `caller()` reports the right case for those packages later.
-
-### Why a stack (not just one "caller package" variable)
-
-`caller(N)` needs the package of the frame *N* levels up. Pushing the caller's
-package at each sub entry makes `(nth N stack)` exactly that:
-
-```
-top-level (main) → A (pkg X) → B (pkg Y), B calls caller(0)/caller(1):
-  on entering A: push "main"          stack = ("main")
-  on entering B: push "X"             stack = ("X" "main")
-  caller(0) in B = (nth 0) = "X"      (B was called from inside A, pkg X)  ✓
-  caller(1) in B = (nth 1) = "main"   (A was called from top level, main)  ✓
-```
-
-### Codegen (`Pl/Parser.pm`)
-
-The orig-case name lives only in the parser, so one runtime call per `package`
-statement is unavoidable. To keep it elegant it was funnelled through a single
-chokepoint and a single helper rather than sprinkled across the four
-package-statement branches:
-
-- New `_cl_pkg_designator($pkg_name)` — the **single source of truth** for the
-  CL package designator (the `::`-or-CL-symbol-collision pipe-quote rule). It
-  replaced three copies of that ternary.
-- `_emit_package_preamble` now emits `(p-set-current-package <designator>
-  "<orig-name>")` into the section's **runtime** bucket (execution order, *not*
-  hoisted with the preamble) at both of its return points. This covers the
-  top-level simple form, the top-level block form, and the inline-in-runtime-
-  block form.
-- The block-form restore and the inside-a-sub `package` switch emit the call
-  explicitly (the inside-a-sub setf is restored on sub exit by `p-sub`'s dynamic
-  binding).
-
----
-
-## Files changed
-
-| File | Change |
-|------|--------|
-| `cl/pcl-runtime.lisp` | Add `*pcl-current-package*`, `*pcl-caller-pkg-stack*`, `*pcl-pkg-name-map*`, `p-set-current-package`, `pcl-pkg-perl-name` (+ exports). `p-sub` macro: 2 extra dynamic bindings. `p-caller`: package from stack instead of `"main"`, with a placeholder-frame fallback when the SBCL backtrace walk can't locate a frame. `p-load-module-cached`: rebind `*pcl-current-package*` around the load so a loaded module's `package` statements don't leak into the caller. |
-| `Pl/Parser.pm` | New `_cl_pkg_designator` helper (de-duplicates the triplicated ternary). `_emit_package_preamble` + the package-statement branches emit `p-set-current-package`. |
-| `Pl/t/misc-fixes-01.t` | Regression tests (calling-frame package; single-segment case preserved). |
-
----
-
-## Cost
-
-### Execution time
-
-Per **sub call**, `p-sub` now additionally does:
-
-- one `cons` (push onto `*pcl-caller-pkg-stack*`) — a single heap allocation;
-- one `symbol-package` + one `equal` hash lookup (`pcl-pkg-perl-name`);
-- two extra dynamic-variable bindings (`*pcl-current-package*`,
-  `*pcl-caller-pkg-stack*`) on top of the two already there.
-
-This is O(1), allocation-light, and dwarfed by the work in any real sub body. No
-measurable change in the gate (3253 tests) or the full sweep wall-clock
-(~295 s, within run-to-run noise).
-
-Per **`package` statement** (compile-time-rare): one extra runtime form
-(`p-set-current-package`) — a hash insert + a `setf`. Negligible.
-
-`caller()` itself is unchanged in cost: it already walked the SBCL backtrace for
-filename/subname; reading `(nth level stack)` is trivial on top.
-
-### Complexity
-
-- **Runtime:** +~35 lines (three defvars, two small functions), +4 lines in the
-  `p-sub` lambda. Conceptually one new idea: "the lexically-current Perl package
-  is a dynamic variable, snapshotted per call onto a stack."
-- **Parser:** net **simpler** — the new `_cl_pkg_designator` removed three copies
-  of the pipe-quote ternary; the emission is one line at the chokepoint.
-- **Memory:** the stack grows by one cons per active frame and unwinds on
-  return; it never outlives the call chain.
-
-### What it deliberately does **not** do
-
-- It does **not** fix `caller`'s filename/line (still `"-"`/`0`) — that needs a
-  source-map and is documented as deferred.
-- `caller(0)` in **list context** still returns only the package today, because
-  `(caller(0))[N]` slices don't propagate list `wantarray` to the call — a
-  pre-existing, orthogonal gap (the package field, the part real modules use via
-  `scalar(caller)`, is correct).
-- It does **not** touch `p-get-class`/method dispatch — package *case* recovery
-  for blessed objects already worked via literal strings.
-
----
-
-## What pclxs needs from this, and what it will inherit
-
-*Added 2026-07-26, from the pclxs side. This section is here rather than in
-that repo because it is host-side knowledge: pclxs never names PCL.*
-
-XS asks `caller` too, and the first measured case is **Params::Validate**,
-whose `get_caller` walks perl's context stack for exactly one thing — the
-package and sub name to put in an error message:
-
-```c
-/* Params-Validate-1.31/lib/Params/Validate/XS.xs */
-while (cxix >= 0) {
-    ... CXt_SUB / CXt_EVAL ...
-    gv_efullname4(sv, CvGV(cx->blk_sub.cv), NULL, TRUE);   /* "Foo::bar" */
-}
-```
-
-pclxs classifies this **B, not D** (`tools/xs-classify`): the *mechanism* is
-perl's `cxstack`, which is interpreter guts, but the *question* is `caller`,
-and a host has an answer. So when pclxs implements it, it will be a vtable
-question answered by the host — which for PCL means this file's machinery.
-
-**And it inherits this file's limits, deliberately.** The pclxs side has
-been told to copy the behaviour rather than invent a better one:
-
-| field | PCL today | what XS sees through pclxs |
+| item | why | cost if added |
 |---|---|---|
-| package | correct (this document) | correct |
-| filename | `"-"` / unknown | `"-"` — error messages will say so |
-| line | `0` | `0` |
-| sub name (`(caller(N))[3]`) | not returned; the list-context 4-tuple has the `wantarray` gap above | pclxs cannot fill it in either |
+| file / line in the default build | needs a per-statement or per-call-site register write | text +17.9 % (all statements) / ≥ +1.5 % (call sites) |
+| a frame for every anonymous sub | +3.5 ns on a 28 ns anonymous call (+12 %), the anoncall row +4 % | measured, left out |
+| `eval {}` / `eval STRING` / `require` frames (`(eval)`, evaltext, is_require) | each would be the same prologue as an anonymous frame, on every eval execution | ~+3.5 ns per eval (the anonymous frame's number) |
+| hasargs '' for `&name;` | the frame does not record how it was called | one more slot store |
+| hints / bitmask / hinthash (fields 8-10) | PCL keeps no per-frame pragma state | — |
+| `@DB::args`, `CORE::GLOBAL::caller`, frames `Sub::Uplevel` hides | tier 2, a design (docs/not-supported.md ns-caller-fidelity) | — |
 
-The consequence is narrow and worth writing down before someone reports it
-as a pclxs bug: **XS-generated diagnostics will carry `(unknown) line 0`
-and, where a module prints the calling sub's name, an incomplete one.**
-Params::Validate's message degrades from
-`Foo::bar(): the 'x' parameter is required` to something without the
-`Foo::bar` part. The validation itself is unaffected — no module measured
-so far *branches* on caller's filename or sub name, they only print them.
+## What pclxs inherits
 
-**Where fixing it would pay twice.** A source map (this file's deferred
-item) would fix perl-side `caller` and XS-side diagnostics in one move,
-since the pclxs entry would just forward. That is the argument for doing
-it here rather than working around it in the shim: the shim cannot
-synthesise a filename it was never given.
+XS asks `caller` too (Params::Validate's `get_caller` reads the package and
+sub name for an error message).  When pclxs forwards that question it gets
+this file's answers: the package and the sub name are right; the file and
+line are perl's only in a `line-track` build.

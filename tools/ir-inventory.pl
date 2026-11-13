@@ -312,8 +312,7 @@ my %FAMILY;
                          p-caller-ctx p-sort-cmp *pcl-caller-wantarray*
                          *pcl-sub-call-depth*)],
   'runtime-config' => [qw(*p-raw-elems*)],
-  'package-tracking' => [qw(*pcl-current-package* *pcl-caller-pkg-stack*
-                            *pcl-caller-subname-stack* p-set-current-package
+  'package-tracking' => [qw(*pcl-current-package* p-set-current-package
                             p-register-pkg-name)],
   'phase' => [qw(*end-blocks* *unitcheck-blocks* *check-blocks* *init-blocks*
                  p-run-compile-phase-blocks p-eval-always p-BEGIN p-CHECK)],

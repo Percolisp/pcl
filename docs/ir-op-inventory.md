@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **771**
+* names exported: **769**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 771
+* with a machine-readable `Contract:` tail: **71** of 769
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -246,7 +246,7 @@ ir-spec §10 row **introspection** — §7; `p-caller` returns package but file/
 |---|---|---|---|---|---|---|---|---|---|
 | `p-__pcl_set_prototype` | function | `(code proto)` | — | — | — | — | — | — | — |
 | `p-bless` | function | `(ref class)` | — | — | — | — | — | — | — |
-| `p-caller` | function | `(&optional (level 0))` | — | — | — | — | — | — | — |
+| `p-caller` | function | `(&optional (level 0 level-p))` | — | — | — | — | — | — | — |
 | `p-can` | function | `(invocant method-name)` | — | — | — | — | — | — | — |
 | `p-coderef-defined-p` | function | `(coderef)` | — | — | — | — | — | — | — |
 | `p-coderef-exists-p` | function | `(coderef)` | — | — | — | — | — | — | — |
@@ -882,14 +882,12 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-pack` | function | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-unpack` | function | `(&rest args)` | — | — | — | — | — | — | — |
 
-## package-tracking (5)
+## package-tracking (3)
 
 *No ir-spec §10 row.*  the caller()/__PACKAGE__ bookkeeping — docs/caller-implementation.md
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
-| `*pcl-caller-pkg-stack*` | variable | `` | — | — | — | — | — | — | — |
-| `*pcl-caller-subname-stack*` | variable | `` | — | — | — | — | — | — | — |
 | `*pcl-current-package*` | variable | `` | — | — | — | — | — | — | — |
 | `p-register-pkg-name` | function | `(pkg perl-name)` | — | — | — | — | — | — | — |
 | `p-set-current-package` | function | `(pkg perl-name)` | — | — | — | — | — | — | — |
@@ -1067,7 +1065,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
-| `p-anon-sub` | macro | `(pkg lambda-form)` | — | — | — | — | — | — | — |
+| `p-anon-sub` | macro | `(pkg &rest args)` | — | — | — | — | — | — | — |
 | `p-args-body` | macro | `(&body body)` | — | — | — | — | — | — | — |
 | `p-cloned-sub` | function | `(f)` | — | — | — | — | — | — | — |
 | `p-declare-sub` | macro | `(name &optional body pkg)` | — | — | — | — | — | — | — |

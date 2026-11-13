@@ -459,42 +459,53 @@ typeglob slots are the fiddly remainder.
 ---
 
 <a id="ns-caller-fidelity"></a>
-## `caller()` fidelity  [DEFERRED for now — task #233]
+## `caller()` fidelity — the tier-1 residue  [task #233; s539d]
 
-**USER decision (2026-09-17, s488): deferred, "for now".**  The whole
-`caller()` fidelity family is one deliberate deferral, so every test row that
-fails on it carries `NS:caller() fidelity [DEFERRED, USER s488] + #233` and the
-cause census counts it as not-supported, not as a bug.  The morning-s488
-"bug queue" ruling is superseded by this entry (DECIDED `## s488`).
+**History.**  Deferred whole by the USER in s488 ("for now"); re-opened in
+part in s539 (DECIDED `## s539`): make `caller` better WHERE THAT IS CHEAP in
+execution time and code size.  Batch s539d did the cheap tier
+(`docs/caller-implementation.md`); this entry is what it left, each item with
+the reason or the measured cost.  Rows that fail on it carry
+`NS:ns-caller-fidelity` (+ #233).
 
-**Perl behaviour:** `caller` with no argument returns exactly
-`($package, $filename, $line)`; `caller(N)` returns the Nth frame's eleven
-fields (package, file, line, sub name, hasargs, wantarray, evaltext, …);
-`#line` directives adjust the reported line; `*CORE::GLOBAL::caller` may be
-overridden; frames belong to the program, so `Sub::Uplevel` can hide one.
+**Perl behaviour:** `caller` with no argument returns `($package, $filename,
+$line)`; `caller(N)` returns the Nth frame's eleven fields; every sub call,
+`eval` and `require` is a frame; `#line` directives adjust the reported
+location; `*CORE::GLOBAL::caller` may be overridden; frames belong to the
+program, so `Sub::Uplevel` can hide one; `@DB::args` holds a frame's
+arguments.
 
-**PCL behaviour:** the PACKAGE field is right (`docs/caller-implementation.md`
-— the mechanism that `Exporter`-style `import` depends on), and since #1240
-the location registers that `die` uses exist per frame.  The rest is the
-#233 list: `caller` with no argument returns 4 fields; the filename is the
-generated `.lisp`; `$0` is the SBCL binary; `#line` is ignored; the package
-is empty inside an anonymous sub; `caller(N)` past the top returns a count,
-not an empty list; PCL's own frames are visible to a walk (so `uplevel`
-cannot hide one); `CORE::GLOBAL::caller` overrides are not honoured.
+**PCL behaviour since s539d:** the package, the sub name, hasargs and the
+wantarray field are perl's; `caller` with no argument is three fields and
+`caller(N)` eleven; the empty list past the outermost frame; an anonymous sub
+whose body calls `caller` is a frame; `# line` directives are honoured; Carp
+reports its caller's location by perl's algorithm.  What is NOT:
 
-**What it is NOT (recorded because it was asked, s488):** it does not need
-SBCL in any debug state.  `caller` reads PCL's own per-sub frame stack, the
-same bookkeeping perl keeps in its context stack, in an ordinary compiled
-run.  Most items are a store per call or nothing (the frame and the location
-registers already exist for `die` messages); `#line`, frame hiding and the
-`CORE::GLOBAL` override need design.  The deferral is a priority call
-(Target A: no per-call bookkeeping without a measured reason), not a
-feasibility one.
+- **The FILE and LINE in the default build.**  A frame records the location
+  registers, which only `PCL_OPT=line-track` writes, so a default build
+  answers file `-` (or `(eval N)`) and line 0, and Carp says `at - line 0.`
+  Recording them by default costs +17.9 % emitted text (Math::BigInt::Calc,
+  every statement) or ≥ +1.5 % (only the statements that can call), against
+  the ruling's +0.5 % — LEFT OUT.  `PCL_OPT=line-track` gives perl's answers.
+- **A frame for EVERY anonymous sub.**  Only one whose body calls `caller`
+  (or compiles perl at run time) is a frame: the frame costs +3.5 ns on a
+  28 ns anonymous call (+12 %; the anoncall bench row +4 %) — LEFT OUT.  So a
+  named sub called from an anonymous sub that does not itself read `caller`
+  sees that sub's CALLER one level up, not the anonymous frame.
+- **`eval` / `require` frames** — `(eval)`, evaltext, is_require.  The same
+  prologue on every eval execution (~+3.5 ns each); not built.  caller(N)
+  across an `eval {}` counts one frame fewer than perl.
+- **hasargs** is 1 for every frame (`&name;` is not told apart); the hint
+  fields 8-10 are undef.
+- **Tier 2, not scheduled:** frames a program can hide (`Sub::Uplevel`, which
+  `Test::Exception` is built on), the `*CORE::GLOBAL::caller` override,
+  `@DB::args` (so a Carp backtrace names each sub without its arguments).
+- `$0` is right (it was by s539).
 
-**Affected tests:** `perl-tests/caller.t` (36 rows in the sweep baseline);
-t/op/caller.t and neighbours in the companion (43 rows); the CPAN board's
-seven `Sub-Uplevel` files (130 rows, 103 of them `03_nested_uplevels.t`).
-Listed in the README roadmap under "planned, not rejected".
+**Affected tests:** `perl-tests/caller.t` (the rows left in the sweep
+baseline); t/op/caller.t and neighbours in the companion; the CPAN board's
+`Sub-Uplevel` files (frame hiding) and the Log-Log4perl rows that print
+`%F` / `%L` (the default build's location).
 
 ---
 
@@ -549,22 +560,33 @@ nothing else:
 ---
 
 <a id="ns-error-location"></a>
-## Error messages: no "at FILE line N" location info
+## Error messages: the "at FILE line N" location (narrowed s539d)
 
 **Perl behaviour:** Die/warn/croak messages append `" at FILE line N.\n"` when
-the message does not already end with a newline.  `die if $@` propagates with
-`"... propagated at FILE line N."`.
+the message does not already end with a newline (Carp appends it always);
+`die if $@` propagates with `"... propagated at FILE line N."`.
 
-**PCL behaviour:** PCL does not track source file/line number at runtime.  Error
-messages have the same text content, but the `" at FILE line N."` suffix is
-never appended.
+**PCL behaviour:** the SHAPE is perl's everywhere; the CONTENT is perl's where
+the location is known at compile time or recorded at run time:
 
-**Rationale:** CL does not naturally expose Perl-compatible source location
-metadata at runtime.  Application code adds `\n` to its own messages anyway;
-only internal test machinery needs the exact suffix.
+- an explicit `die` / `warn` carries its file and line as a compile-time
+  constant (s473c), after any `# line` directive (s539d) -- right in every
+  build;
+- a die raised BY THE RUNTIME (`Illegal division by zero`, ...) and a Carp
+  message (croak / carp / confess, s539d, task #1361) name the location from
+  the location registers, which only `PCL_OPT=line-track` writes; the default
+  build says `at (eval 0) line 0.` (a runtime die) and `at - line 0.` (Carp,
+  through `caller`, docs/not-supported.md ns-caller-fidelity);
+- an explicit die inside a string eval names `-` where perl names
+  `(eval N)` (task #4942).
 
-**Affected tests:** Many `perl-tests/` files comment out tests that check the
-exact `" at FILE line N"` format (e.g. `warn.t`, `die.t`, `chop.t`).
+**Rationale:** the default build writes no location register because doing so
+costs +17.9 % emitted text and +4..6 % on counting loops (s473c, s539d); the
+switch is `PCL_OPT=line-track`.
+
+**Affected tests:** rows that compare the exact file and line of a runtime die
+or a croak (perl-tests `warn.t`, `die.t`, ...); rows that only need the
+` at ... line N.` tail now pass.
 
 ---
 

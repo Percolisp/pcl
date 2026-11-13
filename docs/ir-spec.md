@@ -2414,8 +2414,8 @@ Three sites read that same rule, and each was a silent wrong before it:
 registers the function (visible to compile-time `BEGIN` code — the whole
 | `:attributes` | a list of strings (`("lvalue" "method")`) | every attribute on a named sub's definition except a prototype (normative, s514e / #3162).  **Run-time meaning:** the `p-sub` expansion calls `(%p-apply-sub-attributes FN PKG ATTRS)` after installing the function: the built-in ones (`lvalue` `method` `const`) are recorded in the sub-attribute registry beside the prototype registry (what `attributes::get` reads, never the prototype); any other is handed, as perl does, to `attributes->import(PKG, \&f, LIST)` -- PKG's `MODIFY_CODE_ATTRIBUTES`, else `Invalid CODE attribute: NAME`.  An anonymous `sub :lvalue {…}` reaches the same function through a `__pcl_set_attributes(sub {…}, 'lvalue')` call around its lambda.  Recording `lvalue` changes nothing about the lowering: lvalue-ness is a compile-time fact.  Example: `sub lv :lvalue { $x }` → `(p-sub pl-lv (&rest %_args) (… :attributes ("lvalue") …) …)` |
 form is inside `eval-when`) and wraps the body so that at **every call**:
-1. the caller's package and sub-name are pushed on stacks (for
-   `caller()`),
+1. the call FRAME is recorded -- the caller's package, the sub, the call site's location registers and the context (for
+   `caller()`; §7.3c),
 2. `*pcl-current-package*` becomes the sub's home package,
 3. `*pcl-caller-wantarray*` snapshots `*wantarray*`,
 4. the body runs inside `(p-sub-frame …)` — the sub's return frame:
@@ -3698,7 +3698,19 @@ emitted text's own `(p-line …)` forms supply the line.
 
 **A backend implementing this IR needs a per-statement line write, a
 per-file/per-sub-body file write, and a save/restore at those five scopes.**
-Nothing else reads the registers; they are diagnostic state, never a value.
+The registers are diagnostic state, never a value; besides a runtime die, the
+one reader is a call FRAME, which records them at the call for `caller` (§7.3c,
+s539d).
+
+**A `# line N "FILE"` directive moves every location after it (s539d, task
+#233 item 4):** the line and file PPI computes under perlsyn's rule
+(`Pl::Environment::src_location`) are the ones `__LINE__`, `__FILE__`, an
+explicit die's `:loc` and the `(p-line N)` constants carry, and a statement
+whose file differs from the unit's (or that returns to it) is preceded by its
+own `(p-file …)`.  Constants only: no run-time cost.
+
+    # line 100 "foo.pl"
+    die "x";             # x at foo.pl line 100.
 The store must be cheap — PCL's is a write to a global (not a dynamically
 bound variable) and the file is an interned index rather than a string, both
 for measured reasons recorded in `cl/pcl-runtime.lisp`'s register header — and
@@ -4454,6 +4466,36 @@ decimal splits its fraction into right-padded three-digit groups (`1.02` is
 element-wise — so `$VERSION = "2.7.18"` FAILS a `VERSION(2.719)` check while
 `$VERSION = 2.718` SATISFIES `VERSION("2.7.19")`.  `use Module VERSION` is the
 same call.
+
+### 7.3c `caller()` reads the call-frame stack (normative, s539d, task #233)
+
+Every NAMED sub, and every anonymous sub emitted `(p-anon-sub "PKG" :frame
+(lambda …))`, is a CALL FRAME: it binds `*pcl-sub-call-depth*` one higher and
+records five facts in that frame (`p-frame-bind`) — the CALLER's package
+(`*pcl-current-package*` at the call), the sub (a named sub's qualified name;
+an anonymous sub's function, named when `caller` asks: a
+`Sub::Util::set_subname` name, else `PKG::__ANON__`), the two location
+registers of §6.3b as they stood at the call, and the context (`*wantarray*`
+at the call).  `caller(N)` answers frame `depth - N`:
+
+| form | answer |
+|---|---|
+| scalar context | the calling package |
+| `caller` (no EXPR) | `(PACKAGE FILE LINE)` |
+| `caller(N)` | eleven fields: package, file, line, subname, hasargs (always 1), wantarray (1 / `""` / undef), then evaltext, is_require, hints, bitmask, hinthash (all undef) |
+| past the outermost frame, a negative N | the empty list / undef |
+
+FILE and LINE are the location registers, so they are perl's only where the
+registers are written (`PCL_OPT=line-track`); in the default build a frame
+answers file `-` (or `(eval N)` for a call made from a string eval's code)
+and line 0, which is never a real line.  The compiler marks an anonymous sub
+`:frame` iff its body calls the `caller` builtin or compiles perl at run time
+(`Pl::Parser2::anon_reads_frames`); any other anonymous sub, an `eval`, a
+`require`, a sort / map / grep block is not a frame.  `goto &sub` replaces the
+current frame: the target's frame records the ORIGINAL call.
+
+    sub f { my @c = caller(0); "@c[0,3]" }  my $g = sub { (caller(0))[3] };
+    f();     # "main main::f"            $g->();   # "main::__ANON__"
 
 ### 7.4 Scheduled blocks
 
@@ -6300,7 +6342,7 @@ function's docstring states its Perl contract. The families:
 | compiled regex (qr) | `(pcl::p-qr :pat "…" :flags "…" :tier T)` literal · `(pcl::p-qr-from-parts :pat FORM :flags "…" :tier :dynamic)` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. **Every evaluation is a NEW object** (task #4060): `qr/$s/` twice, and `qr/$re/` with `$re` a qr, are distinct references (the interpolated form copies the cached compiled op), so a bless or re-bless reaches only the copies of ONE object (its class lives on the referent, ir-spec §2 #4000). It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
 | I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup.  A LIST-form pipe open `(p-open FH "-|" PROG ARG…)` execs PROG with NO shell (#1697); the mode set is closed and matched longest-first, `+>>` included (#1696); an open the OS refuses is FALSE with `$!`, never a signal (#1699) — §7.5 |
 | command capture | `p-backtick` (`` `CMD` ``, every `qx` delimiter, `` <<`TAG` `` and the NAMED `readpipe EXPR` — ONE runtime function, four surface syntaxes) | **wantarray-sensitive, exactly like `p-readline`** (task #731): scalar/void yields the whole captured stdout as one string, LIST context yields it SPLIT INTO `$/` RECORDS, each keeping its separator — so empty output is the empty list in list context and `""` in scalar.  The split uses `%p-read-record`, the same `$/` reader `p-readline` uses, so slurp (`$/ = undef`), paragraph mode (`$/ = ""`) and a custom separator cannot drift apart between the two.  A package that displaced the builtin with `use subs "readpipe"` is called instead, for every one of the four syntaxes (#703/#734) |
-| introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` returns package but file/line are stubs (divergence) |
+| introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` reads the call-frame stack (§7.3c): file/line are the location registers, written only under `line-track` |
 | context & frames | `p-list-ctx p-scalar-ctx p-void-ctx p-caller-ctx` (§4) · `p-sort-cmp` (§5.4) | **names, not operations**: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else. They mark where the IR says "this runs in context C" / "this is a comparator frame" |
 | declarations | `p-let` (§2b.2a) · `p-raw-params` (§5.2) · `p-sub` (§5.1) | **names carrying the compiler's own VERDICTS**: a binding's class, a parameter's class, a sub's proven facts.  Every one expands to exactly the form it replaced — the information is free at run time — and every set (classes, `p-let` fact keys, `p-sub` fact keys) is CLOSED: a member outside it is an error at macroexpansion, never a silent pass.  A translator may drop all three vocabularies and still produce a correct program; what it loses is the ability to choose a representation (raw slot vs box, stack vs heap, by-value vs by-reference arguments) without re-deriving the analysis |
 
