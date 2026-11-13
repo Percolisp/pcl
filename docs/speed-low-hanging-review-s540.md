@@ -120,6 +120,11 @@ redefinition loaded as a fasl in front of the unchanged program, best of 5, C/A 
 | R7 | `caller` in shims (List::Util `reduce` / `first`'s `$a`/`$b` via `caller`) | `caller` walks the SBCL backtrace (49 % of a reduce loop); reduce is 45x perl, perl running the SAME shim text is 7x | m-reduce profile; shimbench | s539d's cheap `caller` tier is the lever; nothing filed here |
 | R8 | `%p-symref-box` / `%p-stash-live-sym` | guarded by a count -- but once ANY stash delete ran (namespace::clean, Moo), every symbolic ref probes a weak table | -- | #4525 / #4501's family, already filed |
 
+`:alloc` profiles (`legs/leg6.log`: podtext, json-rt, moo-objs) say the same in allocation terms:
+`listify_rest_arg` -- the `&rest` lists of `p-sub` / `p-method-call` -- is 2.6-5.7 % of the
+allocation samples (the frame: s539d), ~92 % of everything allocated is under `p-method-call`, and
+31 % of moo-objs' allocation is SBCL compiling string-eval'd code (#2421, parked).
+
 Also read and NOT a finding: `p-true-p`'s slow path already has the plain-box arms (#2513, #2772);
 `%p-sv-stash`, `%p-stash-deleted-p`, `%p-live-sub-p` and `*p-tie-table*` are count-guarded; `p-print`
 / `p-say` lists are stack-allocated (#2771); the regex engine is parked (ONE engine, USER s476).
@@ -190,7 +195,7 @@ for this review except that the `isa` count belongs to `find` and dies with it.
 | per-module work repeated per PROGRAM | the prototype/export scan of every `use`d module is cached (`~/.pcl-cache/proto/`, content-keyed); `moo-class.pl` (16 lines, `use Moo`) transpiles in 0.258 s against ~0.17 s for a one-liner.  Nothing to take. |
 | a module transpile spawned as a new perl | the runtime spawns `pl2cl --module` per module cache MISS; it is served by `pl2cl --xserver` only when `PCL_XSERVER` is set (the gate sets it, `pcl` does not).  Misses are first-run cost -- PARKED by the USER's ruling (#2420 / #2423). |
 | a cache that misses when it could hit -- LOCAL modules | **a module under `use lib` / -I / `.` is never fasl-compiled by default (the s471 trust class): its cached TEXT is compiled by SBCL on EVERY run.**  One 2,434-line local module: 0.530 s per run vs 0.055 s with `PCL_COMPILE_DIRS='*'` (perl 0.009; `legs/leg1.log`) -- ~0.2 s per 1,000 lines of a program's own modules, every invocation.  A ruling, so not on THE LIST: #4986. |
-| a cache that misses when it could hit -- the vendored PPI as a library | a program `use`-ing `vendor/PPI/lib` re-transpiles PPI's modules on EVERY run (cache entries rewritten each run; 98-116 s a run, s534a's "3 s per parse" excluded load); with `PCL_COMPILE_DIRS='*'` `PPI.pm` is a `fasl-build` on every run and its 100 dependencies load from TEXT under the nested-build rule.  Cause not found: #4987 |
+| a cache that misses when it could hit -- the vendored PPI as a library | a program `use`-ing `vendor/PPI/lib` re-transpiles PPI's modules on EVERY run (cache entries rewritten each run; 98-116 s a run, s534a's "3 s per parse" excluded load); with `PCL_COMPILE_DIRS='*'` `PPI.pm` is a `fasl-build` on every run and its 100 dependencies load from TEXT under the nested-build rule.  The rewritten manifest is byte-identical to the one it replaces (`legs/leg6.log`), so the invalidation is an ORDERING, not a content, change -- suspected: the modules' `use` cycles.  #4987 |
 | emitted size as the driver of SBCL compile time | by top-level form over the sample (1.64 MB): `p-sub` 52.6 %, `p-eval-always` 20.3 % -- of which the **#2610 detector tables are 254,512 of the modules' 1,199,790 bytes (21 %)**, `p-let` 8 %, `p-defcell` 3.7 %, comments 2.4 %.  SBCL side below. |
 | `compile-file` policy | generated code compiles at `(speed 2) (safety 1) (debug 0)` (the runtime's last declaim, saved in the core); a cheaper policy is measured below -- it matters for FIRST runs and string evals only (both parked) |
 | the fasl cache's own load time | below |
@@ -309,3 +314,17 @@ two s525 / s526 reviews -- one line each, as of `05806e16`.
 | R1 numification flag | runtime review s525 | DONE (box face) | s525u |
 | R3 one typed entry per op family | runtime review s525 | STILL TRUE | the structural candidate; the string-compare arm (part 2 R4) is a one-family probe of it and did NOT pay |
 | R5 rule-10 splits, R6 default arms | runtime review s525 | R6 DONE, R5 partial | not speed |
+
+## Neighbours and files
+
+- **s540a** (#4787, `docs/cpan-speed-comparison-s540.md`) was not on main while this was written and
+  its ranked list was not yet drafted; a lever both reviews name is to be listed once, with both
+  numbers, by whichever merges second.
+- **s539d** (the cheap `caller` tier and a cheaper sub frame) owns the frame and `caller` costs this
+  review only points at (part 2 R6 / R7, part 1 P2).
+- Scratch, in the s540b worktree's `scratch/s540b/` (not on main): `prof.pl` (sb-sprof harness),
+  `ab.pl` (runtime / emission A/B with a base-vs-base column), `optdiff.pl` + `optab.pl` (what a
+  registry name changes and holds), `shim/shimbench.pl`, `comp/` (phases, SBCL compile/load,
+  detector stripping, bytes by form), `lev/` (the scratch redefinitions: `tr-cache.lisp`,
+  `str-cmp.lisp`, `hash-presize.lisp`, `md5-prim.lisp`), `emitlev/` (the hand-edited emissions),
+  `legs/leg1..6.log` (every timing quoted above).
