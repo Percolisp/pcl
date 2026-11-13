@@ -86,6 +86,17 @@ A file that stops early does less work and would read as fast.  `PE` files
 a shortfall at the same place) are listed separately; `S` = both skip the file;
 `X` = anything else (a PCL failure, a timeout).
 
+**Where the raw data is.**  Every `scratch/s540a/...` path in this doc is in the
+s540a worktree (`.claude/worktrees/agent-ab202023149badf2a/` under the main
+checkout), not committed: the coarse pass's 24 leg logs `coarse-c*.log` (each
+ending `=== heavy.sh s540a leg END rc=0`) and their TSVs `coarse-c*.tsv`; the
+precise pass `benchP1.log` / `benchP2.log` + `precise-[12].tsv`; the lever
+benches `bench1.log`, `bench2b.log` + `bench1-*.tsv`, `bench2-*.tsv`; the
+profiles `prof-05806e16/`; the probes `probe/`, `micro/`.  The committed
+summary is `baselines/board-timing-s540.tsv` (one row per file, its `src`
+column naming the TSV that measured it).  The tables below are
+`tools/board-timing.pl --report --norm --table` over those TSVs.
+
 ### 1a. CPU time is NOT load-proof on this box
 
 The brief expected CPU time to inflate far less than wall time under load.  It
@@ -112,6 +123,31 @@ median (`tools/board-timing.pl --report --norm`; a row without Test::More takes
 the median factor of its load bucket) -- every coarse CPU number below is
 normalised that way; (2) the precise pass (an exclusive bench at load < 2,
 best of 3) is the reference, and the doc says which table is which.
+
+### 1b. The profiles
+
+`sb-sprof` (`:cpu` and `:alloc`, 1 ms) through the same hooks fasl
+(`tools/board-timing.pl --prof cpu|alloc`): from the main program's
+compile->run boundary (`p-run-compile-phase-blocks`) to exit for the RUN
+phase, from the first form (`--prof-from start`) for the LOAD phase; read with
+`scratch/s540a/profsum.pl` (top functions by self and by total).  Taken on
+**`05806e16`** (main's code from MAIN-READY-91, which merged while this ran;
+an extraction of it with its own core and cache, warmed by one cold run):
+
+* **run phase, 12 files of 8 dists** -- JSON-PP `099_binary15.t`, Capture-Tiny
+  `06-stdout-closed.t` + `03-tee.t`, Mojo-DOM58 `dom.t`, YAML-PP `43.indent.t`
+  + `20.dump.t` + `21.emit.t`, Pod-Simple `render.t`, Text-CSV `55_combi.t`,
+  IO-Compress `107multi-zip.t` + `cz-05examples.t`, Template-Toolkit
+  `filter.t` (the board's run phase is concentrated: outside JSON-PP and
+  Capture-Tiny no file runs more than 1.2 s longer than perl);
+* **load phase, 6 files of 6 dists** -- Text-CSV `16_import.t`, Log4perl
+  `040Filter.t`, IO-Compress `999pod.t`, HTTP-Tiny `140_proxy.t`, YAML-PP
+  `00.compile.t`, Getopt-Long `gol-load1.t`: all six are SBCL's compiler
+  (constraint propagation 30-33 %, `ir1-optimize` 26-30 %, `ir1-convert`
+  10-13 %);
+* **transpile, 8 test files of 8 dists** -- `Devel::NYTProf` over `pl2cl`
+  (the six largest board test files plus two small ones), grouped by package
+  in `scratch/s540a/nyt-groups.txt`.
 
 ## 2. Per distribution
 
@@ -260,7 +296,7 @@ ending in its `END rc=0` line).
 | 7 | **Fasl builds in the SECOND run** (`cfile`): a module first loaded INSIDE another module's fasl build loads from its text and gets its own fasl only on a later run, so the cache needs one run per nesting level to converge | **27.3** (warm rows) | 63 / 20 | Log4perl `040Filter.t` on a fresh cache, default policy: run 1 builds 5 / text 27, run 2 hits 5 / builds 1, run 3+ hits 6 (`PCL_FASL_DEBUG`); under row 1's `'*'` TT and Log4perl were still building at run 3 | build the deferred fasls after the outer build returns (in the same run) | the convergence count above (taken); after the fix every second run must show 0 builds | one session | **#4963** (new) |
 | 8 | **A `require`d / `do`ne `.pl` file is transpiled and compiled from text on EVERY run** (`%p-load-module-uncached`): IO-Compress's test helper | **21.7** transpile + its compile | 103 / 7 (IO-Compress 82 files) | warm rows still run 96 module transpiles, 82 of them IO-Compress's one helper per file; `105oneshot-*` compile `oneshot.pl` 2.5-6.7 s per run, and 2 of 9 rows died with no hook record (heap exhaustion) | cache a required `.pl` like a module | CONFIRMS #4643 (its "loaded UNCACHED from text every run") | one session | #4643 |
 | 9 | **`Symbol::gensym` builds the whole stash view of `Symbol::`** on every call (`delete $$genpkg{$name}` -> `p-stash` -> `%p-stash-add-variable-names` + `package-iter-step` over every symbol the package can see) -- every `IO::Handle->new`, `IO::File->new`, File::Temp handle | ~10 (Capture-Tiny run) | 21 / 1 on the board; every IO::* user | Capture-Tiny `06` / `03`: `p-stash` 21-24 % of the run | a stash ELEMENT op (`exists` / `delete` / fetch of `$Pkg::{NAME}`) that does not materialise the view, or a view cached until the package changes | **taken** (`bench2b`): 20,000 x `gensym` perl 0.010 / PCL 1.63 s (**81 us per call, 160x**); 5,000 x `IO::Handle->new` 0.010 / 0.51 s | one session | **#4964** (new) |
-| 10 | **`s///` on a string built by `.=`**: the target is an adjustable string buffer, so cl-ppcre's literal-prefix `search` and character reads go through hairy-vector access | ~4 (YAML-PP, Mojo) | 6 / 2 | YAML-PP `43.indent.t`: `search` 27.6 % + `vector-hairy-data-vector-ref` 7.9 %; `20.dump.t` 18.5 %; Mojo `dom.t` 12.8 % | hand cl-ppcre a SIMPLE string (coerce once per match call) | SUBSTBUF (filled from bench P2) | small | **#4966** (new) |
+| 10 | **A match or `s///` on a LONG string pays its whole length each time**: cl-ppcre finds the regex's constant prefix with the generic CL `search` (element by element through the generic accessor), and an `s///` on a fresh copy copies and rebuilds the whole string | ~4 (YAML-PP, Mojo) | 6 / 2 | YAML-PP `43.indent.t`: `search` 27.6 % + `vector-hairy-data-vector-ref` 7.9 %; `21.emit.t` 23.7 % + 8.3 %; `20.dump.t` 18.5 %; Mojo `dom.t` 12.8 % -- YAML::PP's lexer consumes its input line IN PLACE (`$$yaml =~ s/\A...//`, 38 substitutions in `Lexer.pm`), and its emitter escapes with `s/.../.../eg` | a typed (simple-string, Boyer-Moore) prefix search inside cl-ppcre -- the one engine stays; `s/\A...//` as an in-place chop | **taken** (`scratch/s540a/micro.log`, code 05806e16, inside-program times): 2,000 x `/key: (\w+)/` with the prefix at the end of 50 KB: perl 0.001 s, PCL 0.070 s; 2,000 x `s/key: /K=/` on a 50 KB copy: perl 0.004, PCL 0.38 (95x).  REFUTED on the way: a `.=`-built buffer is not slower to match than a literal copy (`micro/matchbuf.pl`: PCL 0.192 vs 0.183 s) | one session for the search; the chop needs a design note | **#4966** (new) |
 | 11 | **Cold first run** (empty cache): 1,362 module transpiles, each a fresh `perl pl2cl` | **1,067** (cold - warm) | all | raw over all 896 files: the transpiles 1,161 s of wall, the fasl builds 405 s, string-eval transpiles 209 s | transpile modules through ONE resident `pl2cl` (the string-eval server exists) | CONFIRMS #2423 ("every script/module transpile at run time spawns a fresh perl pl2cl") | several | #2423 |
 
 ## 5. The known levers: confirmed or not shown
