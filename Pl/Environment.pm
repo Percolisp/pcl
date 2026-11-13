@@ -541,6 +541,32 @@ has source_file => (
     default => '-',
 );
 
+=head2 src_location($node)
+
+THE SOURCE LOCATION OF A NODE AS PERL REPORTS IT (s539d, task #233 item 4):
+C<($file, $line)> after any C<# line N "FILE"> directive above the node --
+what C<__FILE__>, C<__LINE__>, a die/warn's C<at FILE line N.> and the
+C<line-track> registers all say.  PPI applies perlsyn's directive rule while
+it indexes locations (C<PPI::Document::_logical_line_and_file>); a directive
+without a file keeps the file.  With no directive, C<$file> is
+C<source_file>.  A node PPI cannot locate (a fragment re-parse) answers line
+0, as C<line_number> did.  C<$file> is the raw name: a caller embedding it in
+a Lisp string escapes it.
+
+=cut
+
+sub src_location {
+    my ($self, $node) = @_;
+    my $file = $self->source_file || q{-};
+    my $loc  = (ref $node && $node->can('location')) ? eval { $node->location } : undef;
+    return ($file, 0) unless ref $loc eq 'ARRAY';
+    # The logical file is the document's own name until a directive names
+    # another; PCL hands PPI a string, so that default is undef.
+    my $doc_file = eval { my $d = $node->top; $d->can('filename') ? $d->filename : undef };
+    $file = $loc->[4] if defined $loc->[4] && !(defined $doc_file && $loc->[4] eq $doc_file);
+    return ($file, $loc->[3] // 0);
+}
+
 has state_var_renames => (
     is      => 'rw',
     default => sub { {} },

@@ -9761,9 +9761,30 @@ sub _lower_block {
   my @forms = $self->_lower_block_1($stmts, $vi, $tail_ctx);
   return @forms unless @forms && Pl::Passes::enabled('line-track');
   my ($first) = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
-  my $line = $first && $first->can('line_number') ? $first->line_number : undef;
+  return @forms unless $first;
+  my ($file, $line) = $self->environment->src_location($first);
   return @forms unless $line;
-  return (['p-line', $line], @forms);
+  return ($self->_line_directive_file_form($first, $file), ['p-line', $line], @forms);
+}
+
+# A `# line N "FILE"` directive (s539d, #233 item 4) changes the FILE too, and
+# the file register is otherwise written only at a sub body's head and a run
+# bucket's: so a statement whose logical file is not the unit's writes it
+# itself, and so does the first statement back in the unit's file after one
+# that was not (a directive that names the unit's file again).  () for every
+# statement of a file without a FILE directive.
+sub _line_directive_file_form {
+  my ($self, $first, $file) = @_;
+  my $env  = $self->environment;
+  my $unit = $env->source_file || '-';
+  if ($file eq $unit) {
+    my $prev = $first->can('previous_token') ? $first->previous_token : undef;
+    return () unless $prev;
+    my ($pfile) = $env->src_location($prev);
+    return () if $pfile eq $unit;
+  }
+  (my $q = $file) =~ s/(["\\])/\\$1/g;
+  return (['p-file', "\"$q\""]);
 }
 
 # `(p-file "…")` for THIS compilation's source, or () when the gate is off.

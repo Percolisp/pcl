@@ -403,8 +403,13 @@ sub build_core {                 # save a core with $rt_source baked in
   # which shows up as `BROKEN: pclB exit 1` on the two pack rows and is an
   # artefact of where the file sits, not of what is in it.  Stage any source
   # that is not already beside $RT into cl/ for the build.
+  # NOT under BENCH_EMIT_B (s539d): there B's runtime is a whole tree's, built
+  # in place beside its own extensions and its own pl2cl -- a staged copy
+  # derives A's tree from its path and then talks to B's pl2cl, a mix whose
+  # module loads (moo-objs, json-rt) failed in the pl2cl server client.
   my $staged;
-  if (dirname(abs_path($rt_source)) ne dirname(abs_path($RT))) {
+  if (dirname(abs_path($rt_source)) ne dirname(abs_path($RT))
+      && !($ENV{BENCH_EMIT_B} && $rt_source =~ m{/cl/pcl-runtime\.lisp\z})) {
     my ($sfh, $sfile) = tempfile('bench-rt-XXXXXX', SUFFIX => '.lisp',
                                  DIR => dirname($RT), UNLINK => 0);
     close $sfh;

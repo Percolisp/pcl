@@ -1545,6 +1545,28 @@ sub gen_symbol_form {
   return cl_sym($content);
 }
 
+# THE SOURCE LOCATION of NODE as perl reports it -- ($file, $line) after any
+# `# line N "FILE"` directive above it (s539d, #233 item 4).  ONE reading for
+# __FILE__, __LINE__ and a die/warn's :loc (Pl::Environment::src_location).
+sub _src_location {
+  my ($self, $node) = @_;
+  my $env = $self->environment;
+  return $env->src_location($node) if $env;
+  return ('-', (ref $node && $node->can('line_number')) ? ($node->line_number // 0) : 0);
+}
+
+# `__FILE__` / `__LINE__` (CONTENT) at NODE as their compile-time constant
+# form, or undef for any other word.  The one spelling of both; the two
+# leaf paths (gen_leaf, the single-word funcall) call it.
+sub _file_line_token {
+  my ($self, $node, $content) = @_;
+  return undef unless $content eq '__FILE__' || $content eq '__LINE__';
+  my ($file, $line) = $self->_src_location($node);
+  return $line if $content eq '__LINE__';
+  $file =~ s/(["\\])/\\$1/g;
+  return qq{"$file"};
+}
+
 sub gen_leaf {
   my $self = shift;
   my $node = shift;
@@ -1591,15 +1613,8 @@ sub gen_leaf {
   if ($ref eq 'PPI::Token::Word') {
     my $content = $node->can('content') ? ($node->content() // '') : '';
     # Handle __FILE__ and __LINE__ compile-time tokens
-    if ($content eq '__FILE__') {
-      my $source_file = $self->environment ? $self->environment->source_file : '-';
-      $source_file //= '-';
-      return qq{"$source_file"};
-    }
-    if ($content eq '__LINE__') {
-      my $line = $node->line_number // 0;
-      return $line;
-    }
+    my $loc_form = $self->_file_line_token($node, $content);
+    return $loc_form if defined $loc_form;
     # If marked as bareword string by handle_subcalls (unknown word used as a value,
     # e.g. !Bare where Bare is not a known function), emit as a string literal.
     if ($node->{_bareword_string}) {
@@ -2787,15 +2802,8 @@ sub gen_funcall_form {
     my $func_node = $self->expr_o->get_a_node($kids->[0]);
     if (ref($func_node) eq 'PPI::Token::Word' && $func_node->can('content')) {
       my $content = $func_node->content() // '';
-      if ($content eq '__FILE__') {
-        my $source_file = $self->environment
-            ? $self->environment->source_file : '-';
-        $source_file //= '-';
-        return qq{"$source_file"};
-      }
-      if ($content eq '__LINE__') {
-        return $func_node->line_number // 0;
-      }
+      my $loc_form = $self->_file_line_token($func_node, $content);
+      return $loc_form if defined $loc_form;
       if ($content eq '__PACKAGE__') {
         my $pkg = $self->environment
             ? $self->environment->current_package : 'main';
@@ -3570,8 +3578,7 @@ sub gen_funcall_form {
   my $call;
   if ($cl_func eq 'p-die' || $cl_func eq 'p-warn') {
     my $word = $self->expr_o->get_a_node($kids->[0]);
-    my $line = (ref($word) && $word->can('line_number')) ? ($word->line_number // 0) : 0;
-    my $file = ($self->environment && $self->environment->source_file) || '-';
+    my ($file, $line) = $self->_src_location($word);
     $file =~ s/(["\\])/\\$1/g;
     $call = [$cl_func, ':loc', "\"$file line $line\"", @args];
   } else {
