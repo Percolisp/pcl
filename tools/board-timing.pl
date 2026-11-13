@@ -82,8 +82,7 @@
 # --prof cpu|alloc: sb-sprof from the main program's compile->run boundary
 # (p-run-compile-phase-blocks) to exit, one report per run in --prof-dir.
 #
-# --report: the summary tables (markdown) over one or more TSVs; a later
-# file's row for the same (dist, file, mode) replaces an earlier one, and with
+# --report: the summary tables (markdown) over one or more TSVs; a later# file's row for the same (dist, file, mode) replaces an earlier one, and with
 # --repeat the best rep (least CPU) is the row, its spread beside it.
 
 use strict;
@@ -495,7 +494,11 @@ sub read_rows {
         $r{A_cpu} = num($r{x_cpu}) + $xchild;
         $r{C_cpu} = num($r{C_cpu}) + $child - $xchild;
       }
-      my $k = "$r{dist}\t$r{file}\t$r{mode}\t" . ($r{variant} // q{});
+      # a variant named `precise...` RE-TIMES the base (a quiet bench): its rows
+      # replace the base rows; any other variant is its own population.
+      my $v = $r{variant} // q{};
+      $v = q{} if $v =~ /^precise/;
+      my $k = "$r{dist}\t$r{file}\t$r{mode}\t$v";
       if (($src{$k} // '') ne $f) { $reps{$k} = []; $src{$k} = $f }
       $r{src} = basename($f);
       push @{ $reps{$k} }, \%r;

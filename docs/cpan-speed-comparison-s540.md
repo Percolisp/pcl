@@ -159,9 +159,56 @@ The whole per-file table is `baselines/board-timing-s540.tsv`.
 
 ## 4. THINGS THAT SHOULD BE FASTER, ranked by measured seconds over the board
 
+Seconds are the coarse pass's normalised CPU over the 638 compared files
+(warm), unless the row says otherwise; "files / dists" = where the component
+is more than 0.05 s.  Every lever measurement named "taken" is on a quiet box
+(`heavy.sh ... bench`, load < 2, best of 3, `scratch/s540a/bench*.log`, each
+ending in its `END rc=0` line).
+
+| # | what | board s | files / dists | evidence | lever | discriminating measurement | size | owner |
+|---|---|---:|---|---|---|---|---|---|
+| 1 | **The distribution's own modules are compiled from TEXT on every run** (`mcompile`): a module under `-I` / `lib` / `PERL5LIB` is never compiled to a fasl by default (`%p-compile-module-p`, the s471 ruling: default = perl's installed dirs + PCL's `lib/`), so SBCL compiles its whole text in every file that loads it -- Pod::Simple 7.3 s per file, Text::CSV_PP 4.6 s, TT 3.4 s, Getopt::Long 3.1 s | **1,422.5** | 612 / 28 | load profiles (6 files, `--prof-from start`): SBCL's compiler -- constraint propagation 30-33 %, `ir1-optimize` 26-30 %, `ir1-convert` 10-13 % | compile `:local` modules to fasls too (the cache is already validated by mtime + size + the dependency manifest; the s471 text says "correctness is the manifest, this is a belt") | **taken** (`bench2b`): `PCL_COMPILE_DIRS='*'`, best of 3: Text-CSV `16_import.t` 5.29 -> 0.68 s, Getopt-Long `gol-load1.t` 3.82 -> 0.58, JSON-PP `000_load.t` 1.82 -> 0.37, Data-Dumper `bless.t` 2.49 -> 0.64, HTTP-Tiny `140_proxy.t` 2.70 -> 1.36; TT `config.t` 4.59 -> 2.31 and Log4perl `040Filter.t` 4.63 -> 4.38 had NOT converged in 3 runs (row 7).  A cheap compile POLICY instead (`compilation-speed 3`, `speed 0`, all run-time compiles) gave only -0..-25 % (Getopt 3.82 -> 3.17, JSON-PP 1.82 -> 1.44) | one session of code; **needs a ruling** (the default is the s471 ruling) | **#4961** (new) |
+| 2 | **The Test::More layer `cl/pcl-test.lisp` (1,822 lines) is SOURCE-loaded in every file that `use`s Test::More** (`p-ensure-test-lib` calls `load` on the `.lisp`) | **224.9** | 611 / 29 | `tcompile` = 0.37 s quiet in every Test::More file; the fixed workload section 1a calibrates with | load it through the extension fasl cache (`%p-load-extension-file`, the path `pcl-pack` / `pcl-mro` take) | **taken** (`bench1`): the TAP layer preloaded from a fasl, best of 3 on 6 files of 6 dists: -0.37..-0.41 s each (CMM `003-basic.t` 0.77 -> 0.39 s, File-Which `01_use.t` 0.64 -> 0.25 s); the fasl load itself < 10 ms | one session | **#4962** (new) |
+| 3 | **The test file's own transpile** (phase A: `pl2cl` per run) | **203.0** | 638 / 30 | NYTProf over `pl2cl` of 8 test files (`scratch/s540a/nyt-groups.txt`): PPI 40-47 % (`PPI::Node::find` 21-26 %), PExpr 11-21 %, Parser2 10-13 %, `UNIVERSAL::isa` 6-8 % (up to 11 million calls), code generation 4-8 % | `pcl`'s script cache already skips it on a repeated run of an unchanged file; the transpile itself is the parser program's | CONFIRMS #2423's 0.17 s + 2.5-3 ms per line and the s525 / s526 PPI share (40-47 % here vs 46-60 % there on Calc.pm) | several | #2423, #3694 |
+| 4 | **Subprocesses**: a Perl `fork` under PCL | **51.7** | 16 / 4 (Capture-Tiny 50 s) | strace of Capture-Tiny `06-stdout-closed.t` (`scratch/s540a/probe/`): the same 391 perl `execve`s as perl, but 631 process forks (perl 391) and **481 thread creations with 512 MB stacks** -- `%p-fork-process` stops and restarts the signal-relay thread and `sb-posix:fork` the finalizer thread, in parent AND child | do not restart threads in a child that will `exec`; a cheaper spawn for `system` | **taken** (`bench1`): 200 x `fork`+`exec 'true'` perl 0.18 / PCL 0.85 s CPU (+3.4 ms per fork); 200 x `system('true')` 0.16 / 0.29 | one session | **#4965** (new) |
+| 5 | **JSON::PP's encode / decode** (the `099_binary*` round trips) | **~48** (run 69.9 vs perl 21.5) | 16 / 1 | profile `099_binary15.t`: 85 % under method calls, then a SPREAD: boxes (`box-set` + `%make-p-box` 8 % self, 25 % of allocation), EQUAL-table lookups 8 % (object fields and the own-method cache), `string=*` 3 %, GC 2 %, string concatenation 21 % and `subseq` 17 % of allocation | none single: object representation (#1890's per-object EQUAL table) + the method cache (#4523 / #4524) + allocation per character | **taken**: `micro/jsonpp.pl` (40 round trips of a 200-string array) perl 0.18 / PCL 0.84 s (4.6x); `micro/substr1.pl` (2 M one-character `substr`) 0.11 / 0.12 = PAR, so `substr` is NOT the lever | several | **#4967** (new: the profile hunt, this micro as its row) |
+| 6 | **String-eval compile** (`ecompile`, plus `evalx` transpiles) | **42.1** | 201 / 19 | -- | a cheap compile policy for eval'd code | CONFIRMS #2421's lever area; on the board it is small, and the global cheap policy of row 1 measured -0..-25 % | one session | #2421 |
+| 7 | **Fasl builds in the SECOND run** (`cfile`): a module first loaded INSIDE another module's fasl build loads from its text and gets its own fasl only on a later run, so the cache needs one run per nesting level to converge | **33.2** (warm rows) | 65 / 21 | Log4perl `040Filter.t` on a fresh cache, default policy: run 1 builds 5 / text 27, run 2 hits 5 / builds 1, run 3+ hits 6 (`PCL_FASL_DEBUG`); under row 1's `'*'` TT and Log4perl were still building at run 3 | build the deferred fasls after the outer build returns (in the same run) | the convergence count above (taken); after the fix every second run must show 0 builds | one session | **#4963** (new) |
+| 8 | **A `require`d / `do`ne `.pl` file is transpiled and compiled from text on EVERY run** (`%p-load-module-uncached`): IO-Compress's test helper | **21.8** transpile + its compile | 103 / 7 (IO-Compress 82 files) | warm rows still run 96 module transpiles, 82 of them IO-Compress's one helper per file; `105oneshot-*` compile `oneshot.pl` 2.5-6.7 s per run, and 2 of 9 rows died with no hook record (heap exhaustion) | cache a required `.pl` like a module | CONFIRMS #4643 (its "loaded UNCACHED from text every run") | one session | #4643 |
+| 9 | **`Symbol::gensym` builds the whole stash view of `Symbol::`** on every call (`delete $$genpkg{$name}` -> `p-stash` -> `%p-stash-add-variable-names` + `package-iter-step` over every symbol the package can see) -- every `IO::Handle->new`, `IO::File->new`, File::Temp handle | ~10 (Capture-Tiny run) | 21 / 1 on the board; every IO::* user | Capture-Tiny `06` / `03`: `p-stash` 21-24 % of the run | a stash ELEMENT op (`exists` / `delete` / fetch of `$Pkg::{NAME}`) that does not materialise the view, or a view cached until the package changes | **taken** (`bench2b`): 20,000 x `gensym` perl 0.010 / PCL 1.63 s (**81 us per call, 160x**); 5,000 x `IO::Handle->new` 0.010 / 0.51 s | one session | **#4964** (new) |
+| 10 | **`s///` on a string built by `.=`**: the target is an adjustable string buffer, so cl-ppcre's literal-prefix `search` and character reads go through hairy-vector access | ~4 (YAML-PP, Mojo) | 6 / 2 | YAML-PP `43.indent.t`: `search` 27.6 % + `vector-hairy-data-vector-ref` 7.9 %; `20.dump.t` 18.5 %; Mojo `dom.t` 12.8 % | hand cl-ppcre a SIMPLE string (coerce once per match call) | SUBSTBUF (filled from bench P2) | small | **#4966** (new) |
+| 11 | **Cold first run** (empty cache): 1,362 module transpiles, each a fresh `perl pl2cl` | **1,046** (cold - warm) | all | raw over all 896 files: the transpiles 1,161 s of wall, the fasl builds 405 s, string-eval transpiles 209 s | transpile modules through ONE resident `pl2cl` (the string-eval server exists) | CONFIRMS #2423 ("every script/module transpile at run time spawns a fresh perl pl2cl") | several | #2423 |
+
 ## 5. The known levers: confirmed or not shown
 
+| known | what the board shows |
+|---|---|
+| #4061 (a weak-table write per `bless`) and #2371's DESTROY registry (MAIN-READY-89: ~22-35 ns per `bless` once any DESTROY exists) | **NOT SHOWN at board scale.**  The weak-table functions (`gethash/weak`, `puthash/weak`, `remhash/weak`, `findhash-weak`) are 4-5 % of Mojo `dom.t`'s 0.6 s run and ~4 % of Capture-Tiny's -- hundredths of a second per file; no suite feels the DESTROY registry. |
+| #4305 (the `@{}` / `%{}` deref overloads: every unblessed deref pays once any class registers one) | **NOT SHOWN**: `%p-deref-overload-1` is 2 % of Mojo `dom.t`'s run (Mojo::DOM58 is the board's one class that registers them). |
+| #4523 / #4524 / #4525 (inherited method and overload lookup) | **The SHAPE is confirmed, the SECONDS are not on the board.**  Pod-Simple `render.t` (a 3-4 deep class chain) spends 6.4 % of its run in `find-symbol` + 4.7 % in EQUAL lookups -- #4523's re-walk -- and Text-CSV `55_combi.t` 7.2 % in `p-find-overload` (#4524); but the board's whole run phase in SBCL is 109 s and these files' runs are tenths of a second.  The bench rows (`methinh` 3.98x, `methinh3` 7.85x) remain the evidence for them. |
+| #2770-#2773 (string append, `print`, scalar `grep`, `unshift`) | **Closed and not seen again**: no `replace` / `ub32-bash-copy` hot spot in any profile. |
+| #477 (a scalar `m//g` loop was quadratic) | **Not seen**: YAML-PP's `\G`-scanning lexer shows no quadratic signature. |
+| #4643 (heap exhaustion compiling IO-Compress `oneshot.pl`; the `.pl` loaded uncached) | **CONFIRMED, both halves**: the `.pl` is transpiled and text-compiled on every run (row 8: 2.5-6.7 s per `105oneshot-*` file), and 2 of its 9 files died in the warm pass with no hook record (the heap death). |
+| #3694 / #2423 (the transpile; PPI's share) | **CONFIRMED**: PPI 40-47 % of `pl2cl` (row 3); per-module `pl2cl` spawns are the cold run's largest cost (row 11). |
+| #2421 (a cheap compile policy for string-eval'd code) | **Area confirmed, small on the board** (`ecompile` 42 s); the same idea applied to ALL run-time compiles was measured (row 1): -0..-25 %, far below fasl caching. |
+| #4621's list | covered above; nothing in it holds board seconds except through rows 1-2. |
+
 ## 6. Possible correctness findings (PCL suspiciously fast)
+
+**None crossed the bar** (a compared file whose PCL run phase is under half of
+perl's whole time, with perl >= 0.25 s).  The three closest were read:
+
+* **YAML-Tiny `31_local_tml.t`** (PCL run 0.07 s, perl 0.22 s at the coarse
+  load; 13 ok both): perl's time includes compiling its TestML helpers -- `perl
+  -c` is 0.04 s and the whole file 0.13 s on a quiet box, so perl's RUN is
+  ~0.09 s against PCL's 0.07.  Par, not a skip.
+* **Text-CSV `55_combi.t`** (PCL run 0.59 s, perl 1.00 s; 25,119 ok both):
+  **the native TAP layer**.  perl spends 0.80 s of its 1.05 s in Test::More
+  itself (`perl -MTest::More -e 'is($_,$_,"x") for 1..25119'` = 0.80 s), so
+  the module's own work is ~0.2 s under perl and ~0.5 s under PCL -- 2.5x,
+  hidden by the harness.  Section 7's first caveat.
+* **IO-Compress `cz-05examples.t`** (0.21 s vs 0.20 s): par; most of both is
+  the example scripts it runs as subprocesses.
 
 ## 7. What the board does NOT tell
 
