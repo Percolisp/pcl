@@ -1058,8 +1058,10 @@ sub _premerge_use_constant_prototypes {
     # require): every call above the require read the name as unknown -- the
     # string "_INTERNAL_DEBUG" in Log::Log4perl::Appender::new, true.
     local $fp->environment->package_stack->[-1] = _package_of_element($inc);
-    $fp->register_constant_prototype($_)
-      for Pl::Parser::use_constant_names($inc);
+    # ... with a literal scalar's FOLD (task #4982), so a sub body lowered
+    # before the in-stream statement folds its uses too.
+    $fp->register_constant_prototype($_->[0], $fp->constant_fold_cl($_->[1]))
+      for Pl::Parser::use_constant_pairs($inc);
   }
 }
 

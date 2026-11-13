@@ -254,20 +254,27 @@ sub perl_builtin_inc_dirs {
 sub program_inc {
     my ($root, @inc) = @_;
     my $shim = "$root/lib";
-    # The compiler's PPI library is ONE source: whatever Pl::VendorPPI put on
+    # The compiler's PPI library is ONE source: the entry Pl::VendorPPI put on
     # @INC ($Pl::VendorPPI::LIB, read as a package variable so this module
-    # never loads the loader).  It is dropped by that spelling as well as by
-    # the root-derived one, because the loader finds its root through its OWN
-    # real path: reached through a symlinked Pl/ (or an -I of another tree),
-    # it names a vendor dir that is not "$root/vendor/PPI/lib".
+    # never loads the loader -- by its own spelling, because the loader finds
+    # its root through its OWN real path: reached through a symlinked Pl/ (or
+    # an -I of another tree), it names a vendor dir that is not
+    # "$root/vendor/PPI/lib").  THAT ONE ENTRY is dropped, and only when the
+    # loader inserted it ($Pl::VendorPPI::ADDED) -- never a directory the
+    # CALLER named (task #4987).  A program may `use lib` that very directory
+    # (a program built on PCL's vendored PPI): dropping the caller's entry sent
+    # the module transpile to ANOTHER PPI (site_perl's, or none: `missing`),
+    # the runtime then saw every PPI dependency "moved" (#1860's R2) and every
+    # run re-transpiled the whole library, 98-116 s a run.
     no warnings 'once';
-    my @ppi = ("$root/vendor/PPI/lib",
-               defined $Pl::VendorPPI::LIB ? ($Pl::VendorPPI::LIB) : ());
-    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib", @ppi);
+    my $vend = ($Pl::VendorPPI::ADDED && defined $Pl::VendorPPI::LIB)
+             ? $Pl::VendorPPI::LIB : undef;
+    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib");
     my %builtin = map { (_canon_dir($_) => 1) } perl_builtin_inc_dirs();
     my (@out, $placed);
     for my $d (@inc) {
         next if !defined $d || ref $d || !length $d;
+        if (defined $vend && $d eq $vend) { undef $vend; next }   # once
         next if $d =~ m{\A/} && $tree{_canon_dir($d)};
         if (!$placed && $builtin{_canon_dir($d)}) {
             push @out, $shim if -d $shim;

@@ -9814,7 +9814,9 @@ sub _walk_file_prototypes {
 sub _imported_record {
   my ($proto) = @_;
   my %r = (%$proto, from_module => 1);
-  delete $r{at};
+  # ... and without a literal constant's FOLD (task #4982): an imported
+  # constant's value is not in this unit's text, so a use of it stays a call.
+  delete @r{qw(at const_cl const_pkg)};
   return \%r;
 }
 
@@ -10267,10 +10269,21 @@ sub _process_use_vars {
 # The NAMES a `use constant` statement declares, in both spellings:
 #   use constant PI => 3.14;                 -> ("PI")
 #   use constant { PI => 3.14, E => 2.71 };  -> ("PI", "E")
-# ONE reading of that question (rule 11): the emitting walks below pair each
-# name with its VALUE and cannot answer it without also compiling the value,
-# which the pre-pass (Parser2::_premerge_use_constant_prototypes) must not do.
+# ONE reading of that question (rule 11): use_constant_pairs below is the walk,
+# and it is the one _process_use_constant / _process_constant_hash make -- a
+# name and its VALUE tokens, the value never compiled here (the pre-pass,
+# Parser2::_premerge_use_constant_prototypes, must not compile a value: only a
+# literal scalar's fold is, constant_fold_cl).
 sub use_constant_names {
+  my ($stmt) = @_;
+  return map { $_->[0] } use_constant_pairs($stmt);
+}
+
+# ([NAME, \@VALUE_TOKENS], ...) for a `use constant` statement, in source order:
+# the value tokens exactly as the emitting walk collects them (the single form:
+# every child after the name but `=>` operators and structure tokens; the hash
+# form: the tokens after `=>` up to the next top-level comma).
+sub use_constant_pairs {
   my ($stmt) = @_;
   my @children = grep { $_->significant } $stmt->children;
   my $i = 0;
@@ -10279,10 +10292,7 @@ sub use_constant_names {
   return () if $i >= @children;
   my $next = $children[$i];
   if ($next->isa('PPI::Structure::Constructor')) {
-    # Hash form — the SAME walk _process_constant_hash makes, with the value
-    # half skipped instead of compiled: name, `=>`, value tokens up to the
-    # next top-level comma, comma, repeat.
-    my @names;
+    my @pairs;
     for my $content ($next->schildren) {
       next unless $content->isa('PPI::Statement::Expression');
       my @parts = $content->schildren;
@@ -10290,19 +10300,56 @@ sub use_constant_names {
       while ($i < @parts) {
         my $name_tok = $parts[$i];
         last unless $name_tok && $name_tok->isa('PPI::Token::Word');
-        push @names, $name_tok->content;
         $i++;
         $i++ while $i < @parts && $parts[$i]->isa('PPI::Token::Operator')
                                 && $parts[$i]->content eq '=>';
-        $i++ while $i < @parts && !($parts[$i]->isa('PPI::Token::Operator')
-                                    && $parts[$i]->content eq ',');
+        my @value;
+        while ($i < @parts && !($parts[$i]->isa('PPI::Token::Operator')
+                                && $parts[$i]->content eq ',')) {
+          push @value, $parts[$i++];
+        }
         $i++ if $i < @parts;                # the comma
+        push @pairs, [$name_tok->content, \@value];
       }
     }
-    return @names;
+    return @pairs;
   }
-  return ($next->content) if $next->isa('PPI::Token::Word');
-  return ();
+  return () if !$next->isa('PPI::Token::Word');
+  my @value = grep { !($_->isa('PPI::Token::Operator') && $_->content eq '=>')
+                     && !$_->isa('PPI::Token::Structure') }
+              @children[$i + 1 .. $#children];
+  return ([$next->content, \@value]);
+}
+
+# THE FOLD of a `use constant` value (task #4982, Kind-A `const-fold`): the CL
+# text of a LITERAL SCALAR value -- one number, `-` and a number, or one
+# string that does not interpolate -- or undef for anything else (a list, a
+# `qw()`, `undef`, an expression: those stay calls).  The text is what the
+# expression compiler emits for that literal anywhere, so a folded use reads
+# exactly as the literal written there would.  Only such a value is compiled
+# here; nothing else is touched (use_constant_names says why).
+sub constant_fold_cl {
+  my ($self, $parts) = @_;
+  my @p = grep { ref $_ && $_->significant
+                 && !($_->isa('PPI::Token::Structure') && $_->content eq ';') }
+          @$parts;
+  my $literal =
+       (@p == 1 && ($p[0]->isa('PPI::Token::Number')
+                    || $p[0]->isa('PPI::Token::Quote::Single')
+                    || $p[0]->isa('PPI::Token::Quote::Literal')
+                    || ($p[0]->isa('PPI::Token::Quote::Double')
+                        && !$p[0]->interpolations)))
+    || (@p == 2 && $p[0]->isa('PPI::Token::Operator') && $p[0]->content eq '-'
+        && $p[1]->isa('PPI::Token::Number'));
+  return undef if !$literal;
+  my $cl = eval { $self->_compile_constant_value(\@p) };
+  # A number, a string datum, or the IR's escaped-string wrapper -- nothing
+  # that evaluates anything.
+  return undef if !defined $cl;
+  return $cl if $cl =~ /\A-?[0-9][^\s()"]*\z/;
+  return $cl if $cl =~ /\A"(?:[^"\\]|\\.)*"\z/s;
+  return $cl if $cl =~ /\A\(p-esc "(?:[^"\\]|\\.)*"\)\z/s;
+  return undef;
 }
 
 # The registration SITE of a `use`/`require` statement (task #2871): what it
@@ -10357,11 +10404,17 @@ sub use_statements_of {
 # is a CALL and never a list operator.  Written once and called from both the
 # emitter and the pre-pass.
 sub register_constant_prototype {
-  my ($self, $name) = @_;
-  $self->environment->add_prototype($name, {
+  my ($self, $name, $fold_cl) = @_;
+  my $env = $self->environment;
+  $env->add_prototype($name, {
     params     => [],
     min_params => 0,
     is_proto   => 0,
+    # A literal scalar value's fold (constant_fold_cl) and the package it is
+    # in force for: ExprToCL folds a use only there (task #4982).
+    (defined $fold_cl
+       ? (const_cl => $fold_cl, const_pkg => $env->current_package // 'main')
+       : ()),
   });
 }
 
@@ -10514,8 +10567,10 @@ sub _emit_constant {
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   # (ONE spelling of that record — see register_constant_prototype, which the
-  # #711 pre-pass calls before any sub body is lowered).
-  $self->register_constant_prototype($name);
+  # #711 pre-pass calls before any sub body is lowered), with the literal's
+  # fold when the value is a literal scalar (#4982; the pre-pass computes the
+  # same one from the same tokens).
+  $self->register_constant_prototype($name, $self->constant_fold_cl($value_parts));
 }
 
 

@@ -89,12 +89,31 @@ SKIP: {
   require PCLPaths;
   my $foreign = "/nonexistent/other-pcl-tree";
   local $Pl::VendorPPI::LIB = "$vend/lib";
-  my @got = PCLPaths::program_inc($foreign, "/x/user-lib", "$vend/lib", "/y/perl5lib");
+  local $Pl::VendorPPI::ADDED = 1;
+  my @got = PCLPaths::program_inc($foreign, "$vend/lib", "/x/user-lib", "/y/perl5lib");
   ok(!grep({ $_ eq "$vend/lib" } @got),
      "program_inc drops the loader's own vendor/PPI/lib even when the program root is another tree")
     or diag "@got";
   is_deeply([ grep { m{^/[xy]/} } @got ], ["/x/user-lib", "/y/perl5lib"],
             "... and keeps the user's entries in order");
+
+  # ... but ONLY the loader's own insertion (task #4987).  A PROGRAM may
+  # `use lib` that very directory -- one built on PCL's vendored PPI -- and its
+  # module transpile is spawned with the program's @INC as -I: dropping the
+  # caller's entry resolved every PPI module elsewhere (site_perl, or nowhere),
+  # the runtime saw each dependency "moved", and every run re-transpiled.
+  my @twice = PCLPaths::program_inc($foreign, "$vend/lib", "/x/user-lib",
+                                    "$vend/lib", "/y/perl5lib");
+  is_deeply([ grep { $_ eq "$vend/lib" || m{^/[xy]/} } @twice ],
+            ["/x/user-lib", "$vend/lib", "/y/perl5lib"],
+            "the loader's insertion goes, the caller's own -I of the same directory stays (#4987)")
+    or diag "@twice";
+  local $Pl::VendorPPI::ADDED = 0;
+  my @given = PCLPaths::program_inc($foreign, "/x/user-lib", "$vend/lib", "/y/perl5lib");
+  is_deeply([ grep { $_ eq "$vend/lib" || m{^/[xy]/} } @given ],
+            ["/x/user-lib", "$vend/lib", "/y/perl5lib"],
+            "a vendor dir the caller named itself (the loader added none) is kept (#4987)")
+    or diag "@given";
 }
 
 done_testing();

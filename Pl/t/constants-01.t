@@ -15,7 +15,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 23;
+use Test::More tests => 27;
 BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -37,6 +37,22 @@ sub output_contains {
     my $desc     = shift // "contains: $expected";
 
     my $result = parse_code($code);
+    my $rx = join '\s+', map { quotemeta } split /\s+/, $expected;
+    like($result, qr/$rx/, $desc);
+}
+
+# The same under the GENERAL form: the Kind-A name `const-fold` OFF (task
+# #4982).  With it on -- the default -- a use of a literal `use constant` IS
+# its literal (perl inlines it); off, it is the scalar-context call of the
+# constant sub every use was before.  The shape rows below assert both.
+sub general_contains {
+    my ($code, $expected, $desc) = @_;
+    my $result = do {
+        local $ENV{PCL_OPT} = '-const-fold';
+        Pl::Passes::_parse_env();
+        parse_code($code);
+    };
+    Pl::Passes::_parse_env();
     my $rx = join '\s+', map { quotemeta } split /\s+/, $expected;
     like($result, qr/$rx/, $desc);
 }
@@ -103,11 +119,17 @@ diag "-------- Constant usage in expressions:";
 
 # The constant use compiles to a scalar-context call of the constant sub
 # (pl-PI) inside the my-init assignment.  (v1 spelled the binding box-set;
-# v2 spells the same runtime write p-my-= inside the fresh let.)
-output_contains('use constant PI => 3.14159;
+# v2 spells the same runtime write p-my-= inside the fresh let.)  Since #4982
+# that is the GENERAL form (`const-fold` off); by default a literal
+# constant's use is the literal itself, as perl inlines it.
+general_contains('use constant PI => 3.14159;
 my $x = PI;',
                 '(p-my-= $x (p-scalar-ctx (pl-PI)))',
                 'Constant in assignment');
+output_contains('use constant PI => 3.14159;
+my $x = PI;',
+                '(p-my-= $x 3.14159)',
+                'Constant in assignment: FOLDED to its literal (#4982)');
 
 # These two used to spell the write `p-my-=` into a boxed slot.  Since #759
 # (Kind-A `raw-op-family`, s456af) the ARITH ROOT proves the stored value is a
@@ -115,16 +137,25 @@ my $x = PI;',
 # let-init instead — a strictly stronger assertion, because it pins the
 # constant's lowering AND the operand tree AND the slot's representation.
 # What these rows are really about is unchanged and still asserted: a constant
-# use compiles to a scalar-context call of the constant sub.
-output_contains('use constant PI => 3.14;
+# use compiles to a scalar-context call of the constant sub (the general form,
+# #4982) -- and, by default, to the literal.
+general_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
                 '(p-let (($area :scalar (p-* (p-* (p-scalar-ctx (pl-PI)) $r) $r))))',
                 'Constant in arithmetic');
+output_contains('use constant PI => 3.14;
+my $area = PI * $r * $r;',
+                '(p-let (($area :scalar (p-* (p-* 3.14 $r) $r))))',
+                'Constant in arithmetic: FOLDED (#4982)');
 
-output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
+general_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
                 '(p-let (($size :scalar (p-* (p-scalar-ctx (pl-WIDTH)) (p-scalar-ctx (pl-HEIGHT))))))',
                 'Multiple constants in expression');
+output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
+my $size = WIDTH * HEIGHT;',
+                '(p-let (($size :scalar (p-* 100 200))))',
+                'Multiple constants in expression: the hash form FOLDS too (#4982)');
 
 
 # ========================================
@@ -136,9 +167,17 @@ diag "-------- Constant after print is a list element, not a filehandle:";
 # swallow FOO as a filehandle and print nothing for it.
 {
     my $cl = parse_code('use constant FOO => 1; print FOO, "x";');
-    like($cl, qr/\(p-print \(p-list-ctx \(pl-FOO\)\) "x"\)/,
+    my $gen = do {
+        local $ENV{PCL_OPT} = '-const-fold';
+        Pl::Passes::_parse_env();
+        parse_code('use constant FOO => 1; print FOO, "x";');
+    };
+    Pl::Passes::_parse_env();
+    like($gen, qr/\(p-print \(p-list-ctx \(pl-FOO\)\) "x"\)/,
          'print FOO, ... treats FOO as a list element (constant), not a filehandle');
-    unlike($cl, qr/p-print :fh.*pl-FOO/,
+    like($cl, qr/\(p-print 1 "x"\)/,
+         '... and the element is the FOLDED literal by default (#4982)');
+    unlike($cl, qr/p-print :fh.*(?:pl-FOO|FOO)/,
            'print FOO, ... does NOT route FOO as a filehandle');
 }
 

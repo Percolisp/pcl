@@ -64,11 +64,12 @@ sub write_mod {
 #                 PCL_CACHE_DIR and PCL_CORE this way)
 #
 # EVERY FASL-PATH ROW PASSES compile => '*' (task #1261).  These fixtures live
-# in a tempdir, and since #1261 the DEFAULT is to compile only modules under
-# perl's installed library directories or PCL's own lib/ — so without the
-# override the "fasl build" and "fasl hit" passes below would both take the
-# TEXT path and stop testing what they say.  The default itself is asserted by
-# its own rows further down.
+# in a tempdir, and from #1261 until #4986 the DEFAULT compiled only modules
+# under perl's installed library directories or PCL's own lib/ — so without
+# the override the "fasl build" and "fasl hit" passes below would both have
+# taken the TEXT path and stopped testing what they say.  The override stays
+# (a later default must not weaken these rows silently); the default itself
+# is asserted by its own rows further down.
 #
 # NO PERL5LIB (task #1284, fixed s473i).  This helper used to set PERL5LIB=$dir
 # as well, because `pcl -I` reached the PROGRAM's transpile while the runtime
@@ -341,17 +342,21 @@ sub _slurp {
 # WHICH MODULES ARE COMPILED TO NATIVE CODE — two directory lists (#1261).
 #
 # PCL_COMPILE_DIRS names the directories whose modules are compiled and
-# cached (`*` = all); unset means perl's installed library directories plus
-# PCL's own lib/.  PCL_NO_COMPILE_DIRS names directories that are NEVER
+# cached (`*` = all); unset means every directory (#4986; until s540 perl's
+# installed library directories plus PCL's own lib/).  PCL_NO_COMPILE_DIRS names directories that are NEVER
 # compiled and WINS on any match.  A module that is not compiled still gets
 # the transpile cache and the manifest check; it loads from the cached text.
 {
     my $local = 'use GuardBoot; print GuardBoot->greet;';
     my $inst  = 'use Carp; print 1;';
 
+    # Since #4986 (the USER, s540) the default compiles EVERY module: a module
+    # reached through -I / use lib is compiled once like an installed one (its
+    # staleness shapes are Pl/t/local-module-fasl-01.t's).  Until then the
+    # s471 default left it as text, and this row asserted TEXT.
     my $t = run_pcl($local, debug => 1);
-    like($t, qr/^PCL: module GuardBoot\.pm -> TEXT/m,
-         'DEFAULT: a module reached through -I / use lib is NOT compiled');
+    like($t, qr/^PCL: module GuardBoot\.pm -> (?:FASL HIT|fasl-build)/m,
+         'DEFAULT: a module reached through -I / use lib IS compiled (#4986)');
     my $ti = run_pcl($inst, debug => 1);
     like($ti, qr/^PCL: module Carp\.pm -> (?:FASL HIT|fasl-build)/m,
          'DEFAULT: a module from an installed library directory IS compiled');

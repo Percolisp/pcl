@@ -4127,12 +4127,66 @@
   "Streams whose $| is 1.  ONLY autoflushing handles get an entry, so
    `(zerop (hash-table-count …))` is a one-fixnum fast path on every print —
    $| is set in a vanishing fraction of programs and must cost nothing in the
-   rest.  Weak keys: an abandoned handle must not be pinned here.")
+   rest.  Weak keys: an abandoned handle must not be pinned here.  THE
+   AUTHORITY; a print reads it through %p-autoflush-p's mirror, and a writer
+   goes through %p-autoflush-mark.")
+
+;;; THE PRINT-SIDE READ IS A MIRROR (task #4983).  A WEAK hash table is a
+;;; SYNCHRONIZED one in SBCL: every GETHASH takes its lock (~57 ns, measured
+;;; against ~5 for the mirror's scan).  Once a program says `$| = 1` -- an
+;;; everyday first line -- the table's count is 1 for the rest of the run, so
+;;; every later print to ANY handle paid that lookup: 1 M prints to a file +81 %
+;;; (0.074 -> 0.134 s).  The mirror answers the same question lock-free: a
+;;; simple-vector of WEAK POINTERS to the marked streams, compared with EQ, kept
+;;; while at most 8 handles are marked (more, and the table answers).  It is
+;;; re-taken when it may be stale: a writer through %p-autoflush-mark drops it,
+;;; and a count that differs from the one it was taken at -- a direct writer
+;;; (cl/pcl-test.lisp's TAP stream), or entries the collector dropped -- re-takes
+;;; it at the next print.  A broken weak pointer answers NIL, so a collected
+;;; stream can never match.
+(sb-ext:defglobal **p-autoflush-mirror** nil
+  "(COUNT . VECTOR): *p-autoflush-handles*'s entry count when the mirror was
+   taken and a simple-vector of weak pointers to its streams -- VECTOR NIL when
+   more than 8 are marked.  NIL = not taken.")
+
+(defun %p-autoflush-remirror ()
+  "Take the mirror of *p-autoflush-handles* now and return it."
+  (let ((acc '()))
+    (maphash (lambda (k v)
+               (declare (ignore v))
+               (push (sb-ext:make-weak-pointer k) acc))
+             *p-autoflush-handles*)
+    (setf **p-autoflush-mirror**
+          (cons (hash-table-count *p-autoflush-handles*)
+                (when (<= (length acc) 8)
+                  (coerce acc 'simple-vector))))))
+
+(defun %p-autoflush-p (stream)
+  "True when STREAM's $| is on: one fixnum test when no handle is marked, a
+   scan of the lock-free mirror otherwise."
+  (let ((n (hash-table-count *p-autoflush-handles*)))
+    (and (plusp n)
+         (let ((m **p-autoflush-mirror**))
+           (when (or (null m) (/= (the fixnum (car m)) n))
+             (setf m (%p-autoflush-remirror)))
+           (let ((v (cdr m)))
+             (if v
+                 (loop for wp across (the simple-vector v)
+                       thereis (eq (sb-ext:weak-pointer-value wp) stream))
+                 (values (gethash stream *p-autoflush-handles*))))))))
+
+(defun %p-autoflush-mark (stream on)
+  "Set (ON true) or clear STREAM's $| flag -- THE writer of the table, which
+   drops the mirror so the next print re-takes it."
+  (if on
+      (setf (gethash stream *p-autoflush-handles*) t)
+      (remhash stream *p-autoflush-handles*))
+  (setf **p-autoflush-mirror** nil)
+  on)
 
 (defun %p-maybe-autoflush (stream)
   "Flush STREAM if its $| is on (signal handlers held: %p-with-signals-held)."
-  (when (and (plusp (hash-table-count *p-autoflush-handles*))
-             (gethash stream *p-autoflush-handles*))
+  (when (%p-autoflush-p stream)
     (%p-with-signals-held (stream)
                           (ignore-errors (finish-output stream)))))
 
@@ -4192,7 +4246,7 @@
 (defvar |$\|| (make-p-box
                (make-p-magic-cell
                 :getter (lambda ()
-                          (if (gethash (%p-default-out) *p-autoflush-handles*) 1 0))
+                          (if (%p-autoflush-p (%p-default-out)) 1 0))
                 :setter (lambda (new)
                           ;; Perl: $| is the SELECTED handle's flag, writes clamp
                           ;; to 0/1 by truthiness (assigning 5 stores 1; --$|
@@ -4201,9 +4255,9 @@
                           ;; IO::Handle::flush and printflush work in plain Perl.
                           (let ((s (%p-default-out)))
                             (cond ((p-true-p new)
-                                   (setf (gethash s *p-autoflush-handles*) t)
+                                   (%p-autoflush-mark s t)
                                    (ignore-errors (finish-output s)))
-                                  (t (remhash s *p-autoflush-handles*)))))))
+                                  (t (%p-autoflush-mark s nil)))))))
   "Output autoflush flag (magic — per selected handle, writes clamp to 0/1)")
 
 (defmacro p-local-pipe (&body body)
@@ -4212,12 +4266,10 @@
    non-local exit (die/last), which the old dynamic rebinding also gave us."
   (let ((s (gensym "STREAM")) (old (gensym "OLD")))
     `(let* ((,s (%p-default-out))
-            (,old (gethash ,s *p-autoflush-handles*)))
-       (remhash ,s *p-autoflush-handles*)
+            (,old (%p-autoflush-p ,s)))
+       (%p-autoflush-mark ,s nil)
        (unwind-protect (progn ,@body)
-         (if ,old
-             (setf (gethash ,s *p-autoflush-handles*) t)
-             (remhash ,s *p-autoflush-handles*))))))
+         (%p-autoflush-mark ,s ,old)))))
 ;;; Subscript separator ($;)
 (defvar |$;| (make-p-box (string (code-char #x1C))) "Subscript separator (default SUBSEP)")
 ;;; Output field separator ($,) — perl's default is UNDEF, not "" (task #465,
@@ -16559,17 +16611,33 @@ which is one of #1140's escape spellings (probed)."
    Stores values in boxes for l-value semantics.
    Flattens vectors (e.g. from %arr[...] kv-slice) and hash-tables
    (e.g. from %existing_hash used in list context) in the pair list."
-  (let ((flat (loop for item in (%p-tie-views pairs)  ; tied: its view (#155)
-                    if (and (vectorp item) (not (stringp item)))
-                    append (coerce item 'list)
-                    else if (hash-table-p item)
-                    append (loop for k being the hash-keys of item
-                                 using (hash-value v)
-                                 when (%p-real-hash-key-p k)
-                                 collect k and collect v)  ; keep box so %p-make-hash-entry sees class
-                    else
-                    collect item))
-        (h (make-hash-table :test 'equal)))
+  ;; PRESIZED, and with no copy when nothing spreads (task #4984): the table is
+  ;; made for the pair count (SBCL's default holds 7 and a 10-key literal grew
+  ;; it twice), and a pair list holding no array or hash to flatten -- the
+  ;; ordinary `{ k => v, ... }` -- is read in place instead of being consed
+  ;; into a flattened copy first.  -15 % on a 10-key constructor loop.
+  (let ((items (%p-tie-views pairs)))         ; tied: its view (#155)
+    (if (loop for item in items
+              never (or (hash-table-p item)
+                        (and (vectorp item) (not (stringp item)))))
+        (%p-hash-from-pairs items)
+        (%p-hash-from-pairs
+         (loop for item in items
+               if (and (vectorp item) (not (stringp item)))
+               append (coerce item 'list)
+               else if (hash-table-p item)
+               append (loop for k being the hash-keys of item
+                            using (hash-value v)
+                            when (%p-real-hash-key-p k)
+                            collect k and collect v)  ; keep box so %p-make-hash-entry sees class
+               else
+               collect item)))))
+
+(defun %p-hash-from-pairs (flat)
+  "A new Perl hash holding the key/value list FLAT (nothing left to spread),
+   its table sized for the pairs."
+  (let ((h (make-hash-table :test 'equal
+                            :size (max 7 (ceiling (length flat) 2)))))
     (loop for (k v) on flat by #'cddr
           do (setf (gethash (%p-hash-key k) h) (%p-make-hash-entry v)))
     h))
@@ -21234,9 +21302,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    sets `$|` on STDOUT, reopens it from a saved dup, prints `ok 8` — and the
    row was LOST, because a later close of an fdopen'd `>&=1` handle took
    descriptor 1 with it before the exit flush could run."
-  (when (gethash old *p-autoflush-handles*)
-    (remhash old *p-autoflush-handles*)
-    (setf (gethash new *p-autoflush-handles*) t))
+  (when (%p-autoflush-p old)
+    (%p-autoflush-mark old nil)
+    (%p-autoflush-mark new t))
   new)
 
 (defun %p-std-rebuild (slot &optional buffering)
@@ -28214,7 +28282,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-14800"
+(defparameter *pcl-cache-generation* "v2-14850"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -28306,31 +28374,39 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; ── WHICH MODULES ARE COMPILED TO NATIVE CODE (task #1261 half 2) ──────
 ;;; The dependency manifest makes a stale dependent impossible for BOTH cache
 ;;; layers, so this is a belt, not the correctness fix: it decides how much
-;;; COMPILED state a module gets to leave behind on disk.  A module resolved
-;;; from perl's installed library directories (or PCL's own lib/) changes only
-;;; on a reinstall; a module reached through `use lib`, `-I`, PERL5LIB, `.` or
-;;; the program's own directory is very likely being EDITED, and a fasl is the
-;;; most opaque artifact PCL writes.
+;;; COMPILED state a module gets to leave behind on disk.
+;;;
+;;; EVERY MODULE IS COMPILED BY DEFAULT (task #4986, the USER s540, superseding
+;;; the s471 default).  From s471 a module reached through `use lib`, `-I`,
+;;; PERL5LIB or `.` was cached as TEXT only -- "very likely being EDITED, and a
+;;; fasl is the most opaque artifact PCL writes" -- so SBCL compiled it again on
+;;; every run: 0.53 s per run for a 2,434-line module against 0.055 s from its
+;;; fasl, and on the CPAN board 1,412 s of PCL's 2,154 (each dist's own modules,
+;;; compiled in every test file).  Staleness was never the reason: a fasl is
+;;; valid exactly while its text is (P-CACHE-VALID-P, the same manifest), and
+;;; an edited module, an edited dependency, a same-size rewrite in the second
+;;; the entry was built, a module of the same name in another `-I` directory
+;;; and a changed PCL_OPT each rebuild it (Pl/t/local-module-fasl-01.t holds
+;;; the five shapes; a same-size rewrite whose mtime is put BACK with utime is
+;;; the one thing it cannot see, ns-cache-same-size-rewrite).
 ;;;
 ;;; The knob is TWO DIRECTORY LISTS in PERL5LIB syntax, not a policy word:
 ;;;
 ;;;   PCL_COMPILE_DIRS      a module whose SOURCE lies under one of these is
 ;;;                         compiled and cached.  `*` = every directory.
-;;;                         UNSET = perl's installed library directories plus
-;;;                         PCL's own lib/, which is the module's trust CLASS
-;;;                         as its manifest records it.
+;;;                         UNSET = every directory (since #4986; before it,
+;;;                         perl's installed library directories plus PCL's
+;;;                         own lib/ -- the trust CLASS the manifest records).
 ;;;   PCL_NO_COMPILE_DIRS   a module under one of these is NEVER compiled (it
 ;;;                         still gets the transpile cache and the manifest
 ;;;                         check, and loads from the cached TEXT).  Wins over
 ;;;                         PCL_COMPILE_DIRS on any match; `*` = compile
 ;;;                         nothing, which is what PCL_NO_FASL_CACHE=1 means.
+;;;                         The opt-out for an edit loop that wants the text.
 ;;;
-;;; WHY THE DEFAULT IS NOT *P-CORE-INC-DIRS*: that list is pl2cl's own @INC as
-;;; the preamble found it, so it carries PERL5LIB and -I entries (measured:
-;;; `PERL5LIB=/tmp ./pl2cl prog.pl` puts /tmp in it) — exactly the directories
-;;; a developer edits in.  The installed set is derived instead from %Config's
-;;; six library keys plus PCL's lib/, by ONE classifier on the transpiler side
-;;; (Pl::ProtoCache::trust_class), whose answer arrives here in the manifest.
+;;; The trust class (Pl::ProtoCache::trust_class: %Config's six library keys
+;;; plus PCL's lib/ = :installed, anything else :local) is still written into
+;;; every manifest and read back; it no longer decides the policy.
 
 (defvar *p-dir-list-cache* (make-hash-table :test 'equal)
   "environment variable name -> (raw-value . parsed), so the realpath work is
@@ -28394,8 +28470,10 @@ would consume, so it dies naming the stream (rule 12)."
    its trust class from the dependency manifest (:installed or :local), or
    :MAIN-SCRIPT for the program itself (task #1841).
    PCL_NO_COMPILE_DIRS wins on any match; PCL_COMPILE_DIRS decides when set;
-   unset, the answer is the trust class.  PCL_NO_FASL_CACHE=1 is kept as the
-   alias of PCL_NO_COMPILE_DIRS=* it has always meant.
+   unset, the answer is YES for every module (task #4986: a `use lib` / -I
+   module is compiled once like an installed one; the trust class CLASS no
+   longer decides).  PCL_NO_FASL_CACHE=1 is kept as the alias of
+   PCL_NO_COMPILE_DIRS=* it has always meant.
 
    :MAIN-SCRIPT IS EXEMPT FROM THE POSITIVE LIST, and that is the whole
    compile-policy question task #1841 had to answer.  The directory lists
@@ -28419,22 +28497,25 @@ would consume, so it dies naming the stream (rule 12)."
         ((eq class :extension) t)
         ((sb-posix:getenv "PCL_COMPILE_DIRS")
          (%p-under-dirs-p source-path (%p-dir-list "PCL_COMPILE_DIRS")))
-        (t (eq class :installed))))
+        ;; #4986: every module, :local as well as :installed.
+        (t t)))
 
 (defun %p-fasl-cache-enabled-p (source-path &optional (class :local))
   "True when the cached module at SOURCE-PATH, of trust class CLASS, may be
    compiled to and loaded from a FASL.
 
-   NOT while *PCL-FASL-BUILD* is true: that is a nested load, reached from a
-   `use` running in the compile pass of ANOTHER module's fasl build, and
-   compiling there would nest compile-file inside compile-file for a fasl the
-   outer build may then discard.  The dependency loads from its text, and gets
-   its own fasl when the outer FASL's load reaches its `use` — by which time
-   the flag is unbound again."
+   A NESTED load -- reached from a `use` running in the compile pass of
+   ANOTHER module's fasl build, while *PCL-FASL-BUILD* is true -- may LOAD a
+   valid fasl, but does not BUILD one there: compile-file must not nest inside
+   compile-file.  %P-LOAD-MODULE-CACHED-1 runs that module's text and DEFERS
+   its build to the end of the outermost one (task #4963).  Until #4963 the
+   answer here was simply NO, and the module got its fasl only when a LATER
+   run reached its `use` outside a build -- by then it was in %INC for the rest
+   of this run -- so a program's cache needed one run per nesting level of
+   `use` to settle (Log4perl 040Filter.t: builds 5, then 1, then 0)."
   (and *pcl-cache-fasl*
        *pcl-runtime-identity*
        (not *pcl-skip-cache*)
-       (not *pcl-fasl-build*)
        (%p-compile-module-p source-path class)))
 (defparameter *pcl-pl2cl-path* nil
   "Path to pl2cl script (set at load time)")
@@ -28887,7 +28968,7 @@ would consume, so it dies naming the stream (rule 12)."
     (when problem (format t "  UNSAFE: ~A~%" problem)))
   (format t "PCL_COMPILE_DIRS: ~A~%"
           (%p-dir-list-line "PCL_COMPILE_DIRS"
-                            "perl's installed library directories and PCL's own lib/"))
+                            "every directory: a module under -I, use lib, PERL5LIB or . is compiled like an installed one (#4986)"))
   (format t "PCL_NO_COMPILE_DIRS: ~A~%"
           (if (sb-posix:getenv "PCL_NO_FASL_CACHE")
               "* -- every directory (PCL_NO_FASL_CACHE=1, the kept alias)"
@@ -30112,16 +30193,40 @@ would consume, so it dies naming the stream (rule 12)."
   (%p-fasl-note "PCL: fasl unreadable, will rebuild (~A): ~A~%"
                 (file-namestring fasl-path) reason))
 
+(defvar *p-deferred-fasl-builds* nil
+  "(SOURCE LISP-PATH FASL-PATH) of each module a NESTED load ran from its text
+   during another module's fasl build (task #4963): built when the outermost
+   build returns, in the same run.")
+
 (defun %p-build-module-fasl (lisp-path fasl-path)
   "Compile the cached module text LISP-PATH into FASL-PATH.  T on success.
    NIL — with a marker — on any failure, and then the caller loads the text.
+   The OUTERMOST build then builds the fasls its nested loads deferred."
+  (let ((outer (not *pcl-fasl-build*)))
+    (prog1 (%p-build-module-fasl-1 lisp-path fasl-path)
+      (when outer (%p-build-deferred-fasls)))))
+
+(defun %p-build-deferred-fasls ()
+  "Build the fasls nested loads deferred (task #4963) until none is left.  Each
+   such module is already LOADED -- it ran from its text -- and compiling it
+   again is safe for the reason any fasl build is (*pcl-fasl-build*: the
+   compile pass runs none of the module's own forms, only the idempotent ones
+   the reader needs).  The fasl is for the NEXT run; this one is not loaded."
+  (loop while *p-deferred-fasl-builds*
+        do (destructuring-bind (source lisp fasl) (pop *p-deferred-fasl-builds*)
+             (%p-fasl-note "PCL: module ~A -> fasl-build (deferred)~%"
+                           (file-namestring source))
+             (%p-build-module-fasl-1 lisp fasl))))
+
+(defun %p-build-module-fasl-1 (lisp-path fasl-path)
+  "%p-build-module-fasl's compile.
 
    *PCL-FASL-BUILD* is what makes this safe to do in the image that is about
    to run the module: with it bound, compile-file executes none of the
    module's own forms, so nothing here changes this program's state and the
    fasl carries every effect once, at ITS load."
   (when (%p-fasl-build-refused-p fasl-path)
-    (return-from %p-build-module-fasl nil))
+    (return-from %p-build-module-fasl-1 nil))
   (let ((temp (%p-cache-temp-path fasl-path)))
     (handler-case
         (multiple-value-bind (out warnings-p failure-p)
@@ -30706,7 +30811,16 @@ would consume, so it dies naming the stream (rule 12)."
                             (p-compute-cache-path source-path nil)))
           (p-cleanup-old-cache)))
     ;; 3. Build the fasl from that text and run THE FASL, so the module
-    ;;    executes once here too; on any failure, run the text.
+    ;;    executes once here too; on any failure, run the text.  A NESTED load
+    ;;    (another module's fasl build is compiling) runs the text and DEFERS
+    ;;    its build to the end of the outermost build, in this run (#4963).
+    (when (and fasl-path *pcl-fasl-build*)
+      (unless (find fasl-path *p-deferred-fasl-builds*
+                    :key #'third :test #'equal)
+        (push (list source-path lisp-path fasl-path) *p-deferred-fasl-builds*))
+      (%p-fasl-note "PCL: module ~A: fasl build deferred (nested load)~%"
+                    (file-namestring (truename source-path)))
+      (setf fasl-path nil))
     (%p-fasl-note "PCL: module ~A -> ~:[TEXT~;fasl-build~] (~,3Fs to here)~%"
                   (file-namestring (truename source-path)) (and fasl-path t)
                   (%p-secs-since %start))
@@ -39443,10 +39557,14 @@ would consume, so it dies naming the stream (rule 12)."
   (%compiled (cons nil nil)))
 
 (defstruct p-tr-op
-  "Transliteration operation tr///"
+  "Transliteration operation tr///.  %COMPILED is the op's expansion, filled
+   on its first use by %p-tr-compiled (task #4981): the op is built once per
+   SITE (%p-op-once) and never changes, so its lists are expanded once, not on
+   every call."
   from
   to
-  modifiers)
+  modifiers
+  (%compiled nil))
 
 (defun parse-regex-modifiers (mod-string)
   "Parse modifier string like 'gi' into plist (:g t :i t).
@@ -42635,19 +42753,54 @@ would consume, so it dies naming the stream (rule 12)."
                   (write-char (char str i) out)
                   (incf i)))))))
 
+;;; tr/// EXPANDED ONCE PER OP (task #4981).  A literal tr's op is built once per
+;;; SITE (%p-op-once) and never changes, so everything that depends only on the
+;;; op -- the expanded lists, the search set, the complement's sorted list, the
+;;; IDENTICAL verdict -- is computed on its first use and kept on the op.  Until
+;;; #4981 do-tr redid all of it on EVERY call, and a /c op ran an O(n^2)
+;;; remove-duplicates over its search list: Data::Dumper's `tr/\0-\377//c`, one
+;;; per dumped value, was 77 % of a Dumper program (7.1 s -> 0.6 s).
+(defstruct (p-tr-compiled (:conc-name %trc-)
+                          (:constructor %make-p-tr-compiled))
+  "A tr/// op's expansion (%p-tr-compiled): the expanded lists, the flags, and
+   the search list as a lookup -- one SVREF per character for a Latin-1
+   codepoint (LATIN, %tr-from-index's answer for 0..255), the hash table and
+   the sorted vector for the rest."
+  (from-chars "" :type simple-string)
+  (to-chars "" :type simple-string)
+  (complement-p nil)
+  (delete-p nil)
+  (squash-p nil)
+  (return-p nil)
+  (identical-p nil)
+  (from-set (make-hash-table) :type hash-table)
+  (sorted-from #() :type simple-vector)
+  (latin #() :type simple-vector))
+
+(defun %tr-count-below (sorted code)
+  "How many entries of the ascending simple-vector SORTED are below CODE (a
+   binary search; the complement's rank)."
+  (let ((lo 0) (hi (length sorted)))
+    (declare (fixnum lo hi))
+    (loop while (< lo hi)
+          do (let ((mid (ash (+ lo hi) -1)))
+               (if (< (svref sorted mid) code)
+                   (setf lo (1+ mid))
+                   (setf hi mid))))
+    lo))
+
 (defun %tr-from-index (code from-set sorted-from complement-p)
   "Return the position of codepoint CODE within the (possibly complemented) tr
    search-list, or NIL if CODE is not matched.
    - Non-complement: the first index of CODE in the search list (from-set hash).
    - Complement: CODE's rank among all codepoints NOT in the search list, i.e.
-     CODE minus the number of search codepoints strictly less than CODE."
+     CODE minus the number of search codepoints strictly less than CODE
+     (SORTED-FROM holds them once each, ascending)."
   (if complement-p
       (if (nth-value 1 (gethash code from-set))
           nil
-          (let ((less 0))
-            (loop for fc across sorted-from while (< fc code) do (incf less))
-            (- code less)))
-      (gethash code from-set)))
+          (- code (%tr-count-below sorted-from code)))
+      (values (gethash code from-set))))
 
 (defun %tr-identical-p (delete-p squash-p complement-p from-chars to-chars)
   "True when a tr/// is perl's OPpTRANS_IDENTICAL: a count that does not
@@ -42660,77 +42813,124 @@ would consume, so it dies naming the stream (rule 12)."
        (or (zerop (length to-chars))
            (and (not complement-p) (string= from-chars to-chars)))))
 
-(defun do-tr (string-box op)
-  "Perform transliteration on boxed string.  Returns the count of matched chars,
-   or (with /r) the transliterated copy without modifying STRING-BOX."
-  ;; to-string on the BOX, as in do-regex-subst just above (#119).
-  (let* ((str (to-string string-box))
-         (modifiers (p-tr-op-modifiers op))
+(defun %p-tr-compile (op)
+  "OP's expansion as a P-TR-COMPILED record (see %p-tr-compiled)."
+  (let* ((modifiers (p-tr-op-modifiers op))
          (complement-p (and (member :c modifiers) t))
          (delete-p (and (member :d modifiers) t))
          (squash-p (and (member :s modifiers) t))
-         (return-p (and (member :r modifiers) t))
-         (from-chars (expand-tr-chars (p-tr-op-from op)))
-         (to-chars (expand-tr-chars (p-tr-op-to op)))
-         (to-len (length to-chars))
+         (from-chars (coerce (expand-tr-chars (p-tr-op-from op)) 'simple-string))
+         (to-chars (coerce (expand-tr-chars (p-tr-op-to op)) 'simple-string))
          (from-set (make-hash-table))
-         (count 0)
-         (last-out nil)
-         (last-was-tr nil))
+         (sorted #())
+         (latin (make-array 256 :initial-element nil)))
     ;; from-set: codepoint -> first index in the search list
     (loop for ch across from-chars for i from 0
-          do (unless (nth-value 1 (gethash (char-code ch) from-set))
-               (setf (gethash (char-code ch) from-set) i)))
-    (let* ((sorted-from (when complement-p
-                          (sort (remove-duplicates
-                                 (map 'vector #'char-code from-chars))
-                                #'<)))
-           (result
-            (with-output-to-string (out)
-              (loop for c across str
-                    for idx = (%tr-from-index (char-code c) from-set
-                                              sorted-from complement-p)
-                    do (cond
-                         (idx
-                          (incf count)
-                          (let ((new-char
-                                 (cond
-                                   ((and delete-p (>= idx to-len)) nil)
-                                   ((zerop to-len) c)  ; empty repl, no /d: identity
-                                   ((>= idx to-len) (char to-chars (1- to-len)))
-                                   (t (char to-chars idx)))))
-                            (cond
-                              ((null new-char) nil)  ; deleted (/d)
-                              ((and squash-p last-was-tr (eql new-char last-out))
-                               nil)                   ; squeezed (/s)
-                              (t (write-char new-char out)
-                                 (setf last-out new-char last-was-tr t)))))
-                         (t
-                          (write-char c out)
-                          (setf last-out c last-was-tr nil)))))))
-      (cond
-        (return-p result)
-        (t
-         (if (p-box-p string-box)
-             ;; An IDENTICAL tr (perl's OPpTRANS_IDENTICAL: a count) never
-             ;; writes its target -- so a read-only one does not die and a
-             ;; tied one is not STOREd (#4264); any other tr writes, matched
-             ;; or not, and a read-only target dies in the write.
-             (unless (%tr-identical-p delete-p squash-p complement-p
-                                      from-chars to-chars)
-               (%p-write-match-target string-box result))
-             ;; A count-only tr (empty replacement, no /d) leaves the target
-             ;; untouched, and perl accepts that on a read-only value:
-             ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result
-             ;; actually differs from the input — which is perl's own rule and
-             ;; even finer than its compile-time OPpTRANS_IDENTICAL flag, and
-             ;; is what keeps tr.t's "harmless if explicitly/implicitly not
-             ;; updating" rows (631, 639, 748, 752) passing.  It used to warn
-             ;; and carry on: `$1 =~ tr/a-z/A-Z/` silently did nothing where
-             ;; perl croaks (task #911, #873's third slot).
-             (when (string/= result str)
-               (%p-readonly-modification)))
-         count)))))
+          do (let ((code (char-code ch)))
+               (unless (nth-value 1 (gethash code from-set))
+                 (setf (gethash code from-set) i))))
+    ;; The complement's distinct codepoints, ascending: the table's keys are
+    ;; distinct already, so no remove-duplicates (O(n^2) on a vector).
+    (when complement-p
+      (setf sorted (sort (coerce (loop for k being the hash-keys of from-set
+                                       collect k)
+                                 'simple-vector)
+                         #'<)))
+    (dotimes (code 256)
+      (setf (svref latin code)
+            (%tr-from-index code from-set sorted complement-p)))
+    (%make-p-tr-compiled
+     :from-chars from-chars :to-chars to-chars
+     :complement-p complement-p :delete-p delete-p :squash-p squash-p
+     :return-p (and (member :r modifiers) t)
+     :identical-p (%tr-identical-p delete-p squash-p complement-p
+                                   from-chars to-chars)
+     :from-set from-set :sorted-from sorted :latin latin)))
+
+(defun %p-tr-compiled (op)
+  "OP's expansion, computed on its first use and kept on the op (task #4981).
+   The op is per SITE and immutable, so the record needs no validity test; an
+   op built per call (a run-time value, never a literal) fills its own slot and
+   pays what every call paid before."
+  (or (p-tr-op-%compiled op)
+      (setf (p-tr-op-%compiled op) (%p-tr-compile op))))
+
+(declaim (inline %tr-index))
+(defun %tr-index (c tc)
+  "%tr-from-index for character C under the compiled op TC."
+  (let ((code (char-code c)))
+    (if (< code 256)
+        (svref (%trc-latin tc) code)
+        (%tr-from-index code (%trc-from-set tc) (%trc-sorted-from tc)
+                        (%trc-complement-p tc)))))
+
+(defun %p-tr-apply (string-box str tc)
+  "do-tr's general path: build the transliterated copy of STR, then return it
+   (/r) or write it to STRING-BOX and return the count."
+  (let* ((to-chars (%trc-to-chars tc))
+         (to-len (length to-chars))
+         (delete-p (%trc-delete-p tc))
+         (squash-p (%trc-squash-p tc))
+         (count 0)
+         (last-out nil)
+         (last-was-tr nil)
+         (result
+          (with-output-to-string (out)
+            (loop for c across str
+                  for idx = (%tr-index c tc)
+                  do (cond
+                       (idx
+                        (incf count)
+                        (let ((new-char
+                               (cond
+                                 ((and delete-p (>= idx to-len)) nil)
+                                 ((zerop to-len) c)  ; empty repl, no /d: identity
+                                 ((>= idx to-len) (char to-chars (1- to-len)))
+                                 (t (char to-chars idx)))))
+                          (cond
+                            ((null new-char) nil)  ; deleted (/d)
+                            ((and squash-p last-was-tr (eql new-char last-out))
+                             nil)                   ; squeezed (/s)
+                            (t (write-char new-char out)
+                               (setf last-out new-char last-was-tr t)))))
+                       (t
+                        (write-char c out)
+                        (setf last-out c last-was-tr nil)))))))
+    (cond
+      ((%trc-return-p tc) result)
+      (t
+       (if (p-box-p string-box)
+           ;; An IDENTICAL tr (perl's OPpTRANS_IDENTICAL: a count) never
+           ;; writes its target -- so a read-only one does not die and a
+           ;; tied one is not STOREd (#4264); any other tr writes, matched
+           ;; or not, and a read-only target dies in the write.
+           (unless (%trc-identical-p tc)
+             (%p-write-match-target string-box result))
+           ;; A count-only tr (empty replacement, no /d) leaves the target
+           ;; untouched, and perl accepts that on a read-only value:
+           ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result
+           ;; actually differs from the input — which is perl's own rule and
+           ;; even finer than its compile-time OPpTRANS_IDENTICAL flag, and
+           ;; is what keeps tr.t's "harmless if explicitly/implicitly not
+           ;; updating" rows (631, 639, 748, 752) passing.  It used to warn
+           ;; and carry on: `$1 =~ tr/a-z/A-Z/` silently did nothing where
+           ;; perl croaks (task #911, #873's third slot).
+           (when (string/= result str)
+             (%p-readonly-modification)))
+       count))))
+
+(defun do-tr (string-box op)
+  "Perform transliteration on boxed string.  Returns the count of matched chars,
+   or (with /r) the transliterated copy without modifying STRING-BOX.
+   An IDENTICAL tr without /r (a count: %tr-identical-p) builds no string and
+   writes nothing -- it counts (task #4981); the copy it used to build was
+   always equal to the input."
+  ;; to-string on the BOX, as in do-regex-subst just above (#119).
+  (let ((str (to-string string-box))
+        (tc (%p-tr-compiled op)))
+    (if (and (%trc-identical-p tc) (not (%trc-return-p tc)))
+        (loop for c across str count (%tr-index c tc))
+        (%p-tr-apply string-box str tc))))
 
 (defun p-=~ (string operation)
   "Perl =~ binding operator.

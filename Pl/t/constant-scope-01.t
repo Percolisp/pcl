@@ -41,7 +41,7 @@ my $pcl_bin      = "$project_root/pcl";
 plan skip_all => "pl2cl not found" unless -x $pl2cl && -x $pcl_bin;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 my $libdir = tempdir(CLEANUP => 1);
 make_path("$libdir/C3870");
@@ -130,8 +130,14 @@ sub both_agree {
 {
     my $cl = PCLCore::transpile("PERL5LIB=$libdir $pl2cl --module < $libdir/C3870/A.pm");
     unlike($cl, qr/\(p-if "_D"/, '#3870: `_D` above the require is not the STRING "_D"');
-    my $calls = () = $cl =~ /\(C3870::A::pl-_D\)|\(\|C3870::A\|::pl-_D\)/g;
+    # The general form (`const-fold` off, task #4982): both reads CALL the
+    # package constant.  By default both are its folded literal 0 -- which is
+    # the same fact, read off the same record.
+    my $gen = PCLCore::transpile("PCL_OPT=-const-fold PERL5LIB=$libdir $pl2cl --module < $libdir/C3870/A.pm");
+    my $calls = () = $gen =~ /\(C3870::A::pl-_D\)|\(\|C3870::A\|::pl-_D\)/g;
     is($calls, 2, '... both reads of `_D` are calls of the package constant');
+    my $folds = () = $cl =~ /\(p-if 0 \(p-print \(p-esc "debug-/g;
+    is($folds, 2, '... and both are its literal 0 when folded (#4982)');
     unlike($cl, qr/\("main" "_D"/, '... and no `main` record of a constant `package C3870::A` declares');
 }
 {

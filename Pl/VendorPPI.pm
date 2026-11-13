@@ -30,6 +30,11 @@ use File::Basename ();
 use Cwd ();
 
 our $LIB;
+# 1 when THIS module put $LIB on @INC; 0 when the caller's own @INC (a `-I`,
+# PERL5LIB) already named it, spelled the same.  PCLPaths::program_inc removes
+# only this module's own insertion from a PROGRAM's @INC (task #4987): a
+# program that `use lib`s the very same directory keeps it.
+our $ADDED;
 BEGIN {
   my $root = File::Basename::dirname(File::Basename::dirname(Cwd::abs_path(__FILE__)));
   $LIB = "$root/vendor/PPI/lib";
@@ -40,7 +45,11 @@ BEGIN {
         . "$LIB first (say `use Pl::VendorPPI;`, not `use PPI;`; PCL_SYSTEM_PPI=1 "
         . "means the system PPI on purpose)\n";
     }
-    unshift @INC, $LIB if !grep { $_ eq $LIB } @INC;
+    $ADDED = 0;
+    if (!grep { $_ eq $LIB } @INC) {
+      unshift @INC, $LIB;
+      $ADDED = 1;
+    }
   }
 }
 use PPI ();

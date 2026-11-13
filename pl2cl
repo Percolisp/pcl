@@ -1458,6 +1458,14 @@ sub _xread_request {
 sub _xapply_client_inc {
   my ($client_inc) = @_;
   my %srv = map { ($_ => 1) } @INC;
+  # The server's own entry for its compiler PPI (Pl::VendorPPI's insertion) is
+  # not one a client can SHARE: program_inc drops it, so a client that names
+  # the same directory gets its own entry (task #4987).
+  {
+    no warnings 'once';
+    delete $srv{$Pl::VendorPPI::LIB}
+      if $Pl::VendorPPI::ADDED && defined $Pl::VendorPPI::LIB;
+  }
   my @extra = grep { !$srv{$_} } @$client_inc;
   return 0 if !@extra;
   my ($anchor) = grep { $srv{$_} } @$client_inc;

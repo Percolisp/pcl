@@ -2718,6 +2718,28 @@ sub _class_name_bareword {
   return qq{"$classname"};
 }
 
+# The literal a bare `NAME` / `NAME()` folds to (task #4982), or undef.  The
+# record asked is the one in force HERE (the parse clock, #2871: a use above
+# the declaration never sees it); it carries a fold only for a literal scalar a
+# `use constant` of THIS unit declared (Pl::Parser::constant_fold_cl; an import
+# drops it, Pl::Parser::_imported_record); and it folds only in the package the
+# constant was declared in.  `&NAME` (force_user_sub), `CORE::NAME`, a
+# qualified spelling and a method call never reach a fold.  The detector
+# (#2610) heard this site from PExpr already, so this second question is kept
+# out of its table.
+sub _constant_fold {
+  my ($self, $node, $word, $name) = @_;
+  return undef if $node->{force_user_sub} || (ref($word) && $word->{_core_qualified});
+  return undef if $name !~ /\A[A-Za-z_]\w*\z/;
+  my $env = $self->environment;
+  return undef if !$env || !$env->can('get_prototype');
+  my $rec = do { local $env->{detect_calls}; $env->get_prototype($name) };
+  return undef if ref($rec) ne 'HASH' || !defined $rec->{const_cl}
+               || $rec->{from_module};
+  return undef if ($rec->{const_pkg} // '') ne ($env->current_package // 'main');
+  return $rec->{const_cl};
+}
+
 # ---- E2.1: form-producing funcall (the generic call path) ------------------
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
 # (word:is/ok/… = the seam frontier head) and non-special builtins —
@@ -2826,6 +2848,21 @@ sub gen_funcall_form {
         my $nx = $func_node->snext_sibling;
         return '(p-eof-argv)'
           if $nx && $nx->isa('PPI::Structure::List') && !$nx->schildren;
+      }
+      # A use of a LITERAL `use constant` IS its literal (task #4982, Kind-A
+      # `const-fold`): perl inlines such a constant at every use it compiles
+      # after the declaration, so the call through the constant sub's frame
+      # and its context bind buy nothing.  With the name OFF, `--facts`
+      # prints the fact on the general form (the recursion's guard).
+      my $fold = $self->_constant_fold($node, $func_node, $content);
+      if (defined $fold) {
+        return Pl::Passes::fact('const-fold', 1, $fold)
+          if Pl::Passes::enabled('const-fold');
+        if (Pl::Passes::facts_enabled() && !$self->{_const_fold_general}) {
+          local $self->{_const_fold_general} = 1;
+          return Pl::Passes::fact('const-fold', 1,
+                                  $self->gen_funcall_form($node, $node_id, $kids));
+        }
       }
     }
   }
