@@ -330,11 +330,13 @@ path, the `-I` list, the compiler version and the compiler's own files
   `perl` binary and PPI's files). Entries unused for 30 days are removed.
   `pcl --no-cache` runs once without the cache; `pcl --clear-cache` empties
   it.
-* **What gets compiled to native code** is a policy. By default, modules
-  under perl's installed library directories and PCL's own `lib/` are
-  compiled to `.fasl`, while a module you are editing (anywhere else) is
-  cached as readable text. `PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS`
-  (colon-separated directories, `PERL5LIB` syntax, `*` = all) change that.
+* **What gets compiled to native code** is a policy. By default every
+  module is compiled to `.fasl` once and reused, your own modules under
+  `-I`, `use lib`, `PERL5LIB` or `.` as well as installed ones; an edited
+  module (or one whose dependencies changed) is rebuilt on its next run.
+  `PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS` (colon-separated
+  directories, `PERL5LIB` syntax, `*` = all) change that:
+  `PCL_NO_COMPILE_DIRS=DIR` keeps the modules under `DIR` as readable text.
 * **Running a CPAN distribution's own test suite** under PCL:
   `tools/run-dist-t.pl <dist-dir> <t-file>` runs one test file
   (`--no-dist-lib` keeps the distribution's own `lib/` off `@INC`, needed
@@ -375,7 +377,7 @@ survives an uninstall; `pcl --clear-cache` empties it.
 | variable | effect |
 |---|---|
 | `PCL_CACHE_DIR` | root of every per-user cache: compiled modules, scripts and evals, prototype facts, saved cores, XS artifacts (default `~/.pcl-cache`, created with mode `0700`) |
-| `PCL_COMPILE_DIRS` | directories (colon-separated) whose modules are compiled to native code; `*` = every directory; unset = perl's library directories plus PCL's `lib/` |
+| `PCL_COMPILE_DIRS` | directories (colon-separated) whose modules are compiled to native code; `*` = every directory; unset = every directory (a list replaces that) |
 | `PCL_NO_COMPILE_DIRS` | directories whose modules are never compiled; wins over `PCL_COMPILE_DIRS`; `*` = compile nothing (`PCL_NO_FASL_CACHE=1` is the older name for that) |
 | `PCL_NO_CACHE=1` | the program runs without the module, script and eval caches (what `--no-cache` sets) |
 | `PCL_CORE=path` | use this saved core |

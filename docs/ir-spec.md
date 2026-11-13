@@ -2525,6 +2525,23 @@ list / its count.  The trailing `t` is the hash form `use constant { A => EXPR
 constant T => [1, 2]` → `(p-use-constant pl-T (make-p-box (p-array-init 1
 2)))`; `T == T` is true and `push @{+T}, 3` is kept.
 
+**A use of a LITERAL `use constant` IS the literal (normative, s540d / #4982;
+Kind-A `const-fold`).**  A bare `NAME` or `NAME()` compiled after the
+statement that declared it (the positional rule below), in the declaring
+package, naming a `use constant` of THIS unit whose value is ONE literal
+scalar -- a number, `-` and a number, or a non-interpolating string -- is
+emitted as that literal, the IR the literal written there gets, instead of
+`(p-scalar-ctx (pl-NAME))`: perl inlines such a constant at every use it
+compiles after the declaration.  `&NAME`, `->NAME`, a qualified spelling, a
+list, `qw()`, `undef` or non-literal value, and an IMPORTED constant (its value
+is not in this unit's text) stay calls.  Nothing is built for code that
+modifies a constant (the USER, s540; principle 9): the folded value is the
+literal at that position and behaves as one.  So a later `*NAME = sub {...}`
+is seen by `&NAME` and the method call and never by a folded use -- perl's
+answer.  `PCL_OPT=-const-fold` restores the call, which runs identically
+except for that redefinition.  Example: `use constant PI => 3.14; my $area =
+PI * $r * $r;` → `(p-let (($area :scalar (p-* (p-* 3.14 $r) $r))))`.
+
 The plist is what the compiler proved **under the configuration that emitted
 the file**: `PCL_OPT` switches off Kind-A rules, and a fact whose analysis a
 switched-off rule pays for (`:returns`, the #77 family) is then simply absent.
@@ -6106,15 +6123,26 @@ two directory lists in `PERL5LIB` syntax, read at run time:
 
 | variable | meaning |
 |---|---|
-| `PCL_COMPILE_DIRS` | modules under these directories are compiled to native code and cached; `*` = all. **Unset** = perl's installed library directories (%Config's six `*libexp` keys) plus PCL's own `lib/` — the `source` line's trust class |
+| `PCL_COMPILE_DIRS` | modules under these directories are compiled to native code and cached; `*` = all; set, the list REPLACES the default. **Unset** = every module (s540d, #4986; until then perl's installed library directories -- %Config's six `*libexp` keys -- plus PCL's own `lib/`, the `source` line's trust class, which is still recorded) |
 | `PCL_NO_COMPILE_DIRS` | modules under these are NEVER compiled; **wins** on any match; `*` = compile nothing |
 | `PCL_NO_FASL_CACHE=1` | the kept alias of `PCL_NO_COMPILE_DIRS='*'` |
 
 A module that is not compiled still gets the `.lisp` cache and the manifest
-check; it loads from the cached text. The default exists because a module
-under `use lib`/`-I`/`PERL5LIB`/`.` is very likely being edited, and a fasl is
-the most opaque artifact PCL writes — but it is a belt: correctness is rule 2
-above, for both cache layers alike.
+check; it loads from the cached text.  Correctness is rule 2 above, for both
+cache layers alike, which is why every module is compiled by default (the
+USER, s540, #4986: a module under `use lib`/`-I`/`PERL5LIB`/`.` is compiled
+ONCE like an installed one; the s471 default left it as text, recompiled by
+SBCL on every run).
+
+**A NESTED LOAD DEFERS ITS BUILD, IT DOES NOT SKIP IT** (normative, s540d,
+task #4963).  While a module's fasl is being built (`*pcl-fasl-build*`), a
+`use` its compile pass reaches LOADS that module's valid fasl if it has one,
+and otherwise runs its text and queues its build; the OUTERMOST build, when it
+returns, builds every queued fasl (for the next run; this run already ran the
+text).  compile-file never nests.  Example: `A` uses `B` uses `C`, an empty
+cache: the first run builds A's fasl, then C's and B's; the second run loads
+all three from their fasls (until s540d: B on the second run, C on the
+third).
 
 **THE MAIN SCRIPT IS AN ENTRY TOO** (normative, s488b, task #1841). `pcl
 FILE` caches the program exactly as a `use`d module is cached: three files
@@ -6136,8 +6164,10 @@ must see. Three rules are the script's own:
 2. **The key carries the path AS GIVEN**, because `$0` is that string
    verbatim; `__FILE__`, `caller`'s file and the `__END__`/DATA section are
    functions of the path and the content, so the key covers them too.
-3. **The compile policy exempts it**: a main script is always under
-   `.`/`-I`/`PERL5LIB`, so the module rule would never compile it. The *off*
+3. **The compile policy's positive list exempts it**: a main script is
+   always under `.`/`-I`/`PERL5LIB`, so a `PCL_COMPILE_DIRS` list that leaves
+   those out would never compile it (unset, every module is compiled anyway,
+   s540d). The *off*
    switches (`PCL_NO_FASL_CACHE`, a `PCL_NO_COMPILE_DIRS` match,
    `--no-cache`) still apply.
 

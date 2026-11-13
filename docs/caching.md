@@ -134,12 +134,36 @@ facts. A module you have not touched, whose dependencies have not moved,
 stays valid indefinitely, and the check costs one `stat` per searched
 directory.
 
-**The compile policy (which entries also get a `.fasl`) is two directory
-lists**, read at run time (`PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS`,
-§6). By default it is perl's own installed library directories plus PCL's
-`lib/`. A module you are working on (under `-I`, `PERL5LIB` or `.`) is
-cached as readable text, never silently as an opaque compiled file. A
-module that does not qualify for a `.fasl` still gets the `.lisp` cache and
+**Every module is compiled once, wherever it was found** (since s540,
+task #4986, the USER's ruling). A module under `use lib`, `-I`, `PERL5LIB`
+or `.` (your own modules, or a CPAN distribution's `lib/` while its tests
+run) gets a `.fasl` and reuses it, exactly like an installed module. Until
+then such a module was cached as readable text only and SBCL compiled that
+text again on every run: 0.53 s per run for a 2,434-line module, against
+0.055 s from its `.fasl` (Appendix B), and 1,412 of the 2,154 seconds PCL
+spent on the CPAN board (`docs/cpan-speed-comparison-s540.md`). Staleness
+was never the reason: a `.fasl` is valid exactly while its `.lisp` is, by
+the same manifest. Editing the module, editing only a module it `use`s,
+replacing it by a file of the same size in the second its entry was written,
+pointing `-I` at another directory with a module of the same name, and
+changing `PCL_OPT` each rebuild it (`Pl/t/local-module-fasl-01.t` tests the
+five). The one change no `stat` can see is a same-size rewrite whose
+modification time is set BACK with `utime` (`docs/not-supported.md`
+`ns-cache-same-size-rewrite`).
+
+**A module first met while another module's `.fasl` is being built gets
+its own `.fasl` in the same run** (task #4963). SBCL cannot nest one compile
+inside another, so such a module runs from its text at that moment and its
+build is done when the outer build finishes. Before s540 it was simply left
+as text, and got its `.fasl` only on a later run: a program's cache needed
+one run per level of nested `use` to settle.
+
+**The compile policy is two directory lists**, read at run time
+(`PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS`, §6). Unset, every module is
+compiled. `PCL_NO_COMPILE_DIRS=DIR` keeps the modules under `DIR` as
+readable text (an edit loop that wants to read the transpiled module, say),
+and `PCL_COMPILE_DIRS=DIR:...` compiles only what is under the listed
+directories. A module that is not compiled still gets the `.lisp` cache and
 the manifest check.
 
 **The cache directory** is `$PCL_CACHE_DIR` (default `~/.pcl-cache`),
@@ -197,14 +221,13 @@ from the cache entry takes 0.037 seconds (measured 2026-09-17).
   *different* file, and which file that is changes the parse. With two
   directories whose `B.pm` differ only in an empty prototype, perl answers
   8 and then 107, and a key without the search path would answer 8 twice.
-- **The main script is compiled to a `.fasl` by default**, unlike a module
-  under `-I`, `PERL5LIB` or `.`. The module rule exists because such a
-  module is probably being edited; but a main script is always under one of
-  those directories, so applying the rule would mean paying the SBCL
-  compile on every run, and the cache would buy nothing. The off switches
-  still apply: `PCL_NO_FASL_CACHE=1` or a `PCL_NO_COMPILE_DIRS` match leaves
-  the entry as readable text, and `--no-cache` or `PCL_NO_CACHE` skips the
-  cache entirely.
+- **The main script is compiled to a `.fasl` by default**, like every
+  module (§2), and it is also exempt from a `PCL_COMPILE_DIRS` list: a main
+  script is always under `.`, `-I` or `PERL5LIB`, so a list that leaves
+  those out would mean paying the SBCL compile on every run, and the cache
+  would buy nothing. The off switches still apply: `PCL_NO_FASL_CACHE=1` or
+  a `PCL_NO_COMPILE_DIRS` match leaves the entry as readable text, and
+  `--no-cache` or `PCL_NO_CACHE` skips the cache entirely.
 - **Not cached:** `pcl -e CODE` (written to a temporary file with a fresh
   random name, so an entry keyed on the path would leave one dead entry
   behind per run), and a file run with any source-changing switch on the
@@ -306,7 +329,7 @@ Moved to the end of the page: [Appendix B](#appendix-b-measured-numbers).
 | variable | meaning | default |
 |---|---|---|
 | `PCL_CACHE_DIR` | root of every per-user cache: `modules/`, `scripts/`, `evals/`, `ext/`, `proto/`, `core/`, `xs/` | `~/.pcl-cache` |
-| `PCL_COMPILE_DIRS` | colon-separated directories (`PERL5LIB` syntax); a module under one is compiled to a `.fasl`. `*` = every directory. The **main script** is exempt from this list (§2c) | perl's installed library directories and PCL's own `lib/` |
+| `PCL_COMPILE_DIRS` | colon-separated directories (`PERL5LIB` syntax); a module under one is compiled to a `.fasl`, and set, the list REPLACES the default. `*` = every directory. The **main script** is exempt from this list (§2c) | every directory (since s540, #4986; before it, perl's installed library directories and PCL's own `lib/`) |
 | `PCL_NO_COMPILE_DIRS` | same syntax; a module, or the main script, under one is **never** compiled to native code (it still gets the `.lisp` and manifest cache); wins over `PCL_COMPILE_DIRS` on any match. `*` = compile nothing | empty |
 | `PCL_NO_FASL_CACHE=1` | the older name for `PCL_NO_COMPILE_DIRS='*'`; also the one switch that turns off the **compiled extensions** of §4 | |
 | `PCL_NO_CACHE` / `pcl --no-cache` | this run reads and writes no module cache, **no script cache and no eval cache**: one switch. It does *not* disable the saved core (§1) or the compiled extensions (§4), which are compiles of files in PCL's own tree, keyed by their bytes | off |

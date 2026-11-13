@@ -756,9 +756,9 @@ Environment:
   PCL_COMPILE_DIRS      Colon-separated directories, PERL5LIB syntax: a module
                         whose source lies under one of them is compiled to
                         native code and cached.  `*` = every directory.  UNSET
-                        = perl's installed library directories plus PCL's own
-                        lib/ -- so a module you are EDITING is cached as text,
-                        never as an opaque fasl.
+                        = every directory: a module under -I, use lib,
+                        PERL5LIB or . is compiled once, like an installed
+                        one.  A list REPLACES that default.
   PCL_NO_COMPILE_DIRS   Same syntax; a module under one of these is NEVER
                         compiled.  Wins over PCL_COMPILE_DIRS on any match;
                         `*` = compile nothing.  (PCL_NO_FASL_CACHE=1 is the
