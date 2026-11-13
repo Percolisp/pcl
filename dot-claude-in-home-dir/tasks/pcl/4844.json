@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s538a (Opus, 2026-11-13) from a probe beside s537a's #4762 (a leading `::` names main).  PRE-EXISTING: main 53dd73da\n(MAIN-READY-88), the old base 23f0f917 and the s538a tree all answer the same.\n\nREPRODUCER (perl 5.40.3; the s538a worktree's scratch/s538a/pr2/colonfh.pl):\n\n    my $f = \"/tmp/x$$\"; open my $w, \">\", $f or die; print $w \"x\\ny\\n\"; close $w;\n    open(::H, \"<\", $f) or die; my $a = <::H>; print \"1 '\", ($a // \"undef\") =~ s/\\n//r, \"'\\n\";\n    my @r = <::H>; print \"2 n=\", scalar(@r), \"\\n\"; close ::H;\n    open(H2, \"<\", $f) or die; my $b = readline(::H2); print \"3 '\", ($b // \"undef\") =~ s/\\n//r, \"'\\n\";\n\n  perl:  1 'x'      2 n=1     3 'x'\n  PCL:   1 '::H'    2 n=1     3 'undef'\n\nRow 1: `<::H>` is not recognised as a bareword handle (the angle operand test wants a plain identifier or a\n`Pkg::NAME`, so `::H` falls to the GLOB branch and the pattern \"::H\" comes back as itself, #450's literal-word\nrule).  Row 3: `readline(::H2)` resolves the handle to the package \"\" or reads a fresh symbol.  Row 2 agreeing is an\naccident (the glob's one element).  Same family as #452 (`<main::FH2>`, fixed s438g by widening `_bareword_fh_p`)\nand #4762's ONE splitter `%p-split-symbolic-name`: a leading `::` is main.  Fix at the angle-operand predicate\n(the same one that serves `print ::H` -- that one works) and the readline argument's handle resolution; probe\n`eof(::H)`, `close ::H` (works), `<::H>` in list context, `while (<::H>)`.  LOW (a rare spelling; found in a\npackage section `package Bar; open(::H, ...); <::H>`).",
+   "id" : "4844",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (pre-existing): a handle named with a leading `::` in a READ slot -- `<::H>` is the glob pattern \"::H\" and `readline(::H)` reads nothing (undef); perl reads main::H in both (`open(::H, ...)` and `print ::H` work)"
+}
