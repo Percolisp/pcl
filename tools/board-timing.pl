@@ -111,6 +111,7 @@ my ($list, $modes, $repeat, $cache_root, $timeout, $timeouts_tsv, $hooks, $repor
 my ($perl_side, $cold_continue, $variant, @preload, %xenv) = (1, 0, q{});
 my $norm = 0;
 my $prof_from = q{boundary};
+my $table;    # --report --table OUT.tsv: the per-file table
 my @ARGV_COPY = @ARGV;
 my @positional;
 while (@ARGV) {
@@ -139,6 +140,7 @@ while (@ARGV) {
   elsif ($a eq '--report')     { $report = 1 }
   elsif ($a eq '--top')        { $top = shift @ARGV }
   elsif ($a eq q{--norm})       { $norm = 1 }
+  elsif ($a eq q{--table})      { $table = shift @ARGV }
   elsif ($a =~ /^-/)           { die "board-timing.pl: unknown option $a\n" }
   else                         { push @positional, $a }
 }
@@ -665,7 +667,28 @@ sub report {
   my %x;
   $x{$_->{c_class}}++ for grep { $_->{cmp} eq 'X' } @warm;
   $o .= "Excluded by PCL class: " . join(', ', map { "$_ $x{$_}" } sort keys %x) . "\n";
+  write_table($table, \@warm, \%cold, $taken) if defined $table;
   return $o;
+}
+
+# The per-file table (--report --table OUT.tsv): one line per board file, its
+# warm row (the precise one when a later input supplied it) and its cold CPU;
+# CPU columns are load-normalised when --norm ran (column `f` = the factor).
+sub write_table {
+  my ($path, $warm, $cold, $taken) = @_;
+  my @c = qw(dist file cmp c_class src nrep spread load1 f p_wall p_cpu c_wall c_cpu
+             A_cpu B_cpu C_cpu x_cpu tcompile_c mcompile_c scompile_c ecompile_c cfile_c
+             modload_c subproc_cpu cold_cpu mb_consed gc p_ok c_ok);
+  open my $t, '>', $path or die "board-timing.pl: cannot write $path: $!\n";
+  print $t "# taken-at: $_\n" for @$taken;
+  print $t join("\t", @c), "\n";
+  for my $r (sort { $a->{dist} cmp $b->{dist} || $a->{file} cmp $b->{file} } @$warm) {
+    my %v = (%$r, subproc_cpu => subproc($r),
+             cold_cpu => ($cold->{"$r->{dist}\t$r->{file}"} // {})->{c_cpu});
+    print $t join("\t", map { my $x = $v{$_}; !defined $x ? ''
+                              : $x =~ /^-?\d*\.\d+(?:e-?\d+)?$/i ? sprintf('%.3f', $x) : $x } @c), "\n";
+  }
+  close $t;
 }
 
 # ------------------------------------------------------------------- hooks --
