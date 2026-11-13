@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 6;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -163,4 +163,26 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$fork' '$dir");
     is($pcl_out, $perl, 'fork after a dropped write handle: its bytes are written once');
+}
+
+# 6: a lock held through a lexical that is IN SCOPE but never used again (the
+# lock-guard idiom) stays held while its scope runs, through collections.  The
+# collector cannot tell such a guard from a dropped handle (SBCL keeps no dead
+# variable alive), so a finalizer that CLOSED at the collection released it at
+# a random moment -- Path-Tiny locking.t, s541; SBCL's own `open' finalizer did
+# the same on main for the open spelling.  A child asks with LOCK_NB.
+my $guard = write_prog('guard.pl', <<'PL');
+use strict; use warnings; use Fcntl qw(:flock O_WRONLY O_CREAT);
+my $b = "$ARGV[0]/guard.lock";
+sub child_got { system($^X, "-e", 'use Fcntl ":flock"; open my $h, "<", $ARGV[0] or die; exit(flock($h, LOCK_SH|LOCK_NB) ? 1 : 0)', $b); $? >> 8 }
+sub churn { my @junk; push @junk, [ (1) x 50 ] for 1 .. 300_000; select(undef, undef, undef, 0.2) }
+sub work { sysopen(my $g, $b, O_WRONLY|O_CREAT, 0666) or die; flock($g, LOCK_EX) or die; churn(); return child_got() }
+sub guard { open(my $g, ">", $b) or die; flock($g, LOCK_EX) or die; return $g }
+sub work2 { my $guard = guard(); churn(); return child_got() }
+print "sysopen in a sub: ", work(), "\n";
+print "guard from a helper: ", work2(), "\n";
+PL
+{
+    my ($perl, $pcl_out) = run_both("$guard' '$dir");
+    is($pcl_out, $perl, 'a lock held by an in-scope lexical guard survives collections (no child gets it)');
 }

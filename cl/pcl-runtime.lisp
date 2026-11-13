@@ -3034,10 +3034,10 @@
     ;; `final' is read: a $? a DESTROY sets is the exit status, as in perl.
     (%p-run-global-destruction)
     (%p-flush-stdout-at-exit)
-    ;; Every finalizer of a dropped handle completes before the process goes
-    ;; (one may be running on SBCL's finalizer thread right now): its buffered
-    ;; bytes are the program's output (task #2006 PART 2).
-    (%p-run-dead-handle-finalizers)
+    ;; Every dropped handle the collector found is written out and closed
+    ;; before the process goes: its buffered bytes are the program's output
+    ;; (task #2006 PART 2).
+    (%p-run-dead-handle-finalizers nil :all)
     (%p-flush-all-output)
     ;; Only now, with every END run and every handle flushed, does a status
     ;; an END block changed become the process's.  A nested sb-ext:exit
@@ -20464,10 +20464,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (ignore-errors (finish-output *standard-output*))
   (ignore-errors (finish-output *error-output*))
   (%p-flush-open-streams)
-  ;; A dropped handle the collector has already found writes its bytes from
-  ;; its finalizer (task #2006 PART 2): run one still queued NOW, or its bytes
-  ;; reach the file after a child's -- or in both processes after a fork.
-  (when (%p-finalizers-pending-p) (%p-run-dead-handle-finalizers)))
+  ;; A dropped handle the collector has already found writes its bytes NOW
+  ;; (task #2006 PART 2), or they reach the file after a child's -- or in both
+  ;; processes after a fork.  Its descriptor stays open: see %p-reap-dead-stream.
+  (when (%p-dead-handle-work-p) (%p-run-dead-handle-finalizers nil :write)))
 
 
 (defconstant +p-fd-cloexec+ 1
@@ -21882,12 +21882,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;;; to stay open until exit -- keeping its descriptor and any `flock' it held.
 ;;; Path::Tiny's `slurp' returns-and-drops a LOCK_SH handle, and the next locked
 ;;; `append' waited for its own process forever.  The answer is a BELT: when the
-;;; garbage collector finds the stream unreachable, a finalizer writes out what
-;;; its output buffer still holds and closes the descriptor; and the two places
-;;; a dead handle makes the program fail or block -- a `flock' that would block,
-;;; an opener out of descriptors -- run the collector and try once more.  It
-;;; never closes a stream the program can reach (the collector's own guarantee),
-;;; and when the collector does not free one the behaviour is the old one.
+;;; garbage collector finds the stream unreachable, a finalizer RECORDS it; the
+;;; two places a dead handle makes the program fail or block -- a `flock' that
+;;; would block on a file this process has locked, an opener out of descriptors
+;;; -- run the collector, close the recorded descriptors (of that file / all),
+;;; and try once more; exit closes the rest.  A recorded stream's buffered bytes
+;;; are written at the next PerlIO_flush(NULL) site, a trigger or exit.
+;;;
+;;; WHY NOT CLOSE AT THE COLLECTION.  The collector cannot tell a DROPPED handle
+;;; from one the program still has IN SCOPE but never uses again: SBCL keeps no
+;;; dead variable alive, so `my $guard = lock_it(); work();' leaves the guard
+;;; as unreachable as Path::Tiny's dropped slurp handle.  A finalizer that
+;;; closed at the collection released such a guard's lock at a random moment
+;;; (Path-Tiny locking.t, measured s541; SBCL's own `open' finalizer had done
+;;; the same on main).  Closing only at the triggers keeps the divergence where
+;;; perl would block on its own lock or fail for want of a descriptor.
 ;;;
 ;;; WHY THE FINALIZER HOLDS THE BUFFER AND NOT THE STREAM.  A lexical handle's
 ;;; box holds the fd-stream itself (ir-spec §7.5a), so the stream IS the
@@ -21918,13 +21927,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;;; (probed 5.40.3) as it does here after a trigger.
 
 (defvar *p-reap-failure-announced* nil
-  "Set once a finalizer has reported a failed write-out or close on stderr.")
+  "Set once a dropped handle's failed write-out or close was reported on stderr.")
 
 (defun %p-reap-announce (fd errno)
-  "Say ONCE on stderr that closing a dropped handle's descriptor FD failed with
-   ERRNO (rule 12: an effect-only failure is announced, never signalled -- this
-   runs on SBCL's finalizer thread).  A raw write(2): no Lisp stream is shared
-   with the program's thread."
+  "Say ONCE on stderr that writing out or closing a dropped handle's descriptor
+   FD failed with ERRNO (rule 12: an effect-only failure is announced, never
+   signalled -- it happens inside a flush, a trigger or the exit).  A raw
+   write(2), so no Lisp stream's buffer is touched."
   (unless *p-reap-failure-announced*
     (setf *p-reap-failure-announced* t)
     (let* ((msg (format nil "PCL: closing a dropped filehandle (fd ~D) failed: ~
@@ -21949,21 +21958,61 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (setf (sb-impl::buffer-head obuf) head)
     nil))
 
+(sb-ext:defglobal *p-dead-streams* nil
+  "Records (FD OBUF PID) of descriptor streams PCL opened that the collector
+   found unreachable and whose descriptor is not closed yet, newest first.
+   Pushed by the finalizer (on SBCL's finalizer thread, atomically) and acted
+   on only by %p-drain-dead-streams, in the program's thread.")
+
 (defun %p-reap-dead-stream (fd obuf pid)
-  "THE FINALIZER of a stream PCL opened (see the header above): the stream is
-   gone, so this works on what the closure kept -- descriptor FD and, for an
-   output-only stream, its buffer OBUF.  The buffer is written only in the
-   process that opened the stream (PID): a fork child inherits the registration
-   but not the duty, the parent writes those bytes itself (PCL also drains
-   pending finalizers before it forks).  Then the descriptor is closed, which
-   is what releases a `flock'.  Touches no perl state -- not `$!', not `$?' --
-   and never signals."
-  (let ((errno (and obuf (eql pid (sb-posix:getpid))
-                    (ignore-errors (%p-reap-write-out fd obuf)))))
-    (multiple-value-bind (ok close-errno) (sb-unix:unix-close fd)
-      (let ((bad (or errno (and (not ok) close-errno))))
-        (when bad (%p-reap-announce fd bad)))))
+  "THE FINALIZER of a stream PCL opened (see the header above): it only
+   RECORDS the dead stream -- descriptor FD, an output-only stream's buffer
+   OBUF, the opening process PID -- for %p-drain-dead-streams.  It closes
+   nothing itself: SBCL runs it whenever a collection happens to find the
+   stream, and a lexical the program still has IN SCOPE but never uses again
+   (a lock guard: `my $guard = lock_it(); work();') is as unreachable to the
+   collector as a dropped one -- closing there released a held lock (Path-Tiny
+   locking.t, s541).  Touches no perl state and never signals."
+  (sb-ext:atomic-push (list fd obuf pid) *p-dead-streams*)
   nil)
+
+(defun %p-take-dead-streams ()
+  "Atomically take every record of *p-dead-streams*, leaving it empty."
+  (loop (let ((old *p-dead-streams*))
+          (when (eq old (sb-ext:compare-and-swap (symbol-value '*p-dead-streams*)
+                                                 old nil))
+            (return old)))))
+
+(defun %p-reap-record (rec close)
+  "Act on one dead-stream record REC = (FD OBUF PID): write what the output
+   buffer still holds -- only in the process that opened the stream, a fork
+   child inherits the record but not the duty -- and, when CLOSE, close the
+   descriptor, which releases a `flock' held through it.  A failure is
+   announced once on stderr (rule 12: effect-only)."
+  (destructuring-bind (fd obuf pid) rec
+    (let ((errno (and obuf (eql pid (sb-posix:getpid))
+                      (ignore-errors (%p-reap-write-out fd obuf)))))
+      (setf (second rec) nil)
+      (when errno (%p-reap-announce fd errno))
+      (when close
+        (multiple-value-bind (ok close-errno) (sb-unix:unix-close fd)
+          (unless ok (%p-reap-announce fd close-errno)))))))
+
+(defun %p-drain-dead-streams (mode)
+  "Act on the recorded dead streams (see the header above).  Every buffer is
+   written.  MODE says which descriptors are CLOSED: :all every one (exit, an
+   opener out of descriptors); a (DEV . INO) key only those open on that file
+   (a `flock' on it that would block); :write none (a PerlIO_flush(NULL) site:
+   the bytes reach the file before a child starts).  The rest stay recorded."
+  (let ((keep '()))
+    (dolist (rec (%p-take-dead-streams))
+      (let ((close (or (eq mode :all)
+                       (and (consp mode)
+                            (equal (%p-flock-file-key (first rec)) mode)))))
+        (%p-reap-record rec close)
+        (unless close (push rec keep))))
+    (dolist (rec keep)
+      (sb-ext:atomic-push rec *p-dead-streams*))))
 
 (defun %p-own-stream (stream)
   "Register STREAM -- a descriptor stream PCL has just opened for a handle --
@@ -22009,15 +22058,19 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((r *p-finalizer-drain*))
     (and r (symbol-value (svref r 5)) t)))
 
-(defun %p-run-dead-handle-finalizers (&optional collect)
-  "Run, in THIS thread, every finalizer a collection has queued, and return
-   only when none is running anywhere.  SBCL runs finalizers on its own thread,
-   so a caller that must see the descriptors closed NOW (a retried `flock' or
-   open, the exit, a fork) cannot just call run-pending-finalizers: an item the
-   thread already took may still be running when that returns.  Stopping the
-   thread joins it -- an in-flight finalizer completes -- then the queue is
-   drained here and the thread restarted from this thread, so it inherits this
-   thread's signal mask (%p-sig-relay-start relies on the same).
+(defun %p-dead-handle-work-p ()
+  "True when a dead stream is recorded or a collection has queued finalizers
+   that have not run yet -- the cheap test a PerlIO_flush(NULL) site makes."
+  (or *p-dead-streams* (%p-finalizers-pending-p)))
+
+(defun %p-run-dead-handle-finalizers (&optional collect (mode :write))
+  "Run, in THIS thread, every finalizer a collection has queued, then
+   %p-drain-dead-streams with MODE.  SBCL runs finalizers on its own thread,
+   and an item that thread already took may still be running when
+   run-pending-finalizers returns; so the thread is STOPPED (joined: an
+   in-flight finalizer completes), the queue is drained here, and the thread
+   is restarted from this thread, so it inherits this thread's signal mask
+   (%p-sig-relay-start relies on the same).
 
    COLLECT true runs the full collection WHILE THE THREAD IS STOPPED (the
    trigger's case).  That order is measured, not tidiness (s540c): the
@@ -22028,13 +22081,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((r *p-finalizer-drain*))
     (if (null r)
         (progn (when collect (sb-ext:gc :full t))
-               (sb-kernel:run-pending-finalizers))
+               (sb-kernel:run-pending-finalizers)
+               (%p-drain-dead-streams mode))
         (let ((running (typep (symbol-value (svref r 4)) 'sb-thread:thread)))
           (when running (funcall (svref r 0)))
           (unwind-protect
                (progn (when collect (sb-ext:gc :full t))
                       (funcall (svref r 2))
-                      (loop while (funcall (svref r 3))))
+                      (loop while (funcall (svref r 3)))
+                      (%p-drain-dead-streams mode))
             (when running (funcall (svref r 1)))))))
   (values))
 
@@ -22052,13 +22107,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                (setf (gethash k table) v)))
            weak))
 
-(defun %p-collect-dead-handles ()
-  "THE TRIGGER'S COLLECTION: free every handle the program can no longer
-   reach and close its descriptor before returning (see the header above).
-   The three pins are weakened for the collection's length; Perl signal
-   handlers are held meanwhile (they could read `$.').  Returns T.  Costs a
-   full collection: only %p-flock-impl and the openers' descriptor retry call
-   it, at the point where the program would otherwise block or fail."
+(defun %p-collect-dead-handles (&optional (mode :all))
+  "THE TRIGGER'S COLLECTION: find every handle the program can no longer
+   reach and, before returning, close the descriptors MODE names -- :all (an
+   opener out of descriptors) or the (DEV . INO) of the file a blocking
+   `flock' is about (see %p-drain-dead-streams).  The three pins are weakened
+   for the collection's length; Perl signal handlers are held meanwhile (they
+   could read `$.').  Returns T.  Costs a full collection: only %p-flock-impl
+   and the openers' descriptor retry call it, at the point where the program
+   would otherwise block or fail."
   (%p-with-signals-held (:collector)
                         (let ((last (and *p-last-read-handle*
                                          (sb-ext:make-weak-pointer *p-last-read-handle*)))
@@ -22066,7 +22123,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                               (eofs (%p-weaken-pins *p-eof-seen*)))
                           (setf *p-last-read-handle* nil)
                           (unwind-protect
-                               (%p-run-dead-handle-finalizers t)
+                               (%p-run-dead-handle-finalizers t mode)
                             (%p-restore-pins *p-fh-lines* lines)
                             (%p-restore-pins *p-eof-seen* eofs)
                             (unless *p-last-read-handle*
@@ -25223,8 +25280,10 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %p-flock-held-elsewhere-p (fd)
   "Could a handle this program dropped be what blocks a flock on FD?  True
-   when this process has locked FD's file before, or when finalizers are
-   queued (a dropped holder already collected)."
+   when this process has locked FD's file before (a dropped holder took its
+   lock through PCL, so it is noted there), or when finalizers are queued.  A
+   recorded dead stream alone is not a reason: it holds a lock only on a file
+   noted here, so a file only other processes lock never costs a collection."
   (or (%p-finalizers-pending-p)
       (let ((id (%p-flock-file-key fd)))
         (and id (gethash id *p-flock-files*) t))))
@@ -25243,7 +25302,7 @@ would consume, so it dies naming the stream (rule 12)."
         (cond ((zerop rc) (values rc errno))
               ((not (eql errno sb-posix:ewouldblock)) (values rc errno))
               ((%p-flock-held-elsewhere-p fd)
-               (%p-collect-dead-handles)
+               (%p-collect-dead-handles (or (%p-flock-file-key fd) :all))
                (%p-flock-call fd op))
               ((logtest op 4) (values rc errno))
               (t (%p-flock-call fd op))))))
