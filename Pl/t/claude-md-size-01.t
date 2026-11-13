@@ -26,7 +26,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 9;
+use Test::More tests => 10;
 use FindBin qw($Bin);
 
 my $root = "$Bin/../..";
@@ -65,6 +65,8 @@ my @cited = (
   'WHAT TO RUN WHEN', 'THE RUNTIME IS KEPT COMPILED AND CACHED',
   'Test Status', 'CURRENT NUMBERS', 'Key Files to Read',
   'Semantic Deep-Dives', 'Dependencies', 'Generated artifacts',
+  'Runtime Symbols Must Be Exported', 'Standing rules from the review rounds',
+  'Pipeline and generated artifacts',
 );
 my @gone = grep { index($claude, $_) < 0 } @cited;
 is("@gone", '', 'every section name the tree cites is still in CLAUDE.md');
@@ -78,12 +80,24 @@ is("@no_rule", '', 'principles 1-13 and 9a keep their numbers in CLAUDE.md');
 my $ref = slurp_utf8("$root/docs/claude-md/REFERENCE.md");
 $ref = '' if !defined $ref;
 my @working = ('Design Principles', 'Quick Reference', 'WHAT TO RUN WHEN',
+  'Pipeline and generated artifacts', 'Standing rules from the review rounds',
   'Semantic Deep-Dives', 'Dependencies');
 my @no_long = grep { $ref !~ /^#{2,3} .*\Q$_\E/m } @working;
 is("@no_long", '', 'REFERENCE.md has a heading for every working section of CLAUDE.md');
 (my $flat = $claude) =~ s{\s+}{ }g;   # a pointer may wrap across lines
 my @no_ptr = grep { $flat !~ /REFERENCE\.md`?\s+"\Q$_\E/ } @working;
 is("@no_ptr", '', 'CLAUDE.md points each working section at its REFERENCE.md section by name');
+
+# Every doc in the "Semantic Deep-Dives" index has its description in
+# REFERENCE.md (s541: 13 of 56 had none, so "the full description is in
+# REFERENCE" was false for them).
+my ($index) = $claude =~ /^### Semantic Deep-Dives.*?\n(.*?)^## /ms;
+my @undescribed;
+for my $doc (defined $index ? $index =~ /`((?:baselines\/)?[\w.-]+\.(?:md|tsv))`/g : ()) {
+  my $path = $doc =~ m{/} ? $doc : "docs/$doc";
+  push @undescribed, $doc if index($ref, "`$path`") < 0;
+}
+is("@undescribed", '', 'every doc in the Semantic Deep-Dives index is described in REFERENCE.md');
 
 SKIP: {
   my $mem = "$root/dot-claude-in-home-dir/memory/MEMORY.md";

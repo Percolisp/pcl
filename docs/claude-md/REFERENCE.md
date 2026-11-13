@@ -12,16 +12,20 @@ notes) is in `docs/claude-md/HISTORY.md`, and no task needs it.
 
 **How to find things.**  `grep -n "^##" docs/claude-md/REFERENCE.md` lists the
 sections: Design Principles (1-13, 9a) -- Quick Reference -- WHAT TO RUN WHEN
-(with the pipeline paragraph and the generated artifacts) -- Semantic
-Deep-Dives -- Dependencies.  Principle numbers are the same as in `CLAUDE.md`
+-- Pipeline and generated artifacts (with Runtime Symbols Must Be Exported)
+-- The full sweep runs its own gate (the buckets) -- Standing rules from the
+review rounds -- Semantic Deep-Dives -- Dependencies.  Principle numbers are the same as in `CLAUDE.md`
 and in the code comments that cite them.
 
-**Which copy wins.**  `CLAUDE.md` is the current statement of every rule; this
-file is its long form as of the s541 split (text moved VERBATIM from the
-pre-split `CLAUDE.md`, `git show 8afc7dda:CLAUDE.md`).  THE CURRENT NUMBERS
-(gate, sweep, everyday, board, generation) are ONLY in `CLAUDE.md` "Test
-Status -- CURRENT NUMBERS": a number in this file is the number of the day
-its sentence was written.
+**The two files must AGREE.**  The text here was moved from the pre-split
+`CLAUDE.md` (`git show 8afc7dda:CLAUDE.md`) and CORRECTED where it had gone
+stale (s541: rule 2's prefix, rule 6's next file number, rule 7, rule 13's
+push rule, the artifact commands, the companion cadence line, the gate
+cadence).  If you find `CLAUDE.md` and this file saying different things,
+that is a BUG in the docs: do the stricter of the two and report it in your
+STOP.md / final report.  THE CURRENT NUMBERS (gate, sweep, everyday, board,
+generation) are ONLY in `CLAUDE.md` "Test Status -- CURRENT NUMBERS": a
+number in this file is the number of the day its sentence was written.
 
 **Maintenance (the reviewing session).**  A rule that changes is changed in
 BOTH files in the same commit.  A new design / review doc gets one line in
@@ -35,7 +39,7 @@ doc description here and writes the index line into its STOP.md.
 
 1. **CPAN Compatibility**: Match Perl semantics exactly. The goal is to run real CPAN modules.
 
-2. **Readable Generated Code — but speed wins**: Keep generated CL readable for Perl programmers where it is free. Use Perl-like naming (pl-sub, pl-print, $varname) so the output is recognizable. **Priority decision (2026-07-02): when readability and performance of the generated code conflict, performance wins** — never sacrifice a speed transform for prettier output. See `docs/where-the-time-goes.md` and `docs/codegen-rewrite-review.md`.
+2. **Readable Generated Code — but speed wins**: Keep generated CL readable for Perl programmers where it is free. Use Perl-like naming (`p-sub`, `p-print`, `$varname`; the prefix was `pl-` until the v2 runtime) so the output is recognizable. **Priority decision (2026-07-02): when readability and performance of the generated code conflict, performance wins** — never sacrifice a speed transform for prettier output. See `docs/where-the-time-goes.md` and `docs/codegen-rewrite-review.md`.
 
 3. **Compile-Time Visibility**: Wrap sub definitions and variable declarations in `eval-when` so BEGIN blocks can call subs and access variables defined before them in source order.
 
@@ -45,9 +49,9 @@ doc description here and writes the index line into its STOP.md.
 
 6. **Add Regression Tests for Bug Fixes**: When fixing a bug, add a test case to an existing test file that covers the fixed behavior. This prevents regressions.
 
-   **The constraint is a file's RUN TIME, not its test count** (user, 2026-07-28, restated and refined 2026-08-01). `prove -j8` parallelises across files, so the gate's wall time ≈ the *slowest single file* — a file with many fast rows is fine, a file with a few slow ones is not. What makes a row slow: `test_transpile` runs a perl oracle **and** an SBCL transpile+run; `run_cl` spawns SBCL. So before adding, ask *how long does this file take*, and measure with `prove --timer Pl/t/<file>`; if the answer is heading past the current slowest file, start the next `transpile-test-NN.t` instead (copy an existing file's header/helpers).  **A TIMED row's bound is RELATIVE to perl's own time on the same program, measured in the run (`8 * perl + 0.5 s`), never an absolute number of seconds: CI's runner is ~3x slower than this box (s513: an absolute 1.5 s turned main red).**  The timed row is the gross-regression bound; the lever's inverse guard is a mechanism row that fails on the base. `transpile-test-01.t` (118 rows) and `transpile-test-07.t` (45, closed by the user in s321) are the two to leave alone; as of s321 the files are 01, 01b, 02, 03, 04, 04b, 05, 06, 07, 08, so the next new one is **`-10`** (`-09` landed in s321-era; s374 added the non-transpile-test `bareword-call-01.t`).
+   **The constraint is a file's RUN TIME, not its test count** (user, 2026-07-28, restated and refined 2026-08-01). `prove -j8` parallelises across files, so the gate's wall time ≈ the *slowest single file* — a file with many fast rows is fine, a file with a few slow ones is not. What makes a row slow: `test_transpile` runs a perl oracle **and** an SBCL transpile+run; `run_cl` spawns SBCL. So before adding, ask *how long does this file take*, and measure with `prove --timer Pl/t/<file>`; if the answer is heading past the current slowest file, start the next `transpile-test-NN.t` instead (copy an existing file's header/helpers).  **A TIMED row's bound is RELATIVE to perl's own time on the same program, measured in the run (`8 * perl + 0.5 s`), never an absolute number of seconds: CI's runner is ~3x slower than this box (s513: an absolute 1.5 s turned main red).**  The timed row is the gross-regression bound; the lever's inverse guard is a mechanism row that fails on the base. `transpile-test-01.t` (118 rows) and `transpile-test-07.t` (45, closed by the user in s321) are the two to leave alone; as of s321 the files are 01, 01b, 02, 03, 04, 04b, 05, 06, 07, 08, so the next new one is **`-11`** (`-09` landed in s321-era, `-10` exists since then; s374 added the non-transpile-test `bareword-call-01.t`).
 
-7. **Document Complex Semantics in `docs/`**: When solving a problem involving tricky Perl-vs-CL semantics, write a `docs/topic-name.md` file explaining the problem, the solution, and edge cases. Reference it from CLAUDE.md's "Key Files to Read" section. This prevents re-investigating the same issue in future sessions. Examples: declaration ordering, wantarray context, string escapes.
+7. **Document Complex Semantics in `docs/`**: When solving a problem involving tricky Perl-vs-CL semantics, write a `docs/topic-name.md` file explaining the problem, the solution, and edge cases. Give it ONE LINE in CLAUDE.md's "Semantic Deep-Dives" index and its full description in the section of the same name in this file (an agent appends the description here and hands the index line to the reviewing session). This prevents re-investigating the same issue in future sessions. Examples: declaration ordering, wantarray context, string escapes.
 
 8. **wantarray/context** — three-valued implementation is done (session 163). See `docs/wantarray-impl-plan.md`. A sweep regression exists (VOID_CTX sub-body wrap in `_process_expression_statement` is too broad); fix that regression before any further wantarray work.
 
@@ -55,7 +59,7 @@ doc description here and writes the index line into its STOP.md.
 
    **9a. Fix at the right LAYER — module behavior never goes in the parser or runtime.**
    When a CPAN module misbehaves, the parser (`Pl/*.pm`) or runtime (`cl/pcl-runtime.lisp`) is the *closest* place to patch, and therefore the wrong one by default. Three layers, each owning a different kind of fact:
-   - **`lib/<Module>.pm` shim** — one module's behavior: its subs, prototypes, exports, constants. PCL transpiles it like user code. This is where module-specific facts live.
+   - **`lib/<Module>.pm` shim** — one module's behavior: its subs, prototypes, exports, constants.  A module that must keep running unchanged gets a FACTS OVERLAY instead (`lib/PCL/Facts/<Module>.pm`: forward declarations only; `docs/shipped-modules.md` "Facts overlays"). PCL transpiles it like user code. This is where module-specific facts live.
    - **`Pl/*.pm` parser/codegen** — *generic language mechanisms*, keyed on the **mechanism, never a name**: e.g. "a `(&@)` prototype makes the trailing block parse as a block-form." The shim supplies the data (the prototype); the parser consumes it generically.
    - **`cl/pcl-runtime.lisp`** — genuine Perl *core* semantics: builtins, the box model.
 
@@ -154,8 +158,8 @@ doc description here and writes the index line into its STOP.md.
     - PCL's workaround and which files/tests it unblocks.
 
     Then add the case to `docs/ppi-bug-report.t` — the self-contained
-    Test::More file that IS the upstream report, where every row FAILS on the
-    current PPI (a failing row is the bug). Bump its `tests => N`. A **canary
+    Test::More file that IS the upstream report, where every row FAILS on
+    STOCK PPI (1.291, the installed one; `PCL_SYSTEM_PPI=1`) (a failing row is the bug). Bump its `tests => N`. A **canary
     row** asserting the currently-broken behaviour is welcome in
     `Pl/t/misc-fixes-02.t`: when a PPI upgrade fixes the bug, that row fails,
     which is the signal to drop the workaround.
@@ -189,16 +193,19 @@ prove -j8 Pl/t/
 # by a hash of the runtime source + `sbcl --version` + ~/.sbclrc + the
 # runtime's absolute path (a worktree gets its own) -- so it cannot be stale:
 # an edit makes a new core and prunes the old.  Extensions (pack/mro/warnings/
-# xs) load lazily from the tree and are NOT in the core.  Plain `prove -j8
+# xs) load lazily from the tree and are NOT in the core.
 # (#1202, s493: an extension is compiled ONCE into ~/.pcl-cache/ext/, keyed by the
 # artifact's own BYTES + the runtime identity, so a regenerated artifact cannot reach
 # the old entry; PCL_NO_FASL_CACHE=1 turns it off, --no-cache does not.  pack: 4.3 s -> 0.004 s.)
-# Pl/t/` therefore runs at prove-core speed (~3:45 wall, measured s439).
+# Plain `prove -j8 Pl/t/` therefore runs at prove-core speed (~3:45 wall, measured s439).
 # PCL_NO_CORE=1 = source mode; PCL_SHOW_SBCL=1 prints which core; `pcl
 # --clear-cache` removes the cores; a failed build leaves <core>.failed (one
 # hour) and falls back to source, LOUDLY.  tools/t/sbcl-prefix.t is its test.
 tools/prove-core                 # == prove -j8 Pl/t/ on a FRESH temp core (belt and braces)
 tools/prove-core Pl/t/foo-01.t   # any prove args
+perl tools/sweep-perl-tests.pl --jobs 8          # the full sweep, ALONE on the box (it runs its own gate)
+perl tools/sweep-perl-tests.pl --jobs 4          # the full sweep on a SHARED box: every agent, always (COMMON.md)
+tools/ir-conform --jobs 2                        # after any cl/ or emission change: 0 fail / 0 stale
 
 # Test single file
 prove -v Pl/t/codegen-01.t
@@ -276,7 +283,7 @@ tools/pcl-conform 96-flags       # one case-set file
 # allowances in effect are printed per run) — never left to TIMEOUT into "no
 # rows at all", which is how a file's passing rows vanish invisibly (#176).
 tools/run-perl-suite.pl --all --quick --jobs 4   # THE DEFAULT FORM (#345)
-tools/run-perl-suite.pl --all --jobs 4           # full: once per session, at most
+tools/run-perl-suite.pl --all --jobs 4           # full: AT LEAST ONCE PER ROUND, by the reviewing session (see WHAT TO RUN WHEN)
 # NB: --all --jobs 8 can OOM the 10 GB scope (each worker reserves a 512 MB
 # control stack for a PCL side AND runs a perl side) — use --jobs 4 (s399).
 # --quick does not run the files that spend a whole timeout to produce nothing
@@ -313,7 +320,12 @@ perl -I vendor/PPI/lib docs/ppi-bug-report.t            # the 91-row report on t
 
 The cadence is keyed on WHAT CHANGED, because every measurement is blind to
 a known set of change kinds.  Rows are ADDITIVE — every row that applies
-fires.  **Always, per change:** `tools/prove-core` (~4.5 min); if anything
+fires.  **Always, per change:** the gate -- for a lone change `tools/prove-core`
+(~4.5 min); **inside a BATCH (s477 ruling, USER): per MEMBER the TARGETED
+gate** (`prove Pl/t/<your guard file> <the Pl/t files that name the area you
+touched>`, about a minute) **and the FULL gate ONCE, at the END of the batch
+before MERGE-READY** (a regression the final gate finds is bisected over the
+per-member commits); if anything
 under `Pl/` changed, `tools/corpus-diff.pl` (~2 min — READ its SILENT-DROP
 line) + `tools/emission-ab.pl --ref <base> --list lib/**/*.pm` (seconds);
 plus the targeted files the change names.
@@ -321,9 +333,9 @@ plus the targeted files the change names.
 | what changed | full perl-tests sweep (~2–3 min since s439b's cached core; was ~10) | companion suite — **ROUND-LEVEL since s519 (USER 2026-10-17)**: Fable runs `--all --quick` + the CPAN board once per 3–4 merges on the merged main; a batch runs it only where this column says PER BATCH, plus ONE-FILE runs of the files its members name | also |
 |---|---|---|---|
 | `Pl/**`, corpus-diff IDENTICAL, lib byte-identical, NOT a name-resolution change | **NO — it cannot move; do not run it "to be safe"** | no | — |
-| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | ROUND (Fable); the batch runs ONE-FILE acceptance of the files its members name | gen bump + `tools/rebuild-pack` (staleness gate enforces it) + `tools/ir-host-leak.pl` (the IR must stay in its three vocabularies — a new bare CL symbol in the emission is a LEAK, s470bm / ir-spec §11b) |
-| `Pl/**` name-resolution / scoping / rename / capture / promotion (Parser2 `_rename_*`, `_promote_*`, VarAnnotator, GlobalPartition, eval capture, span passes) | **YES — the sweep IS the gate** (#296) | ROUND (Fable) — the per-batch gate is the SWEEP | gate-SET scan over both populations when a checker / refusal / decline WIDENS (s372) |
-| `cl/**` runtime | YES (invisible to corpus-diff) | ROUND (Fable); PER BATCH only a bounded leg on files the brief NAMES | rule-12 read of the touched dispatch + `tools/ir-inventory.pl` regenerated if an export moved (`Pl/t/ir-inventory-01.t` gates it) + `tools/ir-host-leak.pl` if a macro's expansion changed |
+| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | ROUND (Fable); the batch runs ONE-FILE acceptance of the files its members name | gen bump + ALL THREE artifacts regenerated (`tools/rebuild-pack` does `cl/pcl-pack.lisp` ONLY; the two other commands are under "Pipeline and generated artifacts") (staleness gate enforces it) + `tools/ir-conform --jobs 2` + `tools/ir-host-leak.pl` (the IR must stay in its three vocabularies — a new bare CL symbol in the emission is a LEAK, s470bm / ir-spec §11b) |
+| `Pl/**` name-resolution / scoping / rename / capture / promotion (Parser2 `_rename_*`, `_promote_*`, VarAnnotator, GlobalPartition, eval capture, span passes) | **YES — the sweep IS the gate** (#296) | ROUND (Fable) — the per-batch gate is the SWEEP | gate-SET scan (`tools/gate-set-scan.pl`, on a base worktree and on the tree, then diff) over BOTH populations -- `perl-tests/*.t` and perl's own `t/` -- when a checker / refusal / decline WIDENS (s372) |
+| `cl/**` runtime | YES (invisible to corpus-diff) | ROUND (Fable); PER BATCH only a bounded leg on files the brief NAMES (a coercion / stringification change: the brief names `op/` files -- the s421 "`cl/` coercion change runs the op/ leg" ruling, as narrowed by the s519 round-level cadence) | rule-12 read of the touched dispatch + `tools/ir-conform --jobs 2` + `tools/ir-inventory.pl` regenerated if an export moved (`Pl/t/ir-inventory-01.t` gates it) + `tools/ir-host-leak.pl` if a macro's expansion changed |
 | `lib/**` shim | YES | ROUND (Fable); one-file runs of the dist files a member names | — |
 | harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick` PER BATCH** (the exception: both populations reach it) | baselines edited ROW BY ROW |
 | runners: `tools/sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file-by-file | same | `PCL_SHOW_SBCL=1` before/after diff |
@@ -360,6 +372,8 @@ the batch touched name resolution or the harness.  The three s399 tools:
 `corpus-diff`'s drop counter is per-change (free); `tools/gate-set-scan.pl`
 is on-demand, MANDATORY only for the checker-widening row;
 `tools/drop-census.pl` is a runner column (#343) — not a separate step.
+
+### Pipeline and generated artifacts
 
 **Pipeline (singular, since E4.1 step 2 / #242, s356) — and ONE expression
 compiler (since s411, Phase A of `docs/plan-one-compiler-s411.md`):** the v2
@@ -402,7 +416,13 @@ Perl) transpiled by PCL plus a hand-written appendix: run
 s316b: 5635 pass / 90 fail).  It was found at gen v2-30 against a v2-71
 compiler — 40 generations of drift, which made every pack.t run a test of
 the *old* emitter (and again at s396: v2-136 vs v2-147, eleven generations).
-`cl/pcl-mro.lisp` comes from `lib/mro.pm` the same way, and so does
+**`tools/rebuild-pack` regenerates `cl/pcl-pack.lisp` ONLY.**  The two
+others are transpiled with `--extension`:
+`./pl2cl --extension lib/mro.pm > cl/pcl-mro.lisp && tools/tag-license cl/pcl-mro.lisp`
+and
+`./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp && tools/tag-license cl/pcl-warnings.lisp`
+(an emission-changing batch runs all three on its final rebased tree).
+`cl/pcl-mro.lisp` comes from `lib/mro.pm`, and
 **`cl/pcl-warnings.lisp` from `lib/warnings.pm`** — there are THREE compiler-built
 ones, plus a FOURTH that is DATA (s496a, task #2060): **`cl/pcl-uniprops.lisp`**,
 perl's own Unicode property tables (`Unicode::UCD::prop_invlist`), written by
@@ -417,6 +437,187 @@ pipeline=… gen=` stamp and does not adopt it — `Pl/t/uniprops-01.t` guards i
 artifact's line-1 `gen=` stamp against `*pcl-cache-generation*`, so bumping
 the generation without regenerating fails a row the same session (s399,
 task #331).  The artifacts are discovered by that stamp, not listed.
+
+### Runtime Symbols Must Be Exported
+
+When adding new special variables or functions to `pcl-runtime.lisp`, they must be exported from the `pcl` package. Generated code runs in user packages (e.g., `|File::Basename|`) that `(:use :pcl)`, so unexported symbols won't be visible.
+
+Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarray* t)) ...)` in a user package creates a different variable.
+
+```lisp
+;; In defpackage :pcl
+(:export
+ ...
+ #:*wantarray*   ; Context variable - MUST be exported
+ ...)
+```
+
+
+### The full sweep runs its own gate: the buckets
+
+(Moved here from the old "Test Status" section: the mechanism is working
+reference, the row counts quoted in it are the counts of the day.)
+
+- **The full sweep RUNS ITS OWN GATE (s330, #204)**: `perl tools/sweep-perl-tests.pl
+  --jobs 8` with no file arguments ends by running `tools/sweep-diff.pl diff
+  baselines/fail-baseline.tsv .faillog` and **exits with that verdict** (`--no-gate`
+  opts out; a sweep of named files stays informational).  The diff now has a
+  **fourth bucket, LOST** — baseline PASSING rows the run did not produce,
+  compared against `baselines/pass-baseline.tsv` (`sweep-diff.pl save-status .faillog
+  baselines/pass-baseline.tsv` re-blesses it).  The first three buckets read failing
+  rows only, so a change that makes a file abort EARLIER used to report
+  `0 new / 0 fixed` while coverage evaporated (s328: state.t 157 → 69).  Every
+  run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
+  is found it prints `LOST: NOT CHECKED` rather than nothing.
+  **FIFTH bucket, DROPS (s402, #343)** — statements the compiler could not
+  lower and replaced with `nil` (#138 family).  They are invisible to every
+  other bucket: the row simply is not there (bless.t's drop IS a test row, in
+  a file the sweep calls passing).  The sweep records a per-file `drops` count
+  in `.faillog/_status.tsv` (columns: name, status, pass, fail, planned,
+  **drops**, note) and `sweep-diff.pl` compares it against
+  `baselines/parse-error-drop-census-s399.tsv` — **the census IS the baseline**, a
+  drop leaves it by EDIT; more drops than the census fails the run like a NEW
+  failure.  `tools/run-perl-suite.pl` prints the same comparison for perl's
+  own t/, and every transpile now announces a drop as it happens:
+  `PCL: statement dropped at F line N: <text> -- <reason>` (task #339; OFF in
+  `pl2cl --module`, the runtime's module load — `PCL_DROP_ANNOUNCE=all`
+  forces it back on).
+- Full `perl-tests/` sweep, CURRENT (s406, re-run after #348 switched
+  `which_perl`'s children to PCL): **TOTAL passing 18517** across 108
+  files, GATE clean, drops 12 = census — identical to s405 in every bucket
+  (closure.t stays OK 272/4, pack.t OK 5636/89).  The one row above the s399
+  number is `ref.t` 190 → 191,
+  edited into `baselines/pass-baseline.tsv` by hand with its cause (s404l's
+  blank-line fix in `tools/pclperl-for-tests`, attributed by bisection in a
+  worktree).  The s399 measurement it sits on: **704 blessed fails**,
+  **64 files fully passing**, TOTAL passing 18516 across 108 files.  The
+  s399 move is the only one that is not a regression to chase: task #323 made
+  `warning_is`/`warning_like`/`warnings_like` in `perl-tests/t/test.pl` stop
+  manufacturing a pass, so 24 rows (assignwarn.t 20, hashassign.t 4) became
+  honest failures with ONE cause — PCL emits no warnings-gated diagnostic
+  (`not-supported.md` "Warnings-gated diagnostics are absent", owner #221).
+  Both baselines were edited ROW BY ROW, never re-blessed, and
+  `baselines/pass-baseline.tsv` carries a header note saying so.
+  Historical baseline text follows.
+- Full `perl-tests/` sweep: **679 blessed fails** in `baselines/fail-baseline.tsv`,
+  **65 files fully passing**, 18499 passing / 910 failing across 108 files
+  (re-measured s356 at the E4.1 flip; GATE clean, +0.  The flip moved three
+  files, all pre-authorized and edited into the baselines with their causes:
+  **eval.t 110 → 114** — the ruled eval refusal makes the four `my $$x`-family
+  rows fail as perl does, so they pass (and leave `fail-baseline` by EDIT);
+  **tr.t 241 → 239** — `tr.t:494` builds a 73,769-char `eval` string, the one
+  F6 oversized-run-form event, a ruled refusal per `fable-answers-s346.md`
+  §2.3; **lex.t 46 → 45** — the #228 `[perl #129069]` registration, whose pass
+  was an accident of `--lenient-ppi` truncating NUL source to nothing.
+  (re-measured s341 on a COLD cache; `sweep-diff.pl diff
+  baselines/fail-baseline.tsv .faillog` = **0 new / 0 fixed / 0 LOST**, plus 2 rows
+  the tool
+  itself flags UNSTABLE — new fails ABOVE the abort point of postfixderef.t and
+  ref.t, both already PARTIAL, so they are crash-file noise, not regressions.
+  **Both baselines were re-hygiened in s341 (#223)**: the two now-passing
+  scalar.t rows edited out of the fail baseline, and `baselines/pass-baseline.tsv`
+  re-blessed from that run after a per-file audit — it had been blessed at
+  s337b from a run OLDER than its own commit, which is why every later session
+  read a phantom `+8`.  `save-status` now stamps `# taken-at: <sha> <date>` so
+  a stale bless is visible instead of inferred.
+  689 → 683 in s330: the `scalar()`-never-dereferences fix made 7 rows pass
+  (removed by EDITING them out, never by re-blessing from a run, which would
+  silently absorb anything else that moved) and exposed 1 row that had been
+  passing only because `scalar()` flattened both sides to undef — added by
+  hand with its cause.  s323 had removed the `do.t` "$! is EISDIR on do dir"
+  row the same way.)  Baseline from s315d —
+  class-model target-first reads, $TODO honored again under :invert,
+  no-match s/// write gate; fresh_perl/runperl children run under PCL via
+  `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores the old compare
+  mode.
+  **pack.t and the TIMEOUT retry (#176, s322).**  A file that TIMEOUTs
+  contributes NO rows, so `sweep-diff.pl` can only report its baseline
+  failures as *unverified* — a regression inside a timing-out file is
+  invisible, and the headline "0 new" says nothing about it.  pack.t was
+  merely SLOWER than the timeout (~166 s at s322), not hung, so the sweep now
+  **retries a TIMEOUT once at 3× the timeout, at the end of the queue**
+  (`--no-retry` disables); no operator has to remember `--timeout 400`.
+  Measured s322: pack.t completes at 5636 pass / 89 fail and its failures are
+  **identical to the blessed baseline** — 0 new, 0 fixed.
+  **s334 (#184): pack.t is now ~69 s — under the 90 s default.**  Its minute
+  was COMPILE time, not run time (78.5 s transpile → 7.0 s; the run is 54.7 s
+  either way), and the cause was a per-token tree-walking predicate in
+  `_rewrite_var_uses`, not the regenerated artifact the task suspected.  The
+  retry stays as the backstop for contention.
+  **CORRECTION (s322): the earlier claim here that "pack.t has NO rows in the
+  blessed baseline" was FALSE** — `baselines/fail-baseline.tsv` has always carried
+  its 58 pack.t rows.  The claim came from `grep`ping that file, which
+  contains NUL bytes: grep then treats it as binary and prints nothing.  Use
+  `grep -a`, or perl, on any `.tsv` under `.faillog/` or `baselines/` (the
+  blessed baselines moved from `docs/` to `baselines/` in s440 — USER: docs/
+  must stay browsable).
+  See `docs/sweep-bug-catalog.md`
+
+## Standing rules from the review rounds
+
+The same rules as the section of this name in `CLAUDE.md`, each with where it
+came from and what it guards against.  (The narrative of each round is in
+`docs/session-log.md`; `docs/claude-md/HISTORY.md` part 2 is the compressed
+record, kept only as history.)
+
+- **Errors fail in the SAME PLACES as perl and are TIDY; the exact text is
+  not a goal** (USER, refined s494).  One line, never a Lisp backtrace.  A
+  board / suite row that differs from perl only in message TEXT is keyed to
+  its `ns-` id, not fixed.
+- **`eval STRING` must be supported** (USER, 2026-07-07): never gate a string
+  eval as unsupported; a refusal inside one is perl-shaped and trappable
+  (`PCL: unsupported in string eval: …` in `$@`).
+- **A statement the compiler cannot lower is a perl-shaped, trappable
+  run-time die at the drop site** (RULED s433, shipped as "the flip"): ONE
+  shape for every drop in every mode, no classifier.  The `;; PARSE ERROR`
+  comment stays in the emission for the census; the transpile announces
+  `PCL: statement dropped at F line N: <text> -- <reason>` on stderr; a drop
+  inside a string eval dies there (s407/s409: "announce and continue" keeps
+  the wrong value).  The census (`baselines/parse-error-drop-census-s399.tsv`)
+  IS the baseline: a drop leaves it by edit; more drops than the census fails
+  the sweep like a NEW failure.
+- **Review probes run perl → BASE → tree** (s516 on).  A probe the base
+  passes has not reached the bug.  A claimed bar must be on disk: a log whose
+  last line is `=== heavy.sh <label> ... END rc=...`.
+- **Expectation-rewrite rule** (s377, the "four conjuncts"), for any edit of
+  what a `Pl/t` row EXPECTS: (1) the new text is perl-probed; (2) the diff is
+  exactly the divergence; (3) the edit STRENGTHENS the row; (4) a guard row
+  lands in the same commit.  A `Pl/t` expectation can encode the old bug
+  (s438: `glob-01.t` asserted the one answer perl never gives).
+- **A commit that removes a refusal greps `Pl/t` for the refusal's message
+  text** (s416): a stale twin guard of the removed refusal otherwise fails the
+  gate a session later (it happened twice: parser2-02.t t60, t62).
+- **A detector, its rewriter and its promoter share ONE resolver** (s372,
+  s438 #454): fixing only the detector turns a refusal into a SILENT WRONG.
+  A sigil- or scope-blind capture refusal is a bug: delete or rename it,
+  never narrow it.  When a fix widens what a CHECKER sees, the gate-SET scan
+  over both populations is mandatory (the WHAT TO RUN WHEN table).
+- **A fix that makes values real exposes rows that were passing on nothing**
+  (s418, s438): read each newly failing row for its CAUSE, and edit the
+  baseline by hand with that cause.  A COUNT is not a finding.
+- **"Pre-existing" is WHEN, not WHY** (s421): a companion or board mover is
+  spliced into a baseline only with its cause, attributed (bisect, one-file
+  runs).  A `--quick` NOT-RUN row is never a mover (s409).
+- **Bucket counts need the row TOTAL in both directions; a row number is
+  meaningful only within its own run** (s386: a by-number TAP join across two
+  runs put a failure in the wrong region).  TAP descriptions are the join
+  keys.
+- **A capture-dependent emission keys the eval cache** (s387).  **A
+  diagnostic that can fire during a RUN answers "and on a warm cache?"**
+  (s403: a module's cached transpile does not re-run the compiler, so a
+  transpile-time message is silent on the second run).
+- **A census increase is legal when it converts a worse failure (a crash)
+  into a counted drop** (s409).
+- **Compare a gate count against a measurement of the SAME tree** (s409).
+- **No pipe after `git rebase` / `git merge` in a command chain** (s540: a
+  `| tail` hid a failed rebase and the chain ran on); verify a fast-forward by
+  its own exit status.
+- **Never `git stash` for a compare**: a worktree (or a `git archive`
+  extraction) at the base sha.  Never `cp` a snapshot over a live file.
+- **The `cl/` coercion / stringification rule** (s421: such a change runs the
+  `op/` companion leg) lives in the WHAT TO RUN WHEN table's `cl/**` row since
+  the s519 round-level cadence: the BRIEF names the `op/` files as the
+  batch's bounded leg.
 
 ## Key Files to Read: the Semantic Deep-Dives
 
@@ -452,7 +653,7 @@ task #331).  The artifacts are discovered by that stamp, not listed.
 - `docs/speed-review-s509.md` - **Where the remaining speed is, and what is cheap** (s509, the USER's question): start-up re-measured (a warm one-liner is 53 ms, half of it the Perl launcher -- the parked #2422 / #1862 / #2421), thirteen slow bench rows profiled and classified, four run-time levers filed with measurements (#2770 typed string copy: two rows halved by five lines; #2771 `print`; #2772 scalar `grep`; #2773 `unshift`), and what is NOT cheap. Read it before proposing a perf round.
 - `docs/ctx-bind-fallback-analysis-s510.md` - **The list-context bind around built-in calls (#2775), ANALYSED and RULED (s510)**: the catch-all `(p-list-ctx …)` on every built-in call in a list slot goes, once the eight context-reading built-ins it was hiding are in `%WANTARRAY_SENSITIVE` (#2801); `join`'s bind stays until #2803. Has the counts (3,012 binds over 318 files; density 11.1 → 7.1 per 100 lines), the trial's gate / sweep / everyday, the four gate rows that change and the exact change for the batch (`s510/s510c-prompt.md`). Read it before touching the funcall context rule in `Pl/ExprToCL.pm`.
 - `docs/static-parse-limits-review-s512.md` - **What a STATIC parse of Perl cannot know (s512, the USER's question)**: the seven families of parse facts perl learns by RUNNING code (BEGIN / import / pragmas / filters / keyword plugins / @INC / eval) and how PCL supplies, guesses or misses each; 18 probes; NEW #2871 (a prototype applies ABOVE its definition -- the table is whole-file, perl's is positional), #2872, #2873 (`use autodie` silent), #2874 (`use bigint`); the known discussion (Kegler 2008, PPI, Guacamole, Perlito5) and why the run-time detector (#2610) stays PCL's route.  Read it before promising a parse fact that only running code can produce.
-- `docs/detector-measurement-s513d.md` - **The #2610 detector's first measurement (s513d)**: how PCL recognises, at run time, a call site whose parse a BEGIN-time sub install contradicts; 374 distinct sites / 69 names over the four populations, the five shapes with their verdicts (harmless constants, two real families, a registry gap behind the noise), the USER's ruling (a FLAG: announce vs die), the gate's 53 sites in full.  Read it before touching the detector or deciding its default.  **§6 (s514d): PRODUCTION MODE -- the table is emitted in every unit by default, `PCL_DETECT=announce|die|off|log`, the per-population line counts (gate 71 / sweep 17 / everyday 32 / board 63) and what they are (mostly #3143, the import-prototype gap); the DEFAULT was a USER decision: `off` from s514f (2026-10-11) until the import-tag gap closed; **Â§9 (s516a, 2026-10-13): the default is `announce` AGAIN** -- after #3184 + #3206 + #2879 the recount in log mode reads gate 0 / sweep 0 / everyday 0 / board 23 (18 real Sub::Uplevel `CORE::GLOBAL::caller` sites + 5 harmless Getopt-Long `GetOptions` `(@)` sites, #3261); `PCL_DETECT=off` stays available by name.**
+- `docs/detector-measurement-s513d.md` - **The #2610 detector's first measurement (s513d)**: how PCL recognises, at run time, a call site whose parse a BEGIN-time sub install contradicts; 374 distinct sites / 69 names over the four populations, the five shapes with their verdicts (harmless constants, two real families, a registry gap behind the noise), the USER's ruling (a FLAG: announce vs die), the gate's 53 sites in full.  Read it before touching the detector or deciding its default.  **§6 (s514d): PRODUCTION MODE -- the table is emitted in every unit by default, `PCL_DETECT=announce|die|off|log`, the per-population line counts (gate 71 / sweep 17 / everyday 32 / board 63) and what they are (mostly #3143, the import-prototype gap); the DEFAULT was a USER decision: `off` from s514f (2026-10-11) until the import-tag gap closed; **§9 (s516a, 2026-10-13): the default is `announce` AGAIN** -- after #3184 + #3206 + #2879 the recount in log mode reads gate 0 / sweep 0 / everyday 0 / board 23 (18 real Sub::Uplevel `CORE::GLOBAL::caller` sites + 5 harmless Getopt-Long `GetOptions` `(@)` sites, #3261); `PCL_DETECT=off` stays available by name.**
 - `docs/tie-aggregates.md` - **`tie` on scalars, arrays, hashes AND (§7, s514d) filehandles**: the empty-shell + side-table design for aggregates, why a handle has no free miss branch and how the one-counter entry test was measured free (a typed sentinel cost fhprint 11 %), the tied-handle method table and what `local *FH` undoes.  Read before touching any tie path or an I/O builtin's entry.
 - `docs/production-readiness-review-s513.md` - **How long to the end of the bug queue, how long to production (s513, the USER's question, 2026-10-10)**: the queue is a FRONTIER (770 open; 13 closures / 18 filings a day; the number that can reach zero is the silent-wrongs inside a SUPPORTED SUBSET, 105 today, ~2 months); production in three TIERS -- your own scripts NOW with a diff-test gate, pure-Perl CPAN apps 3-5 months (two parked USER rulings hold it: scope-exit DESTROY #2370, caller fidelity #233), XS not on a measurable path; the measured module-load table (Encode / Storable / File::Glob / Digest::MD5 do not load); the recommendation order (Encode shim first).  Read it before quoting a production date.
 - `docs/first-run-from-text-design-s510.md` - **The first run of a program (#2702), DESIGN measured with a prototype, nothing built**: today the run that builds a program's compiled file loses a module's load-time output, runs a printing `use` before an earlier BEGIN and imports twice (4 of 13 probe programs match perl; the second run 11 of 13). The design: run that first run from the transpiled TEXT and build the compiled file in the last exit hook, in the same image — every module body exactly once. Has the guards the build needs (same pid, compile phase completed, ordinary exits only), the precondition (#2764's plain-stream loader for the script text), what was decided against (a forked or a fresh builder process) and the bar. Read it before touching `%p-run-script-cached-1`.
@@ -462,8 +663,22 @@ task #331).  The artifacts are discovered by that stamp, not listed.
 - `docs/parser-review-s525.md` - **THE PARSER REVIEWED AGAINST PERL'S OWN FRONT END (s525, the USER's question, 2026-10-24)**: sane as an artifact, not as a structure -- 69 passes in `Parser2::parse` (18 may re-serialize and re-parse the document), 18 scope-walk implementations, 34 term/operator predicates, ~35 PPI repair passes, 46 % of compile time in `PPI::Node::find`; perl's corner cases come from THREE single states (toke.c's `PL_expect`, the keyword classes with one perly.y rule each, pad.c's binding table) that PCL re-derives as unrelated special cases.  Three routes sized: copy the three states into the present shape (Option 1, 12-18 sessions, byte-diff gated), an own toke.c-shaped lexer (Option 2, not first), translate perl's OPTREE through `B` (Option 3: exact by construction, ~43k of 54k lines replaced, 40-60 sessions).  **USER RULED (same day): Option 3 OFF -- an exact perl version at transpile time is unrealistic, and the compiled-code cache would freeze the compile-time environment (perl FOLDS on it).  LIVE RECOMMENDATION (§5 box): Option 1 NOW in one slot per round, CHECKERS FIRST (an inert expect-state checker + the binder in dual-run), then 1a -> 1c -> 1b, 12-18 sessions (task #3694); standing rule: no new scope walk, no new suffix family, no new repair pass once the checker exists.  Read it before touching the pass pipeline, the repairs or the scope machinery.
 - `docs/runtime-review-s525.md` - **THE RUNTIME REVIEWED AGAINST PERL'S OWN IMPLEMENTATION (s525r, the USER's question, 2026-10-24)**: sane as an artifact and, with three named exceptions, as a structure -- one coercion path, one value reader (`unbox`) with tie and magic inside it, duplication 0.85 %, growth = perl's surface; 25 op probes vs perl, 20 identical, the 5 divergent all the REPRESENTATION (the ruled IV/UV/NV faces, the missing "was numified" flag: #1040, #3760).  The exceptions: box-or-raw dispatch written per site (~1,000 type tests, 5 `typecase`s), the box has perl's caches but not its flags (the string-vs-number guess has an exact answer in the representation), 12 shape-dispatching macros (`p-setf` 16 arms) = a second lowering layer.  Recommendation R1-R6 (§10): three named repairs + one measured refactor, no restructuring program.  Read it before touching `box-set`, `unbox`, `%p-bitwise-kind-of`, `p-setf` or `p-list-=`.
 - `docs/method-lookup-eval-s534.md` - **METHOD LOOKUP EVALUATED (s534a, the USER's ask, 2026-11-08; recommendation awaiting the USER)**: own-class calls are 1.2x of perl, INHERITED ones had never been measured -- the four new bench rows read `methinh` 3.98x, `methinh3` 7.85x, `methpoly` 3.74x, `ovlbool` 6.53x, ~85 % of it the by-name `@ISA` re-walk (incl. an unguarded weak-table probe in `%p-isa-symbol`, 11-19 %).  Six prototypes A/B-measured + a 61-case probe matrix: #582's invalidate-on-every-`@ISA`-write design is REJECTED (an `@ISA` is a bare vector, so the mark taxes every array write -- PPI +19 % -- and a missed writer is silent: 12 of 61 cases went stale); VALIDATING a cached resolution (hit and miss, per (class, method), plus the ancestry) by re-reading each passed class's `@ISA` names and `pl-NAME` symbol gives 1.3-1.7x of perl and PPI 4.4x -> 2.75x with no audit (#4523 #4524 #4525).  Read it before touching `p-method-call`, `p-find-overload`, `%pcl-isa-ancestry` or the own-class cache.
-- `docs/codegen-review-s526.md` - **THE CODE GENERATION REVIEWED AGAINST PERL'S OP TREE AND THE IR SPEC (s526c, a Fable fork, the USER's third review, 2026-10-24)**: sane as an artifact and, in its EXPRESSION half and its registry, as a structure (one expression compiler, 95 IR heads; one printer; 24 Kind-A names + one Kind-B pass, `PCL_OPT=none` honest; duplication 3.2 %; the code generation is 6.0 % of compile time -- PPI is 60.5 %); the debt is the STATEMENT lowering, which has the parser's shape: no statement classifier (`_lower_block_1` 1,188 lines of `isa`/`content` shape tests at the point of use), the v1 TEXT seam as the DEFAULT for 1,058 of 20,825 corpus statements (`local` 337, `use` 244, `BEGIN` 147, `no` 133, signatured subs 89, loop-modifier `return` 37, `require` 34 -- 33 v1 `_process_*` stay live, 53 text heads, 160,000 `is_raw` calls per module), the mutable `_let_bound_vars` accumulator (51 uses).  The compiler NAMES 92 % of stores; `p-setf` is one store in thirteen (483 of ~6,200) -- the runtime review's "second lowering layer" is the tail; the representation verdicts are sound and conservative (90 % of lexicals stay boxed; a raw slot drops exactly one perl bit, #3780); context is DYNAMIC where perl's `OPf_WANT` is static (13.3 binds per 100 emitted lines; `p-void-ctx` the most frequent IR head, 8,636).  **RECOMMENDATION ADOPTED (DECIDED ## s526): no separate program -- C1 (a statement classifier, IDENTICAL emission, 2-3 sessions) + C2 (close the text seam one statement kind per session, `local` first) = step 1d of #3694 in the parser slot; C3 (facts on binding ids) rides on the 1c ports; C4 (the void-position bind as a Kind-A gate, measure first), C5 (#75's constructor macros, with the next generation bump), C6/C7 fillers.**  Read it before touching `_lower_block_1`, the seam (`Pl::CLForm::raw`, `fallback_parser`), VarAnnotator's verdicts or `p-setf`'s arms.
+- `docs/codegen-review-s526.md` - **[STATUS s541: C1 is DONE -- the statement classifier `Pl/Stmt.pm`, s533a / MAIN-READY-68, `_lower_block_1` is 49 lines now, not the 1,188 described below; C2's first kind `local` is DONE, s533c / MAIN-READY-72; the next C2 kinds and C3-C7 are open.]** **THE CODE GENERATION REVIEWED AGAINST PERL'S OP TREE AND THE IR SPEC (s526c, a Fable fork, the USER's third review, 2026-10-24)**: sane as an artifact and, in its EXPRESSION half and its registry, as a structure (one expression compiler, 95 IR heads; one printer; 24 Kind-A names + one Kind-B pass, `PCL_OPT=none` honest; duplication 3.2 %; the code generation is 6.0 % of compile time -- PPI is 60.5 %); the debt is the STATEMENT lowering, which has the parser's shape: no statement classifier (`_lower_block_1` 1,188 lines of `isa`/`content` shape tests at the point of use), the v1 TEXT seam as the DEFAULT for 1,058 of 20,825 corpus statements (`local` 337, `use` 244, `BEGIN` 147, `no` 133, signatured subs 89, loop-modifier `return` 37, `require` 34 -- 33 v1 `_process_*` stay live, 53 text heads, 160,000 `is_raw` calls per module), the mutable `_let_bound_vars` accumulator (51 uses).  The compiler NAMES 92 % of stores; `p-setf` is one store in thirteen (483 of ~6,200) -- the runtime review's "second lowering layer" is the tail; the representation verdicts are sound and conservative (90 % of lexicals stay boxed; a raw slot drops exactly one perl bit, #3780); context is DYNAMIC where perl's `OPf_WANT` is static (13.3 binds per 100 emitted lines; `p-void-ctx` the most frequent IR head, 8,636).  **RECOMMENDATION ADOPTED (DECIDED ## s526): no separate program -- C1 (a statement classifier, IDENTICAL emission, 2-3 sessions) + C2 (close the text seam one statement kind per session, `local` first) = step 1d of #3694 in the parser slot; C3 (facts on binding ids) rides on the 1c ports; C4 (the void-position bind as a Kind-A gate, measure first), C5 (#75's constructor macros, with the next generation bump), C6/C7 fillers.**  Read it before touching `_lower_block_1`, the seam (`Pl::CLForm::raw`, `fallback_parser`), VarAnnotator's verdicts or `p-setf`'s arms.
 - `docs/everyday-battery.md` - **THE NUMBER THE PROJECT STEERS BY** (#2099, s495): `tools/everyday-smoke.pl` + the checked-in `everyday/` corpus — "N of M ordinary programs identical to perl", with a blessed per-program baseline (`baselines/everyday-baseline.tsv`, rows leave BY EDIT) and a batch-by-batch history (`baselines/everyday-history.tsv`). Read it before quoting the number: it is a steering number, never a compatibility percentage. `--corpus DIR --baseline FILE` measures another population (Rosetta, #2104) with the same tool.
+
+- `docs/interp-scan.md` - **`Pl::InterpScan`, the ONE scanner of variable references inside strings and patterns (#237)**: its event contract and its consumers (the regex-pattern interpolator, StringInterpolation). STANDING RULE: interpolation scanning happens in `Pl/InterpScan.pm` or not at all -- no new scanner, no per-site fix. Read it before touching anything that looks for `$x` / `@x` / `${...}` inside a quoted string or a regex.
+- `docs/var-handling-review-s379.md` - **The variable-handling design review (s379, the USER's ask)**: hoisting, declarations, renaming; 51 % of Parser2.pm is variable identity; directions A (bind-once symbol table -- became `Pl/Binder.pm`), B (one scanner = InterpScan), C (one promotion engine), D (defglobal). STANDING RULES: no new scanner fix, no new suffix family, no new scope walk. Read it before touching a rename / promotion / capture pass.
+- `docs/b1-operand-grammar-s416.md` - **Stacked filetests (`-f -d $x`), designed from measurement (s416)**: one predicate (`_is_print_term_start`: a `-X` operator starts a term), the print-argument leg, the `_`-chain lowering (naive nesting is a SILENT WRONG). Read with `docs/option-b-phase2-plan.md` before touching filetest operands.
+- `docs/shipped-modules.md` - **How `use Module` is resolved**: the search order, the module-override architecture (`lib/` shims: which module is replaced and why, per module), and the FACTS OVERLAYS (`lib/PCL/Facts/…`: forward declarations for facts a static parse cannot see). Read it before adding or changing a shim, and for rule 9a.
+- `docs/failure-cause-classes.md` - **How a failing row's CAUSE is classified** (ruled s486a; the rule lives in `tools/lib/PCLCauses.pm`): the classes, and "The grammar" of the leading cause marker on a CPAN-board row (`#N`, `NS:<id>`, `PERL-SKIP`, `PERL-FAILS`, `UNREDUCED #N`, `HARNESS #N`). Read it before editing a cause column in any baseline.
+- `docs/where-the-time-goes.md` - **A plain-language tour of PCL performance (2026-07-02)**: where a run's time goes and why; the source of the "speed wins over readable output" priority decision.
+- `docs/faster-codegen-suggestions.md` - **Generating faster CL, measured variants per construct**: for each hot construct the CL emitted today, an alternative shape computing the identical result, and the measured difference. The perf worklist for Target A (absolute speed).
+- `docs/boxed-aggregates-design-s455.md` - **Boxed aggregates → raw element storage (s455d; ALL PHASES SHIPPED)**: array / hash elements are stored RAW by default; `PCL_RAW_ELEMS=0` is the all-boxed A/B world. Read it before touching element access, aliasing of elements, or `p-aref` / `p-gethash` and their setters.
+- `docs/sweep-bug-catalog.md` - **The perl-tests sweep's failures by cause -- a session 201-231 snapshot**: its row numbers are stale; its first section says where the causes live now (the baselines' cause columns). History; read only for the cause analysis of an old row.
+- `docs/xs-shim-design.md` - **The XS bridge design** (libperlshim + host vtable; built as the separate public repo `~/pclxs`): how CPAN XS / C extensions run on PCL. Parked with pclxs (the three `Pl/t/xs-0N.t` files are `skip_all`).
+- `docs/MOO_MOOSE_DESIGN.md` - **Moo / Moose support plan** (older): how the frameworks' metaprogramming maps onto PCL. Current state of Moo is `docs/moo-status.md`.
+- `docs/js-target-plan.md` - **A JavaScript target for the PCL IR, the plan (s453)**: parked -- do not start unasked (speed and correctness first; task #622).
+- `docs/c-target-notes.md` - **A C backend for the IR -- notes, not a plan**: reviewed NO (DECIDED §s481, its §8); perl stays the ORACLE and is never a runtime dependency.
 
 ## Dependencies
 
@@ -495,7 +710,7 @@ task #331).  The artifacts are discovered by that stamp, not listed.
   `use YAML::PP` was found by the first red CI run of MAIN-READY-48.  Never edit `vendor/PPI/lib` by
   hand: `tools/vendor-ppi <clone> pcl` refreshes it and the stamp
   (`Pl/t/vendor-ppi-01.t` checks the tree id; run the canary at every refresh);
-  the branch's PUBLIC home is the fork `https://github.com/Percolisp/PPI` (branch `pcl`, created and first pushed s532, 2026-11-02, `a376a6d8`; `gh` is logged in as Percolisp on this box), mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git` (remote `fork`, HTTPS) -- a PPI batch pushes fast-forward to BOTH at MERGE-READY
+  the branch's PUBLIC home is the fork `https://github.com/Percolisp/PPI` (branch `pcl`, created and first pushed s532, 2026-11-02, `a376a6d8`; `gh` is logged in as Percolisp on this box), mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git` (remote `fork`, HTTPS) -- **who pushes:** a PPI batch (an agent) fast-forwards the BARE MIRROR at MERGE-READY and nothing else (COMMON.md: an agent never pushes to GitHub); the REVIEWING SESSION pushes the fork after the batch's merge and refreshes upstream pull request #459 (`gh api -X PATCH`)
   (branches `master` = upstream, `pcl`) -- the fork exists since s532 (2026-11-02): `https://github.com/Percolisp/PPI`, branch `pcl`.
   A PPI bug is FIXED on that branch in PPI's two-commit PR shape (the failing
   rows first as TODO, then the fix; PPI's own suite green after every commit;

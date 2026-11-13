@@ -1,5 +1,15 @@
 # The code generation, reviewed against perl's op tree and the IR spec (s526c, Fable fork, 2026-10-24)
 
+> **STATUS of the recommendation (updated s541, 2026-11-13).**  C1, the statement
+> classifier, is DONE: `Pl/Stmt.pm`, s533a = MAIN-READY-68; `_lower_block_1` went
+> from 1,139 lines to 49 dispatching on `%BLOCK_ARM`, emission identical -- so the
+> line counts and the `isa` / `content` shape tests described below are the state
+> BEFORE it.  C2 (close the v1 text seam one statement kind per session): the
+> first kind, `local`, is DONE (s533c = MAIN-READY-72; seam statements 1,338 ->
+> 956 on the 234-file corpus); the other kinds are open.  C3 rides on the binder
+> ports (ports 1-3 done, port 4 = brief `s539/s539b-prompt.md`).  C4-C7 open.
+> Left by C1: `_lower_foreach_stmt` (249 lines) and `_lower_decl_list` (240) = C7.
+
 The USER's third review (2026-10-24, 13:5x): "When the updates to the parser and
 the runtime are done, create a subtask to review the code generation."  Same
 method as `docs/parser-review-s525.md` (the parser against perl's front end) and

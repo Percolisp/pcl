@@ -6,8 +6,10 @@ SHORTLY here.**  It is split into exactly TWO companion files, not more:
 
 - **`docs/claude-md/REFERENCE.md` -- the FULL TEXT of the working sections,
   under THE SAME HEADINGS as this file** (Design Principles, Quick Reference,
-  WHAT TO RUN WHEN, Semantic Deep-Dives, Dependencies): worked examples,
-  reasons, every command with its commentary.  **When a rule here is too
+  WHAT TO RUN WHEN, Pipeline and generated artifacts, Standing rules from
+  the review rounds, Semantic Deep-Dives, Dependencies): worked examples,
+  reasons, every command with its commentary.  The two files must AGREE; if
+  they differ, do the stricter and report it.  **When a rule here is too
   terse to apply, or a brief sends you to a section of `CLAUDE.md` for
   detail, read the section of the same name there.**  A subagent whose task
   touches the compiler, the runtime, the baselines or a test runner reads
@@ -129,8 +131,9 @@ Principles".
    mechanism work.  **Worked example:** `first { … } @list` (List::Util)
    parse-errored.  WRONG: add `first => {has_block_arg=>1}` to
    `Pl/Environment.pm` (module data in the core).  RIGHT: declare
-   `sub first (&@)` in `lib/List/Util.pm` (the data) and let the generic
-   block-form parser read that prototype (the mechanism).
+   `sub first (&@)` in `lib/List/Util.pm` (the data), and stop
+   `_extract_module_prototypes` from SKIPPING that module, so the generic
+   block-form parser reads the prototype (the mechanism).
    **Smell test (hard stop):** a diff that adds a literal
    CPAN module name *or a non-core function name* under `Pl/` or `cl/` is at
    the wrong layer (core builtins are language, the only exception).
@@ -169,7 +172,9 @@ Principles".
     a section in `docs/ppi-upstream-bugs.md` (minimal repro, what perl does,
     actual vs expected token dump, PPI version, the workaround and what it
     unblocks) and a row in `docs/ppi-bug-report.t` (every row FAILS on stock
-    PPI; bump `tests => N`).  Scope: only what PPI itself tokenizes or
+    PPI; bump `tests => N`).  A bug NOT yet fixed on the branch may get a
+    canary row in `Pl/t/misc-fixes-02.t` asserting the broken behaviour: it
+    fails when PPI is fixed, the signal to drop the workaround.  Scope: only what PPI itself tokenizes or
     structures wrongly.  **PPI is VENDORED (`vendor/PPI`, the `pcl` branch),
     so the fix goes ON THAT BRANCH** in PPI's two-commit PR shape (failing
     rows first as TODO in `t/ppi_bugs_pcl.t`, then the fix; PPI's own suite
@@ -193,7 +198,8 @@ prove -v Pl/t/codegen-01.t         # one file
 echo 'my $x = 1 + 2;' | ./pl2cl    # quick transpile
 ./runpcl x.pl                      # transpile + run (output may hold NULs: grep -a)
 
-perl tools/sweep-perl-tests.pl --jobs 8          # full perl-tests/ sweep; RUNS ITS OWN GATE
+perl tools/sweep-perl-tests.pl --jobs 8          # full sweep, ALONE on the box; RUNS ITS OWN GATE
+perl tools/sweep-perl-tests.pl --jobs 4          # full sweep on a SHARED box (every agent, always)
 perl tools/sweep-perl-tests.pl --jobs 1 perl-tests/foo.t   # one file (informational)
 tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # rebuild a verdict
 tools/corpus-diff.pl               # emission A/B over the corpus; READ its SILENT-DROP line
@@ -203,8 +209,9 @@ tools/run-perl-suite.pl --all --quick --jobs 4   # perl's own t/ (the companion)
 tools/run-perl-suite.pl --jobs 1 FILE            # one companion file
 tools/run-dist-t.pl --rows DIST t/FILE           # one CPAN-board file
 tools/ir-host-leak.pl ; tools/ir-inventory.pl    # the IR stays in its three vocabularies
+tools/ir-conform --jobs 2                        # after any cl/ or emission change: 0 fail / 0 stale
 tools/gate-set-scan.pl ; tools/drop-census.pl    # population-wide instruments
-tools/rebuild-pack                 # regenerate the transpiled artifacts (see below)
+tools/rebuild-pack                 # regenerates cl/pcl-pack.lisp ONLY (mro + warnings: "Generated artifacts" below)
 tools/tag-license FILE             # every new code file carries the license tag
 tools/install-pcl --prefix ~/.local   # installer; test: prove tools/t/install-pcl.t
 prove tools/t/install-container.t  # installer in a container (minutes; before a tag)
@@ -223,7 +230,8 @@ PCL_SHOW_SBCL=1 <any runner>       # print the exact SBCL command it spawns
   the checkout are derived (`tools/lib/PCLPaths.pm`), never written down
   (guard `Pl/t/no-hardcoded-paths-01.t`).  Every script finds its tree through
   `PCLPaths::root`.
-- **Companion suite**: `--all --jobs 8` can OOM — use `--jobs 4`.  A file
+- **Companion suite**: `--all --jobs 8` can OOM — use `--jobs 4`; an agent's
+  one-file run is `--jobs 1`.  A file
   that needs more than the 90 s default is registered in
   `baselines/perl-suite-timeouts.tsv`, never left to TIMEOUT.
 - **`.tsv` files under `.faillog/` and `baselines/` contain NUL bytes**: use
@@ -237,18 +245,28 @@ PCL_SHOW_SBCL=1 <any runner>       # print the exact SBCL command it spawns
 ### WHAT TO RUN WHEN
 
 The cadence is keyed on WHAT CHANGED, because every measurement is blind to a
-known set of change kinds.  Rows are ADDITIVE.  **Always, per change:**
-`tools/prove-core`; if anything under `Pl/` changed, `tools/corpus-diff.pl`
-(READ its SILENT-DROP line) + `tools/emission-ab.pl --ref <base> --list
-lib/**/*.pm`; plus the targeted files the change names.  Full text, run
+known set of change kinds.  Rows are ADDITIVE.  **Always:**
+- **the gate** — a lone change: `tools/prove-core`.  **In a BATCH (s477
+  ruling): per MEMBER the TARGETED gate** (`prove Pl/t/<guard file> <the
+  Pl/t files that name the area touched>`), **and the FULL gate ONCE at the
+  END of the batch**, before MERGE-READY;
+- if anything under `Pl/` changed: `tools/corpus-diff.pl` (READ its
+  SILENT-DROP line) + `tools/emission-ab.pl --ref <base> --list lib/**/*.pm`;
+- after any `cl/` or emission change: `tools/ir-conform --jobs 2`;
+- the targeted files the change names.
+
+**Who runs what:** a BATCH (an agent) runs everything in the table except
+what is marked ROUND; ROUND = the reviewing session, once per round on merged
+main (the CPAN board's tree half, the companion `--all --quick`, the full
+companion).  On a shared box sweeps are `--jobs 4`, companion runs `--jobs 1`.  Full text, run
 times and reasons: `docs/claude-md/REFERENCE.md` "WHAT TO RUN WHEN".
 
 | what changed | full perl-tests sweep | companion suite | also |
 |---|---|---|---|
 | `Pl/**`, corpus-diff IDENTICAL, lib byte-identical, NOT name resolution | **NO — it cannot move** | no | — |
-| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | ROUND; the batch runs ONE-FILE acceptance of the files its members name | generation bump + `tools/rebuild-pack` + `tools/ir-host-leak.pl` |
-| `Pl/**` name resolution / scoping / rename / capture / promotion | **YES — the sweep IS the gate** | ROUND | gate-SET scan over both populations when a checker / refusal / decline WIDENS |
-| `cl/**` runtime | YES (invisible to corpus-diff) | ROUND; per batch only a bounded leg on files the brief NAMES | rule-12 read of the touched dispatch; `tools/ir-inventory.pl` if an export moved; `tools/ir-host-leak.pl` if a macro expansion changed |
+| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | ROUND; the batch runs ONE-FILE acceptance of the files its members name | generation bump + ALL THREE artifacts regenerated ("Generated artifacts" below) + `tools/ir-host-leak.pl` |
+| `Pl/**` name resolution / scoping / rename / capture / promotion | **YES — the sweep IS the gate** | ROUND | gate-SET scan (`tools/gate-set-scan.pl`: base vs tree) over BOTH populations — `perl-tests/*.t` and perl's own `t/` — when a checker / refusal / decline WIDENS |
+| `cl/**` runtime | YES (invisible to corpus-diff) | ROUND; per batch only a bounded leg on files the brief NAMES (a coercion / stringification change: the brief names `op/` files) | rule-12 read of the touched dispatch; `tools/ir-inventory.pl` if an export moved; `tools/ir-host-leak.pl` if a macro expansion changed |
 | `lib/**` shim | YES | ROUND; one-file runs of the dist files a member names | — |
 | harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick` PER BATCH** | baselines edited ROW BY ROW |
 | runners: `tools/sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file by file | same | `PCL_SHOW_SBCL=1` before/after diff |
@@ -256,10 +274,13 @@ times and reasons: `docs/claude-md/REFERENCE.md` "WHAT TO RUN WHEN".
 | any BATCH that changes `Pl/**`, `cl/**` or `lib/**` (once per batch) | — | — | `tools/everyday-smoke.pl`: quote `EVERYDAY: N of M` BEFORE → AFTER |
 
 - **Baselines are edited ROW BY ROW with the cause, never re-blessed from a
-  run** (`baselines/fail-baseline.tsv`, `pass-baseline.tsv`, the drop census
+  run** (`baselines/fail-baseline.tsv`, the drop census
   `parse-error-drop-census-s399.tsv`, `cpan-board14-fails.tsv`,
   `perl-suite-fails.tsv`, `everyday-baseline.tsv`).  A NEW row is explained or
-  fixed; a FIXED row leaves by edit citing the batch.
+  fixed; a FIXED row leaves by edit citing the batch.  The one exception:
+  `pass-baseline.tsv` (the sweep's passing rows) is normally edited by hand
+  too, and may be re-blessed with `sweep-diff.pl save-status` ONLY from a
+  gate-green run after a per-file audit (runbook §6; it stamps `# taken-at:`).
 - **Read the sweep's `TOTAL passing` line, not only the diff**: the diff
   buckets are NEW / FIXED / UNSTABLE / **LOST** (baseline passing rows the run
   did not produce) / **DROPS** (statements replaced by `nil`).  A change that
@@ -279,11 +300,17 @@ times and reasons: `docs/claude-md/REFERENCE.md` "WHAT TO RUN WHEN".
   (`docs/everyday-battery.md`).  The baseline's cause column picks the next
   correctness batch.  `--record` (whole corpus, clean tree) appends
   `baselines/everyday-history.tsv` at each merge.
-- **"CI green" means BOTH workflows**; the install matrix is trigger-gated,
-  so a `cl/`-only change proves it locally with
-  `prove tools/t/install-container.t`.
+- **"CI green" means BOTH workflows**: the newest `CI` run AND the newest
+  `install-matrix` run.  The install matrix runs on a push only for its own
+  paths, so `prove tools/t/install-container.t` is run locally before a tag
+  and after any change to `tools/install-pcl` or `tools/install-matrix/*`,
+  and a merge that touches the SBCL floor adds a comment line to
+  `.github/workflows/install-matrix.yml` so the push re-runs it.  Not a
+  per-batch duty otherwise.
 
 ### Pipeline and generated artifacts
+
+Full text: `docs/claude-md/REFERENCE.md` "Pipeline and generated artifacts".
 
 - **ONE pipeline, ONE expression compiler**: `Pl/Parser2.pm` +
   `Pl/VarAnnotator.pm` + `Pl/CLForm.pm`; expressions through `Pl/PExpr.pm` →
@@ -298,12 +325,15 @@ times and reasons: `docs/claude-md/REFERENCE.md` "WHAT TO RUN WHEN".
   get reserved generation numbers; keep yours across a rebase.
 - **Generated artifacts checked into the tree** — `cl/pcl-pack.lisp` (from
   `cl/pack-impl.pl`), `cl/pcl-mro.lisp` (`lib/mro.pm`), `cl/pcl-warnings.lisp`
-  (`lib/warnings.pm`): regenerate with `tools/rebuild-pack` after an
-  emission-changing commit; `Pl/t/artifact-staleness-01.t` compares each
-  line-1 `gen=` stamp against the generation.  The fourth,
+  (`lib/warnings.pm`).  After an emission-changing commit regenerate ALL
+  THREE, on the final rebased tree: `tools/rebuild-pack` (pack ONLY);
+  `./pl2cl --extension lib/mro.pm > cl/pcl-mro.lisp && tools/tag-license
+  cl/pcl-mro.lisp`; the same for `lib/warnings.pm` → `cl/pcl-warnings.lisp`.
+  `Pl/t/artifact-staleness-01.t` compares each line-1 `gen=` stamp against
+  the generation and fails the gate otherwise.  The fourth,
   `cl/pcl-uniprops.lisp`, is DATA (`tools/rebuild-uniprops`, guard
   `Pl/t/uniprops-01.t`) and has no `gen=`.
-- **Runtime symbols must be EXPORTED** from the `pcl` package
+- **Runtime Symbols Must Be Exported** from the `pcl` package
   (`cl/pcl-runtime.lisp` `:export`): generated code runs in user packages that
   `(:use :pcl)`; an unexported special (`*wantarray*`) silently becomes a
   different variable there.
@@ -320,15 +350,18 @@ times and reasons: `docs/claude-md/REFERENCE.md` "WHAT TO RUN WHEN".
 
 ## Standing rules from the review rounds
 
-The operational residue of the s321–s540 rulings (each is indexed in
-`docs/DECIDED.md`; the compressed record is `docs/claude-md/HISTORY.md` part 2).
+The operational residue of the s321–s540 rulings.  Each rule with its origin
+and what it guards against: `docs/claude-md/REFERENCE.md` "Standing rules
+from the review rounds".
 
 - **Errors fail in the SAME PLACES as perl and are TIDY** (one line, never a
   Lisp backtrace); the exact text is not a goal.  **`eval STRING` must work**
   — never gate it as unsupported.
 - **A statement the compiler cannot lower is a perl-shaped, trappable
   run-time die at the drop site** (one shape, every mode), announced as
-  `PCL: statement dropped at F line N` and counted in the drop census.
+  `PCL: statement dropped at F line N` and counted in the drop census
+  (`baselines/parse-error-drop-census-s399.tsv`: more drops than the census
+  fails the sweep).
 - **Review probes run perl → BASE → tree.**  A probe the base passes has not
   reached the bug.  A claimed bar must be on disk (a log ending in the
   `heavy.sh` END line).
@@ -349,8 +382,6 @@ The operational residue of the s321–s540 rulings (each is indexed in
   meaningful only within its own run.
 - **A capture-dependent emission keys the eval cache.**  A diagnostic that can
   fire during a RUN answers "and on a warm cache?".
-- **A `cl/` coercion or stringification change runs the `op/` companion
-  leg.**
 - **A census increase is legal when it converts a worse failure (a crash)
   into a counted drop.**
 - **No pipe after `git rebase` / `git merge` in a command chain** (it hides
@@ -358,11 +389,6 @@ The operational residue of the s321–s540 rulings (each is indexed in
 - **Never `git stash` for a compare** — use a worktree at the base sha.
 
 ## Test Status -- CURRENT NUMBERS
-
-**REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
-moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only
-place the current numbers are written down inside the repo rules.  The user-facing
-copy is `docs/STATUS.md` — update both together.
 
 **s540 end, 2026-11-13: main = MAIN-READY-92 `212d4782` + records (code
 `24988e35`, generation v2-14400).**  Gate **371 files / 12,131 rows
@@ -374,6 +400,11 @@ PARTIAL / 27 FAIL / 67 SKIP of 896 files, 109,797 ok / 1,740 not ok; PPI
 USER: `caller` file/line and `croak` location only under
 `PCL_OPT=line-track`; `DESTROY` runs at program exit only.
 
+**REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
+moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only
+place the current numbers are written down inside the repo rules.  The user-facing
+copy is `docs/STATUS.md` — update both together.
+
 ## Key Files to Read
 
 When resuming work (items keep their old numbers: briefs cite "Key Files 0a"):
@@ -384,7 +415,9 @@ When resuming work (items keep their old numbers: briefs cite "Key Files 0a"):
   the docs is a file there.  Both are PUBLISHED: technical content and work
   decisions only, nothing personal.  In an agent WORKTREE that directory is a
   stale checkout — tasks are always read and written through
-  `~/.claude/tasks/pcl` and committed on main by the reviewing session.
+  `~/.claude/tasks/pcl` (write with `JSON::PP->new->utf8` to a `:raw` handle;
+  an agent files new tasks in the ID RANGE its brief gives) and committed on
+  main by the reviewing session.
 - **0b.** `briefs-and-rules-for-claude-subagents/README.md` — the agent RULEBOOK
   (`s473/COMMON.md`), each session's protocol, briefs and running notes
   (`sNNN/SHARED-BOX.md`, `<label>-prompt.md`, `PAUSE-sNNN.md`,
@@ -426,8 +459,10 @@ of every entry (what it found, what it ruled) is in
 
 **Code generation, IR, compiler structure**
 - `ir-spec.md` — NORMATIVE; `generated-cl-ir-review.md` — the IR reviewed.
-- `codegen-review-s526.md` — `_lower_block_1`, the v1 text seam
-  (`Pl::CLForm::raw`), VarAnnotator's verdicts, `p-setf`.
+- `codegen-review-s526.md` — the statement lowering (`_lower_block_1`,
+  `Pl/Stmt.pm`), the v1 text seam (`Pl::CLForm::raw`), VarAnnotator's
+  verdicts, `p-setf`.  STATUS: its C1 (the classifier) and C2's first kind
+  (`local`) are DONE; the next C2 kinds and C3–C7 are open.
 - `v2-target-architecture.md` (read FIRST when joining compiler work),
   `v2-code-review.md`, `compiler-duplication-review-s386.md`.
 - `wantarray-context.md`, `ctx-bind-fallback-analysis-s510.md` — context.
@@ -476,19 +511,25 @@ of every entry (what it found, what it ruled) is in
 Full text: `docs/claude-md/REFERENCE.md` "Dependencies".
 
 - Perl 5.20+; SBCL **2.5.2+** (the floor is TESTED: `tools/t/sbcl-floor.t`
-  under `PCL_SBCL_FLOOR`, and the container leg with `SBCL_VERSION=2.5.2`).
+  under `PCL_SBCL_FLOOR`, and the container leg
+  `PCL_CONTAINER_BASE=ubuntu:22.04 SBCL_VERSION=2.5.2 prove
+  tools/t/install-container.t`).
 - **PPI is VENDORED** (`vendor/PPI/lib`, loaded ONLY through
   `use Pl::VendorPPI;`, never `use PPI;`).  Never edit `vendor/PPI/lib` by
   hand: `tools/vendor-ppi <clone> pcl` (`Pl/t/vendor-ppi-01.t` checks the tree
   id; run the canary `PCL_SYSTEM_PPI=1 prove Pl/t/ppi-bugs-registry-01.t` at
   every refresh).  The branch's public home is `https://github.com/Percolisp/PPI` branch
-  `pcl`, mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git`; a PPI
-  batch pushes fast-forward to both after its merge, and upstream pull
-  request #459 is refreshed.  `PCL_SYSTEM_PPI=1` uses the installed PPI on
+  `pcl`, mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git`.  A PPI
+  batch (an agent) fast-forwards the BARE MIRROR at MERGE-READY and nothing
+  else; the reviewing session pushes the fork after the merge and refreshes
+  upstream pull request #459.  Agents never push to GitHub.  `PCL_SYSTEM_PPI=1` uses the installed PPI on
   purpose.
 - Non-core modules, THE ONE LIST: PPI's deps `PCLVendor::ppi_deps()` (Clone,
-  Params::Util, Task::Weaken, Safe::Isa), Moo, and for fixtures Data::Dump +
-  Try::Tiny (`Pl/t/core-deps-01.t`).  **Nothing else that is not core perl**:
+  Params::Util, Task::Weaken, Safe::Isa) and Moo.  Data::Dump and Try::Tiny
+  are installed on CI only as transpile SUBJECTS of a few fixture rows — a
+  test never uses them as a tool, and a row whose subject is a non-core
+  module skips when it is absent (`eval { require X; 1 }`; guard
+  `Pl/t/core-deps-01.t`).  **Nothing else that is not core perl**:
   CI is a stock machine; before adding a `use`, check
   `Module::CoreList::is_core`.  Diagnostics use core `Data::Dumper`.
 

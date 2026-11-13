@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "SILENT WRONG (found by s540d while probing #4981, 2026-11-13; the same on the base 24988e35, so pre-existing -- NOT caused by #4981's cache): in a tr/// SEARCH or REPLACEMENT list an ESCAPED dash `\\-` is a literal `-` in perl, never a range operator; PCL's expand-tr-chars (cl/pcl-runtime.lisp) reads `a\\-c` as the range a-c and drops a leading `\\-`.\n\nReproducer (perl 5.40.3 vs PCL, base and s540d tree identical):\n\n    my $t = \"a-b-c\"; my $n = ($t =~ tr/a\\-c/Z/); print \"$n $t\\n\";\n    my $u = \"abc-\"; my $m = ($u =~ tr/\\-a/XY/); print \"$m $u\\n\";\n    my $v = \"a-z\"; my $k = ($v =~ tr/a\\-z//); print \"$k\\n\";\n\nperl:              PCL:\n    4 ZZbZZ            3 Z-Z-Z\n    2 YbcX             1 Ybc-\n    3                  2\n\nWhere: expand-tr-chars unescapes `\\-` before (or without marking it for) the range pass.  Fix: an escaped character -- `\\-` in particular -- is a literal in the range scan (perl's toke.c scan_const marks it so).  Guard: Pl/t/tr-01.t rows with the three lines above (perl's answers).  perl-tests/tr.t has no row for it (it passes 242 rows).  Probe file: s540d scratch/s540d/g/trdash.pl.\n",
+   "id" : "5021",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: tr/// reads an escaped dash `\\-` as a range (`tr/a\\-c/Z/` = a..c; perl: a, -, c); a leading `\\-` is dropped -- expand-tr-chars, pre-existing"
+}
