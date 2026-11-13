@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s539a (Opus 5.5, 2026-11-13).\n\nReproducer (scratch/s539a/pr2/dn1.pl):\n  use Test::More tests => 1;\n  diag \"line one\\n\";\n  note \"note one\\n\";\n  diag \"two\\nlines\\n\";\n  ok(1);\nperl prints `# line one` / `# note one` / `# two` / `# lines`; PCL (main 24988e35 and s539a) prints an extra `# ` line after each message that ends in a newline (Test::Builder strips ONE trailing newline before splitting into `# ` lines; it also skips an empty message).  Seen first through Test::Warnings' `allow_warnings` (pr/tw2.pl: `# allowed` then `# `).  Cosmetic in TAP (a comment line) but visible on STDOUT for `note`.  Fix in cl/pcl-test.lisp's diag/note formatter; guard in Pl/t/tap-assert-01.t.",
+   "id" : "4883",
+   "status" : "pending",
+   "subject" : "`diag` / `note` with a message ending in \"\\n\" print an extra empty `# ` line (Test::More prints none)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s539a (Opus 5.5, 2026-11-13).\n\nReproducer (scratch/s539a/pr2/ts1.pl):\n  use Test::More tests => 3;\n  ok(1, \"first\");\n  TODO: { local $TODO = \"not yet\"; todo_skip \"cannot run\", 1; }\n  ok(1, \"last\");\nperl: `not ok 2 # TODO & SKIP cannot run` then `ok 3 - last`, exit 0.  PCL (main 24988e35): `Undefined subroutine &main::todo_skip called`, exit 255 after row 1.  Test::More's todo_skip(WHY, COUNT) emits COUNT `not ok N # TODO & SKIP WHY` rows and `last TODO`; Test::Builder->todo_skip(WHY) emits one.  ->details reports such a row as { ok => 1, actual_ok => 0, type => 'todo_skip', reason => WHY, name => '' }.  The row record s539a added (`%test-record-row`) already has the shape; the function is the missing part.  Fix in cl/pcl-test.lisp (Test::More export + Test::Builder method); guard in Pl/t/tap-assert-01.t.",
+   "id" : "4884",
+   "status" : "pending",
+   "subject" : "`todo_skip` is missing from PCL's Test::More and Test::Builder (dies \"Undefined subroutine &main::todo_skip\")"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s539a (Opus 5.5, 2026-11-13) from the #3619 reduction.\n\nMEASUREMENT (scratch/s539a/det.log in the s539a worktree): running pr/cz3.pl (the #4881 reproducer) with PCL_DETECT_LOG set logs three sites:\n  pr/cz3.pl  main::GZIP_MIN_HEADER_SIZE   3  glob  5  unknown  ()\n  pr/cz3.pl  main::GZIP_MIN_HEADER_SIZE   3  glob  9  unknown  ()\n  pr/cz3.pl  main::GZIP_FEXTRA_HEADER_SIZE 3  glob  5  unknown  ()\nbut in the DEFAULT mode (announce) nothing is printed: `%p-detect-harmless-p` (cl/pcl-runtime.lisp) answers true for `(and (string= assumed \"unknown\") (equal proto \"\"))` -- a nullary sub where the compiler read a bareword.  That is harmless only when the bareword took NO arguments; here the compiler parsed `GZIP_MIN_HEADER_SIZE + 1 .. N` as a list-operator call swallowing `+1 .. N`, and the loop runs once -- a silent wrong the detector saw and did not say.\n\nWHAT A FIX NEEDS: the call site's record must say whether the compiler gave the unknown call ARGUMENTS (it knows at emission: a bare unknown word with an operand after it vs alone); harmless = unknown + () + no arguments.  Count the new announcements over the four populations first (docs/detector-measurement-s513d.md is the method; the s516a recount was gate 0 / sweep 0 / everyday 0 / board 23).  NOT in s539a's scope (ruled: file it; the detector's harmless rule is not changed there).",
+   "id" : "4882",
+   "status" : "pending",
+   "subject" : "The #2610 detector treats an unknown bareword + an installed `()` sub as HARMLESS, so announce mode is silent on the #4881 mis-parse (a call that swallowed `+1 .. N`)"
+}

@@ -2,6 +2,10 @@
 
 Append new entries at the top. One section per session.
 
+## Session 541 (reviewing session, 2026-11-13 21:5x ..) -- a catch-up session: CLAUDE.md under its size limit; the three batches stopped at the s540 end resumed
+
+The USER asked for `CLAUDE.md` to be checked against its maximum size and reorganized, and for the jobs left undone to be started and run to the end.  `CLAUDE.md` was 194,031 bytes against a limit of 40,000 characters; it is now under 30,000, with every old section moved verbatim into two companion files (`docs/claude-md/REFERENCE.md`: the full text of the working sections under the same headings; `docs/claude-md/HISTORY.md`: old numbers and the old review record) and a gate guard (`Pl/t/claude-md-size-01.t`) that also bounds the memory index.  s540c, s540d and s539a were relaunched in their worktrees; s539a got its rule-9a ruling for #3619.  Running notes: `briefs-and-rules-for-claude-subagents/s541/PAUSE-s541.md`.
+
 ## Session 536 (Opus 5.5 reviewing session, 2026-11-08 08:3x .. 22:1x) -- ten merges (MAIN-READY-74..83), the round board on -74 and its attribution, a session killed by memory pressure and resumed; four batches left in flight
 
 Agents ran in parallel by the USER's word (three to five at a time, FOUR heavy slots from 11:4x).  Merged: s532c (-74), s532d (-75), s536a (-76), s535a (-77), s536c (-78), s536b (-79), s536d (-80), s532c's fix-forward #4623 (-81), s536f (-82), s536g (-83); each batch's own section is below.  Main ended at code `3139fcb0`, generation v2-13100: gate 369 / 11,975, sweep 18,793, EVERYDAY 116 of 122.  One coordination lesson was paid for early: a "merge in this order" rule parked finished agents until the USER asked why only one was running, so the rule became "nobody waits for a sibling" (`s536/SHARED-BOX.md` rule 25).

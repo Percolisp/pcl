@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s539a (Opus 5.5, 2026-11-13) -- the CAUSE of #3619.\n\nReproducer (scratch/s539a/pr/cz3.pl in the s539a worktree; needs IO-Compress-2.214-0/lib on @INC):\n  use Test::More tests => 1;\n  BEGIN { use_ok('IO::Compress::Gzip::Constants'); }\n  my $n = 0;\n  for my $index ( GZIP_MIN_HEADER_SIZE + 1 .. GZIP_MIN_HEADER_SIZE + GZIP_FEXTRA_HEADER_SIZE + 1) { $n++ }\n  print \"# extra loop count: $n\\n\";\nperl: 3 (and 4 for the Name loop); PCL (main 24988e35): 1 and 1.  The same constants imported by `BEGIN { require X; X->import }` (pr/cz4.pl) are right on main: the static parse sees that spelling as a `use`, but not a `use_ok` call.  So each of cz-03zlib-v1.t's four header-truncation loops (Extra 3, Name 4, Comment 7, CRC 2 iterations in perl) runs ONCE: 12 x 6 = 72 rows never emitted, the file ends cleanly at 400 of 472.  146 test files under ~/.cpan/build use the `BEGIN { use_ok(...) }` shape.\n\nRULED by the reviewing session (s541, rule 9a): the fact `a call of this sub imports from the module named by its first argument` is DATA declared with the sub (lib/Test/More.pm or a lib/PCL/Facts/ overlay, a marker on its forward declaration); the MECHANISM in Pl/ is keyed on the marker, never a name: a call, as a statement directly in a BEGIN block's body, of a sub carrying the marker, with a literal module name first, is treated FOR PARSE FACTS ONLY as `use MODULE LIST` at that position.  Outside BEGIN: no effect.  Non-literal first argument: no effect, no die.\n\nThe #2610 detector LOGS these sites but stays silent in announce mode: #4882.",
+   "id" : "4881",
+   "status" : "pending",
+   "subject" : "A constant imported by `BEGIN { use_ok(MODULE) }` is invisible to the parse: `CONST + 1 .. N` reads as a call that swallows `+1 .. N` (silent wrong; IO-Compress cz-03zlib-v1.t 72 rows)"
+}
