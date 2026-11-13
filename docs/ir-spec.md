@@ -3929,9 +3929,18 @@ marks) weakened for its length — so after a trigger `$.` of a dropped
 last-read handle reads undef, as in perl.  The exit hook and every
 `PerlIO_flush(NULL)` site (before fork, `system`, `exec`, backticks, a pipe
 open) run any finalizer still queued, so a dropped handle's bytes reach the
-file before a child starts and are written once.  Bytes of a dropped write
-handle are otherwise in the file "at the next collection or at exit" — never
-lost, and never at the drop (perl's moment).
+file before a child starts and are written once (a fork child inherits the
+registration, not the duty: its finalizer only closes its own descriptor).
+
+**When a dropped write handle's bytes reach the file** — the first of: a
+collection that finds the stream (its finalizer then runs on SBCL's thread,
+or at once inside a trigger); the next `PerlIO_flush(NULL)` site, which
+flushes every open handle, dropped or not, before a child starts; exit, after
+the `END` blocks.  Never at the drop, which is perl's moment: a read of the
+file right after the drop, or an `END` block, sees it short.  No byte of an
+output-only handle is lost; a READ-WRITE handle's unflushed writes are
+(task #5003).  A `fork` copies a dropped handle that is not yet collected
+into the child, descriptor and any `flock` it holds included (task #5004).
 
 ```perl
 sub fh { open my $fh, "<", $f or die; flock($fh, LOCK_SH) or die; return $fh }

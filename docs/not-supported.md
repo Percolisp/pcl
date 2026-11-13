@@ -165,7 +165,7 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Objects and OO
 
 * [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
-* [A filehandle that ESCAPES its block is closed by the collector or at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-by-the-collector-or-at-exit-not-at-its-last-reference) — owner #2006 (the moment), #5003
+* [A filehandle that ESCAPES its block is closed by the collector or at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-by-the-collector-or-at-exit-not-at-its-last-reference) — owner #2006 (the moment), #5003, #5004
 * [Perl 5.38 `class` / `field` / `method` syntax — DEFERRED](#perl-538-class--field--method-syntax--deferred--future-version)
 * [Indirect object syntax with a SCALAR invocant — MAYBE LATER](#indirect-object-syntax-with-a-scalar-invocant-method-obj-list--maybe-later--user-decision-s425)
 * [`tie` on a filehandle — announced, not silent](#tie-on-a-filehandle--announced-not-silent-scalar-array-and-hash-tie-work)
@@ -2465,14 +2465,17 @@ before (Path::Tiny's `slurp`, then a locked `append` — its
 `t/input_output*.t` hung there until s540c), and an opener out of
 descriptors (a loop over more files than `ulimit -n`).  What stays different
 from perl, measured s540c:
-* **the MOMENT**: perl closes at the last reference, PCL at the next
-  collection.  A file written through a dropped handle and read back by the
-  same program before any collection is SHORTER (Path-Tiny
+* **the MOMENT**: perl closes at the last reference.  PCL writes a dropped
+  handle's bytes at the first of: a collection that finds it, the next
+  `system` / `fork` / `exec` / backticks / piped open (every open handle is
+  flushed before a child starts), exit (after the `END` blocks).  A file
+  written through a dropped handle and read back by the same program before
+  any of those is SHORTER, and an `END` block sees it short too (Path-Tiny
   `input_output*.t`'s 12 `openw`/`opena` -> `openr` rows; a
   `{ my $fh = $f->openw; print $fh ...; }` block followed by a read).  Close
-  it explicitly when another step reads the file.  No byte is lost: a
-  collected handle's buffer is written by its finalizer, and everything left
-  is flushed at exit;
+  it explicitly when another step reads the file.  No byte of an
+  output-only handle is lost: a collected handle's buffer is written by
+  its finalizer, and everything left is flushed at exit;
 * a READ-WRITE handle (`+<`, `+>`, `+>>`) the collector reaches before exit
   loses its unflushed writes (task #5003: SBCL's read-write buffer state
   cannot be read once the stream is gone);
@@ -2486,9 +2489,13 @@ from perl, measured s540c:
 * the collector is CONSERVATIVE: a stale word on a stack can keep a dropped
   handle alive through a collection, and then the old behaviour holds (the
   lock is kept, the descriptor stays used).
+* a `fork` while a dropped handle is not yet collected copies its descriptor,
+  and any `flock` held through it, into the child: a child's `LOCK_NB` lock
+  of that file fails, and a child's BLOCKING lock while the parent waits for
+  the child deadlocks (task #5004; perl closed the handle at the drop).
 
 **Owner:** #2006 (the moment: refcount semantics are #2370's, parked);
-#5003 (read-write buffers).
+#5003 (read-write buffers); #5004 (fork after a dropped lock).
 
 ---
 
