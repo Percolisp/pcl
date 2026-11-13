@@ -5682,7 +5682,8 @@ symbol is unqualified: the reader interns it under the section's
 rename families that produce file cells flow through it: span promotion
 (W10) and capture promotion (M-C/M-F) of a SEGMENT-extent lexical.  **A
 BLOCK-extent capture promotion never takes the alias** (normative, s537b,
-#4461): its cell joins the eval-site alists under the original name for the
+#4461): whatever declares it -- a single `my $x` or a multi-name
+`my ($r, $x)` -- its cell joins the eval-site alists under the original name for the
 block's extent only (the per-site pair, M5), because the alias would outlive
 the block — `{ my $got; sub rec { … $got … } eval '…' } print $got` printed
 the cell where perl prints the package variable.
