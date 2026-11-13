@@ -16,3 +16,6 @@ RESUME RECIPE after a cut: read this file bottom-up, then `s540/resume-s540.md`,
 * The README / STATUS / CHANGELOG wording read against measurement A: it says late, says an object the collector reclaimed gets none, quotes the 9,727 of 100,000 and names the guard-object case.  True to the measurement.
 * **#4864 (the keep-alive proposal) RULED: stays filed, unscheduled, under #2370** -- it is the first step of the parked Stage 2 licence walk (an emission change for a timing guarantee the USER parked in s539); the runtime ring alternative saves the newest N only and is not built.
 * Left for its merge: the bars (gate, sweep, corpus-diff + ir-conform, bench B = the `bless` cost with a DESTROY class loaded, C quiet, companion), everyday, the Try-Tiny finally.t newly reached rows 17 18 23 keyed #2370.
+
+## 11:5x -- `docs/STATUS.md` board row = the s539 round (641 / 161 / 27 / 67 of 896; 109,797 ok / 1,740 not ok, the twelve load timeouts counted by their one-file re-runs).  CLAUDE.md's CURRENT NUMBERS gets the same at the first merge.
+* STATE: all three slots held (s537a gate-SET scan, s537b #4461 scan, s538a `leg660b`); s537a's exclusive bench queued behind its scan.
