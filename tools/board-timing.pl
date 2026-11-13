@@ -64,8 +64,11 @@
 #                   + every *compile + cfile
 #     C run       = the SBCL wall/CPU minus start and every bucket: the
 #                   program, the eval'd code, the END phase.
-#   A/B/C CPU: A = pl2cl's tree CPU + (SBCL tree CPU - SBCL's own CPU at
-#   exit), i.e. the module transpiles; B and C from SBCL's own clock.
+#   A/B/C CPU: SBCL's own clock for B and C; SBCL's CHILDREN (its tree CPU
+#   minus its own at exit) are split -- up to the transpile buckets' wall to
+#   A (SBCL waits on a module's pl2cl, so its CPU is about its wall), the rest
+#   to C (subprocesses the program itself starts: system, `$^X ...`, pipes).
+#   A = the test file's pl2cl tree CPU + that transpile share.
 #
 # THE COMPARISON (column cmp): C = PCL ran to its plan with no failing row and
 # the same ok count as perl, which also ran to its plan; PE = the same rows
@@ -168,7 +171,7 @@ my @COLS = qw(sha mode rep dist file load1 timeout
   A_wall B_wall C_wall A_cpu B_cpu C_cpu
   modload tap tcompile mcompile scompile ecompile cfile xpile evalx xserver evalrun
   modload_c tap_c tcompile_c mcompile_c scompile_c ecompile_c cfile_c evalrun_c
-  n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec);
+  n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec cpu_v);
 my $ofh = \*STDOUT;
 if (defined $out) {
   my $new = !-s $out;
@@ -393,10 +396,17 @@ sub pcl_run {
     $r{A_wall} = $xw + $abuck;
     $r{B_wall} = $r{start} + $bbuck;
     $r{C_wall} = $sw - $r{start} - $abuck - $bbuck;
+    # SBCL's CHILDREN: the module transpiles (pl2cl, SBCL blocked meanwhile,
+    # so their CPU is about their wall) belong to A; the rest -- the
+    # subprocesses the PROGRAM starts (system, `$^X ...`, pipes) -- to C.
     my $child = $sc - $r{s_self};
-    $r{A_cpu} = $xc + ($child > 0 ? $child : 0);
+    $child = 0 if $child < 0;
+    my $xchild = $abuck < $child ? $abuck : $child;
+    $r{A_cpu} = $xc + $xchild;
     $r{B_cpu} = $bcpu;
-    $r{C_cpu} = $r{s_self} - $bcpu - $us->('xpile_cpu_us') - $us->('evalx_cpu_us') - $us->('xserver_cpu_us');
+    $r{C_cpu} = $r{s_self} - $bcpu - $us->('xpile_cpu_us') - $us->('evalx_cpu_us') - $us->('xserver_cpu_us')
+               + ($child - $xchild);
+    $r{cpu_v} = 2;
   }
   $r{class} = classify($tap, $rc, $r{sig});
   return \%r;
@@ -462,6 +472,15 @@ sub read_rows {
       my %r;
       @r{@cols} = @v;
       next if $r{mode} eq 'warmup';
+      if (!$r{cpu_v} && length($r{s_self} // '')) {
+        # rows of the first version charged ALL of SBCL's child CPU to A
+        my $child = num($r{s_cpu}) - num($r{s_self});
+        $child = 0 if $child < 0;
+        my $ab = num($r{xpile}) + num($r{evalx}) + num($r{xserver});
+        my $xchild = $ab < $child ? $ab : $child;
+        $r{A_cpu} = num($r{x_cpu}) + $xchild;
+        $r{C_cpu} = num($r{C_cpu}) + $child - $xchild;
+      }
       my $k = "$r{dist}\t$r{file}\t$r{mode}";
       if (($src{$k} // '') ne $f) { $reps{$k} = []; $src{$k} = $f }
       $r{src} = basename($f);
@@ -487,6 +506,7 @@ sub read_rows {
 
 sub num { my ($v) = @_; return (defined $v && length $v) ? $v : 0 }
 sub s2 { my ($v) = @_; return sprintf '%.1f', num($v) }
+sub f2 { my ($v) = @_; return sprintf q{%.2f}, num($v) }
 sub ratio { my ($a, $b) = @_; return num($b) > 0 ? sprintf('%.1fx', num($a) / num($b)) : '-' }
 
 sub report {
@@ -541,8 +561,8 @@ sub report {
     my ($r) = @_;
     my ($tb) = sort { num($r->{"${b}_c"} // $r->{$b}) <=> num($r->{"${a}_c"} // $r->{$a}) } qw(tcompile scompile mcompile ecompile modload evalx);
     return sprintf "| %s/%s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $r->{dist}, $r->{file},
-      s2($r->{p_cpu}), s2($r->{c_cpu}), s2(num($r->{c_cpu}) - num($r->{p_cpu})), ratio($r->{c_cpu}, $r->{p_cpu}),
-      s2($r->{A_cpu}), s2($r->{B_cpu}), s2($r->{C_cpu}), $tb,
+      f2($r->{p_cpu}), f2($r->{c_cpu}), f2(num($r->{c_cpu}) - num($r->{p_cpu})), ratio($r->{c_cpu}, $r->{p_cpu}),
+      f2($r->{A_cpu}), f2($r->{B_cpu}), f2($r->{C_cpu}), $tb,
       ($r->{nrep} // 1) > 1 ? sprintf('%.0f%%', 100 * num($r->{spread})) : '-', $r->{src};
   };
   my $hdr = "| file | perl | PCL | excess | ratio | A | B | C | top B/A bucket | spread | from |\n|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---|\n";
@@ -637,7 +657,7 @@ sub hooks_source { return <<'LISP' }
       (with-open-file (s path :direction :output :if-exists :supersede
                               :if-does-not-exist :create)
         (let ((*standard-output* s))
-          (funcall (intern "REPORT" "SB-SPROF") :type :flat :max 80)
+          (funcall (intern "REPORT" "SB-SPROF") :type :flat :max 400)
           (funcall (intern "REPORT" "SB-SPROF") :type :graph :max 40)))
       (setf *prof* nil))))
 (sb-ext:without-package-locks
