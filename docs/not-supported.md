@@ -2471,11 +2471,11 @@ from perl, measured s540c:
   flushed before a child starts), exit (after the `END` blocks).  A file
   written through a dropped handle and read back by the same program before
   any of those is SHORTER, and an `END` block sees it short too (Path-Tiny
-  `input_output*.t`'s 12 `openw`/`opena` -> `openr` rows; a
-  `{ my $fh = $f->openw; print $fh ...; }` block followed by a read).  Close
-  it explicitly when another step reads the file.  No byte of an
-  output-only handle is lost: a collected handle's buffer is written by
-  its finalizer, and everything left is flushed at exit;
+  `input_output*.t`'s 8 `openw`/`opena` -> `openr` rows, which also fail
+  on task #5005; a `{ my $fh = $f->openw; print $fh ...; }` block followed
+  by a read).  Close it explicitly when another step reads the file.  No
+  byte of an output-only handle is lost: a collected handle's buffer is
+  written by its finalizer, and everything left is flushed at exit;
 * a READ-WRITE handle (`+<`, `+>`, `+>>`) the collector reaches before exit
   loses its unflushed writes (task #5003: SBCL's read-write buffer state
   cannot be read once the stream is gone);
