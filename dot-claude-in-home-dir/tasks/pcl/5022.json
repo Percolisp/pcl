@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "PERF, small (found by s540d's predicted-vs-actual scan, 2026-11-13): the #4982 constant fold (Kind-A `const-fold`) does NOT fold a `use constant` whose literal is a HEX, OCTAL or BINARY number.  `Pl::Parser::constant_fold_cl` accepts the value's CL text only by three shapes (a decimal number `\\A-?[0-9]...`, a string datum, `(p-esc \"...\")`), and `_compile_constant_value` emits `0x10` as `#x10`, `017` as `#o17`, `0b11` as `#b11` -- self-evaluating integers the text check does not recognise, so every use stays `(p-scalar-ctx (pl-NAME))`.  Not a correctness issue (a missed fold).\n\nReproducer (s540d scratch/s540d/g/hex.pl):\n\n    use constant H => 0x10; use constant O => 017; use constant B => 0b11; use constant D => 1_000;\n    my $x = H + O + B + D;\n\nemits `(p-+ (p-+ (p-+ (p-scalar-ctx (pl-H)) (p-scalar-ctx (pl-O))) (p-scalar-ctx (pl-B))) 1000)` -- only D folds.\n\nSeen in the wide A/B: core File/stat.pm `HINT_FILETEST_ACCESS => 0x00400000` (predicted, not folded); the hex/flag-constant idiom is common in modules (Fcntl-like flag sets, Compress::Raw::Zlib, Storable's SX_* are decimal and DO fold).\n\nFIX (S): accept `\\A#[xob][0-9a-fA-F]+\\z` (and its negation spelling, probe what `-0x10` compiles to) in constant_fold_cl.  Bar: corpus-diff + the wide A/B predicted (scan the hex `use constant` sites first), PCL_OPT=-const-fold == base over the DIFF set (s540d's check), the gate's constants rows + a guard row.\n",
+   "id" : "5022",
+   "status" : "pending",
+   "subject" : "PERF (small): the #4982 constant fold skips a hex / octal / binary literal (`use constant H => 0x10` stays a call: its CL text #x10 fails constant_fold_cl's text check)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s539a (Opus 5.5, 2026-11-13) from the #3823 census (docs/tap-assertion-audit.md \"The Test::Builder methods\"; probe scratch/s539a/pr/tbm.pl in the s539a worktree: perl's Test::Builder 1.302199 method list, `Test::Builder->can($m)` under PCL).\n\nAfter s539a PCL answers 36 of perl's public methods (base 17).  STILL ABSENT, each needing NEW state (the brief's rule: a method that needs new state is filed, not built):\n  child / create / finalize / reset / reset_outputs -- a second builder object (PCL's layer IS the one builder; a child would need its own counters, as `subtest` rebinds them);\n  name -- the builder's name (the script name for the top builder);\n  is_fh -- a handle predicate;\n  find_TODO -- walks the caller's package for `$TODO` (caller fidelity, #233);\n  todo_start / todo_end -- a TODO stack independent of `$TODO`;\n  no_diag / no_ending / no_header / no_log_results / use_numbers -- output switches the layer has no flag for;\n  coordinate_forks -- fork bookkeeping;\n  context / ctx -- the Test2 bridge (Test2::API context objects).\nEach call dies `Can't locate object method \"X\" via package \"Test::Builder\"` (rule 12), never a stub.  Build one when a board / everyday file reaches it (grep the board's `*PLAN*` / `*FILE*` rows for the method name).",
+   "id" : "4886",
+   "status" : "pending",
+   "subject" : "PCL's Test::Builder still lacks 17 public methods that need state the TAP layer does not keep (child / create / reset / finalize / name / todo_start / todo_end / no_ending / no_header / use_numbers / context ...) -- each dies \"Can't locate object method\""
+}
