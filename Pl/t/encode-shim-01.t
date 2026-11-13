@@ -196,5 +196,33 @@ row('defined &utf8::X', join ',', map { no strict 'refs'; defined &{"utf8::$_"} 
 row('utf8::is_utf8 after the alias shape', (utf8::is_utf8("\x{100}") ? 1 : 0));
 P
 
+# 5. s539a (#4167): resolve_alias and find_encoding AGREE -- an encoding this
+# host has no codec for (big5, euc-kr, iso-2022-*, ...) is not advertised by
+# either (rule 12; perl knows every name below, so both answer there).  cp932
+# is SBCL's codec too and is wired: its whole double-byte repertoire decodes,
+# fails and round-trips as perl's does (measured s539a: 9795 of 11471
+# sequences, 398 one-way); a sample of it here.
+compare_lines(<<'P', 'codec-less names, cp932');
+use Encode qw(decode encode resolve_alias find_encoding);
+for my $n (qw(big5 big5-eten big5-hkscs euc-kr cp949 cp950 gb2312 euc-cn hz johab
+              iso-2022-jp iso-2022-kr 7bit-jis cp932 windows-31j sjis gbk latin1 utf8)) {
+  row("agree $n", ((defined resolve_alias($n)) == (defined find_encoding($n)) ? 1 : 0));
+}
+row('cp932 aliases', map { resolve_alias($_) // 'undef' } qw(cp932 windows-31j ms932 cp-932 windows-932));
+my ($ok, $sum, $one) = (0, 0, 0);
+my @seq = (map({ chr } 0x20 .. 0x7E, 0xA1 .. 0xDF),
+           map { my $l = $_; map { chr($l) . chr($_) } 0x40 .. 0x7E, 0x80 .. 0xFC } 0x82, 0x87, 0x88, 0xED, 0xFA);
+for my $i (0 .. $#seq) {
+  my $in = $seq[$i];
+  my $d = eval { decode('cp932', $in, Encode::FB_CROAK) };
+  next if !defined $d;
+  $ok++; $sum = ($sum + ord($d) * ($i + 1)) % 1000000007;
+  my $b = eval { encode('cp932', $d, Encode::FB_CROAK) };
+  $one++ if !defined $b || $b ne $seq[$i];
+}
+row('cp932 sample', scalar(@seq), $ok, $sum, $one);
+row('cp932 text', cp(encode('cp932', "\x{65E5}\x{672C} \x{FF71}\x{2460}")), cp(decode('cp932', "\x93\xFA\x96\x7B")));
+P
+
 
 done_testing();

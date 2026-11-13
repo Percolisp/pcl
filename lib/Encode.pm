@@ -93,6 +93,7 @@ our %INFO = (
     'shiftjis'     => [ 'shift_jis', 'mb', 'Encode::XS' ],
     'euc-jp'       => [ 'euc-jp', 'mb', 'Encode::XS' ],
     'cp936'        => [ 'gbk', 'mb', 'Encode::XS' ],
+    'cp932'        => [ 'cp932', 'mb', 'Encode::XS' ],
 );
 for my $n (2 .. 11, 13 .. 16) { $INFO{"iso-8859-$n"} = [ "iso-8859-$n", 'byte', 'Encode::XS' ] }
 for my $n (437, 850, 852, 855, 857, 860 .. 866, 869, 874, 1250 .. 1258) {
@@ -112,16 +113,10 @@ our %ALIAS = (
     'shift-jis' => 'shiftjis',
     'euc-jp' => 'euc-jp', 'eucjp' => 'euc-jp', 'ujis' => 'euc-jp',
     'gbk' => 'cp936', 'cp936' => 'cp936',
+    'windows-31j' => 'cp932', 'ms932' => 'cp932', 'x-sjis' => 'shiftjis',
     'winlatin1' => 'cp1252', 'winlatin2' => 'cp1250', 'wincyrillic' => 'cp1251',
     'wingreek' => 'cp1253', 'winturkish' => 'cp1254', 'winhebrew' => 'cp1255',
     'winarabic' => 'cp1256', 'winbaltic' => 'cp1257', 'winvietnamese' => 'cp1258',
-);
-our %NOCODEC = (
-    "big5" => "big5-eten", "big5-eten" => "big5-eten", "big5-hkscs" => "big5-hkscs",
-    "euc-kr" => "euc-kr", "cp949" => "cp949", "cp950" => "cp950",
-    "euc-cn" => "euc-cn", "gb2312" => "euc-cn", "hz" => "hz", "johab" => "johab",
-    "iso-2022-jp" => "iso-2022-jp", "iso-2022-kr" => "iso-2022-kr",
-    "cp932" => "cp932", "7bit-jis" => "7bit-jis",
 );
 my %LATIN = (1 => 1, 2 => 2, 3 => 3, 4 => 4, 5 => 9, 6 => 10, 7 => 13,
              8 => 14, 9 => 15, 10 => 16);
@@ -138,9 +133,10 @@ sub resolve_alias {
         my $e = Encode::Alias->find_alias($name);
         return $e->name if ref $e;
     }
-    # perl knows these names; this host has no codec for them, so
-    # find_encoding answers undef (docs/not-supported.md, Encode).
-    return $NOCODEC{ lc $name };
+    # An encoding this host has no codec for is not advertised: resolve_alias
+    # and find_encoding AGREE (rule 12, task #4167; docs/not-supported.md,
+    # "Encode: encodings with no codec").
+    return undef;
 }
 
 sub _canonical {
