@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 # fh-collect-01.t -- the COLLECTOR closes a filehandle the program can no longer
-# reach (task #2006 PART 2, s540c; docs/ir-spec.md §6.5).
+# reach (task #2006 PART 2, s540c; docs/ir-spec.md §6.5b).
 #
 # A handle that ESCAPED the block that opened it (returned by a sub, passed to
 # a helper) used to stay open until exit, keeping its descriptor and any

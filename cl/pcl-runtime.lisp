@@ -21876,7 +21876,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
      ,@(mapcar (lambda (h) `(%p-scope-close ,h)) handles)))
 
 ;;; ── THE COLLECTOR CLOSES WHAT THE PROGRAM CAN NO LONGER REACH ────────────
-;;; (task #2006 PART 2, s540c; docs/ir-spec.md §6.5).  perl closes a handle at
+;;; (task #2006 PART 2, s540c; docs/ir-spec.md §6.5b).  perl closes a handle at
 ;;; its LAST reference; PCL has no reference count, so a handle that escaped the
 ;;; block that opened it (returned, passed to a helper, stored and dropped) used
 ;;; to stay open until exit -- keeping its descriptor and any `flock' it held.
@@ -25216,7 +25216,7 @@ would consume, so it dies naming the stream (rule 12)."
 (defvar *p-flock-files* (make-hash-table :test 'equal)
   "(DEV . INO) of every file this process has taken a flock on.")
 
-(defun %p-file-id (fd)
+(defun %p-flock-file-key (fd)
   "(DEV . INO) of the file open on FD, or NIL."
   (let ((st (ignore-errors (sb-posix:fstat fd))))
     (and st (cons (sb-posix:stat-dev st) (sb-posix:stat-ino st)))))
@@ -25226,7 +25226,7 @@ would consume, so it dies naming the stream (rule 12)."
    when this process has locked FD's file before, or when finalizers are
    queued (a dropped holder already collected)."
   (or (%p-finalizers-pending-p)
-      (let ((id (%p-file-id fd)))
+      (let ((id (%p-flock-file-key fd)))
         (and id (gethash id *p-flock-files*) t))))
 
 (defun %p-flock-call (fd op)
@@ -25251,7 +25251,7 @@ would consume, so it dies naming the stream (rule 12)."
 (defun %p-flock-note (fd op)
   "After a SUCCESSFUL flock OP on FD: remember the file a lock was taken on."
   (when (and (logtest op 3) (not (logtest op 8)))
-    (let ((id (%p-file-id fd)))
+    (let ((id (%p-flock-file-key fd)))
       (when id (setf (gethash id *p-flock-files*) t)))))
 
 (defmacro p-flock (fh op)
