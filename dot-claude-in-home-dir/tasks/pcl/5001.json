@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FOUND by s540c (2026-11-13) while probing #4866's neighbours.  PRE-EXISTING on main 24988e35 (and 05806e16).  SILENT WRONG.\n\nperl 5.40.3:\n  our %g = (d => 'kept'); my %h = (d => 'kept');\n  sub dl { my $v; { $v = delete local $h{d}; } return \"dl=$v/\" . ($h{d} // 'undef') }\n  sub dg { my $v; { $v = delete local $g{d}; } return \"dg=$v/\" . ($g{d} // 'undef') }\n  print dl(), \"\\n\", dg(), \"\\n\";\n  { my $v; { $v = delete local $h{d}; } print \"top=$v/\", ($h{d} // 'undef'), \"\\n\"; }\nperl:  dl=kept/kept  dg=kept/kept  top=kept/kept\nPCL:   dl=kept/undef dg=kept/undef top=/undef      (base and s540c tree alike)\nEmission: `(p-my-= $v (p-delete %h \"d\"))` -- the `local` is gone; the statement-level `delete local $h{k};` takes the\nstructured local lowering (s533c), the EXPRESSION spelling does not.  The third row also loses the VALUE (top=).\nProbe: ~/pcl/.claude/worktrees/agent-ab2915f40902e154e/scratch/s540c/m2/g15.pl.\nLayer: Pl/ (the expression lowering of `delete local`: the local must open a save/restore around the rest of the\nenclosing BLOCK, as the statement form does -- perl restores at the block's exit, not the statement's).\n",
+   "id" : 5001,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `delete local $h{k}` inside an EXPRESSION ($v = delete local ...) drops the `local` -- the element is deleted for good (our AND my hashes, program and module)"
+}

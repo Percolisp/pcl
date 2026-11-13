@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FOUND by s540c (2026-11-13) while writing the #2006 PART 2 probes.  PRE-EXISTING on main (05806e16 and 24988e35).\n\n  open my $r, \"<\", $0 or die;\n  my $ok = print $r \"x\";                 # perl false, PCL false -- right\n  select($r); my $ok2 = print \"y\"; select(STDOUT);\n  print \"selected input: \", ($ok2 ? \"true\" : \"false\"), \"\\n\";\nperl 5.40.3: `selected input: false` (with `use warnings`: \"Filehandle $r opened only for input\").\nPCL: Unhandled simple-type-error \"#<fd-stream ...> is not a character output stream\" (SB-KERNEL:ILL-OUT under\n%P-WRITE-LIST / %P-PRINT-3) -- the explicit-handle path checks writability (%p-writable-stream), the DEFAULT-handle\npath (%p-default-out, the selected handle) does not.  Rule 12 / the tidy-error ruling: a perl false + EBADF, never a\nLisp backtrace.  Probe: scratch/s540c/p1/inprint.pl in the s540c worktree.\n",
+   "id" : 5002,
+   "status" : "pending",
+   "subject" : "print / printf / say to a SELECTED input-only handle dies with a raw SBCL type error (perl: false, a W io warning)"
+}
