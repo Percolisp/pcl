@@ -3161,10 +3161,19 @@ sub _interp_canon {
 }
 
 # Is this Symbol token the variable being DECLARED by an enclosing
-# my/state/our/local (the declarator), rather than a use of it?
+# my/state/our (the declarator), rather than a use of it?
+# `local` DECLARES NOTHING (task #4866, s540c): it saves and restores a
+# variable that already exists, and the binder resolves its operand like any
+# use.  `local $x` can only name a package variable (a lexical one is perl's
+# compile error), but `local $h{k}` / `local $a[0]` / `local @h{...}` name an
+# ELEMENT of whatever %h / @a is in scope -- a file lexical included.  Counted
+# as a declarator, that symbol was the one use a promoted file lexical's
+# rename skipped: the `local` saved and restored the ORIGINAL-name cell while
+# every other use read the renamed one (every Try::Tiny `finally` block got
+# an empty @_).
 sub _symbol_is_declarator {
   my ($self, $sym) = @_;
-  my $kw_rx = qr/^(?:my|state|our|local)$/;
+  my $kw_rx = qr/^(?:my|state|our)$/;
   # Expression-embedded declaration (`open my $fh, …`, `func(my $x)`,
   # `foreach my $i`): the declarator keyword is the symbol's immediately
   # preceding significant sibling — there is no Statement::Variable wrapper

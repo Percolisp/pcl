@@ -3034,6 +3034,10 @@
     ;; `final' is read: a $? a DESTROY sets is the exit status, as in perl.
     (%p-run-global-destruction)
     (%p-flush-stdout-at-exit)
+    ;; Every finalizer of a dropped handle completes before the process goes
+    ;; (one may be running on SBCL's finalizer thread right now): its buffered
+    ;; bytes are the program's output (task #2006 PART 2).
+    (%p-run-dead-handle-finalizers)
     (%p-flush-all-output)
     ;; Only now, with every END run and every handle flushed, does a status
     ;; an END block changed become the process's.  A nested sb-ext:exit
@@ -20459,7 +20463,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    is not the one the program is writing to now."
   (ignore-errors (finish-output *standard-output*))
   (ignore-errors (finish-output *error-output*))
-  (%p-flush-open-streams))
+  (%p-flush-open-streams)
+  ;; A dropped handle the collector has already found writes its bytes from
+  ;; its finalizer (task #2006 PART 2): run one still queued NOW, or its bytes
+  ;; reach the file after a child's -- or in both processes after a fork.
+  (when (%p-finalizers-pending-p) (%p-run-dead-handle-finalizers)))
 
 
 (defconstant +p-fd-cloexec+ 1
@@ -21432,6 +21440,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (when cloexec (%p-set-cloexec stream))
   (let ((std (%p-std-slot fh)))
     (when std (return-from %p-install-fh (%p-rebind-std std stream))))
+  ;; The collector may close it once nothing reaches it (task #2006 PART 2) --
+  ;; but not an fdopen (CLOEXEC nil): that descriptor is another opener's.
+  (when cloexec (%p-own-stream stream))
   ;; PERL CLOSES WHAT THE HANDLE ALREADY HOLDS (task #2006 (a)).  `open(FH,
   ;; ">", $f); print FH "x"; open(FH, "<", $f); <FH>` reads "x" in perl and
   ;; read NOTHING here: the second open replaced the box's value and the first
@@ -21665,7 +21676,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    3 s and prints again: on a pty the parent's first read returns at once, on a
    pipe it waits for the child to exit."
   (handler-case
-      (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
+      (multiple-value-bind (read-fd write-fd)
+          (%p-call-with-fd-retry #'sb-posix:pipe)
         ;; PERL_FLUSHALL_FOR_CHILD: every handle, not just the standard ones,
         ;; or a block-buffered buffer is DUPLICATED into both processes.
         (%p-flush-all-output)
@@ -21862,6 +21874,223 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    computed BEFORE the close, which is perl's order."
   `(unwind-protect (progn ,@body)
      ,@(mapcar (lambda (h) `(%p-scope-close ,h)) handles)))
+
+;;; ── THE COLLECTOR CLOSES WHAT THE PROGRAM CAN NO LONGER REACH ────────────
+;;; (task #2006 PART 2, s540c; docs/ir-spec.md §6.5).  perl closes a handle at
+;;; its LAST reference; PCL has no reference count, so a handle that escaped the
+;;; block that opened it (returned, passed to a helper, stored and dropped) used
+;;; to stay open until exit -- keeping its descriptor and any `flock' it held.
+;;; Path::Tiny's `slurp' returns-and-drops a LOCK_SH handle, and the next locked
+;;; `append' waited for its own process forever.  The answer is a BELT: when the
+;;; garbage collector finds the stream unreachable, a finalizer writes out what
+;;; its output buffer still holds and closes the descriptor; and the two places
+;;; a dead handle makes the program fail or block -- a `flock' that would block,
+;;; an opener out of descriptors -- run the collector and try once more.  It
+;;; never closes a stream the program can reach (the collector's own guarantee),
+;;; and when the collector does not free one the behaviour is the old one.
+;;;
+;;; WHY THE FINALIZER HOLDS THE BUFFER AND NOT THE STREAM.  A lexical handle's
+;;; box holds the fd-stream itself (ir-spec §7.5a), so the stream IS the
+;;; handle's identity, and a finalizer must not reference its own object.  It
+;;; closes over the descriptor and the stream's OUTPUT BUFFER (an SBCL buffer
+;;; struct the stream keeps for its whole life -- replaced only by serve-event
+;;; queueing, which PCL's streams never use, and released only by `close',
+;;; which cancels the finalizer first).  SBCL's own `open' finalizer closed the
+;;; descriptor WITHOUT that write, so a dropped write handle LOST its buffer at
+;;; the first collection (measured s540c: perl 5 bytes, PCL 0); this one
+;;; replaces it.  Only an OUTPUT-ONLY stream's buffer is written: SBCL 2.6.0
+;;; marks a read-write stream that has read by making its output buffer LOOK
+;;; FULL, so its bytes cannot be told from that marker once the stream is gone.
+;;;
+;;; WHAT IS NOT OWNED, so never finalized here: the standard handles (fd <= 2),
+;;; an fdopen (`<&=N' shares a descriptor something else opened), a fork-pipe's
+;;; parent end (its child must be reaped: *p-pipe-pids* keeps it), a socket
+;;; (sb-bsd-sockets closes its own), an in-memory handle (no descriptor).  A
+;;; glob handle (gensym, IO::File, `*$fh' once used) is pinned by the handle
+;;; table under an interned name, so it stays open until exit as before.
+;;;
+;;; THE PINS.  Three runtime tables hold a stream the program may have dropped:
+;;; the last-read handle (`$.'s), the line counters and the end-of-file marks
+;;; (both keyed on every stream ever read).  A weak table would cost ~100 ns
+;;; per readline (measured), so they stay strong and are weakened only for the
+;;; length of a TRIGGER's collection (%p-collect-dead-handles) -- perl clears
+;;; its last-read handle when that handle is freed, and so `$.' then reads undef
+;;; (probed 5.40.3) as it does here after a trigger.
+
+(defvar *p-reap-failure-announced* nil
+  "Set once a finalizer has reported a failed write-out or close on stderr.")
+
+(defun %p-reap-announce (fd errno)
+  "Say ONCE on stderr that closing a dropped handle's descriptor FD failed with
+   ERRNO (rule 12: an effect-only failure is announced, never signalled -- this
+   runs on SBCL's finalizer thread).  A raw write(2): no Lisp stream is shared
+   with the program's thread."
+  (unless *p-reap-failure-announced*
+    (setf *p-reap-failure-announced* t)
+    (let* ((msg (format nil "PCL: closing a dropped filehandle (fd ~D) failed: ~
+                             errno ~D~%" fd errno))
+           (octets (sb-ext:string-to-octets msg :external-format :latin-1)))
+      (sb-sys:with-pinned-objects (octets)
+        (sb-unix:unix-write 2 octets 0 (length octets))))))
+
+(defun %p-reap-write-out (fd obuf)
+  "Write the bytes still waiting in a dead output stream's buffer OBUF to FD,
+   as SBCL's flush would (it writes at the descriptor's offset too).  Returns
+   NIL, or the errno of the write that failed."
+  (let ((head (sb-impl::buffer-head obuf))
+        (tail (sb-impl::buffer-tail obuf)))
+    (loop while (< head tail)
+          do (multiple-value-bind (n errno)
+                 (sb-unix:unix-write fd (sb-impl::buffer-sap obuf)
+                                     head (- tail head))
+               (cond ((and n (plusp n)) (incf head n))
+                     ((eql errno sb-unix:eintr))
+                     (t (return-from %p-reap-write-out (or errno 0))))))
+    (setf (sb-impl::buffer-head obuf) head)
+    nil))
+
+(defun %p-reap-dead-stream (fd obuf pid)
+  "THE FINALIZER of a stream PCL opened (see the header above): the stream is
+   gone, so this works on what the closure kept -- descriptor FD and, for an
+   output-only stream, its buffer OBUF.  The buffer is written only in the
+   process that opened the stream (PID): a fork child inherits the registration
+   but not the duty, the parent writes those bytes itself (PCL also drains
+   pending finalizers before it forks).  Then the descriptor is closed, which
+   is what releases a `flock'.  Touches no perl state -- not `$!', not `$?' --
+   and never signals."
+  (let ((errno (and obuf (eql pid (sb-posix:getpid))
+                    (ignore-errors (%p-reap-write-out fd obuf)))))
+    (multiple-value-bind (ok close-errno) (sb-unix:unix-close fd)
+      (let ((bad (or errno (and (not ok) close-errno))))
+        (when bad (%p-reap-announce fd bad)))))
+  nil)
+
+(defun %p-own-stream (stream)
+  "Register STREAM -- a descriptor stream PCL has just opened for a handle --
+   so that the collector closes it once nothing can reach it (see the header
+   above).  SBCL's own finalizer on an `open' stream (close without the write)
+   is replaced; a `close' cancels this one, so it can never close twice."
+  (when (and (sb-sys:fd-stream-p stream)
+             (not (sb-impl::fd-stream-serve-events stream))
+             (not (gethash stream *p-pipe-pids*)))
+    (let ((fd (sb-sys:fd-stream-fd stream)))
+      (when (and (integerp fd) (> fd 2))
+        (let ((obuf (and (output-stream-p stream)
+                         (not (input-stream-p stream))
+                         (sb-impl::fd-stream-obuf stream)))
+              (pid (sb-posix:getpid)))
+          (sb-ext:cancel-finalization stream)
+          (sb-ext:finalize stream (lambda () (%p-reap-dead-stream fd obuf pid))
+                           :dont-save t)))))
+  stream)
+
+(defun %p-finalizer-drain-routines ()
+  "SBCL's internal finalizer-thread entry points, as a vector #(stop start
+   rehash run-one thread-symbol), or NIL when this SBCL's shape is not the one
+   PCL knows.  Read on SBCL 2.5.2 (the supported floor) and 2.6.0: identical.
+   Decided once, when the runtime loads (cf. %p-ef-in-place-routines)."
+  (flet ((fn (name)
+           (let ((s (find-symbol name "SB-IMPL")))
+             (and s (fboundp s) (fdefinition s)))))
+    (let ((stop (fn "FINALIZER-THREAD-STOP"))
+          (start (fn "FINALIZER-THREAD-START"))
+          (rehash (fn "FINALIZERS-REHASH"))
+          (one (fn "RUN-USER-FINALIZER"))
+          (var (find-symbol "*FINALIZER-THREAD*" "SB-IMPL"))
+          (queue (find-symbol "*FINALIZERS-TRIGGERED*" "SB-IMPL")))
+      (and stop start rehash one var queue (boundp var) (boundp queue)
+           (vector stop start rehash one var queue)))))
+
+(defparameter *p-finalizer-drain* (%p-finalizer-drain-routines)
+  "%p-finalizer-drain-routines' answer for this SBCL, decided at load.")
+
+(defun %p-finalizers-pending-p ()
+  "True when a collection has queued finalizers that have not run yet."
+  (let ((r *p-finalizer-drain*))
+    (and r (symbol-value (svref r 5)) t)))
+
+(defun %p-run-dead-handle-finalizers ()
+  "Run, in THIS thread, every finalizer a collection has queued, and return
+   only when none is running anywhere.  SBCL runs finalizers on its own thread,
+   so a caller that must see the descriptors closed NOW (a retried `flock' or
+   open, the exit, a fork) cannot just call run-pending-finalizers: an item the
+   thread already took may still be running when that returns.  Stopping the
+   thread joins it -- an in-flight finalizer completes -- then the queue is
+   drained here and the thread restarted from this thread, so it inherits this
+   thread's signal mask (%p-sig-relay-start relies on the same)."
+  (let ((r *p-finalizer-drain*))
+    (if (null r)
+        (sb-kernel:run-pending-finalizers)
+        (let ((running (typep (symbol-value (svref r 4)) 'sb-thread:thread)))
+          (when running (funcall (svref r 0)))
+          (unwind-protect
+               (progn (funcall (svref r 2))
+                      (loop while (funcall (svref r 3))))
+            (when running (funcall (svref r 1)))))))
+  (values))
+
+(defun %p-weaken-pins (table)
+  "Move TABLE's entries into a fresh weak-key table, leaving TABLE empty."
+  (let ((weak (make-hash-table :test 'eq :weakness :key)))
+    (maphash (lambda (k v) (setf (gethash k weak) v)) table)
+    (clrhash table)
+    weak))
+
+(defun %p-restore-pins (table weak)
+  "Put back WEAK's surviving entries; one TABLE gained meanwhile wins."
+  (maphash (lambda (k v)
+             (unless (nth-value 1 (gethash k table))
+               (setf (gethash k table) v)))
+           weak))
+
+(defun %p-collect-dead-handles ()
+  "THE TRIGGER'S COLLECTION: free every handle the program can no longer
+   reach and close its descriptor before returning (see the header above).
+   The three pins are weakened for the collection's length; Perl signal
+   handlers are held meanwhile (they could read `$.').  Returns T.  Costs a
+   full collection: only %p-flock-impl and the openers' descriptor retry call
+   it, at the point where the program would otherwise block or fail."
+  (%p-with-signals-held (:collector)
+                        (let ((last (and *p-last-read-handle*
+                                         (sb-ext:make-weak-pointer *p-last-read-handle*)))
+                              (lines (%p-weaken-pins *p-fh-lines*))
+                              (eofs (%p-weaken-pins *p-eof-seen*)))
+                          (setf *p-last-read-handle* nil)
+                          (unwind-protect
+                               (progn (sb-ext:gc :full t)
+                                      (%p-run-dead-handle-finalizers))
+                            (%p-restore-pins *p-fh-lines* lines)
+                            (%p-restore-pins *p-eof-seen* eofs)
+                            (unless *p-last-read-handle*
+                              (setf *p-last-read-handle*
+                                    (and last (sb-ext:weak-pointer-value last)))))))
+  t)
+
+(defun %p-out-of-fds-p (errno)
+  "True for EMFILE (the process) and ENFILE (the system): no descriptor left."
+  (or (eql errno sb-posix:emfile) (eql errno sb-posix:enfile)))
+
+(defmacro %p-with-fd-retry ((failed-p) &body body)
+  "BODY opens a descriptor and answers a value FAILED-P (a function name)
+   accepts, with `$!' set, when it fails.  A failure for want of a descriptor
+   runs the collector -- a dropped handle gives its descriptor back -- and BODY
+   once more (task #2006 PART 2).  Never in a loop: one retry per call."
+  (let ((v (gensym "V")))
+    `(flet ((attempt () ,@body))
+       (let ((,v (attempt)))
+         (if (and (,failed-p ,v) (%p-out-of-fds-p *p-stored-errno*))
+             (progn (%p-collect-dead-handles) (attempt))
+             ,v)))))
+
+(defun %p-call-with-fd-retry (thunk)
+  "THUNK makes a descriptor with an sb-posix call that SIGNALS on failure
+   (dup, pipe, opendir).  %p-with-fd-retry's rule for that shape: out of
+   descriptors -> collect, call THUNK once more (whose failure propagates)."
+  (handler-case (funcall thunk)
+    (sb-posix:syscall-error (e)
+      (if (%p-out-of-fds-p (sb-posix:syscall-errno e))
+          (progn (%p-collect-dead-handles) (funcall thunk))
+          (error e)))))
 
 (defun %p-dup-src-name (have-val val name-str)
   "The handle NAME a dup-open's source designator spells, when it spells one:
@@ -22101,7 +22330,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               ;; the flag like every other open.
               (if (and eq-form (streamp src))
                   (progn (%p-install-fh fh (%p-fdopen-alias src) nil) t)
-                  (let* ((new-fd (if eq-form src-fd (sb-posix:dup src-fd)))
+                  (let* ((new-fd (if eq-form
+                                     src-fd
+                                     (%p-call-with-fd-retry
+                                      (lambda () (sb-posix:dup src-fd)))))
                          (stream (%p-dup-make-stream new-fd mode-str)))
                     (%p-install-fh fh stream (not eq-form))
                     t)))
@@ -22188,8 +22420,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    anything else escaping CL `open` is a PCL bug that must stay loud (rule 12)."
   (if (zerop (length name))
       (%p-io-errno-fail 2)
-      (handler-case (apply #'open (%p-literal-path name) open-args)
-        (file-error () (%pcl-save-errno) nil))))
+      (%p-with-fd-retry (null)
+                        (handler-case (apply #'open (%p-literal-path name) open-args)
+                          (file-error () (%pcl-save-errno) nil)))))
 
 (defun %p-open-impl (fh mode filename &optional three-arg-p more-args no-command-p)
   "Implementation of Perl open.  THREE-ARG-P says the program wrote the mode and
@@ -22439,10 +22672,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                    #o666
                    (truncate (to-number perms))))
          (dir (%p-sysopen-direction flag-word))
-         (fd (handler-case (sb-posix:open path-str flag-word mode)
-               (sb-posix:syscall-error (e)
-                 (setf *p-stored-errno* (sb-posix:syscall-errno e))
-                 nil))))
+         (fd (%p-with-fd-retry (null)
+                               (handler-case (sb-posix:open path-str flag-word mode)
+                                 (sb-posix:syscall-error (e)
+                                   (setf *p-stored-errno* (sb-posix:syscall-errno e))
+                                   nil)))))
     (when (null fd)
       (return-from %p-sysopen-impl nil))
     (let ((stream (sb-sys:make-fd-stream
@@ -23518,18 +23752,19 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((dom   (truncate (to-number domain)))            ; AF_INET=2 AF_UNIX=1
         (typ   (truncate (to-number type)))              ; SOCK_STREAM=1 SOCK_DGRAM=2
         (proto (truncate (to-number protocol))))
-    (handler-case
-        (let* ((stype (if (= typ 2) :datagram :stream))
-               (sock (if (= dom 1)
-                         (make-instance 'sb-bsd-sockets:local-socket :type stype)
-                         (make-instance 'sb-bsd-sockets:inet-socket :type stype
-                                        :protocol (cond ((= proto 17) :udp)
-                                                        ((= proto 6) :tcp)
-                                                        ((= typ 2) :udp)
-                                                        (t :tcp))))))
-          (%p-install-fh fh sock)
-          1)
-      (error () (%pcl-save-errno) ""))))
+    (%p-with-fd-retry ((lambda (v) (equal v "")))
+                      (handler-case
+                          (let* ((stype (if (= typ 2) :datagram :stream))
+                                 (sock (if (= dom 1)
+                                           (make-instance 'sb-bsd-sockets:local-socket :type stype)
+                                           (make-instance 'sb-bsd-sockets:inet-socket :type stype
+                                                          :protocol (cond ((= proto 17) :udp)
+                                                                          ((= proto 6) :tcp)
+                                                                          ((= typ 2) :udp)
+                                                                          (t :tcp))))))
+                            (%p-install-fh fh sock)
+                            1)
+                        (error () (%pcl-save-errno) "")))))
 
 (defmacro p-socket (fh domain type protocol)
   "Perl socket — bareword filehandle is auto-quoted."
@@ -23585,12 +23820,13 @@ would consume, so it dies naming the stream (rule 12)."
    (a true value).  '' (and sets $!) on failure."
   (let ((server (%p-get-socket serverfh)))
     (unless server (return-from %p-accept-impl ""))
-    (handler-case
-        (let ((new (sb-bsd-sockets:socket-accept server)))
-          (%p-install-fh newfh new)
-          (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername new)
-            (%p-pack-sockaddr-in addr port)))
-      (error () (%pcl-save-errno) ""))))
+    (%p-with-fd-retry ((lambda (v) (equal v "")))
+                      (handler-case
+                          (let ((new (sb-bsd-sockets:socket-accept server)))
+                            (%p-install-fh newfh new)
+                            (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername new)
+                              (%p-pack-sockaddr-in addr port)))
+                        (error () (%pcl-save-errno) "")))))
 
 (defmacro p-accept (newfh serverfh)
   "Perl accept — both filehandles are auto-quoted (the new socket is written
@@ -24951,10 +25187,64 @@ would consume, so it dies naming the stream (rule 12)."
        "")
       (t
        (ignore-errors (force-output stream))
-       (let ((rc (%p-c-flock fd (truncate (to-number op)))))
-         (if (zerop rc)
-             1
-             (progn (%pcl-save-errno) "")))))))
+       (let ((o (truncate (to-number op))))
+         (multiple-value-bind (rc errno) (%p-flock-op fd o)
+           (if (zerop rc)
+               (progn (%p-flock-note fd o) 1)
+               (progn (setf *p-stored-errno* errno) ""))))))))
+
+;;; A LOCK THE PROGRAM HOLDS THROUGH A HANDLE IT DROPPED (task #2006 PART 2).
+;;; flock(2) locks belong to the open file DESCRIPTION, so a second open of the
+;;; same file in the same process conflicts with the first: when the first
+;;; handle was dropped (Path::Tiny's `slurp' returns a LOCK_SH handle and lets
+;;; it go), perl had closed it and the second `flock' succeeds; PCL kept it
+;;; open and a blocking `flock' waited for its own process forever.  So a lock
+;;; request is tried non-blocking first, and when it would block on a file
+;;; THIS process has locked before (through any handle -- a dup shares the
+;;; lock, so the handle cannot be the key) or while the collector has
+;;; finalizers waiting, the collector runs once and the request is tried
+;;; again -- then the program's own call, blocking or not.  A file only other
+;;; processes lock costs one fstat, never a collection.
+(defvar *p-flock-files* (make-hash-table :test 'equal)
+  "(DEV . INO) of every file this process has taken a flock on.")
+
+(defun %p-file-id (fd)
+  "(DEV . INO) of the file open on FD, or NIL."
+  (let ((st (ignore-errors (sb-posix:fstat fd))))
+    (and st (cons (sb-posix:stat-dev st) (sb-posix:stat-ino st)))))
+
+(defun %p-flock-held-elsewhere-p (fd)
+  "Could a handle this program dropped be what blocks a flock on FD?  True
+   when this process has locked FD's file before, or when finalizers are
+   queued (a dropped holder already collected)."
+  (or (%p-finalizers-pending-p)
+      (let ((id (%p-file-id fd)))
+        (and id (gethash id *p-flock-files*) t))))
+
+(defun %p-flock-call (fd op)
+  "flock(2) FD with OP: (values RC ERRNO), the errno read at once."
+  (let ((rc (%p-c-flock fd op)))
+    (values rc (if (zerop rc) 0 (sb-alien:get-errno)))))
+
+(defun %p-flock-op (fd op)
+  "flock(2) FD with OP, with the collector's one retry (see above): (values
+   RC ERRNO) of the LAST call made."
+  (if (or (not (logtest op 3)) (logtest op 8))   ; not LOCK_SH/LOCK_EX, or LOCK_UN
+      (%p-flock-call fd op)
+      (multiple-value-bind (rc errno) (%p-flock-call fd (logior op 4)) ; LOCK_NB
+        (cond ((zerop rc) (values rc errno))
+              ((not (eql errno sb-posix:ewouldblock)) (values rc errno))
+              ((%p-flock-held-elsewhere-p fd)
+               (%p-collect-dead-handles)
+               (%p-flock-call fd op))
+              ((logtest op 4) (values rc errno))
+              (t (%p-flock-call fd op))))))
+
+(defun %p-flock-note (fd op)
+  "After a SUCCESSFUL flock OP on FD: remember the file a lock was taken on."
+  (when (and (logtest op 3) (not (logtest op 8)))
+    (let ((id (%p-file-id fd)))
+      (when id (setf (gethash id *p-flock-files*) t)))))
 
 (defmacro p-flock (fh op)
   "Perl flock — bareword filehandle is auto-quoted, like fileno's."
@@ -25505,7 +25795,9 @@ would consume, so it dies naming the stream (rule 12)."
          ;; The system's own answer (#2922): a failing opendir(3) sets $! as
          ;; perl's does (ENOENT, ENOTDIR for a plain file, EACCES) -- and the
          ;; stream it opens on success is the one the listing reads.
-         (names (handler-case (%p-dir-stream-names (sb-posix:opendir dir-str))
+         (names (handler-case (%p-dir-stream-names
+                               (%p-call-with-fd-retry
+                                (lambda () (sb-posix:opendir dir-str))))
                   (sb-posix:syscall-error (e)
                     (%p-io-errno-fail (sb-posix:syscall-errno e))
                     :fail))))
@@ -27141,7 +27433,8 @@ would consume, so it dies naming the stream (rule 12)."
   ;; and it attaches the stream to a GLOB target (a gensym) instead of
   ;; overwriting the box that holds the glob.
   (handler-case
-      (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
+      (multiple-value-bind (read-fd write-fd)
+          (%p-call-with-fd-retry #'sb-posix:pipe)
         (let ((read-stream (sb-sys:make-fd-stream read-fd
                                                   :input t
                                                   :buffering :none
