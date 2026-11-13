@@ -5054,6 +5054,34 @@ sub _reg_eval_capture {
   return @forms;
 }
 
+# How a string eval reaches a PROMOTED (renamed) scalar cell -- decided here
+# once for every declaration branch that lowers one (_lower_decl_list's
+# single-scalar AND multi-name branches; the multi one emitting the alias
+# unconditionally kept #4461 alive for `my ($r, $c);`, s537b).  A BLOCK-extent
+# cell (`_eval_block_cells`: M5, s353; every block cell since #4461) gets NO
+# global alias -- the alias would outlive the block, and a later
+# p-alias-eval-cell would clobber an OUTER promotion's alias for the same
+# name.  It joins the eval-site capture alists under its ORIGINAL name (the
+# alist builder strips __file__N, innermost-first), scoped to the block by the
+# enclosing save/restore of _let_bound_vars.  Deliberately NOT _reg_lex:
+# _live_lex would re-trip the nested-sub hoist gate, and _seg_lex is unneeded
+# (_forward_global_decls already skips _file_lex_renamed names).  Any other
+# promoted cell gets the M-F alias (_reg_eval_capture) when the file has a
+# string eval.  Returns the CLForms to emit after the assignment.
+sub _eval_reach_promoted {
+  my ($self, @names) = @_;
+  my @forms;
+  for my $name (@names) {
+    if ($self->{_eval_block_cells} && $self->{_eval_block_cells}{$name}) {
+      $self->{_let_bound_vars}{$name} = 1;
+      delete $self->{_pending_eval_caps}{$name} if $self->{_pending_eval_caps};
+    } elsif ($self->{_file_has_str_eval}) {
+      push @forms, $self->_reg_eval_capture($name);
+    }
+  }
+  return @forms;
+}
+
 # ---- W8.5 shared shadow-rename machinery ----------------------------------
 # A `my $x` whose scope is a subtree we can delimit (a fallback block, a
 # condition-my's construct) can be renamed to a fresh name so it stops
@@ -10350,23 +10378,7 @@ sub _lower_decl_scalar {
       _decl_cell($name, '(make-p-box nil)');
     # Register AFTER the assignment: the decl's own RHS (incl. an eval in
     # it) still resolves the original name to the OUTER variable.
-    my @reg;
-    if ($self->{_eval_block_cells} && $self->{_eval_block_cells}{$name}) {
-      # M5 (s353), enclosing-outer shape: NO global alias — a later
-      # p-alias-eval-cell would clobber the OUTER promotion's alias for
-      # the same original name, and post-block evals must keep resolving
-      # the outer cell.  Instead the cell joins the eval-site capture
-      # alists under its ORIGINAL name (the alist builder strips
-      # __file__N, innermost-first), scoped to this block by the
-      # enclosing save/restore of _let_bound_vars.  Deliberately NOT
-      # _reg_lex: _live_lex would re-trip the nested-sub hoist gate, and
-      # _seg_lex is unneeded (_forward_global_decls already skips
-      # _file_lex_renamed names).
-      $self->{_let_bound_vars}{$name} = 1;
-      delete $self->{_pending_eval_caps}{$name} if $self->{_pending_eval_caps};
-    } else {
-      @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
-    }
+    my @reg = $self->_eval_reach_promoted($name);
     return (@declmod_eval,
             ($lowprec_run
               ? ($self->_lower_expr($lowprec_run, $first, ':void'))
@@ -10703,7 +10715,7 @@ sub _lower_decl_list {
     push @{ $self->{_captured_decls} },
       _decl_cell($_, _fresh_container($_)) for @renamed;
     # Register AFTER the assignment (the decl's RHS reads the outer vars).
-    my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture(@renamed) : ();
+    my @reg = $self->_eval_reach_promoted(@renamed);
     my @unren  = grep { !$self->{_file_lex_renamed}{$_} } @$vars;
     $self->_reg_lex(@unren);
     my @assign = $has_init ? ($assign_form->()) : ();

@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 14;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -210,4 +210,26 @@ print "between=", (defined $got ? $got : 'u'), "\n";
 { my $x = 1; sub h { $x } { { eval '$x = 2' } } print "h=", h(), " "; }
 { my $n = 0; sub rr { my $l = shift; $n++; eval 'rr($l - 1)' if $l > 0; $n } print "n=", rr(3), "\n"; }
 print defined($c) ? "def" : "u", " ", defined($n) ? "def" : "u", "\n";
+PL
+
+# ── 15. #4461 (s537b, s540): the same rule for a MULTI-name declaration --
+#    `my ($r, $c);` lowered through _lower_decl_list's multi branch, which
+#    emitted the global alias unconditionally until _eval_reach_promoted
+#    became the one decision for both branches (predicted vs actual found it:
+#    t/op/eval.t:419 was predicted and did not move).
+is(run_cl(<<'PL'), "in=X\nwrote=1/7\nafter=pa/pc u\n", '#4461: a block cell of a multi-name my stays out of the global name');
+our ($a1, $c) = ("pa", "pc");
+{
+    my ($r, $c);
+    sub ctx { $c = 'X' }
+    ctx();
+    print "in=", eval('$c'), "\n";
+}
+{
+    my ($a1, $k) = (1, 2);
+    sub both { "$a1/$k" }
+    eval '$k = 7';
+    print "wrote=", both(), "\n";
+}
+print "after=$a1/$c ", (defined $k ? "def" : "u"), "\n";
 PL
