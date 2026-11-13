@@ -10,7 +10,7 @@
 # Usage:
 #   tools/board-timing.pl [SELECTION] [--modes cold,warm] [--repeat N]
 #        [--cache-root DIR] [--cold-continue] [--out FILE.tsv] [--timeout S]
-#        [--no-hooks] [--no-perl] [--prof cpu|alloc --prof-dir DIR]
+#        [--no-hooks] [--no-perl] [--prof cpu|alloc --prof-dir DIR [--prof-from start]]
 #        [--preload FASL] [--env K=V] [--variant NAME]   (a LEVER's A/B: a
 #        file loaded in front of the program, an environment setting for the
 #        transpile and the run, and the name its rows carry)
@@ -110,6 +110,7 @@ my ($list, $modes, $repeat, $cache_root, $timeout, $timeouts_tsv, $hooks, $repor
      "$root/baselines/cpan-board-timeouts.tsv", 1, 0, 60);
 my ($perl_side, $cold_continue, $variant, @preload, %xenv) = (1, 0, q{});
 my $norm = 0;
+my $prof_from = q{boundary};
 my @ARGV_COPY = @ARGV;
 my @positional;
 while (@ARGV) {
@@ -132,6 +133,7 @@ while (@ARGV) {
   elsif ($a eq q{--variant}) { $variant = shift @ARGV }
   elsif ($a eq '--prof')       { $prof = shift @ARGV }
   elsif ($a eq '--prof-dir')   { $prof_dir = shift @ARGV }
+  elsif ($a eq q{--prof-from})  { $prof_from = shift @ARGV }
   elsif ($a eq '--core')       { $core = shift @ARGV }
   elsif ($a eq '--sha')        { $sha = shift @ARGV }
   elsif ($a eq '--report')     { $report = 1 }
@@ -366,12 +368,13 @@ sub pcl_run {
   $left = 10 if $left < 10;
   my $loads = ($hooks_fasl ? "--load $hooks_fasl " : '') . join('', map { "--load $_ " } @preload);
   my %env = (PCL_CACHE_DIR => $cache, PERL5LIB => perl5lib($w), PCL_BT_OUT => $rec,
-             PCL_BT_PROF => undef, PCL_BT_PROF_OUT => undef);
+             PCL_BT_PROF => undef, PCL_BT_PROF_OUT => undef, PCL_BT_PROF_FROM => undef);
   @env{keys %xenv} = values %xenv;
   if ($prof && $mode ne 'warmup') {
     File::Path::make_path($prof_dir);
     (my $stem = $w->{rel}) =~ s{/}{__}g;
-    @env{qw(PCL_BT_PROF PCL_BT_PROF_OUT)} = ($prof, abs_path($prof_dir) . "/$stem.$prof.prof");
+    @env{qw(PCL_BT_PROF PCL_BT_PROF_OUT)} = ($prof, abs_path($prof_dir) . "/$stem.$prof" . ($prof_from eq q{start} ? q{.start} : q{}) . ".prof");
+    $env{PCL_BT_PROF_FROM} = $prof_from;
   }
   my ($st, $sw, $sc, $spawn) = timed("timeout -k 5 $left $sbcl $loads--load $lisp >$sout 2>$serr </dev/null",
                                      $w->{dist}, \%env);
@@ -700,6 +703,7 @@ sub hooks_source { return <<'LISP' }
 (defvar *ctx* :script)
 (defvar *prof* (sb-ext:posix-getenv "PCL_BT_PROF"))
 (when *prof* (require :sb-sprof))
+(defvar *prof-from-start* (equal (sb-ext:posix-getenv "PCL_BT_PROF_FROM") "start"))
 (defun call-in (bucket ctx fn args)
   (let ((frame (cons 0 0)) (w0 (now-us)) (c0 (cpu-us)))
     (incf (gethash bucket *count* 0))
@@ -730,7 +734,7 @@ sub hooks_source { return <<'LISP' }
            :max-samples 400000 :sample-interval 0.001 :threads :all))
 (defun prof-report ()
   (let ((path (sb-ext:posix-getenv "PCL_BT_PROF_OUT")))
-    (when (and *prof* path *boundary*)
+    (when (and *prof* path (or *boundary* *prof-from-start*))
       (funcall (intern "STOP-PROFILING" "SB-SPROF"))
       (with-open-file (s path :direction :output :if-exists :supersede
                               :if-does-not-exist :create)
@@ -756,7 +760,7 @@ sub hooks_source { return <<'LISP' }
                           (multiple-value-prog1 (apply f args)
                             (when (and (not pcl::*p-unit-load*) (null *boundary*))
                               (setf *boundary* (list (now-us) (cpu-us)))
-                              (when *prof* (prof-start)))))))
+                              (when (and *prof* (not *prof-from-start*)) (prof-start)))))))
   (sb-int:encapsulate 'sb-c:compile-in-lexenv 'board-timing
                       (lambda (f &rest args) (call-in (compile-bucket) nil f args))))
 (defun write-record (phase)
@@ -778,6 +782,7 @@ sub hooks_source { return <<'LISP' }
                            k v k (gethash k *cpu* 0)))
                  *wall*)
         (maphash (lambda (k v) (format s "~(~A~)_n=~D~%" k v)) *count*)))))
+(when (and *prof* *prof-from-start*) (prof-start))
 (push (lambda () (ignore-errors (prof-report)) (ignore-errors (write-record "front")))
       sb-ext:*exit-hooks*)
 (setf sb-ext:*exit-hooks*
