@@ -96,3 +96,23 @@ best of 3) is the reference, and the doc says which table is which.
 ## 6. Possible correctness findings (PCL suspiciously fast)
 
 ## 7. What the board does NOT tell
+
+A test suite is a poor sample of a program's steady state, in four ways, and
+the levers it cannot see are #4788's to find:
+
+* **It is load-dominated.**  Most board files run for tens of milliseconds
+  under perl; PCL's per-file constants (the test file's `pl2cl`, the TAP-layer
+  compile, the module-under-test compile) are paid by every file and dominate
+  the totals.  A long-running program pays them once.
+* **The test harness is native in PCL.**  `use Test::More` is
+  `cl/pcl-test.lisp`, not perl's Test::Builder, so each `ok` / `is` costs PCL
+  a Lisp call where perl runs several method calls.  Files with tens of
+  thousands of assertions make PCL's run phase look faster than the module's
+  own code is (Text-CSV `55_combi.t`: 25,119 rows; section 6).
+* **Its loops are short.**  Few board files run a hot loop for seconds, so
+  steady-state costs -- string building, I/O loops, large sorts and hashes,
+  OO dispatch at scale -- are under-weighted; the bench rows
+  (`tools/bench-exec.pl`) and the everyday corpus measure those.
+* **It never runs `pcl`'s script cache** (the board transpiles every file
+  fresh) and, here, never the board's own `--no-cache` mode; a user's repeated
+  run of an unchanged script skips phase A and the script's compile.
