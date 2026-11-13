@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s540a (Opus agent, 2026-11-13) from the CPAN board timing (#4787; docs/cpan-speed-comparison-s540.md section 4, the per-file table baselines/board-timing-s540.tsv; tool tools/board-timing.pl).  Times are CPU seconds, code 381d9063 (MAIN-READY-89), coarse pass load-normalised, lever A/Bs on a quiet box (heavy.sh bench, best of 3).\n\nWHAT: Symbol::gensym ends with `delete $$genpkg{$name}` ($genpkg = \"Symbol::\").  PCL lowers the symbolic hashref to p-ensure-hashref -> p-stash, which BUILDS a fresh Perl view of the package by iterating its CL package (sb-int:package-iter-step) and adding variable names -- O(symbols visible in the package) per call.  Capture-Tiny's run phase (profiles 06-stdout-closed.t, 03-tee.t on 05806e16): p-stash 21-24 % of the run.\n\nDISCRIMINATING MEASUREMENT (TAKEN, scratch/s540a/bench2b.log): 20,000 x gensym perl 0.010 s / PCL 1.63 s; 5,000 x IO::Handle->new 0.010 / 0.51 s (scratch/s540a/micro/gensym.pl, iohandle.pl).\n\nLEVER: a stash ELEMENT operation (exists / delete / fetch of $Pkg::{NAME} through a symbolic hashref) that touches the one symbol, without materialising the view -- or a view cached per package and dropped when the package changes.  Read #3695 (the stash view lists lexicals) and #3635 / #3670 first: same function family.  Size: one session.",
+   "id" : "4964",
+   "status" : "pending",
+   "subject" : "PERF: Symbol::gensym costs 81 us per call (perl 0.5 us, 160x) -- `delete $$genpkg{$name}` on the stash %{\"Symbol::\"} MATERIALISES the whole stash view (p-stash -> %p-stash-add-variable-names, package-iter-step over every visible symbol) each time; every IO::Handle->new / IO::File->new pays it"
+}

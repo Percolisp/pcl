@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s540a (Opus agent, 2026-11-13) from the CPAN board timing (#4787; docs/cpan-speed-comparison-s540.md section 4, the per-file table baselines/board-timing-s540.tsv; tool tools/board-timing.pl).  Times are CPU seconds, code 381d9063 (MAIN-READY-89), coarse pass load-normalised, lever A/Bs on a quiet box (heavy.sh bench, best of 3).\n\nWHAT: the run phase's subprocess CPU on the board is 51.7 s (16 files, 4 dists; Capture-Tiny ~50 s: its tee children are perl -e processes forked from the test).  strace -f of Capture-Tiny t/06-stdout-closed.t (scratch/s540a/probe/ct06-*.st): perl and PCL exec the SAME 391 perl children, but PCL makes 631 process forks (perl 391) and 481 THREAD creations, each with a 512 MB stack (stack_size=0x1fffef40: the --control-stack-size 512 applies to every thread) -- the finalizer thread that sb-posix:fork stops and restarts, and the signal-relay thread %p-fork-process restarts in BOTH processes, including a child that is about to exec.\n\nDISCRIMINATING MEASUREMENT (TAKEN, scratch/s540a/bench1.log, micro/spawn-*.pl): 200 x fork + exec 'true': perl 0.18 s / PCL 0.85 s CPU (+3.4 ms per fork); 200 x system('true'): 0.16 / 0.29; 200 x backticks: 0.50 / 0.33 (PCL faster).\n\nLEVER: in the child, do not restart threads before exec (exec is the common next step); find what the extra 240 forks are (a run-program fork beside the Perl fork?); a smaller stack for the two service threads.  Size: one session (portability: Linux + macOS, the s491 matrix rule).",
+   "id" : "4965",
+   "status" : "pending",
+   "subject" : "PERF: a Perl fork under PCL costs +3.4 ms of CPU (perl 0.9 ms) -- %p-fork-process stops and restarts the signal-relay thread and sb-posix:fork the finalizer thread in parent AND child; Capture-Tiny's 06-stdout-closed.t makes 481 thread creations with 512 MB stacks and 631 forks where perl makes 391"
+}

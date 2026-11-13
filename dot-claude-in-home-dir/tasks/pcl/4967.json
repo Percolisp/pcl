@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-13",
+   "description" : "FILED s540a (Opus agent, 2026-11-13) from the CPAN board timing (#4787; docs/cpan-speed-comparison-s540.md section 4, the per-file table baselines/board-timing-s540.tsv; tool tools/board-timing.pl).  Times are CPU seconds, code 381d9063 (MAIN-READY-89), coarse pass load-normalised, lever A/Bs on a quiet box (heavy.sh bench, best of 3).\n\nWHAT: JSON-PP's 16 099_binary*.t files hold most of the board's SBCL run phase (69.9 s of 109 s).  Profile of 099_binary15.t (cpu + alloc, 05806e16, scratch/s540a/prof-05806e16/): 85 % under p-method-call (JSON::PP is all $self->method), then a spread -- box-set + %make-p-box 8 % self and 25 % of allocation, gethash/equal 8 % (callers: p-gethash = object field reads, %pcl-own-method-cached), string=* 3 %, GC (maybe_gc -> pthread_sigmask) 2 %, %concatenate-to-string 21 % and vector-subseq 17 % of allocation.\n\nRULED OUT by measurement: one-character substr (micro/substr1.pl: 2 M calls perl 0.11 / PCL 0.12 s -- par).\n\nDISCRIMINATING MEASUREMENT for whoever takes it: micro/jsonpp.pl (40 encode+decode round trips of a 200-string array: perl 0.18 s / PCL 0.84 s) as the row; split encode from decode first, then A/B #4523/#4524's prototypes (scratch/s534a/rt/) on it to see how much is lookup.  Size: several sessions; may land in #1890 (the per-object EQUAL table).",
+   "id" : "4967",
+   "status" : "pending",
+   "subject" : "PERF (CPAN board, the run phase's largest item, ~48 s): JSON::PP encode/decode round trips run 4.6x perl (micro/jsonpp.pl 0.18 vs 0.84 s; JSON-PP 099_binary* run 69.9 s vs perl 21.5) with a SPREAD profile -- boxes, EQUAL-table field + method lookups, per-character allocation; find the lever"
+}
