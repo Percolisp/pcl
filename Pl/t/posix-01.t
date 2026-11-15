@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 19;
 
 sub write_pl {
     my ($code) = @_;
@@ -139,3 +139,20 @@ both_agree('use POSIX; my $ok = eval { POSIX::sigprocmask(0); 1 };'
 both_agree('eval { require POSIX; POSIX->import("locale_h") }; print "err=[$@] ", LC_ALL() + 0, "\n";'
            . ' package Q; use POSIX qw(sys_wait_h); print +(defined &Q::WNOHANG ? 1 : 0), "\n";',
            'POSIX->import("locale_h"): the colon-less tag spelling imports the tag (#4169)');
+
+# ---- s540e, task #4991: strftime normalises by ARITHMETIC ------------------
+# The fields are broken down from their epoch value as if UTC (perl's
+# mini_mktime: no time zone), so only %z / %Z / %s read the zone, once a call.
+# Until s540e the fields came out of localtime(mktime(...)), which SHIFTED a
+# time inside a DST gap by the gap: 03:30 on Europe/Bucharest's spring-forward
+# morning printed 04:30 (perl: 03:30).  Both runs get TZ=Europe/Bucharest from
+# the environment; the gap row fails on the s540e base.
+{
+    local $ENV{TZ} = 'Europe/Bucharest';
+    both_agree('use POSIX; print join("|", map { strftime("%F %T %a %j %U %V %G", @$_) }'
+             . ' [30, 30, 3, 31, 2, 124], [0, 0, 3, 31, 2, 124], [59, 59, 2, 31, 2, 124], [30, 30, 3, 27, 9, 124]), "\n";',
+               'strftime does not shift a time in a DST gap (perl: mini_mktime normalisation)');
+    both_agree('use POSIX; print strftime("[%z] [%s] %d %e %k %l %I %M %S %D %R %r %T", 5, 4, 3, 2, 0, 100, -1, -1, 0),'
+             . ' "|", strftime("no conversions %% here %n%t", 0, 0, 0, 1, 0, 70), "|", strftime("%Y", 0, 0, 0, 1, -13, 100), "\n";',
+               'strftime: the zone letters, the padded fields, literals only, a month out of range');
+}

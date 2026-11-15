@@ -298,105 +298,138 @@ sub _asctime_fields {
 }
 
 # strftime(fmt, sec, min, hour, mday, mon, year, [wday, yday, isdst]).
-# perl MKTIME-NORMALISES the fields first, so strftime("%Y", 0,0,0,32,0,100)
-# is 2000-02-01 and not an error; the wday/yday arguments are IGNORED, exactly
-# as perl's are.
+# perl NORMALISES the fields first (mini_mktime: arithmetic, no time zone), so
+# strftime("%Y", 0,0,0,32,0,100) is 2000-02-01 and not an error; the
+# wday/yday arguments are IGNORED, exactly as perl's are.
+#
+# s540e (#4991): the fields are normalised by ARITHMETIC -- the fields' epoch
+# value as if they were UTC (`_timegm_fields`), broken down again by gmtime --
+# so a format of field letters makes no time-zone call at all.  Only %z, %Z
+# and %s read the zone, and they read it ONCE per call (`mktime` + one
+# localtime, made the first time one of them is met).  Until s540e every call
+# made three localtime calls (each a tzset), and the fields came out of
+# localtime(mktime(...)), which shifts a time that falls in a DST gap: perl
+# does not, and neither does this.  A parsed format is cached (literal runs
+# and conversion letters), and each letter is ONE table lookup.
+my (%STRF_PARSED, %STRF_SIMPLE, %STRF_ONE, @PAD2);
 sub strftime {
     my ($fmt, @f) = @_;
-    my $t = mktime(@f[0 .. 5]);
-    my @l = CORE::localtime($t);
-    return _format_time($fmt, \@l, $t);
-}
-
-my %STRF_SIMPLE = (
-    'n' => "\n", 't' => "\t", '%' => '%',
-);
-
-sub _format_time {
-    my ($fmt, $l, $t) = @_;
-    my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = @$l;
-    my $out = '';
-    my $i = 0;
-    while ($i < length $fmt) {
-        my $c = substr($fmt, $i++, 1);
-        if ($c ne '%') { $out .= $c; next }
-        my $k = substr($fmt, $i++, 1);
-        $k = '' if !defined $k;
-        if (exists $STRF_SIMPLE{$k}) { $out .= $STRF_SIMPLE{$k}; next }
-        $out .= _strf_one($k, $l, $t);
+    my @l = CORE::gmtime(_timegm_fields(@f[0 .. 5]));
+    my $p = $STRF_PARSED{$fmt};
+    if (!$p) {
+        %STRF_PARSED = () if keys(%STRF_PARSED) >= 256;
+        $p = $STRF_PARSED{$fmt} = _strf_parse($fmt);
+    }
+    my $out = $p->[0];
+    my $z;
+    for (my $j = 1; $j < @$p; $j += 2) {
+        my $k = $p->[$j];
+        my $one = $STRF_ONE{$k};
+        $out .= ($one ? $one->(@l) : _strf_zone($k, $z ||= _strf_local(@f))) . $p->[$j + 1];
     }
     return $out;
 }
 
-sub _strf_one {
-    my ($k, $l, $t) = @_;
-    my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday) = @$l;
-    return substr($DAY[$wday], 0, 3)        if $k eq 'a';
-    return $DAY[$wday]                      if $k eq 'A';
-    return substr($MONTH[$mon], 0, 3)       if $k eq 'b' || $k eq 'h';
-    return $MONTH[$mon]                     if $k eq 'B';
-    return sprintf("%02d", int(($year + 1900) / 100)) if $k eq 'C';
-    return sprintf("%02d", $mday)           if $k eq 'd';
-    return sprintf("%2d", $mday)            if $k eq 'e';
-    return sprintf("%02d", $hour)           if $k eq 'H';
-    return sprintf("%02d", $hour % 12 || 12) if $k eq 'I';
-    return sprintf("%03d", $yday + 1)       if $k eq 'j';
-    return sprintf("%2d", $hour)            if $k eq 'k';
-    return sprintf("%2d", $hour % 12 || 12) if $k eq 'l';
-    return sprintf("%02d", $mon + 1)        if $k eq 'm';
-    return sprintf("%02d", $min)            if $k eq 'M';
-    return $hour < 12 ? 'AM' : 'PM'         if $k eq 'p';
-    return $hour < 12 ? 'am' : 'pm'         if $k eq 'P';
-    return sprintf("%02d", $sec)            if $k eq 'S';
-    return $t                               if $k eq 's';
-    return $wday == 0 ? 7 : $wday           if $k eq 'u';
-    return $wday                            if $k eq 'w';
-    return sprintf("%02d", ($year + 1900) % 100) if $k eq 'y';
-    return $year + 1900                     if $k eq 'Y';
-    return sprintf("%02d/%02d/%02d", $mon + 1, $mday, ($year + 1900) % 100) if $k eq 'D';
-    return sprintf("%04d-%02d-%02d", $year + 1900, $mon + 1, $mday)         if $k eq 'F';
-    return sprintf("%02d:%02d", $hour, $min)                                if $k eq 'R';
-    return sprintf("%02d:%02d:%02d", $hour, $min, $sec)                     if $k eq 'T';
-    return sprintf("%02d:%02d:%02d %s", $hour % 12 || 12, $min, $sec, $hour < 12 ? 'AM' : 'PM') if $k eq 'r';
-    return sprintf("%02d/%02d/%02d", $mon + 1, $mday, ($year + 1900) % 100) if $k eq 'x';
-    return sprintf("%02d:%02d:%02d", $hour, $min, $sec)                     if $k eq 'X';
-    return _asctime_fields($sec, $min, $hour, $mday, $mon, $year, $wday) =~ s/\n\z//r if $k eq 'c';
-    return sprintf("%02d", int(($yday + 7 - $wday) / 7))                    if $k eq 'U';
-    return sprintf("%02d", int(($yday + 7 - ($wday == 0 ? 6 : $wday - 1)) / 7)) if $k eq 'W';
-    return _strf_zone($k, $t);
+%STRF_SIMPLE = (
+    'n' => "\n", 't' => "\t", '%' => '%',
+);
+
+# A format as [LITERAL, LETTER, LITERAL, LETTER, ..., LITERAL]: `%n` `%t` `%%`
+# fold into the literals; a `%` at the very end is the letter '' (which dies
+# when the format is used, as an unknown letter does).
+sub _strf_parse {
+    my ($fmt) = @_;
+    my @p = ('');
+    my $i = 0;
+    while ($i < length $fmt) {
+        my $c = substr($fmt, $i++, 1);
+        if ($c ne '%') { $p[-1] .= $c; next }
+        my $k = substr($fmt, $i++, 1);
+        $k = '' if !defined $k;
+        if (exists $STRF_SIMPLE{$k}) { $p[-1] .= $STRF_SIMPLE{$k}; next }
+        push @p, $k, '';
+    }
+    return \@p;
 }
 
-# %z / %Z / %V / %G / %g need the zone or the ISO week; anything else is a
+# The zone half of a call, made once: [t, localtime(t)] for the fields read
+# as LOCAL time (perl's mktime).
+sub _strf_local {
+    my $t = mktime(@_[0 .. 5]);
+    return [$t, CORE::localtime($t)];
+}
+
+@PAD2 = map { sprintf('%02d', $_) } 0 .. 99;
+sub _p2 { my ($n) = @_; return ($n >= 0 && $n <= 99) ? $PAD2[$n] : sprintf('%02d', $n) }
+
+# One entry per field letter: the broken-down fields in, the text out.
+%STRF_ONE = (
+    a => sub { substr($DAY[$_[6]], 0, 3) },
+    A => sub { $DAY[$_[6]] },
+    b => sub { substr($MONTH[$_[4]], 0, 3) },
+    h => sub { substr($MONTH[$_[4]], 0, 3) },
+    B => sub { $MONTH[$_[4]] },
+    C => sub { _p2(int(($_[5] + 1900) / 100)) },
+    d => sub { $PAD2[$_[3]] },
+    e => sub { sprintf("%2d", $_[3]) },
+    H => sub { $PAD2[$_[2]] },
+    I => sub { $PAD2[$_[2] % 12 || 12] },
+    j => sub { sprintf("%03d", $_[7] + 1) },
+    k => sub { sprintf("%2d", $_[2]) },
+    l => sub { sprintf("%2d", $_[2] % 12 || 12) },
+    m => sub { $PAD2[$_[4] + 1] },
+    M => sub { $PAD2[$_[1]] },
+    p => sub { $_[2] < 12 ? 'AM' : 'PM' },
+    P => sub { $_[2] < 12 ? 'am' : 'pm' },
+    S => sub { $PAD2[$_[0]] },
+    u => sub { $_[6] == 0 ? 7 : $_[6] },
+    w => sub { $_[6] },
+    y => sub { $PAD2[($_[5] + 1900) % 100] },
+    Y => sub { $_[5] + 1900 },
+    D => sub { "$PAD2[$_[4] + 1]/$PAD2[$_[3]]/$PAD2[($_[5] + 1900) % 100]" },
+    F => sub { sprintf("%04d", $_[5] + 1900) . "-$PAD2[$_[4] + 1]-$PAD2[$_[3]]" },
+    R => sub { "$PAD2[$_[2]]:$PAD2[$_[1]]" },
+    T => sub { "$PAD2[$_[2]]:$PAD2[$_[1]]:$PAD2[$_[0]]" },
+    r => sub { "$PAD2[$_[2] % 12 || 12]:$PAD2[$_[1]]:$PAD2[$_[0]] " . ($_[2] < 12 ? 'AM' : 'PM') },
+    x => sub { "$PAD2[$_[4] + 1]/$PAD2[$_[3]]/$PAD2[($_[5] + 1900) % 100]" },
+    X => sub { "$PAD2[$_[2]]:$PAD2[$_[1]]:$PAD2[$_[0]]" },
+    c => sub { _asctime_fields(@_[0 .. 6]) =~ s/\n\z//r },
+    U => sub { $PAD2[int(($_[7] + 7 - $_[6]) / 7)] },
+    W => sub { $PAD2[int(($_[7] + 7 - ($_[6] == 0 ? 6 : $_[6] - 1)) / 7)] },
+    V => sub { $PAD2[(_iso_week(@_))[1]] },
+    G => sub { (_iso_week(@_))[0] },
+    g => sub { _p2((_iso_week(@_))[0] % 100) },
+);
+
+# %z / %Z / %s need the zone (Z = [t, localtime(t)]); anything else is a
 # conversion this strftime does not implement and it DIES naming the letter
 # (CLAUDE.md rule 12 -- a format letter produces a VALUE the program consumes,
 # so a silent literal would be the wrong answer, not a missing one).
 sub _strf_zone {
-    my ($k, $t) = @_;
+    my ($k, $z) = @_;
+    my ($t, @lt) = @$z;
+    return $t if $k eq 's';
     if ($k eq 'z') {
-        my $off = _timegm_fields((CORE::localtime($t))[0 .. 5]) - $t;
+        my $off = _timegm_fields(@lt[0 .. 5]) - $t;
         my $sign = $off < 0 ? '-' : '+';
         $off = abs($off);
         return sprintf("%s%02d%02d", $sign, int($off / 3600), int(($off % 3600) / 60));
     }
     if ($k eq 'Z') {
-        my $off = _timegm_fields((CORE::localtime($t))[0 .. 5]) - $t;
+        my $off = _timegm_fields(@lt[0 .. 5]) - $t;
         return 'UTC' if $off == 0;
         my $sign = $off < 0 ? '-' : '+';
         $off = abs($off);
         return sprintf("UTC%s%02d%s", $sign, int($off / 3600),
                        ($off % 3600) ? sprintf(":%02d", int(($off % 3600) / 60)) : '');
     }
-    my ($iy, $iw) = _iso_week($t);
-    return sprintf("%02d", $iw) if $k eq 'V';
-    return $iy                  if $k eq 'G';
-    return sprintf("%02d", $iy % 100) if $k eq 'g';
     require Carp;
     Carp::croak("POSIX::strftime: unimplemented conversion %$k");
 }
 
+# The ISO 8601 week-numbering year and week of broken-down fields.
 sub _iso_week {
-    my ($t) = @_;
-    my @l = CORE::localtime($t);
+    my @l = @_;
     my ($yday, $wday, $year) = ($l[7], $l[6], $l[5] + 1900);
     my $iso_wday = $wday == 0 ? 7 : $wday;
     my $week = int(($yday - $iso_wday + 10) / 7);
