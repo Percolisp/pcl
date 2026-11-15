@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub run_cl {
     my ($code) = @_;
@@ -141,3 +141,31 @@ print +(-d $d ? "dir" : "no-dir"), " ", (-f $fn ? "file" : "no-file"), " ",
       ($fn =~ m{^/tmp/pcl-g\w{6}\.txt$} ? "name-ok" : $fn), "\n";
 PERL
    'File::Temp::tempdir/tempfile work again (they died in catdir)');
+
+# ── s540e, task #4985: canonpath's FAST PATH ────────────────────────────────
+# A path none of the six substitutions can touch comes back as it is (and the
+# same path plus the ONE trailing slash catdir's join always adds comes back
+# without it) -- 1.53 -> ~0.5 us a call under PCL.  A pure speed change: the
+# answers are the full body's, so this row holds the paths on both sides of
+# the guard's edge (a trailing slash, `./`, `/.hidden`, `x/..`, `/...`, a
+# newline before the end) against real perl 5.40.3, and catdir / catfile over
+# clean parts.  The guard's equivalence with the six substitutions was checked
+# on every string of up to 8 characters over `/ . a \n` (s540e probe).
+is(run_cl(<<'PERL'), <<'OUT',
+use File::Spec;
+for my $c ('a', 'a/', './', '.', '..', '../', '/a/', 'a/.b', '/.hidden', 'a/b/c.txt', '/a//b/',
+           "a/\n", 'x/..', '/a/b', 'a/./', '...', '/...', '/./') {
+  (my $s = File::Spec->canonpath($c)) =~ s/\n/\\n/g;
+  (my $e = $c) =~ s/\n/\\n/g;
+  print "[$e]>[$s] ";
+}
+print "\n";
+print join(' ', map { "[$_]" } File::Spec->catdir('t', 'data'), File::Spec->catdir('.', 'a'),
+  File::Spec->catdir('a', '/'), File::Spec->catdir('/', ''), File::Spec->catdir('..'),
+  File::Spec->catfile('t', 'data', 'x.json'), File::Spec->catfile('.', 'a'),
+  File::Spec->catfile('a', 'b', ''), File::Spec->catfile('/usr', 'lib')), "\n";
+PERL
+[a]>[a] [a/]>[a] [./]>[.] [.]>[.] [..]>[..] [../]>[..] [/a/]>[/a] [a/.b]>[a/.b] [/.hidden]>[/.hidden] [a/b/c.txt]>[a/b/c.txt] [/a//b/]>[/a/b] [a/\n]>[a/\n] [x/..]>[x/..] [/a/b]>[/a/b] [a/./]>[a] [...]>[...] [/...]>[/...] [/./]>[/] 
+[t/data] [a] [a] [/] [..] [t/data/x.json] [./a] [a/b/] [/usr/lib]
+OUT
+   'canonpath fast path: the answers either side of the guard are perl\'s (#4985)');

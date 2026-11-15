@@ -146,8 +146,19 @@ sub canonpath {
     # Path::Tiny object goes through — calls it, so its absence made all 30 of
     # that dist's test files die at load with "Can't locate object method
     # canonpath via package File::Spec" (perl: 29 PASS, 1779 assertions).
+    #
+    # FAST PATH (#4985, s540e): a path none of the six substitutions can touch
+    # is returned as it is, and so is such a path plus ONE trailing slash with
+    # that slash removed -- the shape catdir always hands in (`join('/', @_,
+    # '')`).  The test is the six substitutions' own triggers: `//` (1), `/.`
+    # (2, and 4 / 5, which need `/..`), a leading `./` (3), a trailing `/`
+    # (6).  The prefix it answers for is non-empty, so `/` and `` keep the
+    # full body; a `/.` anywhere (also `/.hidden`) takes the full body too.
     my ($class, $path) = @_;
     return unless defined $path;
+    my $q = substr($path, -1) eq '/' ? substr($path, 0, -1) : $path;
+    return $q if length $q && index($q, '//') < 0 && index($q, '/.') < 0
+        && substr($q, 0, 2) ne './' && substr($q, -1) ne '/';
     $path =~ s|/{2,}|/|g;                            # xx////xx  -> xx/xx
     $path =~ s{(?:/\.)+(?:/|\z)}{/}g;                # xx/././xx -> xx/xx
     $path =~ s|^(?:\./)+||s unless $path eq "./";    # ./xx      -> xx
