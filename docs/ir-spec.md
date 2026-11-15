@@ -1168,6 +1168,44 @@ noncharacters; the shim adds strict `UTF-8`'s noncharacter rule and lax
 my ($s, $at) = builtin::decode_octets('UTF-8', "ab\xE9cd", 0);   # ("ab", 2)
 ```
 
+**Digest, base64 and deep-copy primitives (normative, s540e, tasks #4988 #4990
+#4989).**  PCL-only names on the `builtin::` seam, each consumed by one shim
+and named for what it computes; none dies on its data -- every case its caller
+must report or route elsewhere is an ANSWER:
+- `builtin::md5_digest(BYTES)` -> the 16 raw MD5 bytes (RFC 1321, SBCL's
+  `sb-md5`), or **undef** when BYTES holds a character above 255.
+- `builtin::md5_update(H0, H1, H2, H3, PENDING, DATA)` -> `(H0, H1, H2, H3,
+  REST)`: the four chaining words after PENDING . DATA is consumed in whole
+  64-byte blocks, and the fewer than 64 bytes left; the **empty list**, nothing
+  consumed, for a character above 255.  The arguments are a list (an array
+  spreads).  Padding and the length block are the caller's.  A wrong argument
+  count dies naming the builtin.
+- `builtin::base64_encode(BYTES, EOL)` -> the RFC 4648 encoding with EOL after
+  every 76 characters and after the last (nothing for empty input); **undef**
+  for a character above 255.  `builtin::base64_decode(STRING)` -> the octets:
+  characters outside the alphabet (a wide one too) are skipped, the first `=`
+  ends the data, a 2- / 3-character tail is a 1- / 2-byte group, a lone
+  character is dropped.
+- `builtin::deep_copy(REF)` -> `(COPY, CLASS...)`: a structure equal to REF's
+  referent that shares no container with it -- arrays, hashes, scalar
+  referents, references to references; a referent reached twice or by a cycle
+  copied ONCE (an EQ table); every blessing kept, then the distinct classes
+  blessed into.  Scalars arrive CANONICAL, as a round trip through a
+  serialised form gives them: an integer of the 64-bit range as itself, an
+  integral double below 2**53 as an integer, any other double as itself, a
+  string, undef, a boolean (the same interned value); an array keeps its holes
+  and drops its trailing ones.  The walk is iterative.  It answers the **empty
+  list**, nothing copied, for anything else -- a non-reference, CODE, a glob, a
+  regexp, a handle, a tied container or element, a magic cell, a dualvar, a
+  v-string, a NaN or infinity, an integer outside 64 bits, a structure nested
+  deeper than 1,000 levels -- so a caller takes its general path and a kind the
+  walk does not know is never copied shallow (rule 12).
+
+```perl
+my ($c, @classes) = builtin::deep_copy(bless { a => [1] }, 'K');   # a fresh K, ('K')
+my @none = builtin::deep_copy({ code => sub { 1 } });              # ()
+```
+
 **The numeric model (normative, s473a).**  A number in the IR is either a
 host **integer of arbitrary precision** or an IEEE **double**;
 `*read-default-float-format*` is double-float, i.e. every float literal in
