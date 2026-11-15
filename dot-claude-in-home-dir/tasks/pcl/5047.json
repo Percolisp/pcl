@@ -4,6 +4,6 @@
    "created" : "2026-11-15",
    "description" : "FILED s540e (Opus 5.5, 2026-11-15).  Probe scratch/s540e/probe/strfgap.pl in the s540e worktree: perl 03:30:30 / 03:00:00, base 75904a35 04:30:30 / 04:00:00 (and with isdst 0 the same), the s540e tree = perl on all 7 rows.  Only the gap shows it (an overlap and every stable date read the same: in the stable case localtime(mktime(f)) IS the arithmetic normalisation, since the offset cancels).\n\n=== DONE (s540e) === lib/POSIX.pm strftime breaks the fields down from `_timegm_fields` (their epoch value read as UTC) by gmtime -- the brief's \"fields normalised as perl's mini_mktime does\" -- and reads the zone only for %z %Z %s (mktime + one localtime, once a call).  Guard Pl/t/posix-01.t row 18 (TZ=Europe/Bucharest in the environment, four gap / edge dates, perl's oracle) FAILS on the base 75904a35; row 19 holds the other letters.  Status left for the reviewing session.",
    "id" : "5047",
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "SILENT WRONG (s540e, found and fixed in the same batch): POSIX::strftime shifted a time that falls in a DST gap by the gap -- strftime('%H:%M', 0, 30, 3, 31, 2, 124) under Europe/Bucharest printed 04:30, perl 03:30 -- because the fields came out of localtime(mktime(...)); perl normalises with mini_mktime (arithmetic, no zone)"
 }
