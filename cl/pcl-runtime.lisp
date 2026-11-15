@@ -34776,7 +34776,139 @@ would consume, so it dies naming the stream (rule 12)."
         (vector (aref regs 0) (aref regs 1) (aref regs 2) (aref regs 3)
                 (%p-octets-string (subseq all full)))))))
 
-;;; Base64 (RFC 4648 section 4, the MIME line shape of RFC 2045), s540e /
+;;; DEEP COPY of a value graph (s540e, #4989): PCL's own name in this
+;;; namespace.  builtin::deep_copy(REF) -> (COPY, CLASS...): a structure equal
+;;; to REF's referent that shares no container with it -- arrays, hashes,
+;;; scalar referents and references to references, a referent reached twice
+;;; (or by a cycle) copied ONCE (an EQ table), every blessing kept, followed by
+;;; the distinct class names it blessed into (so a caller can refuse a class
+;;; with its own hooks).  The walk is ITERATIVE (an explicit stack).  Scalars
+;;; arrive CANONICAL, the form a serialised round trip gives them: an integer
+;;; in the 64-bit range, an integral double below 2**53 as an integer, any
+;;; other double as itself, a string, undef, a boolean; an array's holes stay
+;;; holes and its trailing holes are dropped.  ANYTHING ELSE answers the EMPTY
+;;; LIST, nothing copied, for the caller to take its general path (rule 12: a
+;;; kind the walk does not know is never copied shallow): CODE, a glob, a
+;;; regexp, a handle, a tied container or element, a magic cell, a dualvar, a
+;;; v-string, a NaN / infinity, an integer outside 64 bits, a structure nested
+;;; deeper than *p-deep-copy-max-depth*.
+(defparameter *p-deep-copy-max-depth* 1000
+  "Nesting past which builtin::deep_copy declines (the caller's general path
+   then decides what a structure this deep does).")
+
+(defun %p-deep-copy-decline ()
+  (throw '%p-deep-copy-decline nil))
+
+(defun %p-deep-copy-scalar (v)
+  "The canonical copy of a plain (unboxed) value V; declines on any other."
+  (cond ((null v) :undef)
+        ((eq v :undef) :undef)
+        ((integerp v)
+         (if (<= -9223372036854775808 v 9223372036854775807) v (%p-deep-copy-decline)))
+        ((typep v 'double-float)
+         (cond ((or (sb-ext:float-nan-p v) (sb-ext:float-infinity-p v))
+                (%p-deep-copy-decline))
+               ((and (< (abs v) 9007199254740992d0) (= v (ftruncate v))) (truncate v))
+               (t v)))
+        ((simple-string-p v) v)
+        ((stringp v) (coerce v 'simple-string))
+        (t (%p-deep-copy-decline))))       ; a v-string is a struct: declines here
+
+(defun %p-deep-copy-slot-value (c)
+  "Canonical plain value C as an element / hash-value slot holds it."
+  (or (%p-storable-raw c) (make-p-box c)))
+
+(defun %p-deep-copy-plain-box-p (b)
+  "True when box B holds a plain value a copy may read as such."
+  (let ((v (p-box-value b)))
+    (cond ((or (p-tie-proxy-p v) (p-magic-cell-p v) (%pcl-dualvar-p b))
+           (%p-deep-copy-decline))
+          ((p-box-is-ref b) nil)
+          ((or (hash-table-p v) (and (vectorp v) (not (stringp v)))) nil)
+          (t t))))
+
+(defun %p-deep-copy-new-container (src)
+  "An empty copy container for referent SRC (sized), or a decline."
+  (cond ((hash-table-p src)
+         (when (%p-tied src) (%p-deep-copy-decline))
+         (make-hash-table :test 'equal :size (max 16 (hash-table-count src))))
+        ((and (vectorp src) (not (stringp src)))
+         (when (%p-tied src) (%p-deep-copy-decline))
+         (let ((n (or (position-if-not #'null src :from-end t) -1)))
+           (make-array (1+ n) :adjustable t :fill-pointer (1+ n) :initial-element nil)))
+        ((p-box-p src) (make-p-box nil))
+        (t (%p-deep-copy-decline))))
+
+(defstruct (%p-deep-copy-walk (:constructor %make-p-deep-copy-walk ()))
+  "One deep copy in progress: referent -> its copy, the referents still to
+   fill (with their depth), the classes blessed into."
+  (seen (make-hash-table :test 'eq))
+  (todo nil)
+  (classes nil))
+
+(defun %p-deep-copy-ref (w b depth)
+  "The copy of the REFERENCE box B (a fresh container round the copy of its
+   referent, blessed as B's referent is); declines on a referent kind it does
+   not copy."
+  (let* ((v (p-box-value b))
+         (src (cond ((p-box-is-ref b) (if (p-box-p v) v (%p-deep-copy-decline)))
+                    ((or (hash-table-p v) (and (vectorp v) (not (stringp v)))) v)
+                    (t (%p-deep-copy-decline))))
+         (dst (or (gethash src (%p-deep-copy-walk-seen w))
+                  (progn
+                    (when (> depth *p-deep-copy-max-depth*) (%p-deep-copy-decline))
+                    (let ((c (%p-deep-copy-new-container src)))
+                      (setf (gethash src (%p-deep-copy-walk-seen w)) c)
+                      (push (list src c (1+ depth)) (%p-deep-copy-walk-todo w))
+                      c))))
+         (ref (if (p-box-p dst) (p-backslash dst) (make-p-box dst)))
+         (class (%p-builtin-blessed b)))
+    (when (stringp class)
+      (when (string= class "Regexp") (%p-deep-copy-decline))
+      (pushnew class (%p-deep-copy-walk-classes w) :test #'string=)
+      (p-bless ref class))
+    ref))
+
+(defun %p-deep-copy-slot (w x depth)
+  "The copy of slot content X (a hole, a raw value, a box) as a slot of the
+   copy container holds it."
+  (cond ((null x) nil)
+        ((not (p-box-p x)) (%p-deep-copy-slot-value (%p-deep-copy-scalar x)))
+        ((%p-deep-copy-plain-box-p x)
+         (when (p-box-class x) (%p-deep-copy-decline))
+         (%p-deep-copy-slot-value (%p-deep-copy-scalar (p-box-value x))))
+        (t (%p-deep-copy-ref w x depth))))
+
+(defun %p-deep-copy-fill (w src dst depth)
+  "Fill copy container DST from referent SRC."
+  (cond
+    ((hash-table-p src)
+     (maphash (lambda (k v)
+                (unless (eq k :__class__)
+                  (when (null v) (%p-deep-copy-decline))
+                  (setf (gethash k dst) (%p-deep-copy-slot w v depth))))
+              src))
+    ((p-box-p src)
+     (box-set dst (if (%p-deep-copy-plain-box-p src)
+                      (%p-deep-copy-scalar (p-box-value src))
+                      (%p-deep-copy-ref w src depth))))
+    (t
+     (dotimes (i (length dst))
+       (setf (aref dst i) (%p-deep-copy-slot w (aref src i) depth))))))
+
+(defun %p-deep-copy (x)
+  "builtin::deep_copy(REF) -> (COPY, CLASS...), or the empty list (see the
+   block comment above)."
+  (catch '%p-deep-copy-decline
+    (unless (and (p-box-p x) (not (%p-deep-copy-plain-box-p x)))
+      (%p-deep-copy-decline))
+    (let* ((w (%make-p-deep-copy-walk))
+           (copy (%p-deep-copy-ref w x 0)))
+      (loop for job = (pop (%p-deep-copy-walk-todo w))
+            while job
+            do (destructuring-bind (src dst depth) job
+                 (%p-deep-copy-fill w src dst depth)))
+      (coerce (cons copy (reverse (%p-deep-copy-walk-classes w))) 'vector))))
 ;;; #4990: PCL's own names in this namespace.  The ENCODER takes octets and an
 ;;; end-of-line string and writes the EOL after every 76 output characters and
 ;;; after the last (none at all for empty input); the DECODER skips every
@@ -34960,6 +35092,8 @@ would consume, so it dies naming the stream (rule 12)."
     ;; Base64 (#4990): octets <-> the RFC 4648 alphabet, MIME line shape.
     (def "BASE64_ENCODE" #'%p-base64-encode)
     (def "BASE64_DECODE" #'%p-base64-decode)
+    ;; A deep copy of a value graph (#4989): (COPY, CLASS...) or ().
+    (def "DEEP_COPY" #'%p-deep-copy)
     ;; bsd_glob(3), the engine CORE::glob runs with the csh flags (#3160):
     ;; builtin::bsd_glob(PATTERN, FLAGNAME...) -> (STATUS, MATCH...), STATUS
     ;; 0 or GLOB_ABEND's -2.  lib/File/Glob.pm owns the GLOB_* numbers.

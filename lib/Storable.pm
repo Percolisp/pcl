@@ -581,9 +581,27 @@ sub thaw {
     return _do_retrieve($frozen, undef, 0, $flg);
 }
 
+# dclone COPIES DIRECTLY (s540e, #4989): a deep copy does not need the
+# serialised form -- perl's C code goes through its in-memory format because
+# that is the code it has; the result is a structure equal to the input that
+# shares nothing with it.  `builtin::deep_copy` walks plain data (arrays,
+# hashes, scalar referents, references to references, sharing and cycles,
+# blessings) and gives every scalar the canonical form a round trip through
+# the format gives it; it answers the empty list for anything else (CODE, a
+# glob, a regexp, a tied container, a magic or dual value, a v-string, a NaN,
+# a structure past its depth), and so does a class with a STORABLE_freeze
+# hook here or `$Storable::canonical` -- those take freeze + thaw, exactly as
+# before, so every answer the format path gave is still the answer.
 sub dclone {
     my ($self) = @_;
     _croak('Not a reference') if !ref $self;
+    if (!$Storable::canonical) {
+        my ($copy, @classes) = builtin::deep_copy($self);
+        if (defined $copy && !grep { $_->can('STORABLE_freeze') } @classes) {
+            $LAST_NETORDER = 0;
+            return $copy;
+        }
+    }
     my $frozen = _do_store($self, 0);
     return _do_retrieve($frozen, undef, 0, FLAGS_COMPAT);
 }
