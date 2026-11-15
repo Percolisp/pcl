@@ -4438,8 +4438,16 @@ sub _interp_fixer {
   my $sigil = substr($canon, 0, 1);
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   # Each arm rewrites the plain spelling AND the braced-interpolation
-  # spelling ("${x}" / "@{x}[…]" / "${x}{k}" — E4.1 M2, s353): braces are
-  # kept in the output so adjacency stays unambiguous.
+  # spelling ("${x}" / "@{x}" / "$#{x}" — E4.1 M2, s353): braces are kept in
+  # the output so adjacency stays unambiguous.  A braced NAME CLOSES the
+  # reference -- "${x}[0]" is $x then the text "[0]", "@{x}{" is @x then
+  # "{" (perl's bug #20716, t/comp/parser.t; InterpScan's reading,
+  # docs/interp-scan.md divergence 2) -- so the braced arms take no
+  # subscript lookahead and belong to the sigil they spell (#4921: the
+  # `${x}[` arm sat in the array family, the `${x}{` / `@{x}{` arm in the
+  # hash family).  A scalar DEREF does take a subscript -- "$$x[0]",
+  # "@$x[1,2]", "$$x{k}" read $x (#4921): the element arm's `(?![\[\{])`
+  # must not exclude it.
   #
   # THE ESCAPE GUARD IS A LOOKBEHIND, AND THAT IS LOAD-BEARING (task #1919).
   # It used to CONSUME the character to the left — `((?:^|[^\\])(?:\\\\)*)` —
@@ -4458,8 +4466,9 @@ sub _interp_fixer {
   return
     $sigil eq '$' ? sub {
       my $n = 0;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)([\$\@])\$\Q$bare\E\b(?=[\[\{])/$1$2\$$newbare/g;
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\Q$bare\E\b(?![\[\{])(?!::)/$1\$$newbare/g;
-      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?![\[\{])/$1\${$newbare}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\{\s*\Q$bare\E\s*\}/$1\${$newbare}/g;
       return $n;
     }
   : $sigil eq '@' ? sub {
@@ -4467,15 +4476,13 @@ sub _interp_fixer {
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\@\Q$bare\E\b(?!\{)(?!::)/$1\@$newbare/g;
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\Q$bare\E(?=\[)/$1\$$newbare/g;
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\#\Q$bare\E\b(?!::)/$1\$#$newbare/g;
-      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\@\{\s*\Q$bare\E\s*\}(?!\{)/$1\@{$newbare}/g;
-      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?=\[)/$1\${$newbare}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\@\{\s*\Q$bare\E\s*\}/$1\@{$newbare}/g;
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\#\{\s*\Q$bare\E\s*\}/$1\$#{$newbare}/g;
       return $n;
     }
   : sub {
       my $n = 0;
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)([\$\@])\Q$bare\E(?=\{)/$1$2$newbare/g;
-      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)([\$\@])\{\s*\Q$bare\E\s*\}(?=\{)/$1$2\{$newbare\}/g;
       return $n;
     };
 }
