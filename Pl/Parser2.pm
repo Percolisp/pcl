@@ -4483,8 +4483,39 @@ sub _interp_fixer {
   : sub {
       my $n = 0;
       $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)([\$\@])\Q$bare\E(?=\{)/$1$2$newbare/g;
+      $n += _rename_hash_in_code($_[0], $bare, $newbare);        # #4822
       return $n;
     };
+}
+
+# #4822: a WHOLE hash `%h` interpolates nowhere -- "100%h" is text -- but the
+# CODE of an interpolation (`@{[ %h ]}`, `@{[ scalar(keys %h) ]}`) names it
+# like any expression.  Inside the code spans InterpScan reports
+# (Pl::InterpScan::code_spans, the binder's own reading of those spans) the
+# code is read as a fragment (Pl::Parser::fragment_doc, as the binder reads
+# it) and each `%bare` Symbol takes the new name.  $_[0] is rewritten in
+# place; returns the number renamed.
+sub _rename_hash_in_code {
+  my (undef, $bare, $newbare) = @_;
+  return 0 if index($_[0], "%$bare") < 0;
+  my $evs = eval { Pl::InterpScan::scan($_[0], postderef_qq => 1) } || [];
+  my $n = 0;
+  for my $sp (sort { $b->[0] <=> $a->[0] } map { Pl::InterpScan::code_spans($_) } @$evs) {
+    my $code = substr($_[0], $sp->[0], $sp->[1] - $sp->[0]);
+    next if index($code, "%$bare") < 0;
+    my $frag = Pl::Parser::fragment_doc($code)
+      or die "PCL internal: cannot re-read the interpolated code `$code`\n";
+    my $k = 0;
+    for my $s (@{ $frag->find('PPI::Token::Symbol') || [] }) {
+      next unless $s->content eq "%$bare";
+      $s->set_content("%$newbare");
+      $k++;
+    }
+    next unless $k;
+    substr($_[0], $sp->[0], $sp->[1] - $sp->[0]) = $frag->serialize;
+    $n += $k;
+  }
+  return $n;
 }
 
 # Could this token's text possibly BE interpolating text?  A cheap superset of

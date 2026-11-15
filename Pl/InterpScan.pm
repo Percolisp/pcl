@@ -85,7 +85,7 @@ use v5.20;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(scan scan_one comment_spans intuit_more regcurly);
+our @EXPORT_OK = qw(scan scan_one comment_spans code_spans intuit_more regcurly);
 
 # perl 5.40.3's always-on keyword set (keywords.h minus the 19
 # feature-gated entries keywords.c guards with FEATURE_*_IS_ENABLED —
@@ -161,6 +161,21 @@ my $PUNCT_ARRAY_SUBSCRIPT = '?!./~&%=<>';
 sub scan {
   my ($text, %opt) = @_;
   return (_walk($text, %opt))[0];
+}
+
+# The CODE an event carries -- the text perl compiles as an EXPRESSION, not
+# interpolates: a braced expression's inside (`@{[ … ]}`, `${\ …}`), each
+# subscript's guts (`$x[$i+1]`), a postfix deref's guts -- as [start, end)
+# spans of the scanned text, in order.  The one reading of "which text of an
+# interpolation is code", for the binder's refs and the rename fixer's
+# whole-hash arm (#4822: `%h` names the hash there, while "100%h" is text).
+sub code_spans {
+  my ($ev) = @_;
+  my @code;
+  push @code, $ev->{expr_span} if $ev->{expr_span};
+  push @code, $_->{guts_span} for grep { $_->{guts_span} } @{ $ev->{chain} || [] };
+  push @code, $ev->{postderef}{guts_span} if $ev->{postderef} && $ev->{postderef}{guts_span};
+  return @code;
 }
 
 # The PATTERN COMMENTS of $text, as [start, end) spans: the regions perl's

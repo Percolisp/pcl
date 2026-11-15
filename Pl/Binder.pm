@@ -688,13 +688,9 @@ sub _interp_refs {
       $canon = ($ev->{sigil} eq '$#' ? '@' : $ev->{sigil}) . $ev->{name};
     }
     $self->_ref($t, $canon, 'interp', $pkg, $cv) if defined $canon;
-    my @code;
-    push @code, $ev->{expr_span} if $ev->{expr_span};
-    push @code, $_->{guts_span} for grep { $_->{guts_span} } @{ $ev->{chain} || [] };
-    push @code, $ev->{postderef}{guts_span} if $ev->{postderef} && $ev->{postderef}{guts_span};
-    for my $sp (@code) {
+    for my $sp (Pl::InterpScan::code_spans($ev)) {
       my $g = substr($text, $sp->[0], $sp->[1] - $sp->[0]);
-      next unless $g =~ /[\$\@]/;
+      next unless $g =~ /[\$\@%]/;                 # a whole hash `%h` is code too (#4822)
       if ($g =~ /^\s*\$(\w+)\s*\z/) { $self->_ref($t, "\$$1", 'interp', $pkg, $cv); next }
       $self->_code_refs($t, $g, $pkg, $cv);
     }
@@ -706,7 +702,7 @@ sub _interp_refs {
 # host's scope -- parsed through Pl::Parser::fragment_doc, the s438f pattern.
 sub _code_refs {
   my ($self, $host, $code, $pkg, $cv) = @_;
-  return unless $code =~ /[\$\@]/;
+  return unless $code =~ /[\$\@%]/;
   return $self->_code_refs_doc($host, $code, $pkg, $cv);
 }
 
