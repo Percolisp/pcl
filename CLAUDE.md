@@ -396,21 +396,22 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s542, 2026-11-16: main = MAIN-READY-96 `7e29313c` (code `d2bc17d4`,
-generation v2-14850; s540c, s539a, s540d and s540e merged in this session).**
-Gate **378 files / 12,277 rows `Result: PASS`** (s540e's gate on merged
-main's code; MAIN-READY-95 measured 377 / 12,259 on main itself); full sweep
-**TOTAL passing 18,803**, GATE clean; corpus-diff population 111 files;
-ir-conform 328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN
-board (round of s539, on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL /
-67 SKIP of 896 files, 109,797 ok / 1,740 not ok -- THE ROUND IS RUNNING
-(batch s542r, on MAIN-READY-95; the companion snapshot dates from
-MAIN-READY-63); PPI `pcl` = `c2f21706`; CI green on MAIN-READY-95.  Known
-default-build limits flagged to the USER: `caller` file/line and `croak`
-location only under `PCL_OPT=line-track`; `DESTROY` runs at program exit
-only; a filehandle that leaves its opening block is written out before the
-next child process, at a `flock` / descriptor trigger or at exit, never at
-the drop (`docs/not-supported.md` ns-escaping-filehandle).
+**s542, 2026-11-16: main = MAIN-READY-97 `62677d00` (code `c1fe4930`,
+generation v2-14900; five batches merged in this session: s540c, s539a,
+s540d, s540e, s539c).**  Gate **378 files / 12,283 rows `Result: PASS`**
+(measured on merged main, on a cold module cache); full sweep **TOTAL
+passing 18,803**, GATE clean; corpus-diff population 111 files; ir-conform
+328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN board
+(round of s539, on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL / 67 SKIP
+of 896 files, 109,797 ok / 1,740 not ok -- THE ROUND IS RUNNING (batch
+s542r, on MAIN-READY-95; the companion snapshot dates from MAIN-READY-63);
+PPI `pcl` = `66e690d2`; CI green on MAIN-READY-96.  Known default-build
+limits flagged to the USER: `caller` file/line and `croak` location only
+under `PCL_OPT=line-track`; `DESTROY` runs at program exit only; a
+filehandle that leaves its opening block is written out before the next
+child process, at a `flock` / descriptor trigger or at exit, never at the
+drop (`docs/not-supported.md` ns-escaping-filehandle).
+
 
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
@@ -532,7 +533,9 @@ Full text: `docs/claude-md/REFERENCE.md` "Dependencies".
   `PCL_CONTAINER_BASE=ubuntu:22.04 SBCL_VERSION=2.5.2 prove
   tools/t/install-container.t`).
 - **PPI is VENDORED** (`vendor/PPI/lib`, loaded ONLY through
-  `use Pl::VendorPPI;`, never `use PPI;`).  Never edit `vendor/PPI/lib` by
+  `use Pl::VendorPPI;`, never `use PPI;`).  Every PCL document is built
+  with `keep_line_endings` (`Pl::Parser::_ppi_new`); perl's CR rules per unit
+  are `_file_line_endings` / `_eval_heredoc_line_endings` (ir-spec 3.2g2).  Never edit `vendor/PPI/lib` by
   hand: `tools/vendor-ppi <clone> pcl` (`Pl/t/vendor-ppi-01.t` checks the tree
   id; run the canary `PCL_SYSTEM_PPI=1 prove Pl/t/ppi-bugs-registry-01.t` at
   every refresh).  The branch's public home is `https://github.com/Percolisp/PPI` branch

@@ -709,6 +709,12 @@ record, kept only as history.)
   names the upstream sha, the branch sha and every carried fix), loaded ONLY
   through the one loader `Pl::VendorPPI` (`use Pl::VendorPPI;`, never `use PPI;`
   -- a PPI loaded from elsewhere first is a die, not a silent mix).
+  **Every PCL document is built with `keep_line_endings`** (s539c, ppi-upstream-bugs 65,
+  `Pl::Parser::_ppi_new`): PPI's default rewrite of CR LF / lone CR to LF would lose a CR
+  inside a string; PCL then applies perl's own rule per unit -- a source FILE reads
+  CR LF as LF before `__DATA__` and keeps a lone CR (`_file_line_endings`), an EVAL STRING
+  keeps every CR in a literal and reads only here-doc bodies' line ends as LF
+  (`_eval_heredoc_line_endings`); ir-spec 3.2g2.
   `PCL_SYSTEM_PPI=1` uses the installed PPI on purpose (the registry canary's
   "did upstream catch up" run, A/Bs).  PPI's non-core deps must be installed:
   Clone, Params::Util, Task::Weaken, Safe::Isa -- THE ONE LIST is
