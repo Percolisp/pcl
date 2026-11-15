@@ -29,6 +29,8 @@ on:
       - "tools/install-matrix/**"
   # (s524, 2026-10-22: this comment line was the push that re-ran the matrix after the SBCL 2.5.2
   #  floor fix #3528 merged as MAIN-READY-42 -- the fix lives in cl/, outside the path filter above.)
+  # (s542, 2026-11-15: re-run for MAIN-READY-93 -- s540c drives SBCL's finalizer thread through SB-IMPL entry
+  #  points looked up at load, the same on 2.5.2 and 2.6.0 locally; the matrix is where the floor images say so.)
 
 jobs:
   install:
