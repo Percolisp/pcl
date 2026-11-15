@@ -43,7 +43,7 @@ sub duplicates {
         for (split /\n/, $text) {
             $line++;
             $pkg = lc $1 if /^\(in-package :?"?([^\s")]+)/;
-            next unless /^\(def(?:un|macro|generic) (\(setf \S+?\)|\S+)/;
+            next if !/^\(def(?:un|macro|generic) (\(setf \S+?\)|\S+)/;
             my $key = "$pkg $1";
             if ($first{$key}) { push @dups, "$key at $label:$line (first at $first{$key})" }
             else              { $first{$key} = "$label:$line" }

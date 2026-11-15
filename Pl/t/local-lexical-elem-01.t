@@ -32,8 +32,8 @@ my $root = File::Spec->rel2abs("$RealBin/../..");
 my $pcl  = "$root/pcl";
 my $pl2cl = "$root/pl2cl";
 
-plan skip_all => "pcl not found"  unless -x $pcl;
-plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
+plan skip_all => "pcl not found"  if !-x $pcl;
+plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
 plan tests => 7;
 
