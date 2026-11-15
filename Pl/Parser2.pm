@@ -5775,6 +5775,77 @@ sub _is_decl_list {
 
 sub _rename_decl_within {
   my ($self, $root, $sym, $new, $decl_override) = @_;
+  my $mode = $ENV{PCL_RENAME_BINDER} // '';      # s539b D0 (TEMPORARY)
+  # the span pass and the capture promoter rewrite the uses themselves: their
+  # call renames the declarator alone (root = the declaring statement)
+  my $declonly = ((caller(1))[3] // '') =~ /::_(?:span_rename_scalar|span_rename_container|promote_captured)\z/;
+  if ($mode eq 'binder') {
+    return $self->_rename_binding($sym, $new) if !$declonly;
+    $sym->set_content($new);
+    return $new;
+  }
+  my ($d0plan, %d0before);
+  if ($mode eq 'log') {
+    $d0plan = $declonly ? [] : eval { [ $self->_rename_binding($sym, $new, dry => 1) ] };
+    $d0plan = $@ || 'die' if !$d0plan;
+    for my $t ($root->tokens, (ref $d0plan ? map { $_->[0] } @$d0plan : ())) {
+      $d0before{ refaddr $t } //= [$t, _d0_sig($t)];
+    }
+  }
+  my $old  = $sym->content;
+  my $d0r = $self->_rename_decl_within_0($root, $sym, $new, $decl_override);
+  $self->_d0_log($root, $sym, $new, $old, $d0plan, \%d0before) if $mode eq 'log';
+  return $d0r;
+}
+
+sub _d0_sig { my ($t) = @_; return $t->isa('PPI::Token::HereDoc') ? $t->content . "\0" . join('', $t->heredoc) : $t->content }
+
+sub _d0_tokstr {
+  my ($t, @x) = @_;
+  (my $c = _d0_sig($t)) =~ s/\s+/ /g;
+  $c = substr($c, 0, 40) . '...' if length $c > 43;
+  return join ':', ($t->line_number // '?'), ref($t) =~ s/^PPI::Token:://r, @x, $c;
+}
+
+sub _d0_log {
+  my ($self, $root, $sym, $new, $old, $plan, $before) = @_;
+  my $fam = (caller(2))[3] // '?';
+  $fam =~ s/^Pl::Parser2:://;
+  my $file = $ENV{PCL_D0_FILE} // Pl::Binder::_file_of($self);
+  local $ENV{PCL_BINDER_LOG} = $ENV{PCL_RENAME_LOG};
+  if (!ref $plan) {
+    Pl::Binder::_row('E4', $file, $sym->line_number // '?', $old, $fam, $new, $plan);
+    return;
+  }
+  my %changed;
+  for my $e (values %$before) {
+    my ($t, $s) = @$e;
+    next if $t == $sym;
+    $changed{ refaddr $t } = $t if _d0_sig($t) ne $s;
+  }
+  my (%bset, @unreach);
+  for my $p (@$plan) {
+    my ($t, $kind, $would, $via, $want) = @$p;
+    if ($would) { $bset{ refaddr $t } = $p } else { push @unreach, _d0_tokstr($t, $kind, $via) }
+    # an interpolating token whose fixer reaches FEWER mentions than the binder holds
+    push @unreach, _d0_tokstr($t, "partial=$would/$want", $via)
+      if $kind eq 'interp' && $would && $want && $would < $want;
+  }
+  my @lonly = map { _d0_tokstr($changed{$_}) } grep { !$bset{$_} } sort { $a <=> $b } keys %changed;
+  my @bonly;
+  for my $k (sort { $a <=> $b } keys %bset) {
+    next if $changed{$k};
+    my ($t, $kind, $would, $via) = @{ $bset{$k} };
+    my $where = !_has_ancestor($t, $root) && $t != $root ? 'out-root' : 'in-root';
+    push @bonly, _d0_tokstr($t, $kind, $via, $where);
+  }
+  my $tag = (@lonly || @bonly || @unreach) ? 'DIFF' : 'SAME';
+  Pl::Binder::_row('R4', $tag, $file, $sym->line_number // '?', $old, $fam, $new,
+                   scalar(keys %bset), join(' ; ', @lonly), join(' ; ', @bonly), join(' ; ', @unreach));
+}
+
+sub _rename_decl_within_0 {
+  my ($self, $root, $sym, $new, $decl_override) = @_;
   my $old  = $sym->content;
   my $canon = $sym->symbol;
   # $decl is the region evaluated in the OUTER scope, skipped by the rewrite.
@@ -5846,6 +5917,94 @@ sub _rename_decl_within {
     last if $stop_tok && refaddr($t) == refaddr($stop_tok);
   }
   return $new;
+}
+
+# THE RENAME OF ONE BINDING (1c port 4, s539b; docs/binder-dual-run-s525.md
+# §6 item 4).  The declarator $sym takes the name $new, and so does EXACTLY
+# every use the binder records for its binding (Pl::Binder::uses_of) --
+# perl's pad, positional: the declaring statement reads the OUTER variable
+# (`my $x = $x + 1`), a nested or a later same-name declaration is another
+# binding (#296-B2), a compound head's `my` covers its whole compound (#297).
+# Each use is rewritten as it is spelled: a Symbol keeps its access sigil
+# (`$x[0]` of @x, a cast's `$$x[0]` of $x), `$#x`, a `${x}` brace's name,
+# interpolated text (_interp_fixer), a one-token signature's default (#4545).
+# RULE 12: no binding for $sym, a scope the table does not hold whole (a
+# token inserted since the build could spell a use), or a use the rewrite
+# cannot reach DIES naming it.  dry => 1 returns the plan, [TOKEN, KIND,
+# WOULD-CHANGE, VIA] per use, and changes nothing.
+sub _rename_binding {
+  my ($self, $sym, $new, %opt) = @_;
+  my $bd = Pl::Binder::for_span($self, $sym);
+  my $b  = $bd ? $bd->decl_binding($sym) : undef;
+  die sprintf("PCL internal: the binder holds no declaration for `%s` at line %s (renaming it %s)\n",
+    $sym->content, $sym->line_number // '?', $new) unless $b;
+  my $held = $bd->holds($b->{scope_node});
+  die sprintf("PCL internal: the binder does not hold every token of the scope of `%s` (line %s): a use could go unrenamed\n",
+    $sym->content, $sym->line_number // '?') unless $held || $opt{dry};
+  my $old = $sym->content;
+  (my $bare    = $old) =~ s/^[\$\@\%]//;
+  (my $newbare = $new) =~ s/^[\$\@\%]//;
+  my $fix = _interp_fixer($old, $newbare);
+  my (@plan, %want);
+  for my $r ($bd->uses_of($b)) {
+    my $t = $r->{tok};
+    next if $want{ refaddr $t }++;
+    my ($kind, $would) = $self->_rename_binding_use($t, $old, $new, $bare, $newbare, $fix, 1);
+    push @plan, [$t, $kind, $would, $r->{via}];
+  }
+  push @$_, $want{ refaddr $_->[0] } for @plan;
+  return (@plan, ($held ? () : ([$sym, 'not-held', 0, '-']))) if $opt{dry};
+  my $cant = sub {
+    my ($t, $kind) = @_;
+    die sprintf("PCL internal: the rename of `%s` to %s cannot reach its use at line %s (%s): %s\n",
+      $old, $new, $t->line_number // '?', $kind, substr(_d0_sig($t), 0, 60));
+  };
+  $_->[2] or $cant->(@$_[0, 1]) for @plan;
+  $sym->set_content($new);
+  for my $p (@plan) {
+    my ($kind, $ok) = $self->_rename_binding_use($p->[0], $old, $new, $bare, $newbare, $fix, 0);
+    $cant->($p->[0], $kind) unless $ok;
+  }
+  return $new;
+}
+
+# One use's rewrite (the plan's KIND); $dry = report whether it would change.
+sub _rename_binding_use {
+  my ($self, $t, $old, $new, $bare, $newbare, $fix, $dry) = @_;
+  if ($t->isa('PPI::Token::Symbol')) {
+    (my $c = $t->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/ or return ('symbol', 0);
+    $t->set_content($c) if !$dry;
+    return ('symbol', 1);
+  }
+  if ($t->isa('PPI::Token::ArrayIndex')) {
+    return ('arylen', 0) unless $t->content eq "\$#$bare";
+    $t->set_content("\$#$newbare") if !$dry;
+    return ('arylen', 1);
+  }
+  if ($t->isa('PPI::Token::Word')) {                       # a `${x}` brace
+    return ('brace', 0) unless $t->content eq $bare;
+    $t->set_content($newbare) if !$dry;
+    return ('brace', 1);
+  }
+  if ($t->isa('PPI::Token::Prototype')) {                  # #4545
+    return ('proto', index($t->content, $bare) >= 0 ? 1 : 0) if $dry;
+    return ('proto', $self->_rename_in_proto_defaults($t, $old, $new) ? 1 : 0);
+  }
+  if ($t->isa('PPI::Token::HereDoc')) {
+    my @l = $t->heredoc;
+    my $n = 0;
+    $n += ($fix->($_) || 0) for @l;
+    return (q{interp}, $dry ? $n : 0) if $dry || !$n;
+  } elsif (_interp_token_candidate($t)) {
+    my $c = $t->content;
+    my $n = $fix->($c);
+    return (q{interp}, $dry ? $n : 0) if $dry || !$n;
+  } else {
+    return (ref($t), 0);
+  }
+  my $before = _d0_sig($t);
+  _fix_interp_token($t, $fix);
+  return ('interp', _d0_sig($t) ne $before ? 1 : 0);
 }
 
 # Where an earlier declaration's rewrite region gives way to a LATER `my`/`state`
@@ -8206,7 +8365,12 @@ sub _state_rewrite_routes {
   require Pl::Binder;
   local $self->{_binder} = Pl::Binder::build_for($self, $doc);
   my %anon;
-  $self->_state_rewrite_site($_, $doc, \%anon) for reverse @sites;
+  if (($ENV{PCL_RENAME_BINDER} // q{}) eq q{binder}) {           # s539b D0: every rename before any edit
+    my @cells = map { [ $self->_state_rewrite_site_names($_, $doc) ] } reverse @sites;
+    $self->_state_rewrite_site($_, $doc, \%anon, shift @cells) for reverse @sites;
+  } else {
+    $self->_state_rewrite_site($_, $doc, \%anon) for reverse @sites;
+  }
   for my $a (values %anon) {
     my $fin = $a->{block}->finish
       or die "Parser2 TODO: unterminated anon sub in state rewrite\n";
@@ -8272,8 +8436,8 @@ sub _state_list_syms {
 # Rewrite ONE declaration site (see _rewrite_state_prepass): every name gets
 # its cell, the declaration becomes the guarded initializer (or the bare
 # cell), and an anon-sub owner collects the cells for its wrap.
-sub _state_rewrite_site {
-  my ($self, $site, $doc, $anon) = @_;
+sub _state_rewrite_site_names {
+  my ($self, $site, $doc) = @_;
   my ($w, $syms, $route, $list, $cast) = @$site;
   my $root = _enclosing_block($w) // $doc;
   my @cells;
@@ -8290,6 +8454,14 @@ sub _state_rewrite_site {
     $self->_rename_decl_within($root, $sym, $cell);
     $self->_state_qualify_foreign_uses($sym, $cell) if $route->{route} ne 'anon';
   }
+  return @cells;
+}
+
+sub _state_rewrite_site {
+  my ($self, $site, $doc, $anon, $pre) = @_;
+  my ($w, $syms, $route, $list, $cast) = @$site;
+  my $root = _enclosing_block($w) // $doc;
+  my @cells = $pre ? @$pre : $self->_state_rewrite_site_names($site, $doc);
   # ONE once-flag per declaration, named after its first cell.
   (my $flag = $cells[0]) =~ s/^[\@\%]/\$/;
   $flag .= '__init';
@@ -15456,6 +15628,37 @@ sub _fallback_stmt_capture {
 # reads the outer one).  A genuine closure capture of the outer $x still
 # answers 1: the use resolves outside the block.
 sub _init_reads_scalar {
+  my ($self, $init, $name) = @_;
+  my $mode = $ENV{PCL_RENAME_BINDER} // '';      # s539b D0 (TEMPORARY)
+  return $self->_init_reads_scalar_b($init, $name) if $mode eq 'binder';
+  my $legacy = $self->_init_reads_scalar_0($init, $name);
+  if ($mode eq 'log') {
+    my $b = eval { $self->_init_reads_scalar_b($init, $name) } // ('E:' . ($@ =~ s/\s+/ /gr));
+    local $ENV{PCL_BINDER_LOG} = $ENV{PCL_RENAME_LOG};
+    my $first = $init->[0];
+    Pl::Binder::_row('IR', ($b eq $legacy ? 'SAME' : 'DIFF'), $ENV{PCL_D0_FILE} // Pl::Binder::_file_of($self),
+                     $first->line_number // '?', $name, "legacy=$legacy", "binder=$b",
+                     substr(join('', map { $_->content } @$init) =~ s/\s+/ /gr, 0, 80));
+  }
+  return $legacy;
+}
+
+# Does the initializer of `my $x = …` READ $x -- the outer lexical or the
+# package variable?  The binder's answer (1c port 4): a use of $name inside
+# the initializer whose binding is declared outside it (Binder::reads_outside).
+# RULE 12: an initializer the table does not hold dies.
+sub _init_reads_scalar_b {
+  my ($self, $init, $name) = @_;
+  my @el = grep { ref $_ } @$init;
+  return 0 unless @el;
+  my $bd = Pl::Binder::for_captures($self, $el[0]);
+  my $rg = $bd ? $bd->ord_range($el[0], $el[-1]) : undef;
+  die sprintf("PCL internal: the binder holds no record of the initializer of %s at line %s\n",
+    $name, $el[0]->line_number // '?') unless $rg;
+  return $bd->reads_outside(@$rg, $name, $el[0]) ? 1 : 0;
+}
+
+sub _init_reads_scalar_0 {
   my ($self, $init, $name) = @_;
   (my $bare = $name) =~ s/^\$//;
   my (%inblk, @blocks);

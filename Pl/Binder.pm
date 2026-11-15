@@ -1034,6 +1034,40 @@ sub mentions_in {
   return $n;
 }
 
+# Does the ordinal range [$lo, $hi] -- an initializer -- READ $canon through a
+# binding declared OUTSIDE it: the outer lexical or the package variable (a
+# `my` nested in the range, an anon sub's or a block's own, is its own
+# binding)?  Asked about the names as spelled now (a rename pass may have
+# run); a literal text in the range naming the outer lexical counts where a
+# string eval can see it (port 2's rule).  $at = a node at $lo (its package).
+sub reads_outside {
+  my ($self, $lo, $hi, $canon, $at) = @_;
+  my %done;
+  for my $r ($self->_refs_in($lo, $hi)) {
+    my $t = $r->{tok};
+    next if $done{ refaddr $t }++;
+    for my $c (@{ $self->_cur_refs($t) }) {
+      next if $c->{via} eq 'decl' || $c->{canon} ne $canon;
+      my $b = $self->_resolve_cur($c->{ord}, $c->{canon}, $c->{pkg});
+      return 1 unless $b->{decl_ord} >= $lo && $b->{decl_ord} <= $hi;
+    }
+  }
+  my $o = $self->_resolve_cur($lo, $canon, $self->_pkg_at($at));
+  return 1 if _is_lexical($o) && $self->text_uses_in($o, $lo, $hi);
+  return 0;
+}
+
+# Does the table hold every token of $node -- none inserted or removed since
+# the build?  Counted once per node (the capture question's check, rule 12:
+# a token the table does not hold may spell a use nobody renames).
+sub holds {
+  my ($self, $node) = @_;
+  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
+  return 0 unless defined $a && defined $z;
+  my $n = $self->{held}{ refaddr $node } //= do { my @t = $node->isa('PPI::Token') ? ($node) : $node->tokens; scalar @t };
+  return $n == $z - $a + 1 ? 1 : 0;
+}
+
 # The binding a DECLARATOR token makes (`my $x`'s `$x`), or undef.
 sub decl_binding {
   my ($self, $tok) = @_;
