@@ -177,6 +177,24 @@ row("retrieve a missing file dies", dies(sub { retrieve("$dir/no/such.st") }));
 row("store into a missing dir dies", dies(sub { store([1], "$dir/no/such.st") }));
 row("last_op_in_netorder", join(',', do { nfreeze([1]); Storable::last_op_in_netorder() ? 1 : 0 },
                                      do { freeze([1]);  Storable::last_op_in_netorder() ? 1 : 0 }));
+# s540e (#4989): dclone copies directly (builtin::deep_copy) and keeps freeze +
+# thaw for hooks, CODE, globs, regexps, tied containers.  The scalars come back
+# in the form a round trip gives them (number or string, perl's answer for
+# each), the shapes the direct walk handles and the ones it hands back, and
+# what dclone leaves behind.
+{ no warnings;
+  row("dclone canonical scalars", join(',', map { (!defined $_ ? 'U' : builtin::created_as_number($_) ? 'N' : 'S')
+                                                . (($_ // '') =~ s/([^\x20-\x7e])/sprintf('\\x{%x}', ord $1)/ger) }
+      @{ dclone([0, -129, 2**31, 1e3, 2**52 + 0.5, 1.5, 0.1 + 0.2, 1e20, "007", "1e3", "", undef, "caf\x{e9}", "\x{263a}"]) })); }
+my $ovd = dclone([bless({v => 7}, 'Ov')]);
+my $td = dclone({h => \%tied});
+row("dclone blessed / overloaded / tied / regexp / sparse",
+    D(dclone([bless([1], 'A'), bless({k => [2]}, 'B'), bless(\(my $s2 = 3), 'A')])) . " $ovd->[0] "
+    . ref(tied(%{ $td->{h} })) . ' ' . ("A-B" =~ dclone([$qr])->[0] ? 1 : 0) . ' ' . D(dclone(\@sparse)));
+my $od = {a => [1], s => \"x"}; my $dd2 = dclone($od);
+row("dclone shares nothing; last op not netorder",
+    ($dd2->{a} != $od->{a} && $dd2->{s} != $od->{s} ? 'fresh' : 'shared') . ' '
+    . do { nfreeze([1]); dclone([1]); Storable::last_op_in_netorder() ? 1 : 0 });
 PERL
 
 sub program {
@@ -216,7 +234,7 @@ my $pcl_out = `sbcl @sbcl_rt --load $cl_file 2>&1`;
 my ($perl, $order) = rows_of($perl_out);
 my ($pcl)          = rows_of($pcl_out);
 
-my $ROWS = 41;
+my $ROWS = 44;
 plan tests => 2 + $ROWS;
 is(scalar(@$order), $ROWS, "the oracle program printed its $ROWS rows under perl")
     or diag($perl_out);
