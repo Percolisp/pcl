@@ -5,6 +5,17 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-15: **`Test::Builder`'s own methods; `use_ok` in `BEGIN`; tied
+  references** (#3823, #3495, #4884, #4881, #3852, #4167, #4962).
+  `Test::Builder->new` answers `parent`, `expected_tests`, `details`,
+  `summary`, `level`, `todo`, `in_todo`, `todo_skip` and the `is_eq` / `like`
+  family, so `Test::Warnings` works; `BEGIN { use_ok('M') }` makes M's
+  constants and prototypes known to the parse, as `use M` does; a reference
+  stored in a tied array or hash is copied as that reference; `Encode` no
+  longer names an encoding it cannot decode (`cp932` added); the TAP layer
+  loads from the compiled-extension cache (a Test::More program starts about
+  0.6 s sooner).
+
 - 2026-11-15: **A filehandle that leaves its block is closed when nothing
   holds it, at the point the program would otherwise wait or fail** (#2006).
   A handle returned, passed to a sub or stored, then dropped, is found by the
