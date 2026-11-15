@@ -234,7 +234,7 @@ for my $dist (sort keys %by_dist) {
   }
   for my $w (@$files) {
     for my $rep (1 .. $repeat) {
-      $perl{$w->{tname}}[$rep] //= perl_run($w) if $perl_side;
+      $perl{$w->{tname}}[$rep] //= perl_run($w, $rep) if $perl_side;
       emit(pcl_run($w, 'warm', $cache, $rep), $perl{$w->{tname}}[$rep]);
     }
   }
@@ -356,7 +356,7 @@ sub slurp { my ($f) = @_; open my $h, '<', $f or return ''; local $/; my $s = <$
 sub to_for { my ($w) = @_; return PCLTimeouts::timeout_for(\%file_to, $w->{rel}, $timeout) }
 
 sub perl_run {
-  my ($w) = @_;
+  my ($w, $rep) = @_;
   my $to = to_for($w);
   my $o = "$tmp/perl.out";
   my $load = load1();
@@ -379,7 +379,7 @@ sub perl_run {
                            $w->{dist}, { PERL5LIB => perl5lib($w) });
     $p{q_c_wall} = $cw;
   }
-  if ($perl_late) {   # once more with the require hook: perl's run-time `require`s, timed
+  if ($perl_late && ($rep // 1) == 1) {   # once (rep 1) more with the require hook: perl's run-time `require`s, timed
     unlink $prec;
     timed("timeout -k 5 $to $^X $helper" . inc_flags($w) . " $w->{t} >/dev/null 2>&1 </dev/null",
           $w->{dist}, { PERL5LIB => perl5lib($w), PCL_BT_PERL_OUT => $prec, PCL_BT_PERL_LATE => 1 });
@@ -976,6 +976,22 @@ sub report_run {
   $i = 0;
   $o .= "\n## PCL's run phase under HALF of perl's (" . scalar(@fast) . " files: possible silent skips, read before believing)\n\n$hdr"
       . join('', map { $line->($_) } @fast);
+  # perl's run phase two ways: the INIT/END clock against (whole file - perl -c), walls, best of the reps
+  my @pc = grep { length($_->{q_c_wall} // '') } @cmp;
+  if (@pc) {
+    my @top = (sort { $b->{q_wall} <=> $a->{q_wall} } @pc)[0 .. 9];
+    $o .= "\n## perl's run phase two ways (wall, best of the reps): the INIT/END clock vs the whole file minus `perl -c`\n\n"
+        . "| file | whole | perl -c | whole - (-c) | INIT..END | difference | INIT..END spread |\n|---|---:|---:|---:|---:|---:|---:|\n";
+    for my $r (grep { defined } @top) {
+      my $d = $r->{p_wall} - $r->{q_c_wall};
+      $o .= sprintf "| %s/%s | %s | %s | %s | %s | %s | %.0f%% |\n", $r->{dist}, $r->{file}, ms($r->{p_wall}), ms($r->{q_c_wall}),
+        ms($d), ms($r->{q_wall}), ms($d - $r->{q_wall}), 100 * num($r->{q_spread});
+    }
+    my @diff = sort { $a <=> $b } map { $_->{p_wall} - $_->{q_c_wall} - $_->{q_wall} } @pc;
+    my ($sd, $sq) = (0, 0); for (@pc) { $sd += $_->{p_wall} - $_->{q_c_wall}; $sq += $_->{q_wall} }
+    $o .= sprintf "\nOver all %d files (ms): (whole - perl -c) - INIT..END = median %s, p10 %s, p90 %s; sums %s s vs %s s.\n",
+      scalar @diff, ms($diff[$#diff / 2]), ms($diff[int($#diff * 0.1)]), ms($diff[int($#diff * 0.9)]), f2($sd), f2($sq);
+  }
   my @nq = grep { $_->{cmp} eq 'C' && !$_->{q_init} } @$rows;
   $o .= sprintf "\nCompared files where perl never reached INIT (left before its run phase): %d%s\n", scalar @nq,
     @nq ? ' -- ' . join(', ', map { "$_->{dist}/$_->{file}" } @nq) : '';
