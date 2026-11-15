@@ -18,7 +18,11 @@ package Pl::Binder;
 # captures_name (1c port 2, s533d, §6 item 2); the span pass, the flatten
 # refusal and every rename pass's "is this use the declaration's variable"
 # ask spans / binding_after / refers_to_decl (1c port 3, s535a, §6 item 3 --
-# the last dual-run hook, _ref_shadowed, left with it).
+# the last dual-run hook, _ref_shadowed, left with it); the declaration
+# renames -- state cells, the exception partition, the re-read and seam
+# shadows -- rename exactly decl_binding's uses_of, in a scope the table
+# holds whole, and the self-reading initializer asks reads_outside (1c port
+# 4, s539b, §6 item 4 -- the region walk _rename_decl_within left with it).
 #
 #   PCL_BINDER_CHECK=log   the MEASUREMENT rows (S per build, R per rebuild,
 #                          C query counts per transpile, E per binder error)
@@ -88,6 +92,8 @@ package Pl::Binder;
 #       ->refers_to_decl($tok, $canon, $decl)  the shadow question (s535a)
 #       ->binding_after($node, $canon), ->decl_binding($tok), ->ord_range($a, $z)
 #       ->mentions_in($node, $canon)   $node's non-declarator mentions of $canon, as spelled now (s536e)
+#       ->holds($node)                 every token of $node is in the table (s539b)
+#       ->reads_outside($lo, $hi, $canon, $at)  does [lo, hi] read $canon from outside it (s539b)
 #       Pl::Binder::for_span($p2, $n)  the binder answering the span / shadow question
 
 use strict;
@@ -1034,12 +1040,24 @@ sub mentions_in {
   return $n;
 }
 
+# Does the table hold every token of $node -- none inserted or removed since
+# the build?  Counted once per node (rule 12: a token the table does not hold
+# may spell a use that no question counts and no rename reaches).
+sub holds {
+  my ($self, $node) = @_;
+  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
+  return 0 unless defined $a && defined $z;
+  my $n = $self->{held}{ refaddr $node } //= do { my @t = $node->isa('PPI::Token') ? ($node) : $node->tokens; scalar @t };
+  return $n == $z - $a + 1 ? 1 : 0;
+}
+
 # Does the ordinal range [$lo, $hi] -- an initializer -- READ $canon through a
 # binding declared OUTSIDE it: the outer lexical or the package variable (a
 # `my` nested in the range, an anon sub's or a block's own, is its own
-# binding)?  Asked about the names as spelled now (a rename pass may have
-# run); a literal text in the range naming the outer lexical counts where a
-# string eval can see it (port 2's rule).  $at = a node at $lo (its package).
+# binding)?  As spelled now (a rename pass may have run); a literal text in
+# the range naming the outer lexical counts where a string eval can see it
+# (port 2's rule).  $at = the node at $lo (its package).  1c port 4 (s539b):
+# it replaced Parser2::_init_reads_scalar's text scan and nested-block walk.
 sub reads_outside {
   my ($self, $lo, $hi, $canon, $at) = @_;
   my %done;
@@ -1055,17 +1073,6 @@ sub reads_outside {
   my $o = $self->_resolve_cur($lo, $canon, $self->_pkg_at($at));
   return 1 if _is_lexical($o) && $self->text_uses_in($o, $lo, $hi);
   return 0;
-}
-
-# Does the table hold every token of $node -- none inserted or removed since
-# the build?  Counted once per node (the capture question's check, rule 12:
-# a token the table does not hold may spell a use nobody renames).
-sub holds {
-  my ($self, $node) = @_;
-  my ($a, $z) = ($self->_first_ord($node), $self->_last_ord($node));
-  return 0 unless defined $a && defined $z;
-  my $n = $self->{held}{ refaddr $node } //= do { my @t = $node->isa('PPI::Token') ? ($node) : $node->tokens; scalar @t };
-  return $n == $z - $a + 1 ? 1 : 0;
 }
 
 # The binding a DECLARATOR token makes (`my $x`'s `$x`), or undef.
@@ -1271,10 +1278,8 @@ sub captures_name {
   return (0, 'no-range', 'block not in the table') unless defined $a && defined $z;
   # Every token of the node must be one the table holds: a token inserted
   # since the build carries no record, and a use it spells would go uncounted
-  # (rule 12: the caller dies on `no-record`).  Checked once per node.
-  my $n = $self->{held}{ refaddr $block } //= do { my @t = $block->isa('PPI::Token') ? ($block) : $block->tokens; scalar @t };
-  return (0, 'no-record', ($n - ($z - $a + 1)) . ' token(s) the table does not hold')
-    if $n != $z - $a + 1;
+  # (rule 12: the caller dies on `no-record`).
+  return (0, 'no-record', 'a token the table does not hold') unless $self->holds($block);
   my (@why, %done);
   my @toks = grep { !$done{ refaddr $_ }++ } map { $_->{tok} } $self->_refs_in($a, $z);
   my $ntok = @toks;

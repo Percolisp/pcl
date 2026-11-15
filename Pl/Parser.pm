@@ -581,8 +581,8 @@ sub _desugar_loop_modifiers {
 # `$a` is the scalar holding the glob name — and `*$a[0]{…}` is not even valid
 # perl, so the braces after a `*` cast are never an element access.
 #
-# The damage was silent and total: `_rename_decl_within` skips a token whose
-# ->symbol is a different variable, so the `my $a` rename (`$a__excl__0`) left
+# The damage was silent and total: the rename walk (then `_rename_decl_within`)
+# skipped a token whose ->symbol is a different variable, so the `my $a` rename (`$a__excl__0`) left
 # the `$a` inside `*$a{SCALAR}` pointing at the never-assigned PACKAGE global
 # and the whole top-level form died "Can't use an undefined value as a symbol
 # reference" — t/uni/parser.t lost 35 rows to it (task #663).  Every OTHER

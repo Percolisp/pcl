@@ -4151,7 +4151,7 @@ sub _span_rename_scalar {
   $self->_filecell_note('span', "\$$bare", $unique ? 'identity' : 'mangle') if $id_ok;
   my $mine = sub { $self->_refers_to_decl($_[0], "\$$bare", $sym) };
   _reg_rename("\$$bare", "\$$newbare", ':spanning') if !$unique;
-  $self->_rename_decl_within($decl, $sym, "\$$newbare", $lead ? undef : $decl);
+  $sym->set_content("\$$newbare");
   $self->{_emb_promoted}{"\$$newbare"} = q{span} if !$lead;
   my $stmts = $segments->[$di]{stmts};
   my $decl_fix = $unique ? undef : _interp_fixer("\$$bare", $newbare);
@@ -4303,7 +4303,7 @@ sub _span_rename_container {
   my $mine = sub { $self->_refers_to_decl($_[0], $csym, $dsym) };
   if (!$unique) {
     _reg_rename($csym, "$sig$newbare", ':spanning');
-    $self->_rename_decl_within($decl, $dsym, "$sig$newbare", $lead ? undef : $decl);
+    $dsym->set_content("$sig$newbare");
     $self->{_emb_promoted}{"$sig$newbare"} = q{span} if !$lead;
     my $fix = _interp_fixer($csym, $newbare);
     my $stmts = $segments->[$di]{stmts};
@@ -5071,10 +5071,11 @@ sub _promote_captured {
   # variable), then every post-declaration use, skipping shadow scopes.
   _reg_rename($canon, $sig . $newbare, ':captured');
   $self->_reg_captures($sig . $newbare, \@cap_subs);
-  # An embedded decl's whole STATEMENT is evaluated before the name exists
-  # (perl introduces a `my` after the statement), so only its declarator is
-  # renamed there — the override names that region.
-  $self->_rename_decl_within($decl, $dsym, $sig . $newbare, $emb_sym ? $decl : undef);
+  # The declaring STATEMENT is evaluated before the name exists (perl
+  # introduces a `my` after its statement; an embedded decl's statement
+  # likewise), so the declarator alone is renamed there; its uses are
+  # @post's, rewritten next.
+  $dsym->set_content($sig . $newbare);
   $self->_rewrite_var_uses(\@post, $canon, $newbare, $extent, $skip);
   $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
   # #2633: a decl that would have been an identity cell (a non-program unit's
@@ -5302,14 +5303,14 @@ sub _shadow_rename_blocker {
   (my $bare = $old) =~ s/^\$//;
   # More than one my/state declaring this name in $root → nested re-shadow;
   # a single positional rename would merge the scopes — unless the caller
-  # renames SHADOW-AWARE ($shadow_ok, #254 B-ii): _rename_decl_within now
-  # leaves an inner declaration's target and its scope alone, so the two
-  # variables stay two variables.
+  # renames SHADOW-AWARE ($shadow_ok, #254 B-ii): _rename_binding renames
+  # exactly one binding's uses, so an inner declaration and its scope keep
+  # theirs and the two variables stay two variables.
   my $decls = _count_decls_of($root, $old);
   return "multiple declarations" if $decls != 1 && !$shadow_ok;
   return "no declaration" if $decls == 0;
   # Interpolated uses ("$x" / /$x/ / "${x}" / heredoc / <$x>) are handled:
-  # the rename (_rename_decl_within) rewrites them via _interp_fixer (M-A;
+  # the rename (_rename_binding) rewrites them via _interp_fixer (M-A;
   # braced spellings since M2, s353).  Only a CODE-level brace-deref
   # (`${x}` as Cast+Block — the name lives in a Word token the symbol
   # rewrite never sees) keeps the refusal; the old whole-content text scan
@@ -5762,222 +5763,60 @@ sub _lexsub_renamable {
   return 1;
 }
 
-# Rename the declaration $sym (a `my $x` Symbol) and every post-declaration
-# scalar use of it within $root to $new — including uses inside interpolating
-# text ("$x", /$x/, heredocs, <$fh>; via _interp_fixer, M-A).  Symbols whose
-# ->symbol resolves to a container (`$x[0]` → @x, `$x{k}` → %x) are left
-# alone — they are element accesses of DIFFERENT variables; the interp fixer
-# skips those forms for the same reason.  The positional walk keeps interp
-# text BEFORE the decl (and in the decl's own RHS) on the outer variable.
-# Every caller's blocker guarantees a single declaration of the name in
-# $root, so there is no shadow scope to skip.
-# Is the Structure::List L the name list of a declarator -- `my (…)`,
-# `state (…)`, `our (…)`?
-sub _is_decl_list {
-  my ($l) = @_;
-  my $pv = $l->sprevious_sibling;
-  return $pv && $pv->isa('PPI::Token::Word')
-      && $pv->content =~ /^(?:my|our|state|local)$/ ? 1 : 0;
-}
-
-sub _rename_decl_within {
-  my ($self, $root, $sym, $new, $decl_override) = @_;
-  my $mode = $ENV{PCL_RENAME_BINDER} // '';      # s539b D0 (TEMPORARY)
-  # the span pass and the capture promoter rewrite the uses themselves: their
-  # call renames the declarator alone (root = the declaring statement)
-  my $declonly = ((caller(1))[3] // '') =~ /::_(?:span_rename_scalar|span_rename_container|promote_captured)\z/;
-  if ($mode eq 'binder') {
-    return $self->_rename_binding($sym, $new) if !$declonly;
-    $sym->set_content($new);
-    return $new;
-  }
-  my ($d0plan, %d0before);
-  if ($mode eq 'log') {
-    $d0plan = $declonly ? [] : eval { [ $self->_rename_binding($sym, $new, dry => 1) ] };
-    $d0plan = $@ || 'die' if !$d0plan;
-    for my $t ($root->tokens, (ref $d0plan ? map { $_->[0] } @$d0plan : ())) {
-      $d0before{ refaddr $t } //= [$t, _d0_sig($t)];
-    }
-  }
-  my $old  = $sym->content;
-  my $d0r = $self->_rename_decl_within_0($root, $sym, $new, $decl_override);
-  $self->_d0_log($root, $sym, $new, $old, $d0plan, \%d0before) if $mode eq 'log';
-  return $d0r;
-}
-
-sub _d0_sig { my ($t) = @_; return $t->isa('PPI::Token::HereDoc') ? $t->content . "\0" . join('', $t->heredoc) : $t->content }
-
-sub _d0_tokstr {
-  my ($t, @x) = @_;
-  (my $c = _d0_sig($t)) =~ s/\s+/ /g;
-  $c = substr($c, 0, 40) . '...' if length $c > 43;
-  return join ':', ($t->line_number // '?'), ref($t) =~ s/^PPI::Token:://r, @x, $c;
-}
-
-sub _d0_log {
-  my ($self, $root, $sym, $new, $old, $plan, $before) = @_;
-  my $fam = (caller(2))[3] // '?';
-  $fam =~ s/^Pl::Parser2:://;
-  my $file = $ENV{PCL_D0_FILE} // Pl::Binder::_file_of($self);
-  local $ENV{PCL_BINDER_LOG} = $ENV{PCL_RENAME_LOG};
-  if (!ref $plan) {
-    Pl::Binder::_row('E4', $file, $sym->line_number // '?', $old, $fam, $new, $plan);
-    return;
-  }
-  my %changed;
-  for my $e (values %$before) {
-    my ($t, $s) = @$e;
-    next if $t == $sym;
-    $changed{ refaddr $t } = $t if _d0_sig($t) ne $s;
-  }
-  my (%bset, @unreach);
-  for my $p (@$plan) {
-    my ($t, $kind, $would, $via, $want) = @$p;
-    if ($would) { $bset{ refaddr $t } = $p } else { push @unreach, _d0_tokstr($t, $kind, $via) }
-    # an interpolating token whose fixer reaches FEWER mentions than the binder holds
-    push @unreach, _d0_tokstr($t, "partial=$would/$want", $via)
-      if $kind eq 'interp' && $would && $want && $would < $want;
-  }
-  my @lonly = map { _d0_tokstr($changed{$_}) } grep { !$bset{$_} } sort { $a <=> $b } keys %changed;
-  my @bonly;
-  for my $k (sort { $a <=> $b } keys %bset) {
-    next if $changed{$k};
-    my ($t, $kind, $would, $via) = @{ $bset{$k} };
-    my $where = !_has_ancestor($t, $root) && $t != $root ? 'out-root' : 'in-root';
-    push @bonly, _d0_tokstr($t, $kind, $via, $where);
-  }
-  my $tag = (@lonly || @bonly || @unreach) ? 'DIFF' : 'SAME';
-  Pl::Binder::_row('R4', $tag, $file, $sym->line_number // '?', $old, $fam, $new,
-                   scalar(keys %bset), join(' ; ', @lonly), join(' ; ', @bonly), join(' ; ', @unreach));
-}
-
-sub _rename_decl_within_0 {
-  my ($self, $root, $sym, $new, $decl_override) = @_;
-  my $old  = $sym->content;
-  my $canon = $sym->symbol;
-  # $decl is the region evaluated in the OUTER scope, skipped by the rewrite.
-  # It is the declaring STATEMENT for an ordinary decl (`my $x = $x` reads the
-  # outer $x), but a caller whose ROOT *is* that statement must say which
-  # sub-region to skip instead — a `for my $x (LIST)` roots at the Compound,
-  # where the default would skip the whole construct (#296).
-  # A LIST declaration's Symbol sits in the Expression INSIDE `my (…)`, whose
-  # ->statement is that inner Expression -- the whole `my ($p, $q) = ($q, $p)`
-  # is the statement that holds it (task #2631: the skipped region was only
-  # the name list, so the RHS was rewritten to the NEW names and read undef,
-  # where the single-scalar `my $x = $x` already read the outer one).
-  my $decl = $decl_override // do {
-    my $st = $sym->statement;
-    while ($st && $st->isa('PPI::Statement::Expression')
-           && $st->parent && $st->parent->isa('PPI::Structure::List')
-           && $st->parent->parent && $st->parent->parent->isa('PPI::Statement')
-           && _is_decl_list($st->parent)) {
-      $st = $st->parent->statement;
-    }
-    $st;
-  };
-  # A NESTED re-declaration of the same name inside $root is a different
-  # variable: its own decl target and every use in its scope must keep the
-  # original name (#254 B-ii — op/while.t's `while (my $i = …) { … my $i = 0 }`).
-  # Without this the rename merged the two scopes, which is why the callers'
-  # blocker refused the shape outright; the reducer that decides "is this use
-  # shadowed" is the same one the span pass uses, so the two agree.
-  my $shadowed = sub {
-    my ($t) = @_;
-    return 1 if $t != $sym && _is_lexical_decl_name($t);
-    return !$self->_refers_to_decl($t, $canon, $sym);
-  };
-  (my $newbare = $new) =~ s/^[\$\@\%]//;
-  my $interp_fix = _interp_fixer($old, $newbare);
-  my ($seen_sym, $past_decl) = (0, 0);
-  my ($stop_tok, $skip_end, $skip_in) = (undef) x 3;
-  for my $t ($root->tokens) {
-    if (!$seen_sym) {
-      next unless $t == $sym;
-      $t->set_content($new);
-      $seen_sym = 1;
-      next;
-    }
-    if (!$past_decl) {
-      my ($p, $inside) = ($t->parent, 0);
-      while ($p) { if ($p == $decl) { $inside = 1; last } $p = $p->parent; }
-      next if $inside;   # decl RHS: `my $x = $x` reads the OUTER $x
-      $past_decl = 1;
-    }
-    # A LATER declaration of the same name ends this one's claim on the uses it
-    # covers (#296-B2).  Only a `my`/`state` word can open one, so the test
-    # costs nothing on ordinary tokens.
-    if (!$stop_tok && !$skip_end && $t->isa('PPI::Token::Word')
-        && $t->content =~ /^(?:my|state)$/) {
-      my ($kind, $end, $inner) = _redecl_region($root, $t, $sym, $canon);
-      if    (($kind // '') eq 'stop') { $stop_tok = $end }
-      elsif (defined $kind)           { ($skip_end, $skip_in) = ($end, $inner) }
-    }
-    if ($skip_end) {
-      my $out = 0;                      # in the construct's OUTER-evaluated part
-      for (my $p = $t; $p; $p = $p->parent) {
-        if (refaddr($p) == refaddr($skip_in)) { $out = 1; last }
-      }
-      $skip_end = undef if refaddr($t) == refaddr($skip_end);
-      next if !$out;
-    }
-    _rename_use_token($t, $old, $new, $interp_fix, $shadowed);
-    last if $stop_tok && refaddr($t) == refaddr($stop_tok);
-  }
-  return $new;
-}
-
 # THE RENAME OF ONE BINDING (1c port 4, s539b; docs/binder-dual-run-s525.md
-# §6 item 4).  The declarator $sym takes the name $new, and so does EXACTLY
-# every use the binder records for its binding (Pl::Binder::uses_of) --
-# perl's pad, positional: the declaring statement reads the OUTER variable
-# (`my $x = $x + 1`), a nested or a later same-name declaration is another
-# binding (#296-B2), a compound head's `my` covers its whole compound (#297).
-# Each use is rewritten as it is spelled: a Symbol keeps its access sigil
-# (`$x[0]` of @x, a cast's `$$x[0]` of $x), `$#x`, a `${x}` brace's name,
-# interpolated text (_interp_fixer), a one-token signature's default (#4545).
+# §6 item 4): the declarator $sym takes the name $new, and so does EXACTLY
+# every use the binder records for its binding (Pl::Binder::uses_of) -- the
+# state cells, the exception partition, the re-read and the seam shadows all
+# rename through here.  perl's pad, positional: the declaring statement reads
+# the OUTER variable (`my $x = $x + 1`, `my ($p, $q) = ($q, $p)`, #2631), a
+# nested or a LATER same-name declaration is another binding (#254 B-ii,
+# #296-B2), a compound head's `my` covers its whole compound and a foreach
+# list runs outside it (#296, #297).  (It replaced _rename_decl_within, a
+# forward walk over a ROOT region with a skip region, a stop at the next
+# same-scope declaration and a per-token shadow test -- the binder's answer
+# had become every one of those.)  Each use is rewritten as it is spelled: a
+# Symbol keeps its access sigil (`$x[0]`/`$x{k}`/`@x{...}` of a container, a
+# cast's `$$x[0]` of the scalar), `$#x`, the name inside a `${x}` brace,
+# interpolated text through _interp_fixer (M-A), a one-token signature's
+# default (#4545).  A literal text a string eval may compile is no use the
+# rename can reach: the callers' string-eval blockers decide those.
 # RULE 12: no binding for $sym, a scope the table does not hold whole (a
 # token inserted since the build could spell a use), or a use the rewrite
-# cannot reach DIES naming it.  dry => 1 returns the plan, [TOKEN, KIND,
-# WOULD-CHANGE, VIA] per use, and changes nothing.
+# cannot reach DIES naming it -- a use left on the old name reads another
+# variable, silently.  Returns $new.
 sub _rename_binding {
-  my ($self, $sym, $new, %opt) = @_;
+  my ($self, $sym, $new) = @_;
   my $bd = Pl::Binder::for_span($self, $sym);
   my $b  = $bd ? $bd->decl_binding($sym) : undef;
   die sprintf("PCL internal: the binder holds no declaration for `%s` at line %s (renaming it %s)\n",
     $sym->content, $sym->line_number // '?', $new) unless $b;
-  my $held = $bd->holds($b->{scope_node});
-  die sprintf("PCL internal: the binder does not hold every token of the scope of `%s` (line %s): a use could go unrenamed\n",
-    $sym->content, $sym->line_number // '?') unless $held || $opt{dry};
+  die sprintf("PCL internal: the binder does not hold every token of the scope of `%s` (line %s), so a use of it could go unrenamed\n",
+    $sym->content, $sym->line_number // '?') unless $bd->holds($b->{scope_node});
   my $old = $sym->content;
-  (my $bare    = $old) =~ s/^[\$\@\%]//;
-  (my $newbare = $new) =~ s/^[\$\@\%]//;
-  my $fix = _interp_fixer($old, $newbare);
-  my (@plan, %want);
-  for my $r ($bd->uses_of($b)) {
-    my $t = $r->{tok};
-    next if $want{ refaddr $t }++;
-    my ($kind, $would) = $self->_rename_binding_use($t, $old, $new, $bare, $newbare, $fix, 1);
-    push @plan, [$t, $kind, $would, $r->{via}];
+  my %r = (old => $old, new => $new, fix => _interp_fixer($old, substr($new, 1)));
+  ($r{bare} = $old) =~ s/^[\$\@\%]//;
+  ($r{newbare} = $new) =~ s/^[\$\@\%]//;
+  my (@toks, %seen);
+  for my $u ($bd->uses_of($b)) {
+    push @toks, $u->{tok} unless $seen{ refaddr $u->{tok} }++;
   }
-  push @$_, $want{ refaddr $_->[0] } for @plan;
-  return (@plan, ($held ? () : ([$sym, 'not-held', 0, '-']))) if $opt{dry};
-  my $cant = sub {
-    my ($t, $kind) = @_;
+  # every use first proven reachable, so a die leaves the document as it was
+  for my $t (@toks) {
+    my ($kind, $ok) = $self->_rename_binding_use($t, \%r, 1);
+    next if $ok;
     die sprintf("PCL internal: the rename of `%s` to %s cannot reach its use at line %s (%s): %s\n",
-      $old, $new, $t->line_number // '?', $kind, substr(_d0_sig($t), 0, 60));
-  };
-  $_->[2] or $cant->(@$_[0, 1]) for @plan;
-  $sym->set_content($new);
-  for my $p (@plan) {
-    my ($kind, $ok) = $self->_rename_binding_use($p->[0], $old, $new, $bare, $newbare, $fix, 0);
-    $cant->($p->[0], $kind) unless $ok;
+      $old, $new, $t->line_number // '?', $kind, substr($t->content, 0, 60));
   }
+  $sym->set_content($new);
+  $self->_rename_binding_use($_, \%r, 0) for @toks;
   return $new;
 }
 
-# One use's rewrite (the plan's KIND); $dry = report whether it would change.
+# One use's rewrite: (KIND, OK) -- OK = the token spells the old name where
+# the rewrite reaches it ($dry: report only).
 sub _rename_binding_use {
-  my ($self, $t, $old, $new, $bare, $newbare, $fix, $dry) = @_;
+  my ($self, $t, $r, $dry) = @_;
+  my ($bare, $newbare) = @$r{qw(bare newbare)};
   if ($t->isa('PPI::Token::Symbol')) {
     (my $c = $t->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/ or return ('symbol', 0);
     $t->set_content($c) if !$dry;
@@ -5988,87 +5827,40 @@ sub _rename_binding_use {
     $t->set_content("\$#$newbare") if !$dry;
     return ('arylen', 1);
   }
-  if ($t->isa('PPI::Token::Word')) {                       # a `${x}` brace
+  if ($t->isa('PPI::Token::Word')) {                            # `${x}`
     return ('brace', 0) unless $t->content eq $bare;
     $t->set_content($newbare) if !$dry;
     return ('brace', 1);
   }
-  if ($t->isa('PPI::Token::Prototype')) {                  # #4545
+  if ($t->isa('PPI::Token::Prototype')) {                       # #4545
     return ('proto', index($t->content, $bare) >= 0 ? 1 : 0) if $dry;
-    return ('proto', $self->_rename_in_proto_defaults($t, $old, $new) ? 1 : 0);
+    return ('proto', $self->_rename_in_proto_defaults($t, @$r{qw(old new)}) ? 1 : 0);
   }
-  if ($t->isa('PPI::Token::HereDoc')) {
-    my @l = $t->heredoc;
-    my $n = 0;
-    $n += ($fix->($_) || 0) for @l;
-    return (q{interp}, $dry ? $n : 0) if $dry || !$n;
-  } elsif (_interp_token_candidate($t)) {
-    my $c = $t->content;
-    my $n = $fix->($c);
-    return (q{interp}, $dry ? $n : 0) if $dry || !$n;
-  } else {
-    return (ref($t), 0);
-  }
-  my $before = _d0_sig($t);
-  _fix_interp_token($t, $fix);
-  return ('interp', _d0_sig($t) ne $before ? 1 : 0);
+  return (ref($t), 0) unless _interp_token_candidate($t);
+  my @text = $t->isa('PPI::Token::HereDoc') ? $t->heredoc : ($t->content);
+  my $was = join '', @text;
+  my $n = 0;
+  $n += ($r->{fix}->($_) || 0) for @text;               # (rewrites the copies)
+  return ('interp', $n ? 1 : 0) if $dry || !$n;
+  _fix_interp_token($t, $r->{fix});
+  my $now = join '', ($t->isa('PPI::Token::HereDoc') ? $t->heredoc : ($t->content));
+  die "PCL internal: the interpolation rewrite left " . ref($t) . " unchanged: $was\n" if $now eq $was;
+  return ('interp', 1);
 }
 
-# Where an earlier declaration's rewrite region gives way to a LATER `my`/`state`
-# word $w declaring the same $canon.  Returns:
-#
-#   ('stop', TOKEN)         $w re-declares in the SAME scope $root — perl's
-#                           later `my` is a NEW variable and every use from
-#                           there on is ITS use, rewritten by its own pass.
-#                           TOKEN is the LAST TOKEN OF THE STATEMENT, not the
-#                           declarator: perl does not introduce the new name
-#                           until the current statement finishes, so the
-#                           redeclaration's own initializer still reads the
-#                           EARLIER variable (probed: `my $a = "X";
-#                           my $a = "[$a]"` prints `[X]`).
-#   ('skip', TOKEN, NODE)   $w declares into a CONSTRUCT (`for my $x (LIST)`,
-#                           `while (my $x = …)`, `for (my $x = 0; …)`), whose
-#                           whole extent is the new variable's scope.  Rewriting
-#                           resumes after TOKEN (the construct's last token);
-#                           inside it only NODE — the region _lexical_decl_scope
-#                           says is evaluated in the OUTER scope — is still ours.
-#   ()                      not a redeclaration of $canon, or one scoped to a
-#                           nested BLOCK: _refers_to_decl decides those, and it is
-#                           positionally exact there (statements before the inner
-#                           `my` still belong to us), which a whole-region skip
-#                           would not be.
-#
-# Both cases were live on this branch and correct before it: an earlier decl's
-# region ran straight through the later declarator, renaming uses the later
-# declaration's own pass then could not find — split.t's three same-block
-# `my ($a,$b) = split …` statements all read the FIRST split's values, and a
-# `while (my $a = …)` body read the enclosing block's `my $a`.  The old
-# _ref_shadowed could see neither (it inspected Block/Sub parents, and a
-# construct's head is a sibling of neither); the binder's answer that replaced
-# it (s535a) sees both, so this region logic is now belt and braces (port 4).
-sub _redecl_region {
-  my ($root, $w, $sym, $canon) = @_;
-  my $nx = $w->snext_sibling or return ();
-  my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-           : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-           : ();
-  for my $s (@syms) {
-    next if $s == $sym || $s->symbol ne $canon;
-    my ($r, $d) = _lexical_decl_scope($w, $s);
-    next unless $r;
-    if (refaddr($r) == refaddr($root)) {
-      # The declaring STATEMENT as $root sees it — the child of $root holding
-      # the declarator.  (Not $w->statement: a `my` embedded in an argument
-      # list — `func(my $x)` — sits in an inner Statement::Expression, and
-      # perl's "not until the statement ends" is about the whole statement.)
-      my $top = $w;
-      $top = $top->parent while $top->parent && refaddr($top->parent) != refaddr($root);
-      return ('stop', _last_token($top));
-    }
-    next unless $r->isa('PPI::Statement::Compound');
-    return ('skip', _last_token($r), $d // $w->parent);
-  }
-  return ();
+# The SCOPE of the declarator token $sym: the Block, the Document or the
+# Compound (a loop or condition head's `my`, #297) whose end closes its
+# binding -- the binder's scope_node (pad_leavemy, pad.c:1503).  undef when
+# the binder says $sym declares nothing (`$o->my($x)`); a token the binder
+# holds no record of DIES (rule 12).  1c port 4: it replaced
+# _lexical_decl_scope, a second reading of the same perly.y rules.
+sub _decl_scope {
+  my ($self, $sym) = @_;
+  my $bd = Pl::Binder::for_span($self, $sym);
+  die sprintf("PCL internal: the binder holds no record of `%s` at line %s\n",
+    $sym->content, $sym->line_number // '?') unless $bd && defined $bd->{ord}{ refaddr $sym };
+  my $b = $bd->decl_binding($sym) or return undef;
+  return $b->{scope_node};
 }
 
 sub _last_token {
@@ -6082,8 +5874,8 @@ sub _last_token {
 # every use-rewrite in the file.  $shadowed answers "does this token belong to
 # a different variable of the same name" for its caller's scope model; the
 # positional/scope logic stays there, this is only the rewrite.
-# (Extracted from _rename_decl_within so the free-capture rename
-# — _rename_free_eval_captures, #296-B1 — cannot drift from it.)
+# (Shared by the free-capture rename -- _rename_free_eval_captures, #296-B1
+# -- and the one-token signature default rewrite, #4545.)
 sub _rename_use_token {
   my ($t, $old, $new, $interp_fix, $shadowed) = @_;
   my $sigil = substr($old, 0, 1);
@@ -8292,10 +8084,11 @@ sub _state_rw_blocker {
   (my $bare = $old) =~ s/^[\$\@\%]//;
   # NO `my`/`our`/`local` re-declaration refusal any more (s415, task #401).
   # It existed because a positional rename of every `$y` in $root would merge
-  # two different variables, but _rename_decl_within has been SHADOW-AWARE
-  # since #254 B-ii and region-limited since #296-B2: it starts at the state
-  # declaration, leaves a nested re-declaration's own scope alone, and stops
-  # at a LATER declaration of the same name.  So the three orderings all come
+  # two different variables, but the rename has been SHADOW-AWARE since
+  # #254 B-ii and region-limited since #296-B2, and since 1c port 4 it renames
+  # exactly the declaration's binding (_rename_binding): a nested
+  # re-declaration's scope and a LATER declaration of the same name are other
+  # bindings.  So the three orderings all come
   # out as perl reads them (probed s415: an unrelated `my $y` later in the
   # file, a `my $y` before the state decl, and an inner `my $y` inside a block
   # under it).  Keeping the refusal cost t/opbasic/concat.t its whole run
@@ -8365,19 +8158,18 @@ sub _state_rewrite_routes {
   my ($self, $doc) = @_;
   my @sites = $self->_state_rewrite_sites($doc);
   return 0 unless @sites;
-  # The rename below asks the binder which uses are the declaration's own
-  # (_rename_decl_within, 1c port 3), and this prepass runs BEFORE the main
-  # build point: a binder of THIS document answers, as written, for the
-  # duration of the loop (the document is re-parsed right after).
+  # The renames ask the binder for each declaration's uses (_rename_binding,
+  # 1c port 4), and this prepass runs BEFORE the main build point: a binder of
+  # THIS document answers, as written (the document is re-parsed right
+  # after).  EVERY site is renamed before ANY declaration is rewritten -- the
+  # rewrite inserts tokens the binder does not hold, inside an earlier site's
+  # scope (rule 12, Binder::holds) -- in reverse document order, which keeps
+  # the cell numbering.
   require Pl::Binder;
   local $self->{_binder} = Pl::Binder::build_for($self, $doc);
+  my @cells = map { [ $self->_state_rename_site($_, $doc) ] } reverse @sites;
   my %anon;
-  if (($ENV{PCL_RENAME_BINDER} // q{}) eq q{binder}) {           # s539b D0: every rename before any edit
-    my @cells = map { [ $self->_state_rewrite_site_names($_, $doc) ] } reverse @sites;
-    $self->_state_rewrite_site($_, $doc, \%anon, shift @cells) for reverse @sites;
-  } else {
-    $self->_state_rewrite_site($_, $doc, \%anon) for reverse @sites;
-  }
+  $self->_state_rewrite_site($_, \%anon, shift @cells) for reverse @sites;
   for my $a (values %anon) {
     my $fin = $a->{block}->finish
       or die "Parser2 TODO: unterminated anon sub in state rewrite\n";
@@ -8440,12 +8232,12 @@ sub _state_list_syms {
   return @syms;
 }
 
-# Rewrite ONE declaration site (see _rewrite_state_prepass): every name gets
-# its cell, the declaration becomes the guarded initializer (or the bare
-# cell), and an anon-sub owner collects the cells for its wrap.
-sub _state_rewrite_site_names {
+# ONE declaration site's names (see _rewrite_state_prepass): every name gets
+# its cell, and exactly its binding's uses are renamed to it.  Returns the
+# cells.
+sub _state_rename_site {
   my ($self, $site, $doc) = @_;
-  my ($w, $syms, $route, $list, $cast) = @$site;
+  my ($w, $syms, $route) = @$site;
   my $root = _enclosing_block($w) // $doc;
   my @cells;
   for my $sym (@$syms) {
@@ -8458,17 +8250,19 @@ sub _state_rewrite_site_names {
     my $cell = "$sig${bare}__state__${n}";
     push @cells, $cell;
     _reg_rename($sym->content, $cell, ':state-cell');
-    $self->_rename_decl_within($root, $sym, $cell);
+    $self->_rename_binding($sym, $cell);
     $self->_state_qualify_foreign_uses($sym, $cell) if $route->{route} ne 'anon';
   }
   return @cells;
 }
 
+# Rewrite ONE declaration site whose names are renamed (_state_rename_site,
+# @$cells): the declaration becomes the guarded initializer (or the bare
+# cell), and an anon-sub owner collects the cells for its wrap.
 sub _state_rewrite_site {
-  my ($self, $site, $doc, $anon, $pre) = @_;
+  my ($self, $site, $anon, $cells) = @_;
   my ($w, $syms, $route, $list, $cast) = @$site;
-  my $root = _enclosing_block($w) // $doc;
-  my @cells = $pre ? @$pre : $self->_state_rewrite_site_names($site, $doc);
+  my @cells = @$cells;
   # ONE once-flag per declaration, named after its first cell.
   (my $flag = $cells[0]) =~ s/^[\@\%]/\$/;
   $flag .= '__init';
@@ -8544,8 +8338,9 @@ sub _state_qualify_foreign_uses {
 # the decl statement lowers to v1's exact guarded-init shape
 # (`(unless FLAG (box-set CELL INIT) (setf FLAG t))` + the bare cell as the
 # statement value).  Every post-decl use in the sub is token-renamed — the
-# same machinery as the other rename families (_rename_decl_within), so the
-# decl's own RHS still reads the OUTER variable (`state $x = $x`).
+# same machinery as the other rename families (_rename_binding: exactly the
+# binding's uses), so the decl's own RHS still reads the OUTER variable
+# (`state $x = $x`).
 #
 # Containers (`state @x [= LIST]`, `state %h [= LIST]`) take the same route:
 # a _fresh_container defvar cell plus a guarded whole-assignment through the
@@ -8655,7 +8450,7 @@ sub _rename_state_vars {
             . $self->{_state_rename_counter}++;
     $self->{_state_eval_capture_orig}{$new} = $orig if $eval_cap_ok;
     _reg_rename($orig, $new, ':state-cell');
-    $self->_rename_decl_within($sub->block, $k[1], $new);
+    $self->_rename_binding($k[1], $new);
     $self->{_state_renamed}{$new} = @k > 2 ? 'init' : 'plain';
     # Both symbols are defvar'd via _captured_decls at lowering time; the
     # marker keeps _forward_global_decls from emitting a competing defvar
@@ -8691,7 +8486,7 @@ sub _is_lexical_decl_name {
   # WHICH tokens the statement declares is _declarator_syms' question (rule
   # 11, the #593 fix's third copy): the old "every Symbol before the `=`" loop
   # called `$a` in `open(my $o, ">", $a)` a DECLARATION — PPI wraps that paren
-  # list in a Statement::Variable with no `=` — so _rename_decl_within left it
+  # list in a Statement::Variable with no `=` — so the rename walk left it
   # on the special `$a` while `my $a` became `$a__excl__0` (#2287's everyday
   # row: File-Compare-Copy wrote its file to "").
   return scalar grep { $_ == $sym } _declarator_syms($st);
@@ -8746,8 +8541,7 @@ sub _rename_exception_mys {
       my $qualified = $self->{_file_qual_global}{$s->content};
       next unless $qualified
                || Pl::GlobalPartition::is_exception_global($s->content);
-      my ($root, $decl) = _lexical_decl_scope($w, $s);
-      next unless $root;
+      my $root = $self->_decl_scope($s) or next;
       # A FILE-level decl in a file whose string eval sits inside a NAMED SUB
       # is left to the capture/promotion machinery (task #296's second
       # reproducer: `my $a = "FILE"; sub g { eval '$a' }`).  A named sub is
@@ -8769,11 +8563,10 @@ sub _rename_exception_mys {
         ? $self->_shadow_rename_blocker($root, $s, 'eval_ok', 'shadow_ok')
         : $self->_state_container_blocker($root, $s, 'eval_ok');
       next if $why;
-      $self->_rename_decl_within($root, $s,
+      $self->_rename_binding($s,
         _reg_rename($s->content,
-                    $s->content . '__excl__' . $self->{_excl_rename_counter}++,
-                    $qualified ? q(:qualified-global) : q(:exception-global)),
-        $decl);
+                    $s->content . q(__excl__) . $self->{_excl_rename_counter}++,
+                    $qualified ? q(:qualified-global) : q(:exception-global)));
     }
   }
   return;
@@ -8862,35 +8655,6 @@ sub _rename_free_eval_captures {
     $self->{_evalcap_names}{$new} = $old;
   }
   return;
-}
-
-# The SCOPE of a `my`/`state` declaration, as perl states it syntactically:
-# returns (ROOT, DECL) for _rename_decl_within — ROOT is the region whose
-# tokens may be rewritten, DECL the sub-region evaluated in the OUTER scope
-# (the initializer / the foreach list), which must not be.  DECL undef means
-# "the declaring statement", which is _rename_decl_within's own default.
-#
-#   for my $x (LIST) {…}   construct-scoped; LIST runs outside it
-#   if/while (my $x = …)   construct-scoped; the head runs in it, so DECL
-#                          stays the declaring statement
-#   for (…; my $x…; …)     ditto, via Structure::For
-#   my $x inside a block   block-scoped (sub body, bare block, loop body)
-#   my $x at file level    to end of document — the decl's own top node
-sub _lexical_decl_scope {
-  my ($w, $s) = @_;
-  my $par = $w->parent;
-  if ($par && $par->isa('PPI::Statement::Compound')) {   # foreach loop variable
-    my ($list) = grep { $_->isa('PPI::Structure::List') } $par->schildren;
-    return ($par, $list // $s);
-  }
-  for (my $p = $w->parent; $p; $p = $p->parent) {
-    if ($p->isa('PPI::Structure::Condition') || $p->isa('PPI::Structure::For')) {
-      my $c = $p->parent;
-      return $c && $c->isa('PPI::Statement::Compound') ? ($c, undef) : ();
-    }
-    return ($p, undef) if $p->isa('PPI::Structure::Block');
-  }
-  return ($s->top, undef);
 }
 
 # The nearest enclosing SUB BODY of $el, if any: a NAMED sub definition, or
@@ -11490,9 +11254,8 @@ sub _stmt_mentions_again {
 # package global -- but the embedded-`my` let (M2 / #3431) is opened AROUND
 # the statement, so it would shadow them; both arms therefore kept the outer
 # variable for such a name, and the statement WROTE it.  The declarator is
-# renamed instead -- with exactly its binding's uses after the statement
-# (_rename_decl_within: the declaring statement is the skipped region, the
-# binder decides every later token) -- to a fresh `NAME__shadow__N`, which the
+# renamed instead -- with exactly its binding's uses, all after the
+# statement (_rename_binding) -- to a fresh `NAME__shadow__N`, which the
 # eval capture alist strips back to NAME: the let binds the fresh name and the
 # statement's other mentions keep reading the outer one.  Runs after the
 # exception rename (its `__excl__` names are fresh already) and before the
@@ -11506,15 +11269,12 @@ sub _rename_rereading_embedded_mys {
     my $name = $sym->content;
     next if $name =~ /__(?:file|state|shadow|excl|lex|evalcap|lexsub)__\w*\z/;
     next unless $self->_stmt_mentions_again($top, $name);
-    # its scope: the nearest Block (or the document) -- an embedded `my` is
-    # never a compound head's, so the walk from the symbol is the word's
-    my ($root) = _lexical_decl_scope($sym, $sym);
-    next unless $root;
+    my $root = $self->_decl_scope($sym) or next;
     (my $bare = $name) =~ s/^[\$\@\%]//;
     next if _has_code_brace_deref($root, $bare);
-    $self->_rename_decl_within($root, $sym,
-      _reg_rename($name, $name . '__shadow__' . $self->{_shadow_rename_counter}++,
-                  ':reread-shadow'), $top);
+    $self->_rename_binding($sym,
+      _reg_rename($name, $name . q(__shadow__) . $self->{_shadow_rename_counter}++,
+                  q(:reread-shadow)));
   }
   return;
 }
@@ -14758,10 +14518,10 @@ sub _gate_seam_my_shadow {
               : $self->_shadow_rename_blocker($block, $s, 'eval_ok');
       die "Parser2 TODO: my-shadow of live lexical " . $s->content
         . " inside fallback block ($why)\n" if $why;
-      $self->_rename_decl_within($block, $s,
+      $self->_rename_binding($s,
         _reg_rename($s->content,
-                    $s->content . '__shadow__' . $self->{_shadow_rename_counter}++,
-                    ':seam-shadow'));
+                    $s->content . q(__shadow__) . $self->{_shadow_rename_counter}++,
+                    q(:seam-shadow)));
     }
   }
 }
@@ -15617,89 +15377,28 @@ sub _fallback_stmt_capture {
 }
 
 # `my $x` / `my $x = INIT` → ($name, \@init_parts | undef); else ().
-# Does the initialiser of `my $x = …` actually READ $x?  Asked at the TOKEN
-# level, because a text scan cannot tell a scalar from an ELEMENT of the
-# same-named container: `$attrs{$_}` is a slot of %attrs and `$a[0]` a slot of
-# @a — different variables, which perl reads without touching $attrs/$a.
-# PPI's ->symbol does exactly that canonicalisation, so ask it.  Interpolating
-# quotes carry no Symbol tokens, so they keep a text scan — with the same
-# subscript exclusion spelled out.  Non-interpolating literals are skipped
-# entirely (sprintf2.t's `my $s = sprintf '%*2$s', …`: perl does not read $s).
-# A false positive here costs a WHOLE-FILE gate — it cost ExtUtils::MM_Unix
-# one, on `my $attrs = join " ", map { qq[$_="$attrs{$_}"] } sort keys %attrs;`
-# (audit family F5, task #229).
-# Tokens inside a BLOCK in the init (an anon-sub body, a map/grep block) go
-# through _block_captures_name instead, so an INNER `my $x` shadow discounts
-# its own uses (E4.1 M2 residue, s353: Moo's Method::Generate::Constructor
-# declares an inner `my $constructor` inside the deferred sub — perl never
-# reads the outer one).  A genuine closure capture of the outer $x still
-# answers 1: the use resolves outside the block.
+# Does the initialiser of `my $x = …` actually READ $x -- the variable its
+# declaration shadows, an outer lexical or the package variable?  The BINDER's
+# answer (1c port 4, s539b; Binder::reads_outside): a use of $x inside the
+# initializer whose binding is declared OUTSIDE it.  Exact by construction
+# where the text scan and the nested-block walk it replaced approximated: an
+# ELEMENT of the same-named container (`$attrs{$_}` is %attrs, `$a[0]` is @a
+# -- the ExtUtils::MM_Unix whole-file gate, audit family F5, task #229), a
+# non-interpolating literal (sprintf2.t's `sprintf '%*2$s', …`), an INNER
+# `my $x` shadow inside an anon sub or a map block (Moo's
+# Method::Generate::Constructor, E4.1 M2), a comment, are no reads; a closure
+# use of the outer $x and an interpolated one are.  A false positive costs a
+# re-route or a refusal, a false negative reads the new binding.  RULE 12: an
+# initializer the table does not hold dies.
 sub _init_reads_scalar {
-  my ($self, $init, $name) = @_;
-  my $mode = $ENV{PCL_RENAME_BINDER} // '';      # s539b D0 (TEMPORARY)
-  return $self->_init_reads_scalar_b($init, $name) if $mode eq 'binder';
-  my $legacy = $self->_init_reads_scalar_0($init, $name);
-  if ($mode eq 'log') {
-    my $b = eval { $self->_init_reads_scalar_b($init, $name) } // ('E:' . ($@ =~ s/\s+/ /gr));
-    local $ENV{PCL_BINDER_LOG} = $ENV{PCL_RENAME_LOG};
-    my $first = $init->[0];
-    Pl::Binder::_row('IR', ($b eq $legacy ? 'SAME' : 'DIFF'), $ENV{PCL_D0_FILE} // Pl::Binder::_file_of($self),
-                     $first->line_number // '?', $name, "legacy=$legacy", "binder=$b",
-                     substr(join('', map { $_->content } @$init) =~ s/\s+/ /gr, 0, 80));
-  }
-  return $legacy;
-}
-
-# Does the initializer of `my $x = …` READ $x -- the outer lexical or the
-# package variable?  The binder's answer (1c port 4): a use of $name inside
-# the initializer whose binding is declared outside it (Binder::reads_outside).
-# RULE 12: an initializer the table does not hold dies.
-sub _init_reads_scalar_b {
   my ($self, $init, $name) = @_;
   my @el = grep { ref $_ } @$init;
   return 0 unless @el;
   my $bd = Pl::Binder::for_captures($self, $el[0]);
   my $rg = $bd ? $bd->ord_range($el[0], $el[-1]) : undef;
   die sprintf("PCL internal: the binder holds no record of the initializer of %s at line %s\n",
-    $name, $el[0]->line_number // '?') unless $rg;
+    $name, $el[0]->line_number // q(?)) unless $rg;
   return $bd->reads_outside(@$rg, $name, $el[0]) ? 1 : 0;
-}
-
-sub _init_reads_scalar_0 {
-  my ($self, $init, $name) = @_;
-  (my $bare = $name) =~ s/^\$//;
-  my (%inblk, @blocks);
-  for my $el (@$init) {
-    next unless $el->isa('PPI::Node');
-    push @blocks, $el->isa('PPI::Structure::Block') ? $el : ();
-    push @blocks, @{ $el->find('PPI::Structure::Block') || [] };
-  }
-  for my $b (@blocks) {
-    # Only TOP-level blocks: a nested block's own capture test would call a
-    # use shadowed one level up "resolves outside me" and false-refuse.
-    my $nested = 0;
-    for (my $p = $b->parent; $p && !$p->isa('PPI::Statement::Variable');
-         $p = $p->parent) {
-      $nested = 1, last if $p->isa('PPI::Structure::Block');
-    }
-    next if $nested;
-    return 1 if $self->_block_captures_name($b, $bare, { $name => 1 });
-    $inblk{ refaddr $_ } = 1 for $b->tokens;
-  }
-  for my $el (@$init) {
-    for my $t ($el->isa('PPI::Node') ? $el->tokens : ($el)) {
-      next if $inblk{ refaddr $t };
-      if ($t->isa('PPI::Token::Symbol')) {
-        return 1 if $t->symbol eq $name;
-      } elsif ($t->isa('PPI::Token::Quote::Single')
-            || $t->isa('PPI::Token::Quote::Literal')) {
-        next;
-      } elsif ($t->content =~ /(?<!\\)\$\{?\s*\Q$bare\E\b\}?\s*(?![\{\[])/) {
-        return 1;
-      }
-    }
-  }
-  return 0;
 }
 
 # The forward-goto DECL-HOIST selection (#126, shared by the #252 general
