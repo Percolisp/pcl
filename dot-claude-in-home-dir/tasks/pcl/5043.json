@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-15",
+   "description" : "FILED s540e (Opus 5.5, 2026-11-15).  Probe scratch/s540e/probe/strf.pl in the s540e worktree, the four `local $ENV{TZ}` blocks: under PCL the UTC / Europe/Bucharest / America/New_York / unset blocks print IDENTICAL timestamps (the host's EET), perl's differ (UTC 1721044800, New York 1721059200).  A TZ given in the ENVIRONMENT at start works (Pl/t/posix-01.t rows 18-19 run under TZ=Europe/Bucharest).\n\nSo the %ENV write does not reach the C library's environment (setenv) before %p-libc-localtime's tzset, or tzset is not re-run.  perl re-reads TZ on every localtime (it calls tzset).  Runtime (cl/), core semantics: %ENV's write path or %p-libc-localtime.  Also probe `$ENV{TZ} = ...` without local, and delete $ENV{TZ}.\n\nBAR: probe perl -> base -> tree; a row in Pl/t/posix-01.t that switches TZ at run time.",
+   "id" : "5043",
+   "status" : "pending",
+   "subject" : "PRE-EXISTING (s540e, probed): an assignment to $ENV{TZ} at run time does not reach localtime / mktime -- `local $ENV{TZ} = 'UTC'; mktime(0,0,12,15,6,124)` answers the box's local zone (1721034000) where perl answers 1721044800; `strftime('%H %Z', localtime($t))` reads the same before and after a TZ switch to Asia/Tokyo"
+}

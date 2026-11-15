@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-15",
+   "description" : "FILED s540e (Opus 5.5, 2026-11-15) while building #4985.  Probe scratch/s540e/probe/canon.pl (155 lines) in the s540e worktree: these 3 lines differ (canonpath(\"/..\\n\"), catfile(), File::Spec::Functions::catfile()); the s540e tree answers them as the base 75904a35 does.  perl runs File::Spec::Unix's XS canonpath / catfile (Cwd.xs); `s|^/\\.\\.$|/|` in _pp_canonpath is what PCL's shim copies, and the XS matches only at the true end.  The same `$` question for \"/../\\n\" (perl: probe it).\n\nBAR: probe perl -> base -> tree; rows in Pl/t/file-spec-01.t.",
+   "id" : "5044",
+   "status" : "pending",
+   "subject" : "PRE-EXISTING (s540e, probed): File::Spec->canonpath(\"/..\\n\") is \"/\\n\" under PCL (the pure-Perl body's `$` matches before the newline), perl's XS answers \"/..\\n\"; File::Spec->catfile() with no arguments is '' under PCL, undef in perl"
+}
