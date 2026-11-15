@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -111,3 +111,16 @@ both_agree($HDR . 'my $r = eval { encode_base64("\x{263A}"); 1 };'
 both_agree('use MIME::Base64; print MIME::Base64::encode("Hi!", ""), " ",'
          . ' MIME::Base64::decode("SGkh"), "\n";',
            'MIME::Base64::encode / ::decode are the encode_base64 / decode_base64 aliases');
+
+# s540e (#4990): the transform is the runtime's builtin::base64_encode /
+# base64_decode now.  The line shape at the 76-column edges (57 bytes = one
+# full line), a multi-character and a CRLF $eol, and the decoder's skipping
+# and stopping rules -- garbage, embedded newlines, truncated padding, a
+# character above 255 in the INPUT (perl skips it) -- against perl's XS.
+both_agree($HDR . 'for my $n (56, 57, 58, 114, 115) { my $d = join("", map { chr(($_ * 37 + 11) % 256) } 1 .. $n);'
+                . ' my $e = encode_base64($d, "|\r\n"); $e =~ s/\r/R/g; $e =~ s/\n/N/g;'
+                . ' print "$n [$e] ", (decode_base64($e) eq $d ? "rt" : "BAD"), "\n" }',
+           'the 76-column line break at its edges, with a two-character $eol');
+both_agree($HDR . 'print join("|", map { decode_base64($_) } "YWJjZA==ZZZZ", "!!YW*Jj??", "YWJ!j", "YW_J-j",'
+                . ' "Zm9vYmE", "Zm9vYg", "Z", "=Zm9v", "Zm9=v", "YWJj\x{100}ZA=="), "\n";',
+           'decode skips non-alphabet characters (a wide one too), stops at "=", drops a lone tail');

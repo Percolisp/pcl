@@ -13,9 +13,11 @@
 # an HTTP API, stores a binary blob in a text field or reads a Basic-Auth
 # header.
 #
-# The encoder/decoder here are the plain 3-byte <-> 4-character transform, not
-# perl's `pack "u"` trick: the trick is faster but depends on uuencode's exact
-# padding, and a straight loop is what can be read against RFC 4648.
+# The 3-byte <-> 4-character transform itself is the runtime's (s540e, #4990:
+# `builtin::base64_encode(BYTES, EOL)` and `builtin::base64_decode(STRING)`,
+# ~200x the Perl loop this file carried until then); what stays here is the
+# module -- the prototypes, the `$eol` default, the empty / undef answers,
+# the wide-character croak, the length functions and the url variants.
 
 package MIME::Base64;
 use strict;
@@ -27,31 +29,16 @@ our @EXPORT    = qw(encode_base64 decode_base64);
 our @EXPORT_OK = qw(encode_base64url decode_base64url
                     encoded_base64_length decoded_base64_length);
 
-my @B64 = ('A' .. 'Z', 'a' .. 'z', '0' .. '9', '+', '/');
-my %B64R;
-@B64R{@B64} = (0 .. 63);
-
 sub encode_base64 ($;$) {
     my ($data, $eol) = @_;
     $eol = "\n" if !defined $eol;
     return '' if !defined $data || $data eq '';
-    require Carp;
-    Carp::croak("The Base64 encoder requires that no data contains characters "
-                . "with code above 255")
-      if $data =~ /[^\x00-\xff]/;
-    my $res = '';
-    my $len = length $data;
-    for (my $i = 0; $i < $len; $i += 3) {
-        my $n = $len - $i; $n = 3 if $n > 3;
-        my $b0 = ord(substr($data, $i, 1));
-        my $b1 = $n > 1 ? ord(substr($data, $i + 1, 1)) : 0;
-        my $b2 = $n > 2 ? ord(substr($data, $i + 2, 1)) : 0;
-        my $v = ($b0 << 16) | ($b1 << 8) | $b2;
-        $res .= $B64[($v >> 18) & 63] . $B64[($v >> 12) & 63]
-              . ($n > 1 ? $B64[($v >> 6) & 63] : '=')
-              . ($n > 2 ? $B64[$v & 63]        : '=');
+    my $res = builtin::base64_encode($data, $eol);
+    if (!defined $res) {
+        require Carp;
+        Carp::croak("The Base64 encoder requires that no data contains characters "
+                    . "with code above 255");
     }
-    $res =~ s/(.{1,76})/$1$eol/g if length $eol;
     return $res;
 }
 
@@ -69,22 +56,7 @@ sub _b64_significant {
 sub decode_base64 ($) {
     my $str = shift;
     return '' if !defined $str;
-    $str = _b64_significant($str);
-    my $res = '';
-    my $len = length $str;
-    for (my $i = 0; $i < $len; $i += 4) {
-        my $n = $len - $i; $n = 4 if $n > 4;
-        last if $n < 2;                      # a lone trailing character is noise
-        my $c0 = $B64R{substr($str, $i, 1)};
-        my $c1 = $B64R{substr($str, $i + 1, 1)};
-        my $c2 = $n > 2 ? $B64R{substr($str, $i + 2, 1)} : 0;
-        my $c3 = $n > 3 ? $B64R{substr($str, $i + 3, 1)} : 0;
-        my $v = ($c0 << 18) | ($c1 << 12) | ($c2 << 6) | $c3;
-        $res .= chr(($v >> 16) & 255);
-        $res .= chr(($v >> 8) & 255) if $n > 2;
-        $res .= chr($v & 255)        if $n > 3;
-    }
-    return $res;
+    return builtin::base64_decode($str);
 }
 
 sub encoded_base64_length ($;$) {

@@ -34776,6 +34776,80 @@ would consume, so it dies naming the stream (rule 12)."
         (vector (aref regs 0) (aref regs 1) (aref regs 2) (aref regs 3)
                 (%p-octets-string (subseq all full)))))))
 
+;;; Base64 (RFC 4648 section 4, the MIME line shape of RFC 2045), s540e /
+;;; #4990: PCL's own names in this namespace.  The ENCODER takes octets and an
+;;; end-of-line string and writes the EOL after every 76 output characters and
+;;; after the last (none at all for empty input); the DECODER skips every
+;;; character outside the alphabet and stops at the first `=`, wherever it
+;;; sits (a 2- or 3-character tail is a 1- or 2-byte group, a lone character
+;;; is dropped).  Argument checks, defaults and messages are the caller's.
+(defparameter *p-base64-alphabet*
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+
+(defparameter *p-base64-values*
+  (let ((v (make-array 256 :element-type 'fixnum :initial-element -1)))
+    (dotimes (i 64 v)
+      (setf (aref v (char-code (char *p-base64-alphabet* i))) i)))
+  "Character code -> its 6-bit value, -1 outside the alphabet.")
+
+(defun %p-base64-encode (data eol)
+  "builtin::base64_encode(BYTES, EOL) -> the encoding, EOL after every 76
+   characters and after the last; undef when BYTES holds a character above
+   255."
+  (declare (optimize (speed 3)))
+  (let ((v (%p-octet-vector (to-string data) nil))
+        (eol (to-string eol))
+        (abc *p-base64-alphabet*))
+    (declare (type simple-string abc))
+    (if (null v)
+        *p-undef*
+        (let* ((n (length v))
+               (chars (* 4 (ceiling n 3)))
+               (lines (ceiling chars 76))
+               (out (make-string (+ chars (* lines (length eol)))))
+               (o 0) (col 0))
+          (declare (type (simple-array (unsigned-byte 8) (*)) v)
+                   (type fixnum n o col))
+          (flet ((put (c) (setf (schar out o) c) (incf o))
+                 (put-eol () (loop for c across eol do (setf (schar out o) c) (incf o))))
+            (loop for i of-type fixnum from 0 below n by 3
+                  do (let* ((k (min 3 (- n i)))
+                            (w (logior (ash (aref v i) 16)
+                                       (if (> k 1) (ash (aref v (+ i 1)) 8) 0)
+                                       (if (> k 2) (aref v (+ i 2)) 0))))
+                       (put (schar abc (ldb (byte 6 18) w)))
+                       (put (schar abc (ldb (byte 6 12) w)))
+                       (put (if (> k 1) (schar abc (ldb (byte 6 6) w)) #\=))
+                       (put (if (> k 2) (schar abc (ldb (byte 6 0) w)) #\=))
+                       (when (= (incf col 4) 76) (put-eol) (setf col 0))))
+            (when (plusp col) (put-eol)))
+          out))))
+
+(defun %p-base64-decode (str)
+  "builtin::base64_decode(STRING) -> the octets: characters outside the
+   alphabet are skipped, the first `=` ends the data."
+  (declare (optimize (speed 3)))
+  (let* ((s (to-string str))
+         (tab *p-base64-values*)
+         (out (make-array (* 3 (ceiling (length s) 4)) :element-type 'character
+                          :fill-pointer 0))
+         (acc 0) (k 0))
+    (declare (type (simple-array fixnum (256)) tab) (type fixnum acc k))
+    (flet ((emit (b) (vector-push (code-char (logand b 255)) out)))
+      (loop for c across s
+            for code of-type fixnum = (char-code c)
+            do (cond ((char= c #\=) (return))
+                     ((or (> code 255) (minusp (aref tab code))))
+                     (t (setf acc (logior (ash (logand acc #x3ffff) 6) (aref tab code)))
+                        (when (= (incf k) 4)
+                          (emit (ash acc -16)) (emit (ash acc -8)) (emit acc)
+                          (setf k 0 acc 0)))))
+      (ecase k
+        ((0 1))                         ; nothing, or a lone character: dropped
+        (2 (emit (ash acc -4)))
+        (3 (emit (ash acc -10)) (emit (ash acc -2)))))
+    (coerce out 'simple-string)))
+
 ;;; The CLOCK IDS are PCL's own pair, defined by `lib/Time/HiRes.pm` and read
 ;;; only here: 0 = wall clock (the epoch), 1 = monotonic.  They are Linux's
 ;;; numbers, which is what a program that prints CLOCK_MONOTONIC sees on this
@@ -34883,6 +34957,9 @@ would consume, so it dies naming the stream (rule 12)."
     ;; block-compression step of an incremental digest.
     (def "MD5_DIGEST" #'%p-md5-digest)
     (def "MD5_UPDATE" #'%p-md5-update)
+    ;; Base64 (#4990): octets <-> the RFC 4648 alphabet, MIME line shape.
+    (def "BASE64_ENCODE" #'%p-base64-encode)
+    (def "BASE64_DECODE" #'%p-base64-decode)
     ;; bsd_glob(3), the engine CORE::glob runs with the csh flags (#3160):
     ;; builtin::bsd_glob(PATTERN, FLAGNAME...) -> (STATUS, MATCH...), STATUS
     ;; 0 or GLOB_ABEND's -2.  lib/File/Glob.pm owns the GLOB_* numbers.
