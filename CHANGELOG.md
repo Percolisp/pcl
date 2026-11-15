@@ -5,7 +5,7 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
-- 2026-11-13: **Your own modules are compiled once, like installed ones**
+- 2026-11-15: **Your own modules are compiled once, like installed ones**
   (#4986, #4963, #4987).  A module found through `use lib`, `-I`, `PERL5LIB`
   or `.` used to be compiled again from its cached text on every run; now it
   gets a compiled file that is reused until the module, or a module it uses,

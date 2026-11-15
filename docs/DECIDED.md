@@ -71,6 +71,7 @@ not-supported.md → only then probe.*
 - **#5021 FILED**: `tr/a\-c/Z/` reads `\-` as a range (pre-existing silent wrong).
 - **#5022 FILED**: the fold skips a hex / octal / binary literal (`0x10` compiles to `#x10`, which `constant_fold_cl`'s text check does not accept) -- a missed fold, found by the predicted-vs-actual scan (core File/stat.pm).
 - **#5023 FILED**: once ANY filehandle is tied, every print to any handle probes the weak tie table twice (+161-169 % on 1 M prints to an untied handle; pre-existing, base = tree) -- the #4983 mirror shape applies.
+- **#5024 FILED**: the DESTROY-registry bless rows (bench-exec blessnew-d / blessdes) read ~7 % slower on the s540d tree than on main (band <= 0.2 %), cause not found -- the tree conses less on them and GC time is the same; the plain bless row is equal.
 
 ## s539a (2026-11-12 .. 15, Opus; resumed in s540, s541 and s542) -- CPAN-board whole-file losses part 2, the harness half: #3823 #3495 #4884 #4883 (Test::Builder methods, details, todo_skip, diag/note), #4881 (= #3619's cause, the import-directive fact), #3852, #4167, #4962 fixed; #4643 measured; #4882 #4885 #4886 #4887 filed; generation v2-14800
 
