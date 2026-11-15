@@ -37,3 +37,6 @@ First MERGE-READY first.  s540d and s539a change emission; s540c does not.  When
 
 ## Main moves in CODE during this sitting
 s540c is MERGE-READY (`d7e44ddf`, a `cl/pcl-runtime.lisp` + `Pl/Parser2.pm` change: dropped filehandles, `local` on a file-level lexical's element; generation v2-14500).  It merges first; the reviewing session tells each running batch when main has moved.  Then: rebase, keep your generation, regenerate the three artifacts if yours changes emission, re-take what the move can change.
+
+## Added 23:4x -- FOUR heavy slots for this sitting
+The USER: everything else on the box is turned off.  `~/pcl-agent-scratch/s513/heavy.sh` is the FOUR-slot script (= the s536 four-slot script + today's changes; the three-slot one is `heavy.sh.three-slot-s542` beside it and goes back in at the next session start unless the USER says the box is idle again).  A waiter started before 23:4x runs the old script and only ever gets slots 1-3; slot 4 is not taken while such a leg holds the whole box.  Watch `free -g`: 12 GB, four legs peak ~1.8 GB each under their 4G fence.
