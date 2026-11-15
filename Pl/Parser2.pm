@@ -4503,8 +4503,9 @@ sub _rename_hash_in_code {
   for my $sp (sort { $b->[0] <=> $a->[0] } map { Pl::InterpScan::code_spans($_) } @$evs) {
     my $code = substr($_[0], $sp->[0], $sp->[1] - $sp->[0]);
     next if index($code, "%$bare") < 0;
-    my $frag = Pl::Parser::fragment_doc($code)
-      or die "PCL internal: cannot re-read the interpolated code `$code`\n";
+    # (code PPI cannot read is no use to the binder either -- _code_refs_doc;
+    # a rename that needed it dies at its own rule-12 check)
+    my $frag = eval { Pl::Parser::fragment_doc($code) } or next;
     my $k = 0;
     for my $s (@{ $frag->find('PPI::Token::Symbol') || [] }) {
       next unless $s->content eq "%$bare";
