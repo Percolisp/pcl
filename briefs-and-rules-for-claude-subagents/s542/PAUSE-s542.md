@@ -45,3 +45,13 @@ Read bottom-up after a cut.  The stop state this session started from is `s541/r
 * Records: CLAUDE.md numbers paragraph replaced again (the MAIN-READY-93 one to HISTORY.md), STATUS gate row 12,193, REFERENCE.md `shipped-modules.md` description gains the import-directive fact, DECIDED + session-log lines.
 * s540d TOLD: rebase; RENUMBER to **v2-14850** (main passed its v2-14600); `_proto_shape_key` is edited by both (keep both deletions); read s539a's TAP-layer fasl change against its own fasl work.  s540e TOLD (v2-14860 if its emission changes).
 * **s539c LAUNCHED 21:4x** (PPI batch 9, #4784 #3555 #4761 + the expect checker; v2-14900; a new isolated worktree; opus / xhigh).  RUNNING: s540d, s540e, s539c.  NEXT freed slot: s539b (v2-15000, + #4822); s541a after s540d merges.
+
+## 22:0x -- PUSHED `0e8830fe..87694cbc` (MAIN-READY-94 + records).  The Try-Tiny `finally.t` question BISECTED (one-file runs, `~/pcl-agent-scratch/s542/round/finally-NN.out`)
+| tree | rows printed | ok / not ok | failing rows |
+|---|---|---|---|
+| MAIN-READY-89, -90, -91 | 30 | 23 / 7 | 10 11 12 15 17 18 23 |
+| MAIN-READY-92 (s539d, the sub-call frame) | **16** | 12 / 4 | 10 11 12 15 |
+| MAIN-READY-93 (s540c) | 16 | 12 / 4 | 10 11 12 15 |
+| MAIN-READY-94 (s539a) = main | **30** | **26 / 4** | 10 11 12 15 |
+* So: s539d CUT the file at 16 rows (the mover the s541 stop asked about); s539a's TAP-layer work restored all 30, and rows 17 18 23 now PASS on main (s540c's #4866 fix, reachable again).  CAUSE of the cut not reduced (it is gone on main); if a later round sees 16 again, start at the TAP layer's END / global-destruction ordering against s539d's frame vector.
+* FOR THE ROUND's board `--diff`: `finally.t` rows 17 18 23 leave the baseline BY EDIT (keyed "NOT REACHED" by s540c: they are reached and pass); the baseline's row 30 "finally ran" (#1571) against the run's row 15 "finally ran" is to be read there (a row NUMBER is meaningful only within its own run).
