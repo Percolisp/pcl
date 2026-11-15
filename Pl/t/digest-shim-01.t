@@ -101,6 +101,18 @@ row("sha reset keeps alg", $d->algorithm . ' ' . $d->hexdigest);
 $d->add_bits("011000010110001001100011");
 row("sha add_bits", $d->hexdigest);
 row("md5 wide char dies", dies(sub { md5_hex("\x{100}") }));
+# s540e (#4988): the digest is the runtime's sb-md5 now -- a whole string
+# through builtin::md5_digest, the object through builtin::md5_update's
+# block step.  Pieces that straddle every block boundary agree with one call,
+# binary bytes hash as bytes, and an `add` that dies on a wide character
+# consumes nothing.
+my $mixed = join '', map { chr(($_ * 31 + 7) % 256) } 1 .. 200_000;
+my $pc = Digest::MD5->new;
+for (my $i = 0; $i < length $mixed; $i += 997) { $pc->add(substr($mixed, $i, 997)) }
+row("md5 pieces = once", $pc->hexdigest . ' ' . md5_hex($mixed));
+row("md5 NUL and high bytes", md5_hex("\0\0\xff\x80") . ' ' . md5_hex("\0"));
+my $wa = Digest::MD5->new->add("abc");
+row("md5 wide add consumes nothing", dies(sub { $wa->add("ok\x{263a}") }) . ' ' . $wa->hexdigest);
 row("sha wide char dies", dies(sub { Digest::SHA->new->add("\x{263a}") }));
 my $u = "caf\x{e9}"; utf8::upgrade($u);
 row("upgraded string = its bytes", md5_hex($u) . ' ' . sha1_hex($u));
@@ -134,8 +146,8 @@ my $pcl_out = `sbcl @sbcl_rt --load $cl_file 2>&1`;
 my ($perl, $order) = rows_of($perl_out);
 my ($pcl)          = rows_of($pcl_out);
 
-plan tests => 1 + 39;
-is(scalar(@$order), 39, 'the oracle program printed its 39 rows under perl')
+plan tests => 1 + 42;
+is(scalar(@$order), 42, 'the oracle program printed its 42 rows under perl')
     or diag($perl_out);
 for my $k (@$order) {
     is($pcl->{$k}, $perl->{$k}, "$k (perl: " . substr($perl->{$k}, 0, 60) . ")");

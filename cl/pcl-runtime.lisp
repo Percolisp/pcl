@@ -20892,14 +20892,28 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       0
       (max 0 (truncate (to-number start)))))
 
-(defun %p-octet-vector (s)
+(defun %p-octet-vector (s &optional (wide :die))
   "S's characters as a byte vector; a character above 255 is perl's fatal
-   `Wide character` (decoding is defined on OCTETS only)."
-  (let ((v (make-array (length s) :element-type '(unsigned-byte 8))))
-    (dotimes (i (length s) v)
-      (let ((c (char-code (char s i))))
-        (when (> c 255) (p-die "Wide character"))
-        (setf (aref v i) c)))))
+   `Wide character` (decoding is defined on OCTETS only) -- or, with WIDE
+   NIL, the answer NIL, for a caller that reports it in its own words.  The
+   copy loop is typed per string representation (s540e: an MD5 of 1 KB spent
+   more in a generic CHAR than in the digest)."
+  (declare (optimize (speed 3)))
+  (let* ((n (length s))
+         (v (make-array n :element-type '(unsigned-byte 8))))
+    (macrolet ((copy-from (type)
+                 `(let ((s s))
+                    (declare (type ,type s))
+                    (dotimes (i n v)
+                      (let ((c (char-code (char s i))))
+                        (when (> c 255)
+                          (return-from %p-octet-vector
+                            (when wide (p-die "Wide character"))))
+                        (setf (aref v i) c))))))
+      (typecase s
+        ((simple-array character (*)) (copy-from (simple-array character (*))))
+        (simple-base-string (copy-from simple-base-string))
+        (t (copy-from string))))))
 
 (defun %p-octets-string (v)
   "Octet vector V as a string of characters 0-255 (perl's byte form)."
@@ -34712,6 +34726,56 @@ would consume, so it dies naming the stream (rule 12)."
   "builtin::trim — strip leading/trailing ASCII whitespace."
   (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) (to-string s)))
 
+;;; MD5 (RFC 1321) over the sb-md5 contrib this runtime already loads for the
+;;; module cache's manifest (task #1261), s540e / #4988.  PCL's own names in
+;;; this namespace (perl's builtin has none): a byte string's digest, and the
+;;; compression step an incremental digest is made of -- the chaining state
+;;; travels as four integers, the pending partial block as a byte string, so
+;;; a caller's object stays plain Perl data (copyable, comparable) and the
+;;; padding and the length block stay the caller's.  A character above 255
+;;; has no octets: both answer "nothing" for it and the caller reports it.
+(defun %p-md5-digest (data)
+  "builtin::md5_digest(BYTES) -> the 16 raw digest bytes, or undef when BYTES
+   holds a character above 255."
+  (let ((v (%p-octet-vector (to-string data) nil)))
+    (if v
+        (%p-octets-string (sb-md5:md5sum-sequence v))
+        *p-undef*)))
+
+(defun %p-md5-word (x)
+  "A chaining word as the (unsigned-byte 32) the block function takes."
+  (ldb (byte 32 0) (truncate (to-number x))))
+
+(defun %p-md5-update (&rest args)
+  "builtin::md5_update(H0, H1, H2, H3, PENDING, DATA) -> (H0, H1, H2, H3,
+   REST): the chaining state after PENDING . DATA is consumed in whole 64-byte
+   blocks, and the fewer than 64 bytes left over.  The empty list, nothing
+   consumed, when either string holds a character above 255.  The arguments
+   are a perl LIST (`@{$st->{h}}` spreads), so the caller may pass the four
+   words as an array."
+  (let ((a (%p-builtin-arg-list args)))
+    (unless (= (length a) 6)
+      (p-die (format nil "builtin::md5_update takes 6 arguments, not ~D~%" (length a))))
+    (apply #'%p-md5-update-1 a)))
+
+(defun %p-md5-update-1 (h0 h1 h2 h3 pending data)
+  (let ((p (%p-octet-vector (to-string pending) nil))
+        (d (%p-octet-vector (to-string data) nil)))
+    (when (and p d)
+      (let* ((all (if (zerop (length p))
+                      d
+                      (concatenate '(simple-array (unsigned-byte 8) (*)) p d)))
+             (full (* 64 (floor (length all) 64)))
+             (regs (sb-md5:initial-md5-regs))
+             (block (make-array 16 :element-type '(unsigned-byte 32))))
+        (setf (aref regs 0) (%p-md5-word h0) (aref regs 1) (%p-md5-word h1)
+              (aref regs 2) (%p-md5-word h2) (aref regs 3) (%p-md5-word h3))
+        (loop for off of-type fixnum from 0 below full by 64
+              do (sb-md5:fill-block-ub8 block all off)
+              (sb-md5:update-md5-block regs block))
+        (vector (aref regs 0) (aref regs 1) (aref regs 2) (aref regs 3)
+                (%p-octets-string (subseq all full)))))))
+
 ;;; The CLOCK IDS are PCL's own pair, defined by `lib/Time/HiRes.pm` and read
 ;;; only here: 0 = wall clock (the epoch), 1 = monotonic.  They are Linux's
 ;;; numbers, which is what a program that prints CLOCK_MONOTONIC sees on this
@@ -34815,6 +34879,10 @@ would consume, so it dies naming the stream (rule 12)."
     (def "DECODE_OCTETS" #'%p-decode-octets)
     (def "ENCODING_KNOWN"
         (lambda (name) (if (%p-codec-keyword name) 1 *p-undef*)))
+    ;; MD5 over sb-md5 (#4988): a byte string's 16 digest bytes, and the
+    ;; block-compression step of an incremental digest.
+    (def "MD5_DIGEST" #'%p-md5-digest)
+    (def "MD5_UPDATE" #'%p-md5-update)
     ;; bsd_glob(3), the engine CORE::glob runs with the csh flags (#3160):
     ;; builtin::bsd_glob(PATTERN, FLAGNAME...) -> (STATUS, MATCH...), STATUS
     ;; 0 or GLOB_ABEND's -2.  lib/File/Glob.pm owns the GLOB_* numbers.
