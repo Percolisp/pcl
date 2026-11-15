@@ -109,6 +109,8 @@ use Time::HiRes ();
 my $root = abs_path("$FindBin::RealBin/..");
 
 my (@want_dist, $only_rx, $files_list, $out, $prof, $prof_dir, $core, $sha);
+# THE RUN PHASE (s541a, task #4791): --run, --fasl, --xp-dir, --tree, --perl-c, --perl-late
+my ($run_mode, $fasl_mode, $xp_dir, $perl_c, $perl_late) = (0, 0, undef, 0, 0);
 my ($list, $modes, $repeat, $cache_root, $timeout, $timeouts_tsv, $hooks, $report, $top)
   = ("$root/baselines/cpan-board-dists.tsv", 'cold,warm', 1, undef, 120,
      "$root/baselines/cpan-board-timeouts.tsv", 1, 0, 60);
@@ -145,13 +147,19 @@ while (@ARGV) {
   elsif ($a eq '--top')        { $top = shift @ARGV }
   elsif ($a eq q{--norm})       { $norm = 1 }
   elsif ($a eq q{--table})      { $table = shift @ARGV }
+  elsif ($a eq q{--run})        { $run_mode = 1 }
+  elsif ($a eq q{--fasl})       { $fasl_mode = 1; $run_mode = 1 }
+  elsif ($a eq q{--xp-dir})     { $xp_dir = File::Spec->rel2abs(shift @ARGV) }
+  elsif ($a eq q{--tree})       { $root = abs_path(shift @ARGV) // die "board-timing.pl: --tree: no such directory\n" }
+  elsif ($a eq q{--perl-c})     { $perl_c = 1 }
+  elsif ($a eq q{--perl-late})  { $perl_late = 1 }
   elsif ($a =~ /^-/)           { die "board-timing.pl: unknown option $a\n" }
   else                         { push @positional, $a }
 }
 
 if ($report) {
   @positional or die "board-timing.pl --report FILE.tsv...\n";
-  print report(\@positional, $top);
+  print $run_mode ? report_run(\@positional, $top) : report(\@positional, $top);
   exit 0;
 }
 !@positional or die "board-timing.pl: unexpected argument(s) @positional (use --dist NAME)\n";
@@ -187,7 +195,10 @@ my @COLS = qw(sha mode rep dist file load1 timeout
   A_wall B_wall C_wall A_cpu B_cpu C_cpu
   modload tap tcompile mcompile scompile ecompile cfile xpile evalx xserver evalrun
   modload_c tap_c tcompile_c mcompile_c scompile_c ecompile_c cfile_c evalrun_c
-  n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec cpu_v variant);
+  n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec cpu_v variant
+  run_how q_init q_wall q_cpu q_sub q_late_wall q_late_cpu q_late_n q_c_wall
+  r_wall r_cpu r_lw_wall r_lw_cpu r_late_wall r_late_cpu r_late_n r_sub r_gc r_mb
+  pr_wall pr_cpu sread r_rcomp r_rcomp_n);
 my $ofh = \*STDOUT;
 if (defined $out) {
   my $new = !-s $out;
@@ -349,10 +360,89 @@ sub perl_run {
   my $to = to_for($w);
   my $o = "$tmp/perl.out";
   my $load = load1();
-  my ($st, $wall, $cpu) = timed("timeout -k 5 $to $^X " . inc_flags($w) . " $w->{t} >$o 2>/dev/null </dev/null",
-                                $w->{dist}, { PERL5LIB => perl5lib($w) });
+  my $prec = "$tmp/perl.rec";
+  unlink $prec;
+  my $helper = $run_mode ? '-I' . perl_helper() . ' -MPCLBTRun ' : '';
+  my ($st, $wall, $cpu) = timed("timeout -k 5 $to $^X $helper" . inc_flags($w) . " $w->{t} >$o 2>/dev/null </dev/null",
+                                $w->{dist}, { PERL5LIB => perl5lib($w), PCL_BT_PERL_OUT => $prec, PCL_BT_PERL_LATE => undef });
   my $tap = PCLTap::parse_tap(slurp($o));
-  return { wall => $wall, cpu => $cpu, rc => $st >> 8, sig => $st & 127, tap => $tap, load => $load };
+  my %p = (wall => $wall, cpu => $cpu, rc => $st >> 8, sig => $st & 127, tap => $tap, load => $load);
+  return \%p if !$run_mode;
+  my %q = slurp($prec) =~ /^(\w+)=(\S*)$/mg;
+  if (defined $q{init_w}) {
+    @p{qw(q_init q_wall q_cpu q_sub)} = (1, $q{end_w} - $q{init_w}, $q{end_c} - $q{init_c}, $q{end_k} - $q{init_k});
+  } else {
+    $p{q_init} = 0;    # perl left before its run phase (a skip in BEGIN)
+  }
+  if ($perl_c) {    # perl -c: the compile phase alone (the cross-check of the INIT/END clock)
+    my ($cst, $cw) = timed("timeout -k 5 $to $^X -c " . inc_flags($w) . " $w->{t} >/dev/null 2>&1 </dev/null",
+                           $w->{dist}, { PERL5LIB => perl5lib($w) });
+    $p{q_c_wall} = $cw;
+  }
+  if ($perl_late) {   # once more with the require hook: perl's run-time `require`s, timed
+    unlink $prec;
+    timed("timeout -k 5 $to $^X $helper" . inc_flags($w) . " $w->{t} >/dev/null 2>&1 </dev/null",
+          $w->{dist}, { PERL5LIB => perl5lib($w), PCL_BT_PERL_OUT => $prec, PCL_BT_PERL_LATE => 1 });
+    my %l = slurp($prec) =~ /^(\w+)=(\S*)$/mg;
+    @p{qw(q_late_wall q_late_cpu q_late_n)} = map { $l{$_} // '' } qw(late_w late_c late_n);
+  }
+  return \%p;
+}
+
+# perl's RUN PHASE clock: a module loaded with -M before the program compiles,
+# so its INIT block is the FIRST to run (INIT is FIFO) and its END block the
+# LAST (END is LIFO).  It removes its own directory from @INC; a forked child
+# does not write.  With PCL_BT_PERL_LATE it also overrides CORE::GLOBAL::require
+# from BEGIN on and times the run-time requires (outermost only) -- a separate
+# run, because the override adds a frame and a call to every require.
+my $perl_helper_dir;
+sub perl_helper {
+  return $perl_helper_dir if defined $perl_helper_dir;
+  my $dir = $perl_helper_dir = "$tmp/perl-helper";
+  File::Path::make_path($dir);
+  open my $h, '>', "$dir/PCLBTRun.pm" or die "board-timing.pl: $dir/PCLBTRun.pm: $!\n";
+  print $h <<'PERL';
+package PCLBTRun;
+use Time::HiRes ();
+our ($pid, $live, $depth, $late_w, $late_c, $late_n, @init) = ($$, 0, 0, 0, 0, 0);
+sub cpu { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_PROCESS_CPUTIME_ID()) }
+sub kids { my @t = times; $t[2] + $t[3] }
+BEGIN {
+  my ($me) = grep { !ref && -f "$_/PCLBTRun.pm" } @INC;
+  @INC = grep { ref || $_ ne $me } @INC if defined $me;
+  if ($ENV{PCL_BT_PERL_LATE}) {
+    *CORE::GLOBAL::require = sub {
+      my ($f) = @_;
+      return CORE::require($f) if !$live || $depth;
+      local $depth = 1;
+      my ($w0, $c0) = (Time::HiRes::time(), cpu());
+      my $r = eval { CORE::require($f) };
+      my $e = $@;
+      $late_w += Time::HiRes::time() - $w0;
+      $late_c += cpu() - $c0;
+      $late_n++;
+      die $e if $e;
+      return $r;
+    };
+  }
+}
+INIT { $live = 1; @init = (Time::HiRes::time(), cpu(), kids()) }
+END {
+  my $out = $ENV{PCL_BT_PERL_OUT};
+  if ($$ == $pid && defined $out && @init) {
+    local ($!, $@, $?);
+    my @e = (Time::HiRes::time(), cpu(), kids());
+    if (open my $fh, '>', $out) {
+      printf $fh "init_w=%.6f\ninit_c=%.6f\ninit_k=%.2f\nend_w=%.6f\nend_c=%.6f\nend_k=%.2f\nlate_w=%.6f\nlate_c=%.6f\nlate_n=%d\n",
+        @init, @e, $late_w, $late_c, $late_n;
+      close $fh;
+    }
+  }
+}
+1;
+PERL
+  close $h;
+  return $dir;
 }
 
 # One PCL run: (a) pl2cl of the test file, then (b + c) SBCL on its text.
@@ -362,9 +452,21 @@ sub pcl_run {
   my ($lisp, $xerr, $sout, $serr, $rec) = map { "$tmp/pcl.$_" } qw(lisp xerr out err rec);
   unlink $rec;
   my %r = (mode => $mode, rep => $rep, w => $w, load => load1(), to => $to);
-  my ($xst, $xw, $xc) = timed("timeout -k 5 $to perl -I$root " . inc_flags($w)
-                              . " $root/pl2cl --lenient-ppi $w->{t} >$lisp 2>$xerr </dev/null",
-                              $w->{dist}, { PCL_CACHE_DIR => $cache, %xenv });
+  # --xp-dir: the test file's transpile is kept (and reused) per file, so a
+  # timing leg runs no pl2cl -- the run phase does not contain it anyway.
+  my ($how, $reused) = (q{text}, 0);
+  my ($xst, $xw, $xc) = (0, 0, 0);
+  if (defined $xp_dir) {
+    $lisp = "$xp_dir/$w->{base}/$w->{tname}.lisp";
+    File::Path::make_path(File::Basename::dirname($lisp));
+    $reused = 1 if -s $lisp;
+  }
+  if (!$reused) {
+    ($xst, $xw, $xc) = timed("timeout -k 5 $to perl -I$root " . inc_flags($w)
+                             . " $root/pl2cl --lenient-ppi $w->{t} >$lisp.tmp 2>$xerr </dev/null",
+                             $w->{dist}, { PCL_CACHE_DIR => $cache, %xenv });
+    if ($xst == 0) { rename "$lisp.tmp", $lisp or die "board-timing.pl: rename $lisp: $!\n" } else { unlink "$lisp.tmp" }
+  }
   @r{qw(x_wall x_cpu lisp_kb)} = ($xw, $xc, int((-s $lisp // 0) / 1024));
   if ($xst != 0) {
     @r{qw(class rc ok notok plan)} = ($xst >> 8 == 124 ? 'TIMEOUT' : 'XFAIL', $xst >> 8, 0, 0, '');
@@ -376,6 +478,26 @@ sub pcl_run {
   my %env = (PCL_CACHE_DIR => $cache, PERL5LIB => perl5lib($w), PCL_BT_OUT => $rec,
              PCL_BT_PROF => undef, PCL_BT_PROF_OUT => undef, PCL_BT_PROF_FROM => undef);
   @env{keys %xenv} = values %xenv;
+  # --fasl: the program's text compiled to a fasl FIRST, and the run loads the
+  # fasl: nothing of the program is read or compiled inside the run.  The
+  # build is `pcl`'s own first run (task #2702, docs/first-run-from-text-design
+  # -s510.md): a separate SBCL runs the program from its text, output thrown
+  # away, and builds the fasl in that image after the END phase
+  # (pcl::*p-exit-build*, the script cache's deferred build) -- so every module
+  # body and BEGIN block runs once there, as in any run.  The timed run is then
+  # `pcl`'s repeated run of an unchanged script.  A build that fails leaves
+  # the run on the text (run_how = text).
+  if ($fasl_mode) {
+    (my $fasl = $lisp) =~ s/\.lisp\z/.fasl/;
+    $fasl = "$tmp/pcl.fasl" if $fasl eq $lisp;
+    unlink $fasl if !defined $xp_dir;
+    if (!-s $fasl) {
+      timed("timeout -k 5 $left $sbcl --eval '(setf pcl::*p-exit-build* (list (sb-posix:getpid) \"$lisp\" \"$fasl\"))' --load $lisp >/dev/null 2>&1 </dev/null",
+            $w->{dist}, { %env, PCL_BT_OUT => undef });
+    }
+    if (-s $fasl) { $lisp = $fasl; $how = 'fasl' }
+  }
+  $r{run_how} = $how . ($reused ? q{+xp} : q{});
   if ($prof && $mode ne 'warmup') {
     File::Path::make_path($prof_dir);
     (my $stem = $w->{rel}) =~ s{/}{__}g;
@@ -404,13 +526,19 @@ sub pcl_run {
     $r{boundary} = $h{boundary_us} ? ($h{boundary_us} - $h{t0_us}) / 1e6 : '';
     $r{mb_consed} = sprintf '%.0f', ($h{bytes} // 0) / 1e6;
     $r{gc} = $us->('gc_us');
-    $r{$_} = $us->("${_}_wall_us") for qw(modload tap tcompile mcompile scompile ecompile cfile xpile evalx xserver evalrun);
-    $r{"${_}_c"} = $us->("${_}_cpu_us") for qw(modload tap tcompile mcompile scompile ecompile cfile evalrun);
+    $r{$_} = $us->("${_}_wall_us") for qw(modload tap tcompile mcompile scompile ecompile cfile xpile evalx xserver evalrun sread);
+    $r{"${_}_c"} = $us->("${_}_cpu_us") for qw(modload tap tcompile mcompile scompile ecompile cfile evalrun sread);
     @r{qw(n_mod n_fasl n_text n_eval n_xpile)} = map { $h{$_} // 0 } qw(modload_n faslload_n textload_n evalrun_n xpile_n);
+    run_phase(\%r, \%h) if $run_mode;
     my $abuck = $r{xpile} + $r{evalx} + $r{xserver};
-    my @bw = qw(modload tap tcompile mcompile scompile ecompile cfile);
+    my @bw = qw(modload tap tcompile mcompile scompile ecompile cfile sread);
     my $bbuck = 0; $bbuck += $r{$_} for @bw;
     my $bcpu = $us->('t0_cpu_us'); $bcpu += $r{"${_}_c"} for @bw;
+    # SBCL's own run-time compiles (rcompile: CLOS constructors / dispatch)
+    # before the boundary are load (B); after it, run (C)
+    my $rpre = $h{boundary_us} ? 'pre_rcompile' : 'rcompile';
+    $bbuck += $us->("${rpre}_wall_us");
+    $bcpu += $us->("${rpre}_cpu_us");
     $r{A_wall} = $xw + $abuck;
     $r{B_wall} = $r{start} + $bbuck;
     $r{C_wall} = $sw - $r{start} - $abuck - $bbuck;
@@ -428,6 +556,51 @@ sub pcl_run {
   }
   $r{class} = classify($tap, $rc, $r{sig});
   return \%r;
+}
+
+# THE RUN PHASE of one PCL run (--run), from the hooks' record: the window from
+# the boundary (perl's INIT: after the main program's CHECK blocks) to the last
+# exit hook (after the END phase), and what inside it is NOT run:
+#   r_lw   the LOAD work the window still holds on the text path -- reading and
+#          compiling the program's own forms after the boundary (sread,
+#          scompile; zero with --fasl).  Subtracted: perl did it before INIT.
+#   r_late a LATE load / compile: a module first required at run time, a string
+#          eval's transpile and compile (modload tap tcompile mcompile ecompile
+#          cfile xpile evalx xserver).  It IS run time -- perl pays its own --
+#          so it stays IN the run number and is reported beside it.  Its CPU
+#          counts the pl2cl children reaped inside xpile and the WALL of evalx /
+#          xserver (the transpile server's work: a child nobody reaps until exit).
+#   r_sub  the children the PROGRAM starts (reaped in the window, minus the
+#          late-transpile children): listed, never inside the run number.
+#   pr_cpu = r_cpu (SBCL's own CPU in the window) - r_lw_cpu + the late
+#            transpile's outside CPU;  pr_wall = r_wall - r_lw_wall (includes
+#            the waits on children).
+sub run_phase {
+  my ($r, $h) = @_;
+  return if !$h->{boundary_us};
+  my $us = sub { ($h->{$_[0]} // 0) / 1e6 };
+  my $post = sub { my ($b, $k) = @_; my $x = $k eq q{bytes} ? $k : "${k}_us"; $us->("${b}_$x") - $us->("pre_${b}_$x") };
+  my $sum = sub { my ($k, @b) = @_; my $s = 0; $s += $post->($_, $k) for @b; $s };
+  my @lw = qw(sread scompile);
+  my @late = qw(modload tap tcompile mcompile ecompile cfile xpile evalx xserver);
+  $r->{r_wall} = ($h->{exit_us} - $h->{boundary_us}) / 1e6;
+  $r->{r_cpu} = ($h->{exit_cpu_us} - $h->{boundary_cpu_us}) / 1e6;
+  $r->{r_lw_wall} = $sum->('wall', @lw);
+  $r->{r_lw_cpu} = $sum->('cpu', @lw);
+  my $tchild = $sum->('child', qw(xpile evalx xserver));
+  my $outside = $tchild + $post->('evalx', 'wall') + $post->('xserver', 'wall');
+  $r->{r_late_wall} = $sum->('wall', @late);
+  $r->{r_late_cpu} = $sum->('cpu', grep { !/^(evalx|xserver)$/ } @late) + $outside;
+  $r->{r_late_n} = sprintf '%d/%d', map { ($h->{"${_}_n"} // 0) - ($h->{"pre_${_}_n"} // 0) } qw(modload evalrun);
+  my $sub = ($h->{exit_child_us} - $h->{boundary_child_us}) / 1e6 - $tchild;
+  $r->{r_sub} = $sub < 0 ? 0 : $sub;
+  $r->{r_rcomp} = $post->('rcompile', 'cpu');
+  $r->{r_rcomp_n} = ($h->{rcompile_n} // 0) - ($h->{pre_rcompile_n} // 0);
+  # GC and allocation of the RUN: the window's, minus what the load work inside it did
+  $r->{r_gc} = $us->('gc_us') - $us->('boundary_gc_us') - $sum->('gc', @lw);
+  $r->{r_mb} = sprintf '%.1f', (($h->{bytes} // 0) - ($h->{boundary_bytes} // 0) - 1e6 * $sum->('bytes', @lw)) / 1e6;
+  $r->{pr_cpu} = $r->{r_cpu} - $r->{r_lw_cpu} + $outside;
+  $r->{pr_wall} = $r->{r_wall} - $r->{r_lw_wall};
 }
 
 sub classify {
@@ -468,14 +641,39 @@ sub emit {
     @row{qw(p_wall p_cpu p_rc p_ok p_notok p_plan p_skip)} =
       ($p->{wall}, $p->{cpu}, $p->{rc}, $p->{tap}{ok}, $p->{tap}{notok}, $p->{tap}{plan} // '',
        defined $p->{tap}{skip_all} ? 1 : 0);
+    $row{$_} = $p->{$_} for grep { /^q_/ && defined $p->{$_} } keys %$p;
   }
-  print $ofh join("\t", map { $f->($row{$_}) } @COLS), "\n";
+  # run-phase seconds carry 0.1 ms (a perl run phase can be a few ms)
+  my $g = sub { my $v = shift; return '' if !defined $v; return $v =~ /^-?\d+(?:\.\d+)?(?:e-?\d+)?$/i ? sprintf('%.5f', $v) : $v };
+  print $ofh join("\t", map { /^(?:q_(?!init|late_n)|r_(?!late_n|mb|rcomp_n)|pr_|sread)/ ? $g->($row{$_}) : $f->($row{$_}) } @COLS), "\n";
 }
 
 # ------------------------------------------------------------------ report --
 # Rows by (dist, file, mode): the LAST input file that has the key supplies
 # its reps; the rep with the least PCL CPU is the row, with the reps' spread.
 sub read_rows {
+  my ($files) = @_;
+  my ($reps, $taken) = read_reps($files);
+  my %reps = %$reps;
+  my %row;
+  for my $k (keys %reps) {
+    my @r = sort { num($a->{c_cpu}) <=> num($b->{c_cpu}) } @{ $reps{$k} };
+    my %best = %{ $r[0] };
+    my ($lo, $hi) = (num($r[0]{c_cpu}), num($r[-1]{c_cpu}));
+    $best{spread} = @r > 1 && $lo > 0 ? ($hi - $lo) / $lo : '';
+    $best{nrep} = scalar @r;
+    my ($plo) = sort { $a <=> $b } map { num($_->{p_cpu}) } @r;
+    $best{p_cpu} = $plo if @r > 1;
+    my ($pw) = sort { $a <=> $b } map { num($_->{p_wall}) } @r;
+    my ($cw) = sort { $a <=> $b } map { num($_->{c_wall}) } @r;
+    @best{qw(p_wall c_wall)} = ($pw, $cw) if @r > 1;
+    $row{$k} = \%best;
+  }
+  return (\%row, $taken);
+}
+
+# Every rep by (dist, file, mode, variant); the LAST input file that has the key supplies them.
+sub read_reps {
   my ($files) = @_;
   my (%reps, %src, @taken);
   for my $f (@$files) {
@@ -509,21 +707,7 @@ sub read_rows {
       push @{ $reps{$k} }, \%r;
     }
   }
-  my %row;
-  for my $k (keys %reps) {
-    my @r = sort { num($a->{c_cpu}) <=> num($b->{c_cpu}) } @{ $reps{$k} };
-    my %best = %{ $r[0] };
-    my ($lo, $hi) = (num($r[0]{c_cpu}), num($r[-1]{c_cpu}));
-    $best{spread} = @r > 1 && $lo > 0 ? ($hi - $lo) / $lo : '';
-    $best{nrep} = scalar @r;
-    my ($plo) = sort { $a <=> $b } map { num($_->{p_cpu}) } @r;
-    $best{p_cpu} = $plo if @r > 1;
-    my ($pw) = sort { $a <=> $b } map { num($_->{p_wall}) } @r;
-    my ($cw) = sort { $a <=> $b } map { num($_->{c_wall}) } @r;
-    @best{qw(p_wall c_wall)} = ($pw, $cw) if @r > 1;
-    $row{$k} = \%best;
-  }
-  return (\%row, \@taken);
+  return (\%reps, \@taken);
 }
 
 sub num { my ($v) = @_; return (defined $v && length $v) ? $v : 0 }
@@ -679,6 +863,145 @@ sub report {
   return $o;
 }
 
+# ------------------------------------------------------------ report --run --
+# THE RUN PHASE, per file over its warm reps (s541a): PCL's run = the least
+# pr_cpu of its COMPARED reps, perl's = the least q_cpu of all reps, each with
+# its spread ((max - min) / min); load = the highest 1-minute load any rep
+# started at.  A file is compared when its best PCL rep is class C.
+sub run_rows {
+  my ($files) = @_;
+  my ($reps, $taken) = read_reps($files);
+  my @rows;
+  for my $k (sort keys %$reps) {
+    my @all = grep { $_->{mode} eq 'warm' } @{ $reps->{$k} };
+    next if !@all;
+    my @c = grep { $_->{cmp} eq 'C' && length($_->{pr_cpu} // '') } @all;
+    my %r = (dist => $all[0]{dist}, file => $all[0]{file}, nrep => scalar @all, ncmp => scalar @c,
+             src => $all[0]{src}, cmp => @c ? 'C' : $all[0]{cmp}, c_class => $all[0]{c_class});
+    my @q = sort { $a <=> $b } map { num($_->{q_cpu}) } grep { $_->{q_init} } @all;
+    my ($load) = sort { $b <=> $a } map { num($_->{load1}) } @all;
+    $r{load} = $load;
+    $r{q_init} = @q ? 1 : 0;
+    if (@q) {
+      $r{q_cpu} = $q[0];
+      $r{q_spread} = $q[0] > 0 ? ($q[-1] - $q[0]) / $q[0] : 0;
+      my ($qb) = sort { num($a->{q_cpu}) <=> num($b->{q_cpu}) } grep { $_->{q_init} } @all;
+      $r{$_} = $qb->{$_} for qw(q_wall q_sub p_ok);
+      my ($ql) = grep { length($_->{q_late_cpu} // '') } @all;
+      @r{qw(q_late_cpu q_late_n)} = $ql ? ($ql->{q_late_cpu}, $ql->{q_late_n}) : ('', '');
+      my ($qc) = sort { $a <=> $b } map { num($_->{q_c_wall}) } grep { length($_->{q_c_wall} // '') } @all;
+      my ($pw) = sort { $a <=> $b } map { num($_->{p_wall}) } @all;
+      @r{qw(q_c_wall p_wall)} = ($qc // '', $pw);
+    }
+    if (@c) {
+      my @s = sort { num($a->{pr_cpu}) <=> num($b->{pr_cpu}) } @c;
+      my $b = $s[0];
+      $r{pr_cpu} = num($b->{pr_cpu});
+      $r{pr_spread} = $r{pr_cpu} > 0 ? (num($s[-1]{pr_cpu}) - $r{pr_cpu}) / $r{pr_cpu} : 0;
+      $r{$_} = $b->{$_} for qw(pr_wall r_cpu r_lw_cpu r_late_cpu r_late_n r_rcomp r_rcomp_n r_sub r_gc r_mb run_how c_ok);
+    }
+    push @rows, \%r;
+  }
+  return (\@rows, $taken);
+}
+
+sub ms { my ($v) = @_; return length($v // '') ? sprintf('%.1f', 1000 * $v) : '' }
+
+sub report_run {
+  my ($files, $topn) = @_;
+  my ($rows, $taken) = run_rows($files);
+  my @cmp = grep { $_->{cmp} eq 'C' && $_->{q_init} } @$rows;
+  my $o = "# board-timing run-phase report\n\n" . join('', map { "- $_\n" } @$taken) . "\n";
+  my %n;
+  $n{$_->{cmp}}++ for @$rows;
+  my ($maxload) = sort { $b <=> $a } map { $_->{load} } @cmp;
+  $o .= sprintf "Files: %d; compared (C, perl reached INIT) %d; PE %d, S %d, X %d.  Highest start load of a compared rep: %s.\n\n",
+    scalar @$rows, scalar @cmp, map({ $n{$_} // 0 } qw(PE S X)), $maxload // '-';
+  my %t;
+  for my $r (@cmp) {
+    $t{$_} += num($r->{$_}) for qw(q_cpu pr_cpu q_wall pr_wall q_sub r_sub q_late_cpu r_late_cpu r_rcomp r_gc r_mb p_wall);
+  }
+  $o .= "## Totals over the compared files (seconds)\n\n| | perl | PCL | PCL - perl | PCL / perl |\n|---|---:|---:|---:|---:|\n";
+  $o .= sprintf "| run phase, CPU | %s | %s | %s | %s |\n", f2($t{q_cpu}), f2($t{pr_cpu}), f2($t{pr_cpu} - $t{q_cpu}), ratio($t{pr_cpu}, $t{q_cpu});
+  $o .= sprintf "| run phase, wall (waits on children inside) | %s | %s | %s | %s |\n", f2($t{q_wall}), f2($t{pr_wall}), f2($t{pr_wall} - $t{q_wall}), ratio($t{pr_wall}, $t{q_wall});
+  $o .= sprintf "| of the run: late load / compile | %s | %s | | |\n", f2($t{q_late_cpu}), f2($t{r_late_cpu});
+  $o .= sprintf "| of the run: SBCL run-time compiles (CLOS) | - | %s | | |\n", f2($t{r_rcomp});
+  $o .= sprintf "| of the run: GC | - | %s | | |\n", f2($t{r_gc});
+  $o .= sprintf "| subprocesses (NOT in the run) | %s | %s | | |\n", f2($t{q_sub}), f2($t{r_sub});
+  $o .= sprintf "| perl's whole file, wall | %s | | | |\n\nMB consed in PCL's run phase: %.0f\n\n", f2($t{p_wall}), $t{r_mb};
+  # the distribution of ratios
+  my @b = ([q{under 1x}, 0, 1], [q{1-2x}, 1, 2], [q{2-5x}, 2, 5], [q{5-10x}, 5, 10], [q{over 10x}, 10, 1e99]);
+  $o .= "## Ratio distribution (PCL run / perl run)\n\n| ratio | files | perl s | PCL s | PCL - perl |\n|---|---:|---:|---:|---:|\n";
+  for my $bk (@b) {
+    my @in = grep { my $x = $_->{q_cpu} > 0 ? $_->{pr_cpu} / $_->{q_cpu} : 1e99; $x >= $bk->[1] && $x < $bk->[2] } @cmp;
+    my ($p, $c) = (0, 0); for (@in) { $p += $_->{q_cpu}; $c += $_->{pr_cpu} }
+    $o .= sprintf "| %s | %d | %s | %s | %s |\n", $bk->[0], scalar @in, f2($p), f2($c), f2($c - $p);
+  }
+  # per dist
+  my %d;
+  for my $r (@$rows) {
+    my $x = $d{$r->{dist}} //= {};
+    $x->{n}{$r->{cmp}}++;
+    next if !($r->{cmp} eq 'C' && $r->{q_init});
+    $x->{$_} += num($r->{$_}) for qw(q_cpu pr_cpu q_late_cpu r_late_cpu r_rcomp q_sub r_sub r_gc);
+    my $ex = $r->{pr_cpu} - $r->{q_cpu};
+    if (!defined $x->{top} || $ex > $x->{topx}) { $x->{top} = $r->{file}; $x->{topx} = $ex }
+  }
+  $o .= "\n## Per distribution (compared files; CPU seconds of the run phase)\n\n";
+  $o .= "| dist | C | other | perl | PCL | PCL - perl | ratio | late perl / PCL | CLOS compiles | GC | subproc perl / PCL | largest excess |\n";
+  $o .= "|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---|---|\n";
+  for my $dn (sort { num($d{$b}{pr_cpu}) - num($d{$b}{q_cpu}) <=> num($d{$a}{pr_cpu}) - num($d{$a}{q_cpu}) } keys %d) {
+    my $x = $d{$dn};
+    my $other = 0; $other += $x->{n}{$_} for grep { $_ ne 'C' } keys %{ $x->{n} };
+    $o .= sprintf "| %s | %d | %d | %s | %s | %s | %s | %s / %s | %s | %s | %s / %s | %s |\n", $dn, $x->{n}{C} // 0, $other,
+      f2($x->{q_cpu}), f2($x->{pr_cpu}), f2(num($x->{pr_cpu}) - num($x->{q_cpu})), ratio($x->{pr_cpu}, $x->{q_cpu}),
+      f2($x->{q_late_cpu}), f2($x->{r_late_cpu}), f2($x->{r_rcomp}), f2($x->{r_gc}), f2($x->{q_sub}), f2($x->{r_sub}),
+      defined $x->{top} ? sprintf('%s (%s)', $x->{top}, f2($x->{topx})) : '-';
+  }
+  my $hdr = "| # | file | perl ms | PCL ms | excess ms | ratio | late perl / PCL ms | CLOS ms | GC ms | MB | subproc perl / PCL ms | spread perl / PCL | load |\n"
+          . "|---:|---|---:|---:|---:|---:|---|---:|---:|---:|---|---|---:|\n";
+  my $i = 0;
+  my $line = sub {
+    my ($r) = @_;
+    $i++;
+    return sprintf "| %d | %s/%s | %s | %s | %s | %s | %s / %s | %s | %s | %s | %s / %s | %.0f%% / %.0f%% | %.2f |\n", $i, $r->{dist}, $r->{file},
+      ms($r->{q_cpu}), ms($r->{pr_cpu}), ms($r->{pr_cpu} - $r->{q_cpu}), ratio($r->{pr_cpu}, $r->{q_cpu}),
+      ms($r->{q_late_cpu}), ms($r->{r_late_cpu}), ms($r->{r_rcomp}), ms($r->{r_gc}), $r->{r_mb} // '',
+      ms($r->{q_sub}), ms($r->{r_sub}), 100 * num($r->{q_spread}), 100 * num($r->{pr_spread}), $r->{load};
+  };
+  my @by_ex = sort { ($b->{pr_cpu} - $b->{q_cpu}) <=> ($a->{pr_cpu} - $a->{q_cpu}) } @cmp;
+  $o .= "\n## Top $topn by run-phase excess (PCL - perl)\n\n$hdr" . join('', map { $line->($_) } grep { defined } @by_ex[0 .. $topn - 1]);
+  # PCL under HALF of perl: a possible silent skip (or the native TAP layer)
+  my @fast = sort { $b->{q_cpu} <=> $a->{q_cpu} } grep { $_->{pr_cpu} * 2 < $_->{q_cpu} } @cmp;
+  $i = 0;
+  $o .= "\n## PCL's run phase under HALF of perl's (" . scalar(@fast) . " files: possible silent skips, read before believing)\n\n$hdr"
+      . join('', map { $line->($_) } @fast);
+  my @nq = grep { $_->{cmp} eq 'C' && !$_->{q_init} } @$rows;
+  $o .= sprintf "\nCompared files where perl never reached INIT (left before its run phase): %d%s\n", scalar @nq,
+    @nq ? ' -- ' . join(', ', map { "$_->{dist}/$_->{file}" } @nq) : '';
+  write_run_table($table, $rows, $taken) if defined $table;
+  return $o;
+}
+
+sub write_run_table {
+  my ($path, $rows, $taken) = @_;
+  my @c = qw(dist file cmp c_class nrep ncmp load q_init q_cpu pr_cpu excess ratio q_spread pr_spread q_wall pr_wall
+             q_late_cpu q_late_n r_late_cpu r_late_n r_rcomp r_rcomp_n r_gc r_mb q_sub r_sub r_cpu r_lw_cpu run_how p_ok c_ok p_wall q_c_wall src);
+  open my $t, '>', $path or die "board-timing.pl: cannot write $path: $!\n";
+  print $t "# taken-at: $_\n" for @$taken;
+  print $t join("\t", @c), "\n";
+  for my $r (sort { $a->{dist} cmp $b->{dist} || $a->{file} cmp $b->{file} } @$rows) {
+    my %v = %$r;
+    if (length($r->{pr_cpu} // '') && length($r->{q_cpu} // '')) {
+      $v{excess} = $r->{pr_cpu} - $r->{q_cpu};
+      $v{ratio} = $r->{q_cpu} > 0 ? sprintf('%.2f', $r->{pr_cpu} / $r->{q_cpu}) : '';
+    }
+    print $t join("\t", map { my $x = $v{$_}; !defined $x ? ''
+                              : $x =~ /^-?\d*\.\d+(?:e-?\d+)?$/i ? sprintf('%.5f', $x) : $x } @c), "\n";
+  }
+  close $t;
+}
+
 # The per-file table (--report --table OUT.tsv): one line per board file, its
 # warm row (the precise one when a later input supplied it) and its cold CPU;
 # CPU columns are load-normalised when --norm ran (column `f` = the factor).
@@ -722,13 +1045,29 @@ sub hooks_source { return <<'LISP' }
   (multiple-value-bind (s us) (sb-ext:get-time-of-day) (+ (* s 1000000) us)))
 (defun cpu-us ()
   (round (* (get-internal-run-time) 1000000) internal-time-units-per-second))
+;;; CHILD CPU (s541a): the reaped children's user+sys (getrusage CHILDREN), so a
+;;; module transpile (a pl2cl child, reaped inside its bucket) is told apart from
+;;; the subprocesses the PROGRAM starts.
+(defun child-us ()
+  (multiple-value-bind (ok u s) (sb-unix:unix-getrusage sb-unix:rusage_children)
+    (if ok (+ u s) 0)))
+(defvar *pid0* (sb-posix:getpid))
 (defvar *t0-us* (now-us))
 (defvar *t0-cpu* (cpu-us))
 (defvar *t0-bytes* (sb-ext:get-bytes-consed))
 (defvar *t0-gc* sb-ext:*gc-run-time*)
 (defvar *boundary* nil)
-(defvar *wall* (make-hash-table :test 'eq))
-(defvar *cpu* (make-hash-table :test 'eq))
+(defvar *pre* nil)
+(defvar *in-boundary* nil)
+;;; MEASURES per bucket, each EXCLUSIVE of nested buckets: wall, cpu, child (reaped
+;;; children's CPU), gc (SBCL's GC run time), bytes (consed).  All microseconds but bytes.
+(defun gc-now () (round (* sb-ext:*gc-run-time* 1000000) internal-time-units-per-second))
+(defun measures () (vector (now-us) (cpu-us) (child-us) (gc-now) (sb-ext:get-bytes-consed)))
+(defvar *measure-names* '("wall" "cpu" "child" "gc" "bytes"))
+(defvar *tabs* (coerce (loop repeat 5 collect (make-hash-table :test 'eq)) 'vector))
+(defvar *wall* (svref *tabs* 0))
+(defvar *cpu* (svref *tabs* 1))
+(defvar *child* (svref *tabs* 2))
 (defvar *count* (make-hash-table :test 'eq))
 (defvar *frame* nil)
 (defvar *ctx* :script)
@@ -736,19 +1075,58 @@ sub hooks_source { return <<'LISP' }
 (when *prof* (require :sb-sprof))
 (defvar *prof-from-start* (equal (sb-ext:posix-getenv "PCL_BT_PROF_FROM") "start"))
 (defun call-in (bucket ctx fn args)
-  (let ((frame (cons 0 0)) (w0 (now-us)) (c0 (cpu-us)))
+  (let ((frame (make-array 5 :initial-element 0)) (m0 (measures)))
     (incf (gethash bucket *count* 0))
     (unwind-protect
          (let ((*frame* frame) (*ctx* (or ctx *ctx*)))
            (apply fn args))
-      (let ((dw (- (now-us) w0)) (dc (- (cpu-us) c0)))
-        (incf (gethash bucket *wall* 0) (- dw (car frame)))
-        (incf (gethash bucket *cpu* 0) (- dc (cdr frame)))
-        (when *frame*
-          (incf (car *frame*) dw)
-          (incf (cdr *frame*) dc))))))
+      (let ((m1 (measures)))
+        (dotimes (i 5)
+          (let ((d (- (svref m1 i) (svref m0 i))))
+            (incf (gethash bucket (svref *tabs* i) 0) (- d (svref frame i)))
+            (when *frame* (incf (svref *frame* i) d))))))))
+(defun copy-table (h)
+  (let ((c (make-hash-table :test 'eq)))
+    (maphash (lambda (k v) (setf (gethash k c) v)) h)
+    c))
+;;; THE PROGRAM'S RUN PHASE starts where perl's INIT phase starts: after the
+;;; main program's CHECK blocks (%p-drain-compile-blocks inside the main
+;;; p-run-compile-phase-blocks), before its INIT blocks.  The bucket tables are
+;;; snapshotted there, so a bucket's after-boundary share is total - pre.
+(defun mark-boundary ()
+  (unless *boundary*
+    (setf *boundary* (list (now-us) (cpu-us) (child-us) (sb-ext:get-bytes-consed)
+                           sb-ext:*gc-run-time*)
+          *pre* (cons (copy-table *count*) (map 'vector #'copy-table *tabs*)))
+    (when (and *prof* (not *prof-from-start*)) (prof-start))))
+;;; WHO ASKED FOR A NATIVE COMPILE (s541a): the text loader (SBCL's top-level
+;;; eval, sb-impl::%simple-eval) compiling a form of the program / a module /
+;;; the TAP layer, or a string eval -- or SBCL itself at RUN time: CLOS (SB-PCL)
+;;; compiles a constructor or a dispatch function the first time a class is
+;;; instantiated or a generic function called (cl-ppcre's regex node classes),
+;;; bucket RCOMPILE: run time, which perl does not have.
+(defun compile-caller ()
+  (let ((n 0))
+    (sb-debug:map-backtrace
+     (lambda (frame)
+       (incf n)
+       (let* ((name (sb-di:debug-fun-name (sb-di:frame-debug-fun frame)))
+              (sym (if (consp name) (second name) name)))
+         (when (and (symbolp sym) sym (> n 1)
+                    (not (member (symbol-name sym) '("COMPILE-IN-LEXENV" "COMPILE-CALLER" "COMPILE-BUCKET" "CALL-IN")
+                                 :test #'string=)))
+           (let ((pkg (symbol-package sym)))
+             (return-from compile-caller
+               (cond ((string= (symbol-name sym) "%SIMPLE-EVAL") :eval)
+                     ((and pkg (string= (package-name pkg) "SB-PCL")) :clos)
+                     (t :other)))))))
+     :count 12)
+    :other))
 (defun compile-bucket ()
-  (ecase *ctx* (:script :scompile) (:mod :mcompile) (:tap :tcompile) (:eval :ecompile)))
+  (let ((who (compile-caller)))
+    (cond ((eq who :clos) :rcompile)
+          ((and (eq *ctx* :script) (not (eq who :eval))) :rcompile)
+          (t (ecase *ctx* (:script :scompile) (:mod :mcompile) (:tap :tcompile) (:eval :ecompile))))))
 (defmacro wrap (fname bucket ctx)
   `(when (fboundp ',fname)
      (sb-int:encapsulate ',fname 'board-timing
@@ -788,35 +1166,61 @@ sub hooks_source { return <<'LISP' }
   (when (fboundp 'pcl::p-run-compile-phase-blocks)
     (sb-int:encapsulate 'pcl::p-run-compile-phase-blocks 'board-timing
                         (lambda (f &rest args)
+                          (multiple-value-prog1
+                              (let ((*in-boundary* (not pcl::*p-unit-load*)))
+                                (apply f args))
+                            ;; no CHECK drain seen (a runtime without it): the end
+                            (when (not pcl::*p-unit-load*) (mark-boundary))))))
+  (when (fboundp 'pcl::%p-drain-compile-blocks)
+    (sb-int:encapsulate 'pcl::%p-drain-compile-blocks 'board-timing
+                        (lambda (f &rest args)
                           (multiple-value-prog1 (apply f args)
-                            (when (and (not pcl::*p-unit-load*) (null *boundary*))
-                              (setf *boundary* (list (now-us) (cpu-us)))
-                              (when (and *prof* (not *prof-from-start*)) (prof-start)))))))
+                            (when *in-boundary* (mark-boundary))))))
+  ;; READING the program's text (s541a): SBCL's LOAD of a source file reads
+  ;; each top-level form inside sb-c::%do-forms-from-info and hands it to a
+  ;; callback that evaluates it.  For the MAIN program (no bucket open, the
+  ;; script's context) the whole call is bucket SREAD and the callback bucket
+  ;; SEVAL, so SREAD's exclusive time is the reading alone; SEVAL is run.
+  (when (fboundp 'sb-c::%do-forms-from-info)
+    (sb-int:encapsulate 'sb-c::%do-forms-from-info 'board-timing
+                        (lambda (f fn &rest rest)
+                          (if (and (null *frame*) (eq *ctx* :script))
+                              (call-in :sread :script f
+                                       (list* (lambda (&rest a) (call-in :seval :script fn a))
+                                              rest))
+                              (apply f fn rest)))))
   (sb-int:encapsulate 'sb-c:compile-in-lexenv 'board-timing
                       (lambda (f &rest args) (call-in (compile-bucket) nil f args))))
+(defun gc-us (v)
+  (round (* v 1000000) internal-time-units-per-second))
 (defun write-record (phase)
   (let ((path (sb-ext:posix-getenv "PCL_BT_OUT")))
-    (when path
+    ;; a forked child runs the exit hooks too: only the program's own process writes
+    (when (and path (= (sb-posix:getpid) *pid0*))
       (with-open-file (s path :direction :output :if-exists :supersede
                               :if-does-not-exist :create)
-        (format s "phase=~A~%t0_us=~D~%t0_cpu_us=~D~%exit_us=~D~%exit_cpu_us=~D~%"
-                phase *t0-us* *t0-cpu* (now-us) (cpu-us))
+        (format s "phase=~A~%t0_us=~D~%t0_cpu_us=~D~%exit_us=~D~%exit_cpu_us=~D~%exit_child_us=~D~%"
+                phase *t0-us* *t0-cpu* (now-us) (cpu-us) (child-us))
         (when *boundary*
-          (format s "boundary_us=~D~%boundary_cpu_us=~D~%"
-                  (first *boundary*) (second *boundary*)))
+          (destructuring-bind (w c k b g) *boundary*
+            (format s "boundary_us=~D~%boundary_cpu_us=~D~%boundary_child_us=~D~%boundary_bytes=~D~%boundary_gc_us=~D~%"
+                    w c k (- b *t0-bytes*) (gc-us (- g *t0-gc*)))))
         (format s "bytes=~D~%gc_us=~D~%"
                 (- (sb-ext:get-bytes-consed) *t0-bytes*)
-                (round (* (- sb-ext:*gc-run-time* *t0-gc*) 1000000)
-                       internal-time-units-per-second))
-        (maphash (lambda (k v)
-                   (format s "~(~A~)_wall_us=~D~%~(~A~)_cpu_us=~D~%"
-                           k v k (gethash k *cpu* 0)))
-                 *wall*)
-        (maphash (lambda (k v) (format s "~(~A~)_n=~D~%" k v)) *count*)))))
+                (gc-us (- sb-ext:*gc-run-time* *t0-gc*)))
+        (write-tables s "" *tabs* *count*)
+        (when *pre* (write-tables s "pre_" (cdr *pre*) (car *pre*)))))))
+(defun write-tables (s prefix tabs count)
+  (loop for name in *measure-names* for i from 0
+        do (maphash (lambda (k v) (format s "~A~(~A~)_~A~:[_us~;~]=~D~%" prefix k name (string= name "bytes") v))
+                    (svref tabs i)))
+  (maphash (lambda (k v) (format s "~A~(~A~)_n=~D~%" prefix k v)) count))
 (when (and *prof* *prof-from-start*) (prof-start))
-(push (lambda () (ignore-errors (prof-report)) (ignore-errors (write-record "front")))
+(push (lambda () (ignore-errors (write-record "front")))
       sb-ext:*exit-hooks*)
 (setf sb-ext:*exit-hooks*
       (append sb-ext:*exit-hooks*
-              (list (lambda () (ignore-errors (write-record "last"))))))
+              (list (lambda ()
+                      (when (= (sb-posix:getpid) *pid0*) (ignore-errors (prof-report)))
+                      (ignore-errors (write-record "last"))))))
 LISP
