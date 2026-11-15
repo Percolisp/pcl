@@ -16611,9 +16611,9 @@ which is one of #1140's escape spellings (probed)."
    Stores values in boxes for l-value semantics.
    Flattens vectors (e.g. from %arr[...] kv-slice) and hash-tables
    (e.g. from %existing_hash used in list context) in the pair list."
-  ;; PRESIZED, and with no copy when nothing spreads (task #4984): the table is
-  ;; made for the pair count (SBCL's default holds 7 and a 10-key literal grew
-  ;; it twice), and a pair list holding no array or hash to flatten -- the
+  ;; PRESIZED, and with no copy when nothing spreads (task #4984): above 7
+  ;; pairs the table is made for the pair count (SBCL's default holds 7 and a
+  ;; 10-key literal grew it twice), and a pair list holding no array or hash to flatten -- the
   ;; ordinary `{ k => v, ... }` -- is read in place instead of being consed
   ;; into a flattened copy first.  -15 % on a 10-key constructor loop.
   (let ((items (%p-tie-views pairs)))         ; tied: its view (#155)
@@ -16636,8 +16636,15 @@ which is one of #1140's escape spellings (probed)."
 (defun %p-hash-from-pairs (flat)
   "A new Perl hash holding the key/value list FLAT (nothing left to spread),
    its table sized for the pairs."
-  (let ((h (make-hash-table :test 'equal
-                            :size (max 7 (ceiling (length flat) 2)))))
+  ;; Up to 7 pairs -- the common `{ v => $x }`, `bless {}, $class` -- fit
+  ;; SBCL's default table, and the call with CONSTANT arguments compiles to
+  ;; SBCL's defaults fast path; a computed :size goes through the full keyword
+  ;; MAKE-HASH-TABLE, ~33 ns more a hash (measured s540d: a one-pair `bless`
+  ;; loop read 10-12 % slower than the base before this split).
+  (let* ((n (length flat))
+         (h (if (<= n 14)
+                (make-hash-table :test 'equal)
+                (make-hash-table :test 'equal :size (ceiling n 2)))))
     (loop for (k v) on flat by #'cddr
           do (setf (gethash (%p-hash-key k) h) (%p-make-hash-entry v)))
     h))
