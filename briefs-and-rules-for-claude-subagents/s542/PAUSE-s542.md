@@ -92,3 +92,10 @@ Read bottom-up after a cut.  The stop state this session started from is `s541/r
 
 ## 01:3x -- **THE USER: do not start more subtasks.**
 * Nothing is launched from now on.  RUNNING and left to finish: s542r (the round), s539b (binder port 4 + #4822), s541a (#4791).  When one ends its slot stays EMPTY; merges of what they deliver still happen.  The brief I was going to write next (the silent wrongs the reviews filed: #4792 #4795 #5005 #5021 #4794 #4887) is NOT written into a launch; the list stays here for the next session.
+
+## 01:5x -- s539c's last merge bar DONE and everything PUSHED
+* `tools/t/install-container.t` on merged main: 17 / 17 PASS (`~/pcl-agent-scratch/s542/merge/c9-container.log`, END rc=0 01:49; it waited 20 minutes for the box).
+* PUSHED: main `11a6f6df..4e7c1d8c` (MAIN-READY-97 + records); the PPI fork `Percolisp/PPI` `pcl` `c2f21706..66e690d2` (fast-forward, from the bare mirror).
+* Upstream pull request Perl-Critic/PPI #459 REFRESHED (`gh api -X PATCH`): title "53 groups ... (133 commits)", the counts paragraph (133 commits, 53 groups, 459 cases; the CR case's TODO tests are now answered by group BA), table rows AY AZ BA; the API answers head `66e690d2`, 133 commits, open.
+* CI for `4e7c1d8c` to be read at the next check.
+* RUNNING (nothing new is launched, the USER's word): s542r, s539b, s541a.
