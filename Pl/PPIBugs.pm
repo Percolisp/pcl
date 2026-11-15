@@ -320,9 +320,9 @@ print "after\\n";
    tasks => [] },
  { id => 19, kind => 'token', dump => 'tokens',
    title => 'A call to a sub named `x` after a list operator is lexed as the repetition operator',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^x=?$/, pred => '', check => 'x-as-repetition' },
-   fix => { kind => 'retag', handler => 'Pl::Parser2::_repair_word_x_call' },
+   fix => { kind => 'retag', handler => 'Pl::Parser2::_repair_word_x_call', changed => 'the builtin half (print x(), return x ...) is fixed on the branch by group AY (s539c, §66); the handler STAYS for the shapes the tokenizer cannot decide -- a bareword handle or a user word before x (print STDOUT x(), foo x 3): perl asks whether the word is a declared sub or constant, which only PCL knows', commit => 'a9a16511', group => 'AY', pr => undef },
    repro => 'sub x { "PKG" } print x(), "|\\n";',
    perl => "PKG|\n",
    tokens => {
@@ -960,6 +960,19 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => [],
    tasks => [4302, 4761] },
+ { id => 66, kind => 'token', dump => 'tokens',
+   title => 'A sub named `x<digits>` (`x3`, `x64`) where perl expects a TERM -- after a builtin that takes an operand (`print x64()`, `return x3()`), in the `print $fh` slot, before a `(` (`print STDOUT x3()`) -- is lexed as the repetition operator and a number',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'x-as-repetition', shape => 'Operator x (and a Number) after a builtin that takes an operand, after the $fh of print $fh, or glued to digits that a ( follows' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE for x<digits> (the statement was dropped, or after a handle printed nothing); the same rule fixes §19\'s builtin half (print x()); Pl::Parser2::_repair_word_x_call stays for the bareword-handle / user-word x (§19)', commit => 'a9a16511', group => 'AY', pr => undef },
+   repro => 'sub x3 { "X3" } print STDOUT x3(), "\\n";',
+   perl => "X3\n",
+   tokens => {
+     got  => ['Word=sub', 'Word=x3', 'Structure={', 'Quote::Double="X3"', 'Structure=}', 'Word=print', 'Word=STDOUT', 'Operator=x', 'Number=3', 'Structure=(', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=sub', 'Word=x3', 'Structure={', 'Quote::Double="X3"', 'Structure=}', 'Word=print', 'Word=STDOUT', 'Word=x3', 'Structure=(', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [4784] },
 );
 
 # The one accessor.

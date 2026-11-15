@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 411;
+use Test::More tests => 437;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2145,4 +2145,34 @@ for my $case ( [ "print 1;\n__DATA__\nx => 1\n", 'Separator=__DATA__' ],
     my $doc = PPI::Document->new( \"my \$a = 1;\r\nmy \$b = 2;\r\n" );
     my @s = $doc ? $doc->children : ();
     ok( 2 == grep( $_->isa('PPI::Statement'), @s ), 'CR LF line ends still end lines (control)' );
+}
+
+# §66 -- x<digits> where perl expects a TERM: perl reads x3 as the
+# repetition operator x 3 only where it expects an operator (toke.c:
+# case 'x' tests PL_expect == XOPERATOR).  After a builtin that takes
+# an operand (print, return, sort, defined, the if of a statement
+# modifier, ...) it expects a term; in the filehandle slot of
+# print $fh LIST it reads the whole word after the handle (toke.c, case
+# '$': only a binary-operator keyword such as x itself keeps the
+# operator); and a number is never followed by an opening paren, so
+# x3() is a call wherever it stands:
+# `sub x3 { "X3" } print STDOUT x3(), "\n";` prints X3.
+{
+    for my $case ( [ 'print x64(), "\n";', 'Word=x64' ], [ 'print STDOUT x3(), "\n";', 'Word=x3' ],
+                   [ 'print x3() x2;', 'Word=x3' ], [ 'print $fh x3();', 'Word=x3' ],
+                   [ 'print $fh x3;', 'Word=x3' ], [ 'say STDERR x3();', 'Word=x3' ],
+                   [ 'return x3();', 'Word=x3' ], [ 'my @s = sort x3 @l;', 'Word=x3' ],
+                   [ 'print 1 if x3();', 'Word=x3' ], [ 'my $d = defined x3();', 'Word=x3' ],
+                   [ 'print x3 1;', 'Word=x3' ], [ 'print x 3;', 'Word=x' ],
+                   [ 'CORE::print x3();', 'Word=x3' ], [ 'foo x3();', 'Word=x3' ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want, not the x operator" ) or diag "got: @t";
+    }
+}
+for my $code ( 'print $s x 3;', 'print STDOUT x 3;', 'print C x3;', 'print "a" x3;', 'print STDOUT "a" x3;',
+               'my @r = (1) x3;', 'print time x 3;', 'print __PACKAGE__ x 2;', '$o->print x 3;',
+               'print $s x$n;', 'print {$fh} "a" x3;', 'my $r = $s x (3);' ) {
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( /^Operator=x$/, @t ), "$code: the x operator (control)" ) or diag "got: @t";
 }

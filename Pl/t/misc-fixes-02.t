@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 148;
+plan tests => 149;
 
 sub run_cl {
     my ($code) = @_;
@@ -1179,17 +1179,24 @@ test_cl('lexical filehandle stringifies as GLOB(0x..)',
     "ok\n");
 
 # ── PPI bug CANARY for the `x`-as-operator mis-lex PCL WORKS AROUND ──────────
-# `sub x {…} print x(), …` — PPI counts the Word before `x` as a term, so the
-# call comes out as the repetition operator (ppi-upstream-bugs.md §19, report
-# bug 16).  PCL's _repair_word_x_call is keyed on that, so when PPI is fixed
-# this row FAILS: drop the repair, do not "fix" the row.
+# `sub x {…} print STDOUT x(), …` — after a bareword handle (or a user's word)
+# the tokenizer cannot know whether the word is a handle / list operator or a
+# constant, so the call comes out as the repetition operator
+# (ppi-upstream-bugs.md §19, report bug 16).  The builtin half, `print x()`,
+# is fixed on PCL's PPI branch (§66, s539c): the second assertion.  PCL's
+# _repair_word_x_call is keyed on the first, so when PPI decides it too this
+# row FAILS: drop the repair, do not "fix" the row.
 {
-    my $doc = PPI::Document->new(\'sub x { "PKG" } print x(), "|\n";');
+    my $doc = PPI::Document->new(\'sub x { "PKG" } print STDOUT x(), "|\n";');
     ok( $doc && grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
                 $doc->tokens,
-        'CANARY: PPI still lexes a call to a sub named `x` after a list '
-      . 'operator as the repetition operator — if this FAILS, drop '
+        'CANARY: PPI still lexes a call to a sub named `x` after a bareword '
+      . 'filehandle as the repetition operator — if this FAILS, drop '
       . '_repair_word_x_call (ppi-upstream-bugs.md §19)' );
+    my $fixed = PPI::Document->new(\'sub x { "PKG" } print x(), "|\n";');
+    ok( $fixed && !grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+                $fixed->tokens,
+        '§66: after the builtin print, x is a word (the call) on the vendored PPI' );
 }
 
 # ── #378: `__SUB__` inside an ANONYMOUS sub is the closure itself ─────────────

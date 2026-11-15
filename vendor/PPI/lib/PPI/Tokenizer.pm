@@ -1180,16 +1180,29 @@ sub _term_expected {
 	return $KEYWORDS{$word} && !$NO_OPERAND{$word};
 }
 
-# Assuming we are currently parsing the word 'x', return true
-# if previous tokens imply the x is an operator, false otherwise.
+# Assuming we are currently parsing the word 'x' -- alone, or glued to
+# the digits of a number when $digits is true (x3 in $a x3, which is
+# $a x 3) -- return true if previous tokens imply the x is an operator,
+# false otherwise.
 sub _current_x_is_operator {
-	my ( $self ) = @_;
+	my ( $self, $digits ) = @_;
 	return if !@{$self->{tokens}};
 
 	my ($prev, $prevprev) = $self->_previous_significant_tokens(2);
 	return if !$prev;
 
-	return !$self->__current_token_is_forced_word('x') if $prev->isa('PPI::Token::Word');
+	# In the filehandle slot of print $fh LIST perl reads the whole word
+	# after the handle (toke.c, case '$': only a binary-operator keyword
+	# keeps XOPERATOR), so print $fh x3() calls x3, while the keyword x
+	# stays the operator (print $s x 3).
+	return !$digits if $self->_after_scalar_filehandle;
+
+	# After a builtin that takes an operand (print x3(), return x3(),
+	# sort x3 @l, ... if x3()) perl expects a term, and x is the
+	# repetition operator only where it expects an operator (toke.c:
+	# case 'x' tests PL_expect == XOPERATOR), so x, x3 are words.
+	return !$self->__current_token_is_forced_word('x') && !$self->_term_expected
+		if $prev->isa('PPI::Token::Word');
 
 	# After the } of a block that ends a statement (sub x3 { } x3();) or
 	# takes a list (map { } x3()) perl expects a statement or a term, and

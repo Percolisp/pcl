@@ -1129,6 +1129,13 @@ ALL-CAPS shortcut dropped, because an ALL-CAPS word before `x` is a filehandle
 rather than a constant.  Guard rows: `Pl/t/bareword-call-01.t`; canary:
 `Pl/t/misc-fixes-02.t`.
 
+**FIXED on PCL's PPI branch for the builtin half** (s539c: group AY, commit `a9a16511` -- §66's
+rule: after a builtin that takes an operand perl expects a term, so `print x()` is the call;
+registry row `fixed_in => 'pcl'`).  `_repair_word_x_call` STAYS for the half the tokenizer
+cannot decide -- a bareword handle or a user's word before `x` (`print STDOUT x()`,
+`foo x 3`): perl asks whether the word is a declared sub or a constant.  The
+`Pl/t/misc-fixes-02.t` canary now asserts that shape.
+
 ### 19b. …and the same `x` STARTING a statement  [CONFIRMED 1.291, found s456ag]
 
 **FIXED on PCL's PPI branch** (s536j: group AW, commit `e45f69ab` on branch `pcl` -- §63's rule: after the `}` of a block that ends a statement perl does not expect an operator, so `x` is a word; the statement-start arm of `_repair_word_x_call` is DELETED).  §19's own row (`print x()`, after a list operator) is unchanged and keeps the first arm.
@@ -2925,6 +2932,44 @@ normalizes its expected text with the same regex; `t/08_regression.t:270` does i
 rewrite is PPI behaviour its tests assert, so the fix is a behaviour change or a new Document
 attribute, plus perl's CR rules in PCL's lowering (here-doc bodies in both modes, file-mode
 multi-line literals); #4761 has the design.  The report rows stay inside a PCL §65 TODO block.
+
+---
+
+## 66. A sub named `x<digits>` (`x3`, `x64`) where perl expects a TERM -- after a builtin that takes an operand, in the `print $fh` slot, before a `(` -- is lexed as the repetition operator and a number  [CONFIRMED 1.291 and PCL's branch c2f21706]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `X3` twice):
+
+```perl
+sub x3 { "X3" }
+print x3(), "\n";             # after a builtin list operator
+print STDOUT x3(), "\n";      # after a bareword filehandle
+```
+
+**PPI tokens**: `Word[print] Operator[x] Number[3] Structure[(] Structure[)]` and
+`Word[print] Word[STDOUT] Operator[x] Number[3] ...`.  **Expected**: `Word[x3]` both times.
+perl reads `x3` as `x 3` only where it expects an OPERATOR (toke.c, `yylex`: `case 'x'` tests
+`PL_expect == XOPERATOR`).  After a builtin that takes an operand (`print`, `return`, `sort`,
+`defined`, the `if` of a statement modifier, ...) it expects a term; in the filehandle slot of
+`print $fh LIST` it reads the whole word after the handle (toke.c, `case '$'`: only a
+binary-operator keyword such as `x` itself keeps `XOPERATOR`, so `print $fh x3()` calls `x3` and
+`print $s x 3` repeats); after a bareword (`print STDOUT x3()`) perl expects a term unless the
+word is a constant -- which the tokenizer cannot know, but a number is never followed by an
+opening paren, so `x3(` is a call wherever it stands.  PPI's `_current_x_is_operator` took every
+Word as the end of a term.  The same question as §19 (a sub named `x`) and §63 (after a block).
+
+**PCL's workaround**: none for `x<digits>` -- `print x64()` and `print x3() x2` were DROPPED
+statements, `print STDOUT x3()` printed NOTHING at exit 0 (a SILENT WRONG).  Task #4784.
+
+**FIXED on PCL's PPI branch** (s539c: group AY, commit `a9a16511` on branch `pcl-s539c`, vendored
+as vendor/PPI -- `_current_x_is_operator` asks `_term_expected` (the rule the readline and `~~`
+decisions use) after a Word, gives the `print $fh` slot perl's whole-word answer (the
+Whitespace caller says whether the x is glued to digits), and the look-ahead that splits `x3`
+into `x` + `3` leaves `x3(` whole); upstream PR: pending (`PR-AY.md`).  PCL needed no change.
+The same rule fixes §19's builtin half (`print x()`).  NOT decided by the tokenizer, left as
+they were: a bareword handle or a user's word before a paren-less `x3` (`print STDOUT x3, ...`
+-- a drop; `x3 x3` with `x3` a list operator -- a silent wrong) -- perl asks whether the word is a
+declared sub or a constant, which only PCL's lowering knows (task #4901).  Guard
+`Pl/t/ppi-token-rows-01.t` (two rows).
 
 ---
 

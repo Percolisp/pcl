@@ -444,10 +444,13 @@ sub __TOKENIZER__on_char {
 		# assumes we have a complete 'x' token, but we don't
 		# yet.  We may need to split this x character apart from
 		# what follows it.
-		if ( $t->_current_x_is_operator ) {
+		pos $t->{line} = $t->{line_cursor} + 1;
+		if ( $t->_current_x_is_operator( scalar $t->{line} =~ m/\G\d/ ) ) {
 			pos $t->{line} = $t->{line_cursor} + 1;
 			return 'Operator' if $t->{line} =~ m/\G(?:
 				\d  # x op with no whitespace e.g. 'x3'
+				(?!\w*\s*\()  # but not a call, x3(): a number is
+				              # never followed by an opening paren
 				|
 				(?!(  # negative lookahead
 					=>  # not on left of fat comma

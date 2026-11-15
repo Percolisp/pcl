@@ -166,4 +166,11 @@ both_agree(q{sub x3 { print "called(@_)\n"; 7 } x3(); sub x64 { print "x64(@_)\n
 both_agree(qq{our %K = (\n  __FILE__ => 1,\n  __DATA__ => 2,\n  __END__  => 3,\n);\nprint join(",", sort keys %K), "\\n";\nmy \@l = (__END__ => 3); print "\@l\\n";\nprint <DATA>;\n__DATA__\nline one\n},
            '§64: __DATA__ => / __END__ => in a list; the real __DATA__ after it');
 
+# §66 #4784: x<digits> where perl expects a term -- after a builtin that takes an operand, in the
+# filehandle slot of print, and before a ( -- is a word (a call); after a term or a constant it repeats.
+both_agree(q{sub x3 { "<@_>" } sub x64 { "x64" } sub f { return x3(9) } sub foo { "foo(@_)" } print x64(), "|"; print x3() x2, "|"; print STDOUT x3(), "|"; print x3 1; print "|", f(), "|", foo x3(), "|"; my @s = sort { $a <=> $b } 3, 1; print "@s|" if x3(); print defined x3() ? "d" : "u", "\n";},
+           '§66: x64() / x3() after print / STDOUT / return / if / defined / a user word is a call');
+both_agree(q{use constant C => "c"; sub x3 { $b <=> $a } open my $fh, ">&", \*STDOUT or die; print $fh x3(1), "|"; close $fh; my $s = "z"; print "a" x3, "|"; print STDOUT "b" x3; print "|", C x3, "|"; my @l = sort x3 3, 1, 2; my @r = (1) x3; print "@l @r|"; print $s x 2, "\n";},
+           '§66: x3 after print $fh / sort is a word; after a string, a list, a constant, $s it repeats');
+
 done_testing();
