@@ -165,7 +165,7 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Objects and OO
 
 * [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
-* [A filehandle that ESCAPES its block is closed by the collector or at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-by-the-collector-or-at-exit-not-at-its-last-reference) — owner #2006 (the moment), #5003, #5004
+* [A filehandle that ESCAPES its block is closed at a trigger or at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-at-a-trigger-or-at-exit-not-at-its-last-reference) — owner #2006 (the moment), #5003, #5004
 * [Perl 5.38 `class` / `field` / `method` syntax — DEFERRED](#perl-538-class--field--method-syntax--deferred--future-version)
 * [Indirect object syntax with a SCALAR invocant — MAYBE LATER](#indirect-object-syntax-with-a-scalar-invocant-method-obj-list--maybe-later--user-decision-s425)
 * [`tie` on a filehandle — announced, not silent](#tie-on-a-filehandle--announced-not-silent-scalar-array-and-hash-tie-work)
@@ -2445,7 +2445,7 @@ counted; a row asserted inside a `DESTROY` fired by a last-reference overwrite (
 ---
 
 <a id="ns-escaping-filehandle"></a>
-## A filehandle that ESCAPES its block is closed by the collector or at exit, not at its last reference
+## A filehandle that ESCAPES its block is closed at a trigger or at exit, not at its last reference
 
 **Perl behaviour:** a lexical handle is freed — closed and flushed — when its
 last reference goes: for `open(my $fh, …)` in a block that is the block's
@@ -2497,7 +2497,9 @@ stays different from perl, measured s540c / s541:
   as soon as the handle is freed);
 * the collector is CONSERVATIVE: a stale word on a stack can keep a dropped
   handle alive through a collection, and then the old behaviour holds (the
-  lock is kept, the descriptor stays used).
+  lock is kept, the descriptor stays used).  Measured s540c: it found the
+  dropped handle in 10 of 10 runs of each of Path-Tiny's three
+  `input_output*.t` files and of the plain-Perl reduction;
 * a `fork` while a dropped handle's descriptor is still open copies it, and
   any `flock` held through it, into the child: a child's `LOCK_NB` lock of
   that file fails, and a child's BLOCKING lock while the parent waits for the
