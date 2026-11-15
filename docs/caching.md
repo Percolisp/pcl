@@ -443,3 +443,7 @@ uses `eval`, to 0.41 seconds.
 | `pcl cl/pack-impl.pl` (1,211 lines) | 6.571 s | **0.037 s** | 2026-09-17 | the script cache; the first run costs 7.256 s, and perl itself takes 0.006 s |
 | `pcl -e 'print "hi\n"'`, `pcl -l h.pl`, `pcl -lane ... file` (switches on the command line: never cached) | 0.181 s, 0.184 s, 0.191 s | | 2026-10-04 | median of five; the cached `pcl h.pl` took 0.041 s in the same run, `perl -e` 0.002 s |
 | the compiler fingerprint, per process | 1.15 ms | 1.95 ms | 2026-09-17 | the perl and PPI part of the fingerprint (Appendix A) |
+| a program using one 2,434-line module of its own (`use lib`), every run | 0.652 s | **0.056 s** | 2026-11-15 | every module compiled once (§2, #4986); perl takes 0.009 s |
+| the same program's FIRST run (a fresh cache) | 5.224 s | 6.023 s | 2026-11-15 | the one-time compile of the module (+0.8 s), the path an installed module always took |
+| Text-CSV's `t/16_import.t`, warm (the module cache filled by a first run) | 5.69 s | **0.81 s** | 2026-11-15 | the dist's modules compiled once (#4986): module compile 4.86 -> 0.00 s; the cold run 15.7 -> 16.6 s |
+| a program that uses PCL's bundled PPI as a library (`use lib` of `vendor/PPI/lib`, 112 modules), second and third run | 112.4 s, 107.2 s | **0.94 s, 0.91 s** | 2026-11-15 | the program's own `-I` of that directory is kept for the modules' transpiles (#4987), so nothing is rebuilt; the first run 121.7 -> 106.6 s |

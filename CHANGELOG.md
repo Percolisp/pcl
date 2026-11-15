@@ -9,17 +9,21 @@ sessions); dates are development-time, not release-time.
   (#4986, #4963, #4987).  A module found through `use lib`, `-I`, `PERL5LIB`
   or `.` used to be compiled again from its cached text on every run; now it
   gets a compiled file that is reused until the module, or a module it uses,
-  changes (`PCL_NO_COMPILE_DIRS=DIR` keeps a directory's modules as text).  A
+  changes (`PCL_NO_COMPILE_DIRS=DIR` keeps a directory's modules as text): a
+  program using one 2,400-line module of its own took 0.65 s a run and takes
+  0.06 s; its first run takes 0.8 s longer, once, for the compile.  A
   module first loaded while another one was being compiled gets its compiled
   file in the same run, so the second run of a program loads everything
   compiled.  A program that uses PCL's own bundled PPI as a library no longer
-  re-transpiles it on every run (about 110 seconds each time before).
+  re-transpiles it on every run (about 110 seconds each time before, under a
+  second now).
   **Faster `tr///`, `$|`, `{...}` and constants** (#4981, #4983, #4984,
   #4982): `tr///` prepares its character lists once per site instead of on
-  every call (a Data::Dumper program 7.5 s -> about 0.6 s); setting `$|` no
-  longer slows every later print; a hash constructor is made at its final
-  size; a `use constant` with a literal value is the literal at its uses, as
-  perl compiles it.
+  every call (a Data::Dumper program 7.1 s -> 0.6 s); setting `$|` no
+  longer slows every later print (1 M prints 0.14 s -> 0.08 s); a hash
+  constructor is made at its final size (a 10-key `{...}` loop 14 % faster);
+  a `use constant` with a literal value is the literal at its uses, as perl
+  compiles it (a loop testing a constant 45 % faster).
 
 - 2026-11-15: **`Test::Builder`'s own methods; `use_ok` in `BEGIN`; tied
   references** (#3823, #3495, #4884, #4881, #3852, #4167, #4962).

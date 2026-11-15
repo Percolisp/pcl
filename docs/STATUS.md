@@ -115,8 +115,10 @@ is [`not-supported.md`](not-supported.md). The main items:
   effect.
 * **The first run after an edit compiles.** A large program pays its
   compile once (about six seconds for 1,200 lines) and then starts from its
-  cache entry in about 0.04 seconds. Modules and the runtime itself are
-  cached the same way, under `~/.pcl-cache`; `pcl -e` one-liners, and a
+  cache entry in about 0.04 seconds. Modules (your own under `use lib`,
+  `-I` or `PERL5LIB` as well as installed ones, since 2026-11-13) and the
+  runtime itself are cached the same way, under `~/.pcl-cache`, and an
+  edited module is compiled again; `pcl -e` one-liners, and a
   script run with a source-changing switch (`-n`, `-M`, `-l`, ...), are not.
   [`caching.md`](caching.md) says what is cached, where, and how to clear or
   disable it.
