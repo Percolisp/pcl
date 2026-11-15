@@ -5,6 +5,16 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-15: **Faster `dclone`, MD5, base64, `catfile`, `strftime`** (#4989,
+  #4988, #4990, #4985, #4991).  `Storable::dclone` copies directly instead of
+  serialising and parsing back (a small nested hash: 392 -> 1.05 us a call;
+  freeze + thaw stay for hooks, CODE, globs, regexps and tied data);
+  `Digest::MD5` uses the MD5 the runtime already has (1 KB: 333 -> 5.4 us);
+  `MIME::Base64` encodes and decodes in the runtime (1 KB: 125 -> 4.1 us);
+  `File::Spec` returns an already-clean path at once (`catfile` 4.4 -> 2.3 us); `POSIX::strftime` makes no time-zone call unless the format
+  has `%z`, `%Z` or `%s` (15 -> 4.5 us), and a time inside a daylight-saving
+  gap is no longer printed an hour late.
+
 - 2026-11-15: **Your own modules are compiled once, like installed ones**
   (#4986, #4963, #4987).  A module found through `use lib`, `-I`, `PERL5LIB`
   or `.` used to be compiled again from its cached text on every run; now it
