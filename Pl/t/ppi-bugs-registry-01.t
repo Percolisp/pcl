@@ -60,6 +60,11 @@ my %FORM = (
   symbol => sub { my $d = doc($_[0]) or return died();
     map { short(ref $_) . '=' . $_->content . ' ->symbol=' . $_->symbol }
     @{ $d->find('PPI::Token::Symbol') || [] } },
+  # `tokens` of the document made with keep_line_endings (§65: the opt-in on
+  # PCL's branch, the way Pl::Parser::_ppi_new builds every document; a PPI
+  # without the attribute ignores it and shows the bug)
+  tokens_kept => sub { my $d = PPI::Document->new(\$_[0], keep_line_endings => 1) or return died();
+    map { short(ref $_) . '=' . esc($_->content) } grep { $_->significant } $d->tokens },
   # the document's serialization when parsed with $/ undefined
   slurp => sub { my $src = $_[0]; my $d = do { local $/; PPI::Document->new(\$src) } or return died();
     ('serialize=' . esc($d->serialize)) },

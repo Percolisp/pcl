@@ -163,7 +163,8 @@ sub _lex_input {
 	$self = ref $self ? $self : $self->new;
 
 	# Create the Tokenizer
-	my $Tokenizer = eval { X_TOKENIZER->new($input) };
+	my @tokenizer_args = $args{keep_line_endings} ? ( keep_line_endings => 1 ) : ();
+	my $Tokenizer = eval { X_TOKENIZER->new($input, @tokenizer_args) };
 	return    #
 	  $@
 	  ? $self->_error( _INSTANCE( $@, 'PPI::Exception' ) ? $@->message : $@ )
@@ -1472,6 +1473,16 @@ sub _curly {
 	# -- map { { %$_, x => 1 } } LIST, ${ { $k, 1 } }{a} -- is an anonymous
 	# hash, whatever follows it
 	return 'PPI::Structure::Constructor' if _opens_xref_block($Parent);
+
+	# The first thing inside an anonymous array or hash constructor --
+	# [ { \1, "abc" } ], { { %$h } => 1 } -- is an anonymous hash, whatever
+	# follows it: perl expects a term after the [ (and the { of a hash),
+	# and where it expects a term every { is one (toke.c yyl_leftcurly:
+	# XTERM makes HASHBRACK; the look-ahead below is for where a statement
+	# may start)
+	return 'PPI::Structure::Constructor'
+		if $Parent->isa('PPI::Statement')
+		and _INSTANCE($Parent->parent, 'PPI::Structure::Constructor');
 
 	if (
 		$Parent->isa('PPI::Statement')

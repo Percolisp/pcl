@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 437;
+use Test::More tests => 459;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2129,22 +2129,44 @@ for my $case ( [ "print 1;\n__DATA__\nx => 1\n", 'Separator=__DATA__' ],
 # (`eval "'a\r\nb'"` has length 4), and converts only the CR LF line
 # ends inside a here-doc body or a multi-line literal of a source FILE.
 # PPI rewrites every CR LF, CR CR LF and lone CR of the source to LF
-# before it tokenizes, so no token can hold a CR.
+# before it tokenizes, so no token can hold a CR.  That normalisation is
+# PPI's documented behaviour (t/06_round_trip.t compares against it), so
+# the fix is an opt-in: PPI::Document->new(\$source, keep_line_endings => 1)
+# tokenizes the source as it is, lines ending at LF -- a lone CR is a
+# character, as for perl, and a CR LF ends a here-doc's terminator line.
 {
     for my $case ( [ "my \$x = q{a\r\nb};\n", 'Quote::Literal', "q{a\r\nb}", 'a CR LF inside q{}' ],
                    [ "my \$y = \"c\rd\";\n", 'Quote::Double', "\"c\rd\"", 'a lone CR inside ""' ],
-                   [ "print 1;\n__DATA__\nj\r\nk\n", 'Data', "j\r\nk\n", 'a CR LF in the __DATA__ section' ] ) {
+                   [ "print 1;\n__DATA__\nj\r\nk\n", 'Data', "j\r\nk\n", 'a CR LF in the __DATA__ section' ],
+                   [ "print 1;\r\n__END__\r\nz\r\n", 'End', "z\r\n", 'a CR LF after __END__' ] ) {
         my ( $code, $class, $want, $label ) = @$case;
-        my $doc = PPI::Document->new( \$code );
+        my $doc = PPI::Document->new( \$code, keep_line_endings => 1 );
         my ($tok) = grep { short_class(ref $_) eq $class } $doc ? $doc->tokens : ();
         ok( $tok && $tok->content eq $want, "$label: the token keeps the CR" )
             or diag 'got: ' . ( $tok ? join( ' ', map { sprintf '%02x', ord } split //, $tok->content ) : 'no token' );
     }
+    my $src = "my \$v = <<\"T\";\r\nx\r\nT\r\nprint 1;\r\n";
+    my $doc = PPI::Document->new( \$src, keep_line_endings => 1 );
+    my ($hd) = $doc ? grep { $_->isa('PPI::Token::HereDoc') } $doc->tokens : ();
+    is( join( '|', $hd ? $hd->heredoc : () ), "x\r\n", 'a CR LF here-doc: the body keeps the CR' );
+    my $mixed = "my \$a = \"c\rd\";\r\n# note\r\nmy \$b = <<'E';\r\nq\rr\r\nE\r\nprint 1;\r\n__END__\r\nz\r\n";
+    my $round = PPI::Document->new( \$mixed, keep_line_endings => 1 );
+    ok( $round && $round->serialize eq $mixed, 'keep_line_endings: the document serializes to the exact bytes' );
+    my $cmt = PPI::Document->new( \"# a\rprint 2;\nprint 3;\n", keep_line_endings => 1 );
+    is( scalar( $cmt ? $cmt->schildren : () ), 1, 'a lone CR does not end a comment (perl reads lines at LF)' );
+    my $ln = PPI::Document->new( \"my \$a = 1;\rmy \$b = 2;\nmy \$c;\n", keep_line_endings => 1 );
+    my ($b) = $ln ? grep { $_->isa('PPI::Token::Symbol') && $_->content eq '$b' } $ln->tokens : ();
+    is( $b ? $b->line_number : 0, 1, 'a lone CR does not start a line' );
 }
 {
     my $doc = PPI::Document->new( \"my \$a = 1;\r\nmy \$b = 2;\r\n" );
     my @s = $doc ? $doc->children : ();
     ok( 2 == grep( $_->isa('PPI::Statement'), @s ), 'CR LF line ends still end lines (control)' );
+    my $hdoc = PPI::Document->new( \"my \$v = <<\"T\";\r\nx\r\nT\r\nprint 1;\r\n", keep_line_endings => 1 );
+    is( scalar( $hdoc ? $hdoc->schildren : () ), 2, 'a CR LF here-doc: TERM CR LF ends it, the next statement is its own' );
+    my $def = PPI::Document->new( \"my \$x = q{a\r\nb};\n" );
+    my ($q) = $def ? grep { $_->isa('PPI::Token::Quote') } $def->tokens : ();
+    is( $q ? $q->content : '', "q{a\nb}", 'without keep_line_endings the source is normalised to LF (control)' );
 }
 
 # §66 -- x<digits> where perl expects a TERM: perl reads x3 as the
@@ -2175,4 +2197,30 @@ for my $code ( 'print $s x 3;', 'print STDOUT x 3;', 'print C x3;', 'print "a" x
                'print $s x$n;', 'print {$fh} "a" x3;', 'my $r = $s x (3);' ) {
     my @t = map { short_class($_) } toks($code);
     ok( grep( /^Operator=x$/, @t ), "$code: the x operator (control)" ) or diag "got: @t";
+}
+
+# §67 -- the first { inside an anonymous array or hash constructor is an
+# anonymous hash, whatever follows it: perl expects a term after [ (and
+# after the { of an anonymous hash), and where it expects a term a { is
+# always an anonymous hash (toke.c yyl_leftcurly: XTERM makes HASHBRACK;
+# the look-ahead that tells a block from a hash runs only where a
+# statement or a block may start):
+# `my $r = [ { \1, "abc" } ]; print ref $r->[0];` prints HASH.
+{
+    for my $case ( [ 'my @t = ( [ { \1 , "abc" } => "x" ] );', 0 ], [ 'my $r = [ { $x, 1 } ];', 0 ],
+                   [ 'my $r = [ { foo(), 1 } ];', 0 ], [ 'my $r = [ { %h } ];', 0 ],
+                   [ 'my $r = [ { %$h, a => 1 } ];', 0 ], [ 'my $r = [ { lc($x), 1 } ];', 0 ],
+                   [ 'my $r = { { %$h } => 1 };', 1 ] ) {
+        my ( $code, $i ) = @$case;
+        my @c = bracket_classes( $code, '{' );
+        is( $c[$i], 'PPI::Structure::Constructor', "$code: the { inside the constructor is an anonymous hash" );
+    }
+}
+for my $case ( [ 'my $r = [ { "abc", 1 } ];', 'PPI::Structure::Constructor' ], [ 'my $r = [ {} ];', 'PPI::Structure::Constructor' ],
+               [ 'my $r = [ do { "abc", 1 } ];', 'PPI::Structure::Block' ], [ 'my $r = [ sub { 1 } ];', 'PPI::Structure::Block' ],
+               [ 'my $r = [ eval { 1 } ];', 'PPI::Structure::Block' ], [ 'my $r = [ map { $_ } @l ];', 'PPI::Structure::Block' ],
+               [ 'my $r = [ grep { $_, 1 } @l ];', 'PPI::Structure::Block' ], [ '{ $x, 1 };', 'PPI::Structure::Block' ] ) {
+    my ( $code, $want ) = @$case;
+    my @c = bracket_classes( $code, '{' );
+    is( $c[0], $want, "$code: $want (control)" );
 }

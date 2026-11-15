@@ -243,10 +243,12 @@ sub __TOKENIZER__commit {
 		# also ignore it, by turning it into a comment.
 		my $end_rest = substr( $t->{line}, $t->{line_cursor} );
 		$t->{line_cursor} = length $t->{line};
-		if ( $end_rest =~ /\n$/ ) {
-			$end_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
+		# The line end is a CR LF too in a source tokenized with
+		# keep_line_endings (not chomp: the caller's $/ may be anything)
+		if ( $end_rest =~ s/(\015?\012)\z// ) {
+			my $newline = $1;
 			$t->_new_token( 'Comment', $end_rest ) if length $end_rest;
-			$t->_new_token( 'Whitespace', "\n" );
+			$t->_new_token( 'Whitespace', $newline );
 		} else {
 			$t->_new_token( 'Comment', $end_rest ) if length $end_rest;
 		}
@@ -267,10 +269,10 @@ sub __TOKENIZER__commit {
 		# Add the rest of the line as the Data token
 		my $data_rest = substr( $t->{line}, $t->{line_cursor} );
 		$t->{line_cursor} = length $t->{line};
-		if ( $data_rest =~ /\n$/ ) {
-			$data_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
+		if ( $data_rest =~ s/(\015?\012)\z// ) {   # as for __END__ above
+			my $newline = $1;
 			$t->_new_token( 'Comment', $data_rest ) if length $data_rest;
-			$t->_new_token( 'Whitespace', "\n" );
+			$t->_new_token( 'Whitespace', $newline );
 		} else {
 			$t->_new_token( 'Comment', $data_rest ) if length $data_rest;
 		}

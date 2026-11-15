@@ -2933,6 +2933,26 @@ rewrite is PPI behaviour its tests assert, so the fix is a behaviour change or a
 attribute, plus perl's CR rules in PCL's lowering (here-doc bodies in both modes, file-mode
 multi-line literals); #4761 has the design.  The report rows stay inside a PCL §65 TODO block.
 
+**FIXED on PCL's PPI branch** (s539c: group BA, commit `66e690d2` on branch `pcl-s539c`, vendored
+as vendor/PPI -- an OPT-IN, because the normalisation is PPI behaviour its own tests assert:
+`PPI::Document->new(\$src, keep_line_endings => 1)` (and the same argument to `PPI::Lexer` /
+`PPI::Tokenizer->new`) tokenizes the source as it is, lines ending at LF; a here-doc's terminator
+line and an indented here-doc's measured lines may end in CR LF; the rest of an `__END__` /
+`__DATA__` line keeps its CR LF as Whitespace; the document cache is skipped for such a document;
+the default is unchanged); upstream PR: pending (`PR-BA.md`).  The §65 report rows now pass the
+attribute (five more rows and two controls).  **PCL half** (the USER's s538 ruling, perl shape by
+shape): every PCL document is built with the attribute (`Pl::Parser::_ppi_new`); a source FILE
+gets perl's line-reader reading first, once (`Pl::Parser::_file_line_endings`: CR LF -> LF before
+the data section, the data section raw, a lone CR kept; only a text holding a CR LF pays a second
+tokenization to find the separator); an eval STRING keeps every CR except in its here-doc bodies,
+which take perl's eval reading in place (`Pl::Parser::_eval_heredoc_line_endings`: CR LF and lone
+CR -> LF).  Probe table `scratch/s539c/p/cr` (file and eval mode x q / qq / qw / here-doc /
+regex / comment / POD / code / `__DATA__` x CR LF / CR / CR CR LF): base 30 of 57 = perl -> tree
+51 of 57; the six left are four FILE-mode here-docs perl itself rejects (a lone CR or CR CR LF
+terminator: "Can't find string terminator", rule 9) and two EVAL-mode CR CR LF here-docs, which
+read as before (the eval text with a lone-CR here-doc takes the old normalised reading,
+`_lone_cr_heredoc_unterminated`, task #4902).
+
 ---
 
 ## 66. A sub named `x<digits>` (`x3`, `x64`) where perl expects a TERM -- after a builtin that takes an operand, in the `print $fh` slot, before a `(` -- is lexed as the repetition operator and a number  [CONFIRMED 1.291 and PCL's branch c2f21706]
@@ -2970,6 +2990,42 @@ they were: a bareword handle or a user's word before a paren-less `x3` (`print S
 -- a drop; `x3 x3` with `x3` a list operator -- a silent wrong) -- perl asks whether the word is a
 declared sub or a constant, which only PCL's lowering knows (task #4901).  Guard
 `Pl/t/ppi-token-rows-01.t` (two rows).
+
+---
+
+## 67. The first `{` inside an anonymous array or hash constructor is lexed as a block unless a literal and a comma follow it  [CONFIRMED 1.291 and PCL's branch c2f21706]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `HASH HASH 1`):
+
+```perl
+my $x = "k";
+my $r = [ { \1, "abc" }, 0 ];   # IO-Compress t/004gziphdr.t line 357: [ { \1 , "abc" } => "..." ]
+my $s = [ { $x, 1 } ];
+print ref($r->[0]), " ", ref($s->[0]), " $s->[0]{k}\n";
+```
+
+**PPI structure**: `Structure::Constructor[ Statement::Compound( Structure::Block{ \1, "abc" } ... ) ]`
+-- the statement inside the `[` is reblessed a Compound and the `{` is a Block.  **Expected**:
+`Structure::Constructor{ ... }` inside a plain statement.  perl expects a term after the `[` of an
+anonymous array (and after the `{` of an anonymous hash), and where it expects a term every `{`
+is an anonymous hash (toke.c `yyl_leftcurly`: `XTERM` makes `HASHBRACK`); the look-ahead that
+tells a block from a hash runs only where a statement or a block may start.  PPI's `_curly`
+sent the first `{` of a statement inside a constructor to that statement-start look-ahead,
+which knows a hash only by a literal and a comma after the `{` (§5) -- so `[ { 'abc', 1 } ]`
+was right and `[ { \1, "abc" } ]`, `[ { $x, 1 } ]`, `[ { %h } ]`, `[ { foo(), 1 } ]` were not.
+
+**PCL's workaround**: none -- the Block became a statement DROP (`[ { \1, "abc" } ]`, the
+IO-Compress line) or a SILENT WRONG (`[ { $x, 1 } ]` and `[ { %h } ]` printed empty fields).
+Task #3555 (filed for the `{ 'abc', 1 }` row, which s527c's §5 work already fixed; the row that
+stops the file today is the `{ \1 , "abc" }` two lines further).
+
+**FIXED on PCL's PPI branch** (s539c: group AZ, commit `af11a2c3` on branch `pcl-s539c`, vendored
+as vendor/PPI -- `_curly` returns a Constructor for the first `{` of a statement whose parent is a
+`Structure::Constructor`, the sibling of the rule that makes a `{` opening a list's statement a
+constructor; a `{` after `do` / `sub` / `eval` / `map` / `grep` inside the constructor is decided
+by that word as before); upstream PR: pending (`PR-AZ.md`).  PCL needed no change (its
+statement-level `_bare_block_is_anon_hash` was deleted by s527c; `PExpr::_block_is_hash_constructor`
+is the map / grep body rule and stays).  Guard `Pl/t/ppi-token-rows-01.t`.
 
 ---
 

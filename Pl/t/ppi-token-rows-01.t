@@ -173,4 +173,16 @@ both_agree(q{sub x3 { "<@_>" } sub x64 { "x64" } sub f { return x3(9) } sub foo 
 both_agree(q{use constant C => "c"; sub x3 { $b <=> $a } open my $fh, ">&", \*STDOUT or die; print $fh x3(1), "|"; close $fh; my $s = "z"; print "a" x3, "|"; print STDOUT "b" x3; print "|", C x3, "|"; my @l = sort x3 3, 1, 2; my @r = (1) x3; print "@l @r|"; print $s x 2, "\n";},
            '§66: x3 after print $fh / sort is a word; after a string, a list, a constant, $s it repeats');
 
+# §67 #3555: the first { inside an anonymous array is an anonymous hash, whatever follows it.
+both_agree(q{my $x = "k"; my %h = (a => 2); my @t = ( [ sub { "abc" } => "s" ], [ { "abc", 1 } => "a" ], [ { \1, "abc" } => "b" ], [ { $x, 1 } => "c" ], [ { %h } => "d" ] ); print join(",", map { ref($_->[0]) . ":" . $_->[1] } @t), " $t[3][0]{k} $t[4][0]{a}\n";},
+           '§67: [ { \1, "abc" } ], [ { $x, 1 } ], [ { %h } ] hold hashes; [ sub { } ] a code ref');
+
+# §65 #4761: a CR in the source -- a FILE reads CR LF as LF before the data section and keeps a lone
+# CR (here-doc body included) and the data section raw; an eval STRING keeps every CR of a literal and
+# reads a here-doc body's CR LF / lone CR as LF.  The programs hold real CR bytes.
+both_agree(qq{my \$a = q{a\r\nb}; my \$b = "c\rd"; print length(\$a), length(\$b), " ", __LINE__, "|";\r\nmy \$h = <<"T";\r\nx\ry\r\nT\r\nprint unpack("H*", \$h), " ", __LINE__, "|";\nprint unpack("H*", do { local \$/; <DATA> }), "\\n";\n__DATA__\r\nj\r\nk\rl\n},
+           '§65: file mode -- q{} CR LF -> LF, a lone CR kept, the here-doc CR LF -> LF, __DATA__ raw, lines at LF');
+both_agree(q{my $c = "q{a\r\nb}"; my $h = "my \$v = <<T;\r\nx\r\ny\rz\r\nT\r\n\$v"; my $s = "\"a\r\n\r\nb\" =~ s/(\r\n){2,}/X/r"; print length(eval $c), " ", unpack("H*", eval $h), " ", eval($s), "\n";},
+           '§65: eval mode -- a literal keeps its CR LF, a here-doc body reads CR LF and a lone CR as LF');
+
 done_testing();

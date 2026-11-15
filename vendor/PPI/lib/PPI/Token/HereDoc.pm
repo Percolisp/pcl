@@ -143,6 +143,9 @@ sub terminator {
 
 sub _is_terminator {
 	my ( $self, $terminator, $line, $indented ) = @_;
+	# A CR before the LF ends the terminator line too, as for perl -- a
+	# source tokenized with keep_line_endings still holds it
+	$line =~ s/\015(\012?)\z/$1/;
 	if ( $indented ) {
 		return $line =~ /^\s*\Q$terminator\E$/;
 	} else {
@@ -157,13 +160,13 @@ sub _indent {
 	# with whitespace (<<~' EOF'), and the newline of an empty one (<<~'').
 	# The line has no newline when it ends the document.
 	my $line = $token->{_terminator_line};
-	$line =~ s/\n\z//;
+	$line =~ s/\015?\n\z//;
 	return substr( $line, 0, length($line) - length( $token->{_terminator} ) );
 }
 
 sub _is_match_indent {
 	my ( $self, $token, $indent ) = @_;
-	return (grep { /^\Q$indent\E/ || $_ eq "\n" } @{$token->{_heredoc}}) == @{$token->{_heredoc}};
+	return (grep { /^\Q$indent\E/ || /^\015?\n\z/ } @{$token->{_heredoc}}) == @{$token->{_heredoc}};
 }
 
 

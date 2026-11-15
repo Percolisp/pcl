@@ -1607,7 +1607,11 @@ sub parse {
   # the whole-file v1 fallback to isolate a diverging module, task #80.  Both
   # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
   # there is nothing to bisect against.)
-  my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
+  # A source FILE gets perl's line-reader reading of CR LF before the parse; an
+  # eval STRING keeps its CRs (docs/ppi-upstream-bugs.md §65).
+  my $text = Pl::Parser::_maybe_decode_utf8($self->_source);
+  $text = Pl::Parser::_file_line_endings($text) if !$self->eval_mode;
+  my $src = Pl::Parser::_preprocess_source($text);
   $self->{_unit_cell_base} = $self->_unit_cell_base($src);   # #2633
   # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply (a
   # bare PPI::Document->new skipped them).
@@ -1616,12 +1620,21 @@ sub parse {
   # and the run continued on a silently-shortened program.  There is no
   # lenient mode on this pipeline, so the failure has to say WHICH file — an
   # unattributed "PPI parse failed" in a sweep of 100 files is not a report.
-  my $doc = $self->fallback_parser->_ppi_parse($src, $self->_eval_feature_seed,
-                                                 ($self->eval_mode
-                                                   ? (in_eval => { map +($_ => 1), @{ $self->eval_features // [] } })
-                                                   : ()))
+  my @parse_opt = ($self->_eval_feature_seed,
+                   ($self->eval_mode
+                     ? (in_eval => { map +($_ => 1), @{ $self->eval_features // [] } })
+                     : ()));
+  my $doc = $self->fallback_parser->_ppi_parse($src, @parse_opt)
     or die "PCL: cannot parse " . ($self->has_filename ? $self->filename : "(inline code)")
            . ": PPI failed to tokenize it\n";
+  if ($self->eval_mode) {
+    # An eval text whose here-doc ends its lines with a lone CR: perl's eval
+    # reads that CR as a line end inside the here-doc, PPI's LF lines cannot,
+    # so the text takes the normalised reading it had before §65 (#4902).
+    $doc = $self->fallback_parser->_ppi_parse(Pl::Parser::_normalised_line_endings($src), @parse_opt) || $doc
+      if Pl::Parser::_lone_cr_heredoc_unterminated($doc, $src);
+    Pl::Parser::_eval_heredoc_line_endings($doc);
+  }
 
   # #2870: the prototypes visible at the eval SITE, before anything asks.
   $self->_register_eval_protos if $self->eval_mode;

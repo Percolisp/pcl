@@ -25,7 +25,9 @@ package Pl::PPIBugs;
 #             source     the bug is in how PPI reads the TEXT (before tokens)
 #             lexer-dies PPI::Document->new returns undef: no document at all
 #   dump      the dump FORM `tokens` is compared in: tokens | structure |
-#             statements | lexer | heredoc | symbol | slurp -- each defined
+#             statements | lexer | heredoc | symbol | slurp | tokens_kept
+#             (`tokens` of a document made with keep_line_endings, §65; a
+#             PPI without that attribute ignores it) -- each defined
 #             once, in Pl/t/ppi-bugs-registry-01.t (the forms say what a
 #             `got` string means; `tokens` is the report file's
 #             "Class=content" convention without the `PPI::Token::` prefix)
@@ -947,11 +949,11 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => ['Pl/PPIExpect.pm'],
    tasks => [4482] },
- { id => 65, kind => 'source', dump => 'tokens',
+ { id => 65, kind => 'source', dump => 'tokens_kept',
    title => 'Every CR LF, CR CR LF and lone CR in the SOURCE is rewritten to LF before tokenizing, so a CR inside a string literal or the __DATA__ section is lost',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => undef, shape => 'PPI::Tokenizer::new rewrites the source; no token holds a CR' },
-   fix => { kind => 'handler', handler => undef, changed => 'NOT FIXED (s536j measured it: the rewrite is PPI behaviour t/06_round_trip.t and t/08_regression.t assert; the fix is a PPI attribute or a behaviour change plus perl\'s CR rules in PCL -- task #4761)' },
+   fix => { kind => 'handler', handler => 'Pl::Parser::_file_line_endings', changed => 'an OPT-IN on the branch (the rewrite is PPI behaviour its own tests assert): keep_line_endings => 1, passed by Pl::Parser::_ppi_new for every PCL document; perl\'s CR rules are PCL\'s -- a source FILE\'s CR LF -> LF before the data section (_file_line_endings), an eval STRING\'s here-doc bodies (_eval_heredoc_line_endings), the lone-CR eval here-doc read as before (_lone_cr_heredoc_unterminated, #4902)', commit => '66e690d2', group => 'BA', pr => undef },
    repro => "print ord(substr(\"c\rd\", 1, 1)), \"\\n\";",
    perl => "13\n",
    tokens => {
@@ -973,6 +975,19 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => [],
    tasks => [4784] },
+ { id => 67, kind => 'structure', dump => 'structure',
+   title => 'The first `{` inside an anonymous array or hash constructor (`[ { \\1, "abc" } ]`, `[ { $x, 1 } ]`) is built as a BLOCK unless a literal and a comma follow it',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'brace-class', shape => 'the first `{` of a statement inside a Structure::Constructor built as Block (the statement reblessed Compound)' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE: the Block was a statement DROP ([ { \\1, "abc" } ], IO-Compress t/004gziphdr.t line 357) or a SILENT WRONG ([ { $x, 1 } ] / [ { %h } ] held no hash); the statement-level repair _bare_block_is_anon_hash was already deleted (s527c)', commit => 'af11a2c3', group => 'AZ', pr => undef },
+   repro => 'my $r = [ { \\1, "abc" } ]; print ref($r->[0]), "\\n";',
+   perl => "HASH\n",
+   tokens => {
+     got  => ['Word=my', 'Symbol=$r', 'Operator==', 'Structure=[ in Structure::Constructor < Statement::Variable', 'Structure={ in Structure::Block < Statement::Compound', 'Cast=\\', 'Number=1', 'Operator=,', 'Quote::Double="abc"', 'Structure=} in Structure::Block < Statement::Compound', 'Structure=] in Structure::Constructor < Statement::Variable', 'Structure=;', 'Word=print', 'Word=ref', 'Structure=( in Structure::List < Statement', 'Symbol=$r', 'Operator=->', 'Structure=[ in Structure::Subscript < Statement::Expression', 'Number=0', 'Structure=] in Structure::Subscript < Statement::Expression', 'Structure=) in Structure::List < Statement', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=my', 'Symbol=$r', 'Operator==', 'Structure=[ in Structure::Constructor < Statement::Variable', 'Structure={ in Structure::Constructor < Statement', 'Cast=\\', 'Number=1', 'Operator=,', 'Quote::Double="abc"', 'Structure=} in Structure::Constructor < Statement', 'Structure=] in Structure::Constructor < Statement::Variable', 'Structure=;', 'Word=print', 'Word=ref', 'Structure=( in Structure::List < Statement', 'Symbol=$r', 'Operator=->', 'Structure=[ in Structure::Subscript < Statement::Expression', 'Number=0', 'Structure=] in Structure::Subscript < Statement::Expression', 'Structure=) in Structure::List < Statement', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [3555] },
 );
 
 # The one accessor.

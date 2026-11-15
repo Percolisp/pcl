@@ -756,14 +756,68 @@ sub _include_string_args {
 
 # THE PPI construction site.  Every document PCL parses is built here — the
 # first parse and the post-repair reparse below — so the feature callback is
-# attached once and cannot drift between them.
+# attached once and cannot drift between them.  keep_line_endings (PCL's PPI,
+# §65): the source is tokenized as it is, a CR is a character as for perl, and
+# the CR LF of a source FILE has already been given perl's reading
+# (_file_line_endings) by the caller that knows it is a file.
 sub _ppi_new {
   my ($src, %opt) = @_;
   my $doc = PPI::Document->new(\$src,
                                custom_feature_include_cb => \&_pcl_feature_include_cb,
+                               keep_line_endings => 1,
                                %opt);
   return $doc;
 }
+
+# perl's line reader for a source FILE turns every CR LF into LF (toke.c
+# without PERL_STRICT_CR) -- in code, comments, multi-line literals and
+# here-doc bodies alike -- keeps a lone CR as a character, and leaves the
+# __DATA__ / __END__ section raw (the program reads it from the handle).  So a
+# FILE's text gets that reading here, once, before the parse; an eval STRING
+# does not (perl keeps its CRs; its here-doc bodies are _eval_heredoc_line_endings').
+# Only a text holding a CR LF pays the extra tokenization that finds the data
+# section.  docs/ppi-upstream-bugs.md §65.
+sub _file_line_endings {
+  my ($src) = @_;
+  return $src if index($src, "\r\n") < 0;
+  my $doc = _ppi_new($src);
+  my $sep = $doc ? $doc->find_first('PPI::Token::Separator') : undef;
+  return $src =~ s/\r\n/\n/gr if !$sep;
+  my @lines = split /(?<=\n)/, $src;
+  my $last  = $sep->line_number - 1;
+  $last = $#lines if $last > $#lines;
+  s/\r\n\z/\n/ for @lines[0 .. $last];
+  return join '', @lines;
+}
+
+# The here-doc bodies of an eval STRING: perl turns a CR LF and a lone CR into
+# LF there (toke.c S_scan_heredoc on the one eval buffer), while the eval's
+# literals keep every CR (§65).  PPI keeps the body's bytes, so they are given
+# perl's reading in place -- the token's own lines, which every reader
+# (`->heredoc`) and the serialization of a reparse share.
+sub _eval_heredoc_line_endings {
+  my ($doc) = @_;
+  for my $h (@{ $doc->find('PPI::Token::HereDoc') || [] }) {
+    s/\r\n?/\n/g for @{ $h->{_heredoc} };
+  }
+  return $doc;
+}
+
+# The one eval shape PPI's LF lines cannot read: a here-doc whose lines end in a
+# lone CR (or CR CR LF), which perl's eval takes as line ends (S_scan_heredoc)
+# -- PPI then finds no terminator line.  True when the text holds such a CR and
+# a here-doc of the document is unterminated (PPI leaves its terminator line
+# undefined); the caller re-parses _normalised_line_endings' text, PPI's own
+# reading before keep_line_endings (task #4902: the string CRs of that text are
+# lost, as they were).
+sub _lone_cr_heredoc_unterminated {
+  my ($doc, $src) = @_;
+  return 0 if $src !~ /\r(?!\n)/;
+  return scalar grep { !defined $_->{_terminator_line} }
+                     @{ $doc->find('PPI::Token::HereDoc') || [] };
+}
+
+sub _normalised_line_endings { $_[0] =~ s/\r{1,2}\n|\r/\n/gr }
 
 sub _ppi_parse {
   my ($self, $src, %opt) = @_;
@@ -1358,14 +1412,14 @@ sub _build_ppi_doc {
   if ($self->has_filename) {
     open(my $fh, '<', $self->filename)
       or die "Failed to open file: " . $self->filename;
-    my $src = _preprocess_source(_maybe_decode_utf8(do { local $/; <$fh> }));
+    my $src = _preprocess_source(_file_line_endings(_maybe_decode_utf8(do { local $/; <$fh> })));
     close $fh;
     my $doc = $self->_ppi_parse($src);
     return $doc if $doc;
     die "Failed to parse file: " . $self->filename;
   }
   elsif ($self->has_code) {
-    my $code = _preprocess_source(_maybe_decode_utf8($self->code));
+    my $code = _preprocess_source(_file_line_endings(_maybe_decode_utf8($self->code)));
     my $doc = $self->_ppi_parse($code);
     return $doc if $doc;
     die "Failed to parse code";

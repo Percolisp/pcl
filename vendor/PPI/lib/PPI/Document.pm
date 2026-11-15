@@ -185,6 +185,18 @@ L<PPI::Statement::Include> object.
 
 This can be useful when your work project has a complex boilerplate module.
 
+=head3 keep_line_endings
+
+  keep_line_endings => 1
+
+By default every CR LF, CR CR LF and lone CR of the source is turned into a
+LF before tokenizing, so no token holds a CR.  Setting C<keep_line_endings>
+to true tokenizes the source as it is: lines end at LF, a CR is a character
+of the line it is on (inside a string, a comment or the C<__DATA__> section,
+as perl reads it), a here-doc's terminator line may end in CR LF, and the
+document serializes to the exact bytes it was made from.  The document cache
+is not used for such a document.
+
 =cut
 
 sub new {
@@ -215,8 +227,9 @@ sub new {
 		# Save the filename
 		$attr{filename} ||= $source;
 
-		# When loading from a filename, use the caching layer if it exists.
-		if ( $CACHE ) {
+		# When loading from a filename, use the caching layer if it exists
+		# (it stores documents of the normalised source only).
+		if ( $CACHE and !$attr{keep_line_endings} ) {
 			my $file_contents = PPI::Util::_slurp( $source );
 
 			# Errors returned as plain string
@@ -274,6 +287,7 @@ sub _setattr {
 	$document->{readonly}                  = !!$attr{readonly};
 	$document->{filename}                  = $attr{filename};
 	$document->{feature_mods}              = $attr{feature_mods};
+	$document->{keep_line_endings}         = !!$attr{keep_line_endings};
 	$document->{custom_feature_includes}   = $attr{custom_feature_includes};
 	$document->{custom_feature_include_cb} = $attr{custom_feature_include_cb};
 	if ( $ENV{PPI_CUSTOM_FEATURE_INCLUDES} ) {

@@ -138,15 +138,20 @@ my %X_CAN_FOLLOW_WORD = map { $_ => 1 } qw(
 
 =pod
 
-=head2 new $file | \@lines | \$source
+=head2 new $file | \@lines | \$source [, keep_line_endings => 1 ]
 
 The main C<new> constructor creates a new Tokenizer object. These
-objects have no configuration parameters, and can only be used once,
-to tokenize a single perl source file.
+objects can only be used once, to tokenize a single perl source file.
 
 It takes as argument either a normal scalar containing source code,
 a reference to a scalar containing source code, or a reference to an
 ARRAY containing newline-terminated lines of source code.
+
+By default every CR LF, CR CR LF and lone CR of the source is turned
+into a LF before tokenizing.  With C<keep_line_endings> the source is
+tokenized as it is: lines end at LF, and a CR is a character of the
+line it is on -- inside a string, a comment or the C<__DATA__> section,
+as perl reads it (a here-doc's terminator line may end in CR LF).
 
 Returns a new C<PPI::Tokenizer> object on success, or throws a
 L<PPI::Exception> exception on error.
@@ -205,8 +210,12 @@ sub new {
 	# We can't handle a null string
 	$self->{source_bytes} = length $self->{source};
 	if ( $self->{source_bytes} ) {
-		# Split on local newlines
-		$self->{source} =~ s/(?:\015{1,2}\012|\015|\012)/\n/g;
+		# Split on local newlines -- or, with keep_line_endings, take the
+		# source as it is: lines end at LF, and a CR stays a character
+		# of the line it is on, as for perl
+		my %args = @_[ 2 .. $#_ ];
+		$self->{source} =~ s/(?:\015{1,2}\012|\015|\012)/\n/g
+			if !$args{keep_line_endings};
 		$self->{source} = [ split /(?<=\n)/, $self->{source} ];
 
 	} else {
