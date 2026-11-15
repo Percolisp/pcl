@@ -84,6 +84,8 @@ doc description here and writes the index line into its STOP.md.
     (its `|$"|` symbol reads as an unterminated string to a scanner, s308).
     Never write a Lisp function body longer than ~80 lines. If a function needs deeply nested dispatch (e.g. a `case` with many arms inside several `let`s), extract the arms into named helper functions first, then write the short dispatcher. A function that fits on one screen has countable parens; a 300-line function does not.
 
+    **A runtime function or macro is defined ONCE per package** (s540c, guard `Pl/t/runtime-defun-unique-01.t`, pure perl, in the gate): the later `defun` of a name silently replaces the earlier, and nothing says so -- s540c's flock helper `%p-file-id (fd)` replaced s539d's `%p-file-id (path)` at a rebase and every `(p-file ...)` died.  Grep `cl/pcl-{runtime,test,xs}.lisp` for a helper's name before you add it.
+
     **Indentation must encode depth**: Use exactly 2 spaces per paren level. A line's indentation column divided by 2 equals the paren depth it runs at. This makes depth visually checkable without counting parens. When writing or reviewing CL code, if the indentation looks wrong, the parens are wrong. Never write a closing `)` on a line that is indented deeper than the line that opened its form.
 
     **Debugging paren problems: split on `defun`**: When a `.lisp` file has a paren or formatting problem, do NOT count parens across the whole file. Instead, split it into one file per `defun` in `/tmp/` by splitting on lines that start with `(defun ` at column 0 (no indentation). Format and check each chunk independently. Use the helper script:
@@ -691,7 +693,7 @@ record, kept only as history.)
   second SBCL named by `PCL_SBCL_FLOOR` (skips without; its header says how to
   install 2.5.2 beside 2.6.0), and the container leg
   `PCL_CONTAINER_BASE=ubuntu:22.04 SBCL_VERSION=2.5.2 prove tools/t/install-container.t`
-  is the install-matrix shape.  2.5.2 has no `move-double-float-arg` VOP, so an
+  is the install-matrix shape.  **Run `tools/t/sbcl-floor.t` on a `git archive HEAD` extraction, or ALONE** (#5006, s540c): building a core for one SBCL deletes the other SBCL's core of the same tree, so a gate running beside the floor leg in one tree loses its core mid-run.  2.5.2 has no `move-double-float-arg` VOP, so an
   unbounded inline `truncate` of a double (the old `p-int` double arm) does not
   compile there -- `p-int` open-codes the fixnum range and sends a wider double
   to the notinline `%p-int-wide`.

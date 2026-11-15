@@ -144,7 +144,9 @@ Principles".
     exit 0) and fix any failure before reporting done.  It uses SBCL's own
     reader; do NOT use a textual paren scanner (`|$"|` false-positives).
     No Lisp function body over ~80 lines — extract `case` arms into named
-    helpers first.  **Indentation encodes depth**: exactly 2 spaces per paren
+    helpers first.  A runtime function or macro defined TWICE in one package
+    fails the gate (`Pl/t/runtime-defun-unique-01.t`: the later `defun`
+    silently replaces the earlier).  **Indentation encodes depth**: exactly 2 spaces per paren
     level; never a closing `)` on a line indented deeper than the line that
     opened its form.  For a paren problem, split on `(defun` at column 0
     (`perl .claude/hooks/split-lisp.pl FILE.lisp` → `/tmp/defun-NAME.lisp`)
@@ -390,15 +392,20 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s540 end, 2026-11-13: main = MAIN-READY-92 `212d4782` + records (code
-`24988e35`, generation v2-14400).**  Gate **371 files / 12,131 rows
-`Result: PASS`**; full sweep **TOTAL passing 18,803**, GATE clean; corpus-diff
-population 111 files; ir-conform 328 / 0; ir-host-leak 31; **EVERYDAY 115 of
-122 (94.3 %)**; CPAN board (round of s539, on MAIN-READY-85): 641 PASS / 161
-PARTIAL / 27 FAIL / 67 SKIP of 896 files, 109,797 ok / 1,740 not ok; PPI
-`pcl` = `c2f21706`; CI green.  Known default-build limits flagged to the
-USER: `caller` file/line and `croak` location only under
-`PCL_OPT=line-track`; `DESTROY` runs at program exit only.
+**s542, 2026-11-15: main = MAIN-READY-93 `0df490cf` (code `75904a35`,
+generation v2-14500; s540c merged: dropped filehandles, `local` on a
+file-level lexical's element).**  Gate **375 files / 12,156 rows
+`Result: PASS`** (measured on merged main); full sweep **TOTAL passing
+18,803**, GATE clean; corpus-diff population 111 files; ir-conform 328 / 0;
+ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN board (round of s539,
+on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL / 67 SKIP of 896 files,
+109,797 ok / 1,740 not ok; PPI `pcl` = `c2f21706`; CI green on the push
+before this merge.  Known default-build limits flagged to the USER: `caller`
+file/line and `croak` location only under `PCL_OPT=line-track`; `DESTROY`
+runs at program exit only; a filehandle that leaves its opening block is
+written out before the next child process, at a `flock` / descriptor
+trigger or at exit, never at the drop (`docs/not-supported.md`
+ns-escaping-filehandle).
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
 moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only
@@ -511,7 +518,9 @@ of every entry (what it found, what it ruled) is in
 Full text: `docs/claude-md/REFERENCE.md` "Dependencies".
 
 - Perl 5.20+; SBCL **2.5.2+** (the floor is TESTED: `tools/t/sbcl-floor.t`
-  under `PCL_SBCL_FLOOR`, and the container leg
+  under `PCL_SBCL_FLOOR` -- run it on a `git archive HEAD` extraction or
+  ALONE: a core build for one SBCL deletes the other SBCL's core of the same
+  tree, #5006 -- and the container leg
   `PCL_CONTAINER_BASE=ubuntu:22.04 SBCL_VERSION=2.5.2 prove
   tools/t/install-container.t`).
 - **PPI is VENDORED** (`vendor/PPI/lib`, loaded ONLY through
