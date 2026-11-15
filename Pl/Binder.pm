@@ -299,11 +299,18 @@ sub _proto_params {
                         scope => $st, from => $self->_first_ord($blk),
                         to => $self->_last_ord($blk));
   }
-  # A DEFAULT is an expression evaluated in the sub (#485): its uses are refs
-  # at the Prototype token -- one token, so read through the fragment path --
-  # except a parameter of an EARLIER part, which the default sees (perly.y
-  # sigsub; its own part's name it does not).  Resolved at the token's
-  # ordinal, before the block, i.e. to the OUTER binding.
+  $self->_proto_default_refs($proto, $text, $pkg, $cv);
+}
+
+# A DEFAULT is an expression evaluated in the sub (#485): its uses are refs
+# at the Prototype token -- one token, so read through the fragment path --
+# except a parameter of an EARLIER part, which the default sees (perly.y
+# sigsub; its own part's name it does not).  Resolved at the token's
+# ordinal, before the block, i.e. to the OUTER binding.  Read at the build
+# and again by _cur_refs when a rename has rewritten the token's text (#4545
+# renames inside it) -- one reading.
+sub _proto_default_refs {
+  my ($self, $proto, $text, $pkg, $cv) = @_;
   my %left;
   for my $part (Pl::Parser2::_signature_part_defaults($text)) {
     my ($canon, $default) = @$part;
@@ -603,6 +610,11 @@ sub _cur_refs {
   }
   elsif ($tok->isa('PPI::Token::ArrayIndex')) {
     $self->_ref($tok, "\@$1", 'arylen', $pkg, $cv) if $tok->content =~ /^\$#(.+)\z/s;
+  }
+  elsif ($tok->isa('PPI::Token::Prototype')) {
+    # a one-token signature's defaults, renamed in its text (s539b: without
+    # this arm a rename inside one default lost the OTHER defaults' uses)
+    $self->_proto_default_refs($tok, $tok->content, $pkg, $cv);
   }
   else {
     for my $piece (_interp_texts($tok)) {
