@@ -198,7 +198,7 @@ my @COLS = qw(sha mode rep dist file load1 timeout
   n_mod n_fasl n_text n_eval n_xpile boundary mb_consed gc end_wall rec cpu_v variant
   run_how q_init q_wall q_cpu q_sub q_late_wall q_late_cpu q_late_n q_c_wall
   r_wall r_cpu r_lw_wall r_lw_cpu r_late_wall r_late_cpu r_late_n r_sub r_gc r_mb
-  pr_wall pr_cpu sread r_rcomp r_rcomp_n r_eval_cpu r_xsrv);
+  pr_wall pr_cpu sread r_rcomp r_rcomp_n r_eval_cpu r_xsrv r_build);
 my $ofh = \*STDOUT;
 if (defined $out) {
   my $new = !-s $out;
@@ -594,6 +594,8 @@ sub run_phase {
   # of it: the STRING EVALS (their transpile, the server start, their compile) -- the rest is late requires
   $r->{r_eval_cpu} = $post->(q{ecompile}, q{cpu}) + $post->(q{evalx}, q{wall}) + $post->(q{xserver}, q{wall}) + $post->(q{evalx}, q{child}) + $post->(q{xserver}, q{child});
   $r->{r_xsrv} = $post->(q{xserver}, q{wall});
+  # a module TRANSPILED or fasl-BUILT inside the run: the cache had not converged (a warm row should read 0)
+  $r->{r_build} = $post->(q{xpile}, q{wall}) + $post->(q{cfile}, q{wall});
   $r->{r_late_n} = sprintf '%d/%d', map { ($h->{"${_}_n"} // 0) - ($h->{"pre_${_}_n"} // 0) } qw(modload evalrun);
   my $sub = ($h->{exit_child_us} - $h->{boundary_child_us}) / 1e6 - $tchild;
   $r->{r_sub} = $sub < 0 ? 0 : $sub;
@@ -901,7 +903,7 @@ sub run_rows {
       my $b = $s[0];
       $r{pr_cpu} = num($b->{pr_cpu});
       $r{pr_spread} = $r{pr_cpu} > 0 ? (num($s[-1]{pr_cpu}) - $r{pr_cpu}) / $r{pr_cpu} : 0;
-      $r{$_} = $b->{$_} for qw(pr_wall r_cpu r_lw_cpu r_late_cpu r_late_n r_rcomp r_rcomp_n r_eval_cpu r_xsrv r_sub r_gc r_mb run_how c_ok);
+      $r{$_} = $b->{$_} for qw(pr_wall r_cpu r_lw_cpu r_late_cpu r_late_n r_rcomp r_rcomp_n r_eval_cpu r_xsrv r_build r_sub r_gc r_mb run_how c_ok);
     }
     push @rows, \%r;
   }
@@ -922,7 +924,7 @@ sub report_run {
     scalar @$rows, scalar @cmp, map({ $n{$_} // 0 } qw(PE S X)), $maxload // '-';
   my %t;
   for my $r (@cmp) {
-    $t{$_} += num($r->{$_}) for qw(q_cpu pr_cpu q_wall pr_wall q_sub r_sub q_late_cpu r_late_cpu r_rcomp r_eval_cpu r_xsrv r_gc r_mb p_wall);
+    $t{$_} += num($r->{$_}) for qw(q_cpu pr_cpu q_wall pr_wall q_sub r_sub q_late_cpu r_late_cpu r_rcomp r_eval_cpu r_xsrv r_build r_gc r_mb p_wall);
   }
   $o .= "## Totals over the compared files (seconds)\n\n| | perl | PCL | PCL - perl | PCL / perl |\n|---|---:|---:|---:|---:|\n";
   $o .= sprintf "| run phase, CPU | %s | %s | %s | %s |\n", f2($t{q_cpu}), f2($t{pr_cpu}), f2($t{pr_cpu} - $t{q_cpu}), ratio($t{pr_cpu}, $t{q_cpu});
@@ -931,6 +933,7 @@ sub report_run {
   $o .= sprintf "| of the run: SBCL run-time compiles (CLOS) | - | %s | | |\n", f2($t{r_rcomp});
   $o .= sprintf "| of the late: string evals (transpile + server start + compile) | - | %s | | |\n", f2($t{r_eval_cpu});
   $o .= sprintf "| of those: the transpile server's start | - | %s | | |\n", f2($t{r_xsrv});
+  $o .= sprintf "| of the late: a module transpiled or fasl-built INSIDE the run (cache not converged: %d files) | - | %s | | |\n", scalar(grep { num($_->{r_build}) > 0.01 } @cmp), f2($t{r_build});
   $o .= sprintf "| of the run: GC | - | %s | | |\n", f2($t{r_gc});
   $o .= sprintf "| subprocesses (NOT in the run) | %s | %s | | |\n", f2($t{q_sub}), f2($t{r_sub});
   $o .= sprintf "| perl's whole file, wall | %s | | | |\n\nMB consed in PCL's run phase: %.0f\n\n", f2($t{p_wall}), $t{r_mb};
@@ -1007,7 +1010,7 @@ sub report_run {
 sub write_run_table {
   my ($path, $rows, $taken) = @_;
   my @c = qw(dist file cmp c_class nrep ncmp load q_init q_cpu pr_cpu excess ratio q_spread pr_spread q_wall pr_wall
-             q_late_cpu q_late_n r_late_cpu r_late_n r_rcomp r_rcomp_n r_eval_cpu r_xsrv r_gc r_mb q_sub r_sub r_cpu r_lw_cpu run_how p_ok c_ok p_wall q_c_wall src);
+             q_late_cpu q_late_n r_late_cpu r_late_n r_rcomp r_rcomp_n r_eval_cpu r_xsrv r_build r_gc r_mb q_sub r_sub r_cpu r_lw_cpu run_how p_ok c_ok p_wall q_c_wall src);
   open my $t, '>', $path or die "board-timing.pl: cannot write $path: $!\n";
   print $t "# taken-at: $_\n" for @$taken;
   print $t join("\t", @c), "\n";
