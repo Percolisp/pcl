@@ -4186,7 +4186,11 @@
 
 (defun %p-maybe-autoflush (stream)
   "Flush STREAM if its $| is on (signal handlers held: %p-with-signals-held)."
-  (when (%p-autoflush-p stream)
+  ;; the count test stays INLINE here, ahead of the call: with no handle
+  ;; marked a print pays one fixnum test and no call (s540d: with the call
+  ;; first, bench-exec's fhprint read 3-6 % slower than the base).
+  (when (and (plusp (hash-table-count *p-autoflush-handles*))
+             (%p-autoflush-p stream))
     (%p-with-signals-held (stream)
                           (ignore-errors (finish-output stream)))))
 
