@@ -21,7 +21,8 @@ sessions); dates are development-time, not release-time.
   #4982): `tr///` prepares its character lists once per site instead of on
   every call (a Data::Dumper program 7.1 s -> 0.6 s); setting `$|` no
   longer slows every later print (1 M prints 0.14 s -> 0.08 s); a hash
-  constructor is made at its final size (a 10-key `{...}` loop 14 % faster);
+  constructor with more than seven pairs is made at its final size (a
+  10-key `{...}` loop 14 % faster);
   a `use constant` with a literal value is the literal at its uses, as perl
   compiles it (a loop testing a constant 45 % faster).
 
