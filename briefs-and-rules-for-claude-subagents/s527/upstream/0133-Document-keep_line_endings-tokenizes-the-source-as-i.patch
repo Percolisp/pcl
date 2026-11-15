@@ -1,0 +1,219 @@
+From 66e690d2be6c8c030def9abb408e373eec8808fc Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 15 Nov 2026 22:21:48 +0200
+Subject: [PATCH 133/133] Document: keep_line_endings tokenizes the source as
+ it is
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PPI::Document->new(\$source, keep_line_endings => 1) -- and the same
+argument to PPI::Lexer->lex_source / lex_file and PPI::Tokenizer->new --
+skips the rewrite of every CR LF, CR CR LF and lone CR to LF: the source
+is split into lines at LF only, so a CR stays a character of the line it
+is on, as perl reads it (inside a string, a comment, the __DATA__ or
+__END__ section; a lone CR ends no line and no comment).  The default is
+unchanged.
+
+What reads a line end learns the CR LF: a here-doc's terminator line
+may end in CR LF (perl accepts it), and so may the line an indented
+here-doc's indentation is measured on and its blank lines; the rest of
+an __END__ / __DATA__ line keeps its CR LF as the Whitespace after the
+separator.  The document serializes to the exact bytes it was made
+from.  The document cache stores normalised documents only, so it is
+not used for one made with the attribute.
+
+Fixes PCL §65.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Document.pm      | 18 ++++++++++++++++--
+ lib/PPI/Lexer.pm         |  3 ++-
+ lib/PPI/Token/HereDoc.pm |  7 +++++--
+ lib/PPI/Token/Word.pm    | 14 ++++++++------
+ lib/PPI/Tokenizer.pm     | 19 ++++++++++++++-----
+ t/ppi_bugs_pcl.t         |  3 +--
+ 6 files changed, 46 insertions(+), 18 deletions(-)
+
+diff --git a/lib/PPI/Document.pm b/lib/PPI/Document.pm
+index 8c544910..1ad9bccc 100644
+--- a/lib/PPI/Document.pm
++++ b/lib/PPI/Document.pm
+@@ -185,6 +185,18 @@ L<PPI::Statement::Include> object.
+ 
+ This can be useful when your work project has a complex boilerplate module.
+ 
++=head3 keep_line_endings
++
++  keep_line_endings => 1
++
++By default every CR LF, CR CR LF and lone CR of the source is turned into a
++LF before tokenizing, so no token holds a CR.  Setting C<keep_line_endings>
++to true tokenizes the source as it is: lines end at LF, a CR is a character
++of the line it is on (inside a string, a comment or the C<__DATA__> section,
++as perl reads it), a here-doc's terminator line may end in CR LF, and the
++document serializes to the exact bytes it was made from.  The document cache
++is not used for such a document.
++
+ =cut
+ 
+ sub new {
+@@ -215,8 +227,9 @@ sub new {
+ 		# Save the filename
+ 		$attr{filename} ||= $source;
+ 
+-		# When loading from a filename, use the caching layer if it exists.
+-		if ( $CACHE ) {
++		# When loading from a filename, use the caching layer if it exists
++		# (it stores documents of the normalised source only).
++		if ( $CACHE and !$attr{keep_line_endings} ) {
+ 			my $file_contents = PPI::Util::_slurp( $source );
+ 
+ 			# Errors returned as plain string
+@@ -274,6 +287,7 @@ sub _setattr {
+ 	$document->{readonly}                  = !!$attr{readonly};
+ 	$document->{filename}                  = $attr{filename};
+ 	$document->{feature_mods}              = $attr{feature_mods};
++	$document->{keep_line_endings}         = !!$attr{keep_line_endings};
+ 	$document->{custom_feature_includes}   = $attr{custom_feature_includes};
+ 	$document->{custom_feature_include_cb} = $attr{custom_feature_include_cb};
+ 	if ( $ENV{PPI_CUSTOM_FEATURE_INCLUDES} ) {
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 56eb97c4..5aafe148 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -163,7 +163,8 @@ sub _lex_input {
+ 	$self = ref $self ? $self : $self->new;
+ 
+ 	# Create the Tokenizer
+-	my $Tokenizer = eval { X_TOKENIZER->new($input) };
++	my @tokenizer_args = $args{keep_line_endings} ? ( keep_line_endings => 1 ) : ();
++	my $Tokenizer = eval { X_TOKENIZER->new($input, @tokenizer_args) };
+ 	return    #
+ 	  $@
+ 	  ? $self->_error( _INSTANCE( $@, 'PPI::Exception' ) ? $@->message : $@ )
+diff --git a/lib/PPI/Token/HereDoc.pm b/lib/PPI/Token/HereDoc.pm
+index cc363b73..f0b37c84 100644
+--- a/lib/PPI/Token/HereDoc.pm
++++ b/lib/PPI/Token/HereDoc.pm
+@@ -143,6 +143,9 @@ sub terminator {
+ 
+ sub _is_terminator {
+ 	my ( $self, $terminator, $line, $indented ) = @_;
++	# A CR before the LF ends the terminator line too, as for perl -- a
++	# source tokenized with keep_line_endings still holds it
++	$line =~ s/\015(\012?)\z/$1/;
+ 	if ( $indented ) {
+ 		return $line =~ /^\s*\Q$terminator\E$/;
+ 	} else {
+@@ -157,13 +160,13 @@ sub _indent {
+ 	# with whitespace (<<~' EOF'), and the newline of an empty one (<<~'').
+ 	# The line has no newline when it ends the document.
+ 	my $line = $token->{_terminator_line};
+-	$line =~ s/\n\z//;
++	$line =~ s/\015?\n\z//;
+ 	return substr( $line, 0, length($line) - length( $token->{_terminator} ) );
+ }
+ 
+ sub _is_match_indent {
+ 	my ( $self, $token, $indent ) = @_;
+-	return (grep { /^\Q$indent\E/ || $_ eq "\n" } @{$token->{_heredoc}}) == @{$token->{_heredoc}};
++	return (grep { /^\Q$indent\E/ || /^\015?\n\z/ } @{$token->{_heredoc}}) == @{$token->{_heredoc}};
+ }
+ 
+ 
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index b2021178..7b0261cb 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -243,10 +243,12 @@ sub __TOKENIZER__commit {
+ 		# also ignore it, by turning it into a comment.
+ 		my $end_rest = substr( $t->{line}, $t->{line_cursor} );
+ 		$t->{line_cursor} = length $t->{line};
+-		if ( $end_rest =~ /\n$/ ) {
+-			$end_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
++		# The line end is a CR LF too in a source tokenized with
++		# keep_line_endings (not chomp: the caller's $/ may be anything)
++		if ( $end_rest =~ s/(\015?\012)\z// ) {
++			my $newline = $1;
+ 			$t->_new_token( 'Comment', $end_rest ) if length $end_rest;
+-			$t->_new_token( 'Whitespace', "\n" );
++			$t->_new_token( 'Whitespace', $newline );
+ 		} else {
+ 			$t->_new_token( 'Comment', $end_rest ) if length $end_rest;
+ 		}
+@@ -267,10 +269,10 @@ sub __TOKENIZER__commit {
+ 		# Add the rest of the line as the Data token
+ 		my $data_rest = substr( $t->{line}, $t->{line_cursor} );
+ 		$t->{line_cursor} = length $t->{line};
+-		if ( $data_rest =~ /\n$/ ) {
+-			$data_rest =~ s/\n\z//;  # not chomp: the caller's $/ may be anything
++		if ( $data_rest =~ s/(\015?\012)\z// ) {   # as for __END__ above
++			my $newline = $1;
+ 			$t->_new_token( 'Comment', $data_rest ) if length $data_rest;
+-			$t->_new_token( 'Whitespace', "\n" );
++			$t->_new_token( 'Whitespace', $newline );
+ 		} else {
+ 			$t->_new_token( 'Comment', $data_rest ) if length $data_rest;
+ 		}
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index d0626c14..5fed9fe5 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -138,16 +138,21 @@ my %X_CAN_FOLLOW_WORD = map { $_ => 1 } qw(
+ 
+ =pod
+ 
+-=head2 new $file | \@lines | \$source
++=head2 new $file | \@lines | \$source [, keep_line_endings => 1 ]
+ 
+ The main C<new> constructor creates a new Tokenizer object. These
+-objects have no configuration parameters, and can only be used once,
+-to tokenize a single perl source file.
++objects can only be used once, to tokenize a single perl source file.
+ 
+ It takes as argument either a normal scalar containing source code,
+ a reference to a scalar containing source code, or a reference to an
+ ARRAY containing newline-terminated lines of source code.
+ 
++By default every CR LF, CR CR LF and lone CR of the source is turned
++into a LF before tokenizing.  With C<keep_line_endings> the source is
++tokenized as it is: lines end at LF, and a CR is a character of the
++line it is on -- inside a string, a comment or the C<__DATA__> section,
++as perl reads it (a here-doc's terminator line may end in CR LF).
++
+ Returns a new C<PPI::Tokenizer> object on success, or throws a
+ L<PPI::Exception> exception on error.
+ 
+@@ -205,8 +210,12 @@ sub new {
+ 	# We can't handle a null string
+ 	$self->{source_bytes} = length $self->{source};
+ 	if ( $self->{source_bytes} ) {
+-		# Split on local newlines
+-		$self->{source} =~ s/(?:\015{1,2}\012|\015|\012)/\n/g;
++		# Split on local newlines -- or, with keep_line_endings, take the
++		# source as it is: lines end at LF, and a CR stays a character
++		# of the line it is on, as for perl
++		my %args = @_[ 2 .. $#_ ];
++		$self->{source} =~ s/(?:\015{1,2}\012|\015|\012)/\n/g
++			if !$args{keep_line_endings};
+ 		$self->{source} = [ split /(?<=\n)/, $self->{source} ];
+ 
+ 	} else {
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 81c57f08..6e511187 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2148,8 +2148,7 @@ for my $case ( [ "print 1;\n__DATA__\nx => 1\n", 'Separator=__DATA__' ],
+ # the fix is an opt-in: PPI::Document->new(\$source, keep_line_endings => 1)
+ # tokenizes the source as it is, lines ending at LF -- a lone CR is a
+ # character, as for perl, and a CR LF ends a here-doc's terminator line.
+-TODO: {
+-    local $TODO = 'PCL §65: every CR LF and lone CR in the source is rewritten to LF';
++{
+     for my $case ( [ "my \$x = q{a\r\nb};\n", 'Quote::Literal', "q{a\r\nb}", 'a CR LF inside q{}' ],
+                    [ "my \$y = \"c\rd\";\n", 'Quote::Double', "\"c\rd\"", 'a lone CR inside ""' ],
+                    [ "print 1;\n__DATA__\nj\r\nk\n", 'Data', "j\r\nk\n", 'a CR LF in the __DATA__ section' ],
+-- 
+2.53.0
+

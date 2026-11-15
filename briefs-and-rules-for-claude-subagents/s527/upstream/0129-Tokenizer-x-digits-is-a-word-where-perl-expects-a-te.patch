@@ -1,0 +1,120 @@
+From a9a165110de840d7995264e5be39fd0f10316aa5 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 15 Nov 2026 21:58:27 +0200
+Subject: [PATCH 129/133] Tokenizer: x<digits> is a word where perl expects a
+ term
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl's x is the repetition operator only under XOPERATOR (toke.c,
+yylex: case 'x').  _current_x_is_operator took every Word before the x
+as the end of a term.  It now asks _term_expected -- the rule the
+readline and ~~ decisions use -- so after a builtin that takes an
+operand (print x3(), return x3(), sort x3 @l, defined x3(), the if of a
+statement modifier) x and x3 are words; after a builtin that takes no
+operand (time x 3), a method name ($o->print x 3), __PACKAGE__ and a
+user's word the operator stays.
+
+In the filehandle slot of print $fh LIST perl reads the whole word
+after the handle and keeps the operator only for a binary-operator
+keyword (toke.c, case '$'), so print $fh x3() calls x3 while
+print $s x 3 repeats: the Whitespace caller now says whether the x is
+glued to digits.  And the look-ahead that splits x3 into x and 3 does
+not split x3( -- a number is never followed by an opening paren, so it
+is a call wherever it stands (print STDOUT x3(), where STDOUT could be
+a constant for all the tokenizer knows; print C x3 still repeats).
+
+Fixes PCL §66 and §19 (sub x { } print x(), ...).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Whitespace.pm |  5 ++++-
+ lib/PPI/Tokenizer.pm        | 21 +++++++++++++++++----
+ t/ppi_bugs_pcl.t            |  6 ++----
+ 3 files changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 5da5aad1..1ef856d7 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -444,10 +444,13 @@ sub __TOKENIZER__on_char {
+ 		# assumes we have a complete 'x' token, but we don't
+ 		# yet.  We may need to split this x character apart from
+ 		# what follows it.
+-		if ( $t->_current_x_is_operator ) {
++		pos $t->{line} = $t->{line_cursor} + 1;
++		if ( $t->_current_x_is_operator( scalar $t->{line} =~ m/\G\d/ ) ) {
+ 			pos $t->{line} = $t->{line_cursor} + 1;
+ 			return 'Operator' if $t->{line} =~ m/\G(?:
+ 				\d  # x op with no whitespace e.g. 'x3'
++				(?!\w*\s*\()  # but not a call, x3(): a number is
++				              # never followed by an opening paren
+ 				|
+ 				(?!(  # negative lookahead
+ 					=>  # not on left of fat comma
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 8bf73167..d0626c14 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -1180,16 +1180,29 @@ sub _term_expected {
+ 	return $KEYWORDS{$word} && !$NO_OPERAND{$word};
+ }
+ 
+-# Assuming we are currently parsing the word 'x', return true
+-# if previous tokens imply the x is an operator, false otherwise.
++# Assuming we are currently parsing the word 'x' -- alone, or glued to
++# the digits of a number when $digits is true (x3 in $a x3, which is
++# $a x 3) -- return true if previous tokens imply the x is an operator,
++# false otherwise.
+ sub _current_x_is_operator {
+-	my ( $self ) = @_;
++	my ( $self, $digits ) = @_;
+ 	return if !@{$self->{tokens}};
+ 
+ 	my ($prev, $prevprev) = $self->_previous_significant_tokens(2);
+ 	return if !$prev;
+ 
+-	return !$self->__current_token_is_forced_word('x') if $prev->isa('PPI::Token::Word');
++	# In the filehandle slot of print $fh LIST perl reads the whole word
++	# after the handle (toke.c, case '$': only a binary-operator keyword
++	# keeps XOPERATOR), so print $fh x3() calls x3, while the keyword x
++	# stays the operator (print $s x 3).
++	return !$digits if $self->_after_scalar_filehandle;
++
++	# After a builtin that takes an operand (print x3(), return x3(),
++	# sort x3 @l, ... if x3()) perl expects a term, and x is the
++	# repetition operator only where it expects an operator (toke.c:
++	# case 'x' tests PL_expect == XOPERATOR), so x, x3 are words.
++	return !$self->__current_token_is_forced_word('x') && !$self->_term_expected
++		if $prev->isa('PPI::Token::Word');
+ 
+ 	# After the } of a block that ends a statement (sub x3 { } x3();) or
+ 	# takes a list (map { } x3()) perl expects a statement or a term, and
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 722e0988..19601846 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -450,8 +450,7 @@ PERL
+ # whether a complete TERM precedes it.  After a list operator there is none, so
+ # `print x(), "|\n"` calls x() — PPI counts the Word `print` as a term and
+ # emits Operator(x), which reads as "print $_ repeated () times".
+-TODO: {
+-    local $TODO = 'PCL §19: A call to a sub named x after a list operator is lexed as the repetition operator';
++{
+     my $doc = PPI::Document->new(\'sub x { "PKG" } print x(), "|\n";');
+     my ($op) = grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+                $doc->tokens;
+@@ -2173,8 +2172,7 @@ TODO: {
+ # operator); and a number is never followed by an opening paren, so
+ # x3() is a call wherever it stands:
+ # `sub x3 { "X3" } print STDOUT x3(), "\n";` prints X3.
+-TODO: {
+-    local $TODO = 'PCL §66: x<digits> where perl expects a term is lexed as the repetition operator';
++{
+     for my $case ( [ 'print x64(), "\n";', 'Word=x64' ], [ 'print STDOUT x3(), "\n";', 'Word=x3' ],
+                    [ 'print x3() x2;', 'Word=x3' ], [ 'print $fh x3();', 'Word=x3' ],
+                    [ 'print $fh x3;', 'Word=x3' ], [ 'say STDERR x3();', 'Word=x3' ],
+-- 
+2.53.0
+

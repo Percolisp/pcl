@@ -1,0 +1,64 @@
+From af11a2c3d816785af93aae1935e28db8c8557dfe Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 15 Nov 2026 22:11:54 +0200
+Subject: [PATCH 131/133] Lexer: the first { inside a constructor is an
+ anonymous hash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl expects a term after the [ of an anonymous array and after the {
+of an anonymous hash, and where it expects a term every { is an
+anonymous hash (toke.c yyl_leftcurly: XTERM makes HASHBRACK).  _curly
+now says so for the first { of a statement whose parent is a
+Structure::Constructor, before the statement-start look-ahead -- the
+sibling of the rule that makes a { opening a list's statement a
+constructor.  A { after a word inside the constructor (do, sub, eval,
+map, grep) is decided by that word as before.
+
+Fixes PCL §67.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm | 10 ++++++++++
+ t/ppi_bugs_pcl.t |  3 +--
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 8da173e1..56eb97c4 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1473,6 +1473,16 @@ sub _curly {
+ 	# hash, whatever follows it
+ 	return 'PPI::Structure::Constructor' if _opens_xref_block($Parent);
+ 
++	# The first thing inside an anonymous array or hash constructor --
++	# [ { \1, "abc" } ], { { %$h } => 1 } -- is an anonymous hash, whatever
++	# follows it: perl expects a term after the [ (and the { of a hash),
++	# and where it expects a term every { is one (toke.c yyl_leftcurly:
++	# XTERM makes HASHBRACK; the look-ahead below is for where a statement
++	# may start)
++	return 'PPI::Structure::Constructor'
++		if $Parent->isa('PPI::Statement')
++		and _INSTANCE($Parent->parent, 'PPI::Structure::Constructor');
++
+ 	if (
+ 		$Parent->isa('PPI::Statement')
+ 		and
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 4dbd84c9..75441552 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2199,8 +2199,7 @@ for my $code ( 'print $s x 3;', 'print STDOUT x 3;', 'print C x3;', 'print "a" x
+ # the look-ahead that tells a block from a hash runs only where a
+ # statement or a block may start):
+ # `my $r = [ { \1, "abc" } ]; print ref $r->[0];` prints HASH.
+-TODO: {
+-    local $TODO = 'PCL §67: the first { inside a constructor is lexed as a block unless a literal and a comma follow';
++{
+     for my $case ( [ 'my @t = ( [ { \1 , "abc" } => "x" ] );', 0 ], [ 'my $r = [ { $x, 1 } ];', 0 ],
+                    [ 'my $r = [ { foo(), 1 } ];', 0 ], [ 'my $r = [ { %h } ];', 0 ],
+                    [ 'my $r = [ { %$h, a => 1 } ];', 0 ], [ 'my $r = [ { lc($x), 1 } ];', 0 ],
+-- 
+2.53.0
+

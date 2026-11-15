@@ -1,0 +1,89 @@
+From d340180cce9278e30414cfab90fa517d6a335e4d Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 15 Nov 2026 21:57:42 +0200
+Subject: [PATCH 128/133] TODO tests: x<digits> where perl expects a term
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads x3 as the repetition operator x 3 only where it expects an
+operator (toke.c, yylex: case 'x' tests PL_expect == XOPERATOR).  After
+a builtin that takes an operand (print, return, sort, defined, the if of
+a statement modifier, ...) it expects a term, and in the filehandle slot
+of print $fh LIST it reads the whole word after the handle (toke.c, case
+'$': only a binary-operator keyword such as x itself keeps the
+operator), so x3 is a word -- a call to a sub named x3:
+
+    perl -e 'sub x3 { "X3" } print x3(), "\n"; print STDOUT x3(), "\n"'
+    # X3
+    # X3
+
+The bareword handle (print STDOUT x3()) is the same word for perl
+unless STDOUT names a constant; a number is never followed by an
+opening paren, so x3() is the call wherever it stands.
+
+PPI takes every Word as the end of a term there, so the call becomes
+Operator(x) Number(3) and the statement is lost (or, after a
+filehandle, prints nothing).
+
+Fourteen rows inside a new PCL §66 TODO block and twelve controls (the
+keyword x after a filehandle, x3 after a constant in the handle slot,
+after a string, a list, a builtin that takes no operand, __PACKAGE__
+and a method name; x$n after a filehandle; x (3)).  Plan 411 -> 437.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 33 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 04e8ec72..722e0988 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 411 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 437 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2162,3 +2162,34 @@ TODO: {
+     my @s = $doc ? $doc->children : ();
+     ok( 2 == grep( $_->isa('PPI::Statement'), @s ), 'CR LF line ends still end lines (control)' );
+ }
++
++# §66 -- x<digits> where perl expects a TERM: perl reads x3 as the
++# repetition operator x 3 only where it expects an operator (toke.c:
++# case 'x' tests PL_expect == XOPERATOR).  After a builtin that takes
++# an operand (print, return, sort, defined, the if of a statement
++# modifier, ...) it expects a term; in the filehandle slot of
++# print $fh LIST it reads the whole word after the handle (toke.c, case
++# '$': only a binary-operator keyword such as x itself keeps the
++# operator); and a number is never followed by an opening paren, so
++# x3() is a call wherever it stands:
++# `sub x3 { "X3" } print STDOUT x3(), "\n";` prints X3.
++TODO: {
++    local $TODO = 'PCL §66: x<digits> where perl expects a term is lexed as the repetition operator';
++    for my $case ( [ 'print x64(), "\n";', 'Word=x64' ], [ 'print STDOUT x3(), "\n";', 'Word=x3' ],
++                   [ 'print x3() x2;', 'Word=x3' ], [ 'print $fh x3();', 'Word=x3' ],
++                   [ 'print $fh x3;', 'Word=x3' ], [ 'say STDERR x3();', 'Word=x3' ],
++                   [ 'return x3();', 'Word=x3' ], [ 'my @s = sort x3 @l;', 'Word=x3' ],
++                   [ 'print 1 if x3();', 'Word=x3' ], [ 'my $d = defined x3();', 'Word=x3' ],
++                   [ 'print x3 1;', 'Word=x3' ], [ 'print x 3;', 'Word=x' ],
++                   [ 'CORE::print x3();', 'Word=x3' ], [ 'foo x3();', 'Word=x3' ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $want, not the x operator" ) or diag "got: @t";
++    }
++}
++for my $code ( 'print $s x 3;', 'print STDOUT x 3;', 'print C x3;', 'print "a" x3;', 'print STDOUT "a" x3;',
++               'my @r = (1) x3;', 'print time x 3;', 'print __PACKAGE__ x 2;', '$o->print x 3;',
++               'print $s x$n;', 'print {$fh} "a" x3;', 'my $r = $s x (3);' ) {
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( /^Operator=x$/, @t ), "$code: the x operator (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+
