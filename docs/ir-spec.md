@@ -2074,6 +2074,23 @@ backslash-Q in pattern TEXT built at run time is the letter Q.  Example:
 `/\Q$e\E/` with `$e = "a.b\n"` is `(p-quotemeta $e)`, and `/\Qa.b/` is the native
 literal `a\.b`.
 
+### 3.2g2 A CR in the source is a character -- its reading depends on the UNIT (normative, s539c, task #4761)
+
+A literal's text, a here-doc body and the `__DATA__` / `__END__` section are
+the bytes perl's lexer reads, and perl reads them differently by unit.  A
+source FILE (a program, a `use` / `require` / `do` file, a module, an
+extension) goes through perl's line reader: before the data section every
+CR LF reads as LF -- in code, comments, multi-line literals and here-doc
+bodies alike -- and a lone CR stays a character (it ends no line and no
+comment); the data section is raw.  An eval STRING is one buffer: every CR of
+a literal stays, and only a here-doc body reads CR LF and a lone CR as LF.
+Line numbers count LF only.  PCL's PPI tokenizes every document as it is
+(`keep_line_endings`); the file reading is applied once to a FILE's text
+before the parse (`Pl::Parser::_file_line_endings`), the eval here-doc
+reading on the parsed here-doc lines (`_eval_heredoc_line_endings`).
+Example: `my $a = q{a<CR><LF>b}; my $b = "c<CR>d";` in a file gives
+`length $a == 3` and `length $b == 3`; the same text in `eval` gives 4 and 3.
+
 ### 3.2h Case mapping of chars 128-255 follows the SITE's REGIME (normative, s494u, task #2092)
 
 `p-lc` `p-uc` `p-fc` `p-lcfirst` `p-ucfirst` — and the `\L \U \F \l \u`

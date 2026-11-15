@@ -160,3 +160,18 @@ lost) as TODO only -- PPI's own t/06_round_trip.t asserts the newline
 rewrite, so that fix needs a design (PCL task #4761).  One more commit takes
 the TODO marker off the lexical-sub row of a sub named `x` (`my sub x { } x`),
 which passes since group AL.  t/ppi_bugs_pcl.t: 372 -> 411 rows.
+
+## s539c (2026-11-15): the branch is now 133 commits, head 66e690d2
+
+`0001-*.patch` .. `0133-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); pushed fast-forward to
+the BARE repo only (`c2f21706` -> `66e690d2`) -- the fork's `pcl` is moved by the
+reviewing session.  Three groups, each "TODO tests, then the fix"; PPI's suite
+green after every commit, plain and AUTHOR_TESTING=1: **AY** §66 (and §19's
+`print x()` row) `x` / `x<digits>` is a word where perl expects a term after a
+word -- a builtin that takes an operand, the `print $fh` slot, before a `(`
+(`PR-AY.md`); **AZ** §67 the first `{` inside a constructor is an anonymous
+hash, `[ { \1, "abc" } ]` (`PR-AZ.md`); **BA** §65 the OPT-IN
+`keep_line_endings => 1` tokenizes the source as it is -- the default
+normalisation is unchanged, PPI's own t/06_round_trip.t asserts it
+(`PR-BA.md`).  t/ppi_bugs_pcl.t: 411 -> 459 rows.

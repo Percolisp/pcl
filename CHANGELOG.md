@@ -5,6 +5,15 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-15: **A sub named `x3` after `print`, a hash first in a list, and
+  the CRs of a program** (#4784, #3555, #4761).  `print x64()`,
+  `return x3()`, `print STDOUT x3()` and `print $fh x3()` call the sub named
+  `x64` / `x3` instead of repeating a value; `[ { \1, "abc" } ]` and
+  `[ { $x, 1 } ]` hold a hash, as perl reads them (IO-Compress's
+  `004gziphdr.t` runs all 919 of its tests); a CR in the source keeps its
+  byte where perl keeps it -- a lone CR in a file, every CR of a string in
+  an `eval` (Template-Toolkit's `parser.t` passes), the whole `__DATA__`
+  section -- while a file's CR LF line ends still read as LF.
 - 2026-11-15: **Faster `dclone`, MD5, base64, `catfile`, `strftime`** (#4989,
   #4988, #4990, #4985, #4991).  `Storable::dclone` copies directly instead of
   serialising and parsing back (a small nested hash: 392 -> 1.05 us a call;
