@@ -219,6 +219,7 @@ tools/install-pcl --prefix ~/.local   # installer; test: prove tools/t/install-p
 prove tools/t/install-container.t  # installer in a container (minutes; before a tag)
 tools/vendor-ppi <clone> pcl       # refresh vendor/PPI from the pcl branch
 PCL_OPT=none ./pl2cl < prog.pl     # all named optimizations off (Pl/Passes.pm registry)
+PCL_OPT=-const-fold ./pl2cl < prog.pl   # ONE name off (here: a literal `use constant` stays a call, #4982)
 PCL_SHOW_SBCL=1 <any runner>       # print the exact SBCL command it spawns
 ```
 
@@ -227,7 +228,10 @@ PCL_SHOW_SBCL=1 <any runner>       # print the exact SBCL command it spawns
   `~/.pcl-cache/core/`, named by a content hash (it cannot be stale; a
   worktree gets its own).  `PCL_NO_CORE=1` = source mode; `pcl --clear-cache`
   removes the cores; extensions are compiled once into `~/.pcl-cache/ext/`
-  (`PCL_NO_FASL_CACHE=1` off).  **Stale module cache**: `rm -rf ~/.pcl-cache/*`.
+  (`PCL_NO_FASL_CACHE=1` off).  **EVERY module is compiled once** (s540d,
+  #4986: a `use lib` / `-I` / `PERL5LIB` module gets a fasl like an installed
+  one; `PCL_NO_COMPILE_DIRS=DIR` keeps one as text; `docs/caching.md`).
+  **Stale module cache**: `rm -rf ~/.pcl-cache/*`.
 - **A runner chooses WHAT to load, never HOW SBCL starts.**  Paths outside
   the checkout are derived (`tools/lib/PCLPaths.pm`), never written down
   (guard `Pl/t/no-hardcoded-paths-01.t`).  Every script finds its tree through
@@ -392,16 +396,15 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s542, 2026-11-15: main = MAIN-READY-94 `de3bf103` (code `00c6f785`,
-generation v2-14800; s540c and s539a merged today).**  Gate **375 files /
-12,193 rows `Result: PASS`** (s539a's gate on the rebased tree = merged
-main's code; MAIN-READY-93 measured 12,156 on main itself); full sweep
+**s542, 2026-11-15: main = MAIN-READY-95 `75146bf6` (code `cc36604b`,
+generation v2-14850; s540c, s539a and s540d merged today).**  Gate **377
+files / 12,259 rows `Result: PASS`** (measured on merged main); full sweep
 **TOTAL passing 18,803**, GATE clean; corpus-diff population 111 files;
 ir-conform 328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN
 board (round of s539, on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL /
-67 SKIP of 896 files, 109,797 ok / 1,740 not ok -- A ROUND IS OWED (six
-unrounded code merges; the companion snapshot dates from MAIN-READY-63);
-PPI `pcl` = `c2f21706`; CI green on MAIN-READY-93 (both workflows).  Known
+67 SKIP of 896 files, 109,797 ok / 1,740 not ok -- THE ROUND IS RUNNING
+(batch s542r, on MAIN-READY-95; the companion snapshot dates from
+MAIN-READY-63); PPI `pcl` = `c2f21706`; CI green on MAIN-READY-94.  Known
 default-build limits flagged to the USER: `caller` file/line and `croak`
 location only under `PCL_OPT=line-track`; `DESTROY` runs at program exit
 only; a filehandle that leaves its opening block is written out before the
@@ -485,6 +488,8 @@ of every entry (what it found, what it ruled) is in
 - `stable-booleans-design-s516.md` — `p-bool`, `p-!`, `p-defined`.
 - `method-lookup-eval-s534.md` — `p-method-call`, `p-find-overload`.
 - `boxed-aggregates-design-s455.md` — elements RAW by default.
+- `caching.md` — the caches, the module cache's content manifest, the
+  compile policy (every module compiled once since s540d).
 - `extensions.md`, `shipped-modules.md` — extension loading, shims, facts
   overlays.
 

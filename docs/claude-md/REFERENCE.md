@@ -199,6 +199,9 @@ prove -j8 Pl/t/
 # (#1202, s493: an extension is compiled ONCE into ~/.pcl-cache/ext/, keyed by the
 # artifact's own BYTES + the runtime identity, so a regenerated artifact cannot reach
 # the old entry; PCL_NO_FASL_CACHE=1 turns it off, --no-cache does not.  pack: 4.3 s -> 0.004 s.)
+# EVERY MODULE IS COMPILED ONCE (s540d, #4986, the USER's s540 ruling): a module reached through `use lib` / -I / PERL5LIB / `.`
+# gets a fasl like an installed one (until then it was compiled from cached text on every run); PCL_NO_COMPILE_DIRS=DIR keeps a
+# directory as text; a module first met during another module's fasl build gets its fasl in the same run (#4963).  docs/caching.md.
 # Plain `prove -j8 Pl/t/` therefore runs at prove-core speed (~3:45 wall, measured s439).
 # PCL_NO_CORE=1 = source mode; PCL_SHOW_SBCL=1 prints which core; `pcl
 # --clear-cache` removes the cores; a failed build leaves <core>.failed (one
@@ -223,6 +226,8 @@ echo 'my $x = 1 + 2;' | ./pl2cl
 # general-form compiler: its emission must RUN identically (Pl/t/passes-01.t;
 # the gate under it differs only in transpile-SHAPE rows).
 PCL_OPT=none ./pl2cl < prog.pl               # everything off
+PCL_OPT=-const-fold ./pl2cl < prog.pl        # ONE name off: a literal `use constant` stays a call (#4982, s540d: by default a bare use
+                                             #  of a literal `use constant` of this unit, in its package, IS the literal -- ir-spec, the fold rule)
 PCL_OPT=-raw-numeric,-str-buffer ./runpcl x.pl   # named ones off (PCL_NO_RAW_VERDICT=1 = -raw-numeric)
 
 # INSTALL PCL onto a machine (task #277, release phase 1).  The runtime and its
