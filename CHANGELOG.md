@@ -5,6 +5,20 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-15: **A filehandle that leaves its block is closed when nothing
+  holds it, at the point the program would otherwise wait or fail** (#2006).
+  A handle returned, passed to a sub or stored, then dropped, is found by the
+  garbage collector and closed where the program would wait on its own
+  `flock` of the same file or run out of descriptors, and at exit; its bytes
+  reach the file before the next `system` / `fork` / pipe.  Path::Tiny's
+  `slurp` followed by a locked `append` no longer waits forever (its three
+  `input_output` test files ran to their timeout), a loop opening more files
+  than `ulimit -n` through a helper completes, and a dropped write handle no
+  longer loses its buffered bytes when the collector reaches it.  Also
+  `local $h{k}` on a module's file-level `my %h` now localizes the hash the
+  rest of the module uses (#4866: every Try::Tiny `finally` block got an
+  empty `@_`).
+
 - 2026-11-13: **`caller` reads a call-frame stack; `croak` reports its
   caller** (#233, #1361).  `caller` with no argument answers three fields and
   `caller(N)` eleven (the sub's name, hasargs, wantarray); an anonymous sub
