@@ -15,9 +15,10 @@
 # %Internal, @CARP_NOT / @ISA trust, $CarpLevel), confess / cluck a
 # backtrace from where the error happened (long_error_loc).  What it does not
 # have, and why:
-#   * the LOCATION is caller()'s, so it is perl's file and line in a program
-#     compiled with `line-track' and PCL's placeholder `(eval 0) line 0'
-#     otherwise -- the same text a runtime-raised die carries there
+#   * the LOCATION is caller()'s: perl's file and line in the default build
+#     since s543a (line-track is on; `at - line 0.' only under the A/B switch
+#     PCL_OPT=-line-track), except for a call made from a BEGIN / END / use
+#     body, a sub a string eval defined, an `elsif' condition
 #     (docs/not-supported.md ns-caller-fidelity);
 #   * a backtrace line names the sub WITHOUT its arguments: they come from
 #     @DB::args, which PCL does not keep;
