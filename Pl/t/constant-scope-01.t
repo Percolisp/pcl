@@ -41,7 +41,7 @@ my $pcl_bin      = "$project_root/pcl";
 plan skip_all => "pl2cl not found" unless -x $pl2cl && -x $pcl_bin;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 20;
 
 my $libdir = tempdir(CLEANUP => 1);
 make_path("$libdir/C3870");
@@ -179,6 +179,43 @@ use constant TOP => 3;
 sub t { return TOP * 2 }
 package Q; use constant TOP => 5; sub u { return TOP * 2 }
 package main; print t(), " ", Q::u(), "\n";
+PL
+
+# ---- #4795 (s543b): a constant used bare in ITS OWN package is resolved
+# against that package's record -- a LATER package's `sub X` neither shadows it
+# nor says "declared below".  The #266 classifier's declared-subs scan was
+# package-blind, so Bar's `sub X` below made Foo's bare `X` a not-yet
+# bareword: the STRING "X" (literal constants hid it behind the const-fold;
+# PCL_OPT=-const-fold showed it for both).  INVERSE: main c5f618f2 printed
+# `X lit` / `X Y` / `X 42 barsub` / `5 5 5 5 X` / `X`.
+my $c4795 = <<'PL';
+package Foo; use constant X => 2 + 3; use constant Y => "lit"; sub get { X } sub gety { Y }
+package Bar; sub X { "barsub" } sub Y { "barsuby" }
+package main;
+print Foo::get(), " ", Foo::gety(), "\n";
+PL
+both_agree($c4795, '#4795: a later package\'s `sub X` does not turn the bare constant X into a string');
+{
+    local $ENV{PCL_OPT} = '-const-fold';
+    both_agree($c4795, '#4795: ... nor under PCL_OPT=-const-fold');
+}
+both_agree(<<'PL', '#4795: three packages, two constants and a sub of one name');
+package Foo; use constant X => 2 + 3; sub get { X }
+package Bar; sub X { "barsub" }
+package Baz; use constant X => 7 * 6; sub get { X }
+package main;
+print Foo::get(), " ", Baz::get(), " ", Bar::X(), "\n";
+PL
+both_agree(<<'PL', '#4795: every spelling of the constant in its own package');
+package Foo; use constant X => 2 + 3; sub a { Foo::X } sub b { Foo->X } sub c { &X } sub d { X() } sub e { X }
+package Bar; sub X { "barsub" }
+package main;
+print join(" ", Foo::a(), Foo::b(), Foo::c(), Foo::d(), Foo::e()), "\n";
+PL
+both_agree(<<'PL', '#4795: block-form packages');
+package Foo { use constant X => 2 + 3; sub get { X } }
+package Bar { sub X { "barsub" } }
+print Foo::get(), "\n";
 PL
 
 # ---- #4562 (s536b, Role-Tiny concrete-methods.t): a `use constant` in a

@@ -2934,6 +2934,16 @@ the INNERMOST one: inside a block the compiler lowers whole (a BEGIN body),
 each statement is its own site, so `BEGIN { use constant K => 4; print K }`
 prints 4 (s536b, #4562 -- the BEGIN's own site made K a string).
 
+**A bare name the CURRENT package records is resolved against that record
+(normative, s543b / #4795).**  When the package a bare `NAME` is compiled in
+has its own record of NAME (a `use constant`, its own `sub`, an import into
+it), the callable question (#266, `PExpr::_bareword_callable_here`) reads that
+record alone: another package's `sub NAME` -- above or below -- neither makes
+NAME callable there nor makes it "declared below".  Example: `package Foo; use
+constant X => 2 + 3; sub get { X } package Bar; sub X { "b" }` -- `Foo::get()`
+is 5 (it was the string "X").  A package with NO record of the name still
+reads the file's subs package-blind (#5124).
+
 **A sub head under the `signatures` feature is a SIGNATURE, whatever its shape
 (normative, s513f, task #2872):** where the feature is in force at the sub's
 position, every parenthesised list after the sub name — `($)`, `($, $)`,

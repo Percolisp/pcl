@@ -6102,12 +6102,24 @@ sub _bareword_callable_here {
   my $env = $self->environment;
   my ($pkg, $base) = $name =~ /^(.+)::([^:]+)\z/ ? ($1, $2) : (undef, $name);
   my $site = Pl::PExpr::TokenUtils::decl_site($tok);
+  # An unqualified name the CURRENT package records itself (a `use constant`,
+  # its own `sub`, an import into it) resolves against THAT record, which is
+  # what perl resolves it against: another package's `sub X` -- above or below
+  # -- neither makes it callable here nor says "declared below" (#4795: a
+  # LATER `package Bar; sub X` turned `package Foo; use constant X => ...;
+  # sub get { X }` into the string "X").  The prototype table asked below is
+  # per-package for such a name already (#421, `Environment::_proto_record`).
+  my $cur = $env->current_package // 'main';
+  my $own = !defined $pkg
+         && exists(($env->pkg_prototypes->{$base} // {})->{$cur});
   my $declared_below = 0;
   for my $s (@{ $env->get_declared_subs || [] }) {
     next unless defined $s->{name} && $s->{name} eq $base;
     # A qualified call site names its package; an unqualified one stays
-    # package-blind, as the prototype table it replaces here always was.
+    # package-blind, as the prototype table it replaces here always was --
+    # unless the current package records the name itself (above).
     next if defined $pkg && (($s->{package} // '') ne $pkg);
+    next if $own && defined $s->{package} && $s->{package} ne $cur;
     my $before = Pl::PExpr::TokenUtils::site_precedes($s, $site);
     return 'yes' if !defined $before || $before;
     $declared_below = 1;
