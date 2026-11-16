@@ -81,10 +81,9 @@ our %KIND_A = (
   'foreach-arrays' => "Pl::Parser::_foreach_bare_arrays + Parser2 foreach (tasks #1184, #1409): a `for my \$x (\@a)` or `(\@a, \@b)` that already qualifies for the read-only arm AND whose list is nothing but BARE named arrays iterates each array IN TURN over its element-storage SIMPLE vector (`:arrays t`, %p-make-array-run / %p-run-elt-raw) instead of flattening them into a temporary first -- the flattening is 88 % of the `feread2` bench row, and for the SINGLE-array list (#1409) there is no flattening at all: %p-flatten-for-list hands the live adjustable vector back and every access is then a HAIRY data-vector-ref, which is why one array read 0.47x of perl where two read 0.28x.  No new fact: the licence is `foreach-raw`'s own two conjuncts plus the list SHAPE",
   'numeric-slot'   => "VarAnnotator `numonly' + Parser2's raw compound-assign lowering (task #1183): a raw slot every one of whose writes stores a compile-time NUMBER (directly, or through a numeric compound op with a literal delta) can never hold a blessed box, so its `+=`/`-=`/`*=`/`%=`/`++`/`--` carry `:numeric` and the raw twin drops %compound-arith-form's overload guard -- whose cost is the BRANCH, not the tests (-62.5 % on a 4e6 `*=`/`%=` loop)",
   'symref-const'   => "ExprToCL sigil casts (task #1180): a symbolic dereference whose operand is a compile-time STRING -- `\${\"main::g\"}`, `\@{\"Pkg::ISA\"}`, `%{\"Pkg::H\"}` -- passes the cast a PER-SITE cache cell ((p-symref-site)), so the symbol the name denotes is resolved once for the site instead of through #812's name memo (a string sxhash + an `equal` gethash + a list walk + an O(n) NUL scan) on every access",
-  # THE ONE Kind-A gate that is CORRECTNESS, not speed — and, for exactly that
-  # reason, the one that is DEFAULT OFF (%DEFAULT_OFF below): shipping it on
-  # is a speed decision that its own measurement did not authorise.  Turn it
-  # on with `PCL_OPT=line-track`.
+  # A CORRECTNESS gate, not a speed one: ON by default since s543a (the USER,
+  # s543) and kept by `PCL_OPT=none' (%NOT_OFF_BY_NONE below);
+  # `PCL_OPT=-line-track' is the A/B switch that measures its cost.
   'line-track'     => "Parser2 _lower_block + cl/pcl-runtime.lisp's location register: every statement writes its LINE to *p-src-line* (and every sub body its FILE to *p-src-file-id*, an index into *p-src-files*), so a die raised BY THE RUNTIME reports `at FILE line N.` as perl does instead of the placeholder `(eval 0) line 0.`",
   'fh-scope-close' => "VarAnnotator handle licence (task #2006 (b)): a `my \$fh' declared only by `open(my \$fh, ...)' whose every use is a core I/O builtin's handle slot or a truth/defined test -- never returned, assigned, referenced, passed, captured, select()ed, interpolated, with no string eval in the region -- is closed when its block exits: (p-scope-close (\$fh) BODY...) = unwind-protect + %p-scope-close.  NOT an optimisation (it is perl's semantics), so %NOT_OFF_BY_NONE keeps it under PCL_OPT=none",
   'sig-classic'    => "Parser2 _normalize_signature_subs (task #2514): a named sub whose signature is nothing but plain named parameters (`(\$x, \$y)`, `(\$self, \@rest)`, no default, no placeholder) and whose body never observes \@_ is lowered as the SAME sub written `{ my (PARAMS) = \@_; ... }` plus the signature's arity check (p-check-arity), so it takes the classic spelling's raw verdicts (p-raw-params, raw p-let slots) instead of v1's all-boxed signature binding",
@@ -153,19 +152,16 @@ sub check_env {
     . "  known: " . join(' ', names()) . "\n" if @unknown;
 }
 
-# Names that are OFF unless PCL_OPT names them (`PCL_OPT=line-track`), the
-# reverse of every other entry.  A name lands here when the emission is
-# implemented, measured and guarded but its DEFAULT is not this session's call
-# to make.  `line-track` (task #1240) is the first: it costs ~0.25 ns per
-# statement — nothing on the macro rows (json-rt -0.5 %, moo-objs +0.2 %,
-# textproc -1.2 %) and +4…6 % on the counting-loop microbench rows, which is
-# above the ≤3 % bar the s473 brief set for shipping it on by default.
-#
-# THE FLIP IS ONE LINE: move the name out of here and into %NOT_OFF_BY_NONE
-# below (a correctness mechanism belongs in the general form, so `none` must
-# not switch it off), then re-run the gate, the sweep and tools/ir-conform and
-# take the 8 `1240` rows out of ir-conform/known-fail.tsv.
-our %DEFAULT_OFF = ('line-track' => 1);
+# Names that are OFF unless PCL_OPT names them (`PCL_OPT=NAME`), the reverse
+# of every other entry.  A name lands here when the emission is implemented,
+# measured and guarded but its DEFAULT is not the implementing batch's call to
+# make.  THE SET IS EMPTY since s543a: its one member, `line-track` (task
+# #1240), was turned on by the USER (s543) and moved to %NOT_OFF_BY_NONE --
+# its cost (~0.25 ns per statement: the counting-loop bench rows, the emitted
+# text) is recorded in docs/caller-implementation.md.  The hash and its test in
+# enabled() stay: they are the one place the next such emission is parked, at
+# the cost of a hash probe per enabled() call at compile time.
+our %DEFAULT_OFF = ();
 
 # Names `none` does NOT switch off.  `PCL_OPT=none` means "the general-form
 # compiler" — the emission a reader should be able to predict from the source —
@@ -177,7 +173,12 @@ our %DEFAULT_OFF = ('line-track' => 1);
 # lexical handle at its block's exit is perl's semantics (the bytes are in the
 # file when the next step reads it; the descriptor is free), so the general
 # form has it too.  `PCL_OPT=-fh-scope-close' remains the A/B switch.
-our %NOT_OFF_BY_NONE = ('fh-scope-close' => 1);
+#
+# `line-track' (task #1240, ON by default since s543a) is the second: perl's
+# PL_curcop -- the location a runtime-raised die, `caller' and Carp report --
+# is the language's, so `none' writes it too.  `PCL_OPT=-line-track' remains
+# the A/B switch (the default build of every PCL before s543a).
+our %NOT_OFF_BY_NONE = ('fh-scope-close' => 1, 'line-track' => 1);
 
 sub enabled {
   my ($name) = @_;
