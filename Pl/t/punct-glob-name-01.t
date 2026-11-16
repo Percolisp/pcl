@@ -153,9 +153,10 @@ print "D=[", *{;foo}, "]\n";
 print "E=[", *{foo}, "]\n";
 PL
 
-# The die message is compared without its " at FILE line N." tail: PCL's
-# location for a runtime die is its own (`(eval 0) line 0`), a general
-# divergence and not what this row is about.
+# The die message is compared without its " at FILE line N." tail: perl and
+# PCL run the program from two different temp files, and the location is
+# Pl/t/die-location-01.t's subject (perl's in the default build since s543a),
+# not this row's.
 {
     my $code = <<'PL';
 no strict 'refs';

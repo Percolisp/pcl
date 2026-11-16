@@ -114,7 +114,8 @@ is($pcl, $perl, 'require "path": the same value and the same die');
 # "Attempt to reload" -- the file never runs twice (it used to: every side
 # effect of the module happened again).  The hook path and an explicit path
 # the same; a FALSE file leaves the entry absent (#1688, the control).  The
-# location text after "require" is not compared (line-track is off).
+# location text after "require" is not compared: this row is about %INC and
+# the message head; the location (perl's since s543a) is Pl/t/die-location-01.t's.
 ($perl, $pcl) = both('diesload', <<'PL');
 use lib 'mt';
 sub tag { my $e = shift; $e =~ /^Attempt to reload \S+ aborted\.\nCompilation failed in require/ ? "reload"
