@@ -15,7 +15,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 27;
+use Test::More tests => 32;
 BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -180,6 +180,28 @@ diag "-------- Constant after print is a list element, not a filehandle:";
     unlike($cl, qr/p-print :fh.*(?:pl-FOO|FOO)/,
            'print FOO, ... does NOT route FOO as a filehandle');
 }
+
+# #4792 (s543b): `defined NAME` / `defined(NAME)` / `defined NAME()` with an
+# ALL-CAPS `use constant` NAME in force is the CONSTANT's definedness (perl
+# 5.40.3: 1 for `use constant ON => 1`, '' for `use constant U => undef`) --
+# PCL lowered it `(p-defined-fh 'ON)`, a filehandle test that answered FALSE.
+# The arm asks #266's one callable classifier first; only a name not callable
+# at that point (STDIN, an open FH, a constant declared BELOW) keeps the handle
+# reading.  INVERSE: main c5f618f2 emitted `(p-defined-fh 'ON)` for all three.
+{
+    my $code = 'use constant ON => 1; print defined ON ? 1 : 0; print defined(ON) ? 1 : 0; print defined ON() ? 1 : 0;';
+    my $cl = parse_code($code);
+    my $n = () = $cl =~ /\(p-defined 1\)/g;
+    is($n, 3, 'defined ON / defined(ON) / defined ON() of a literal constant is (p-defined 1) by default (#4792)');
+    unlike($cl, qr/p-defined-fh/, '... and never the filehandle test (#4792)');
+}
+general_contains('use constant U => undef; print defined U ? 1 : 0;',
+                 '(p-defined (p-scalar-ctx (pl-U)))',
+                 'defined CONST under -const-fold is the definedness of the constant CALL (#4792)');
+output_contains('print defined STDIN ? 1 : 0;', "(p-defined-fh 'STDIN)",
+                'defined STDIN (not callable) keeps the filehandle test (#4792)');
+output_contains('print defined LATER ? 1 : 0; use constant LATER => 5;', "(p-defined-fh 'LATER)",
+                'a constant declared BELOW the use does not make it callable there (#2871 clock, #4792)');
 
 # A bareword filehandle with NO comma is still a filehandle: `print STDERR LIST`.
 {

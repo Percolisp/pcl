@@ -3393,27 +3393,21 @@ sub gen_funcall_form {
               $self->_paren_deref_base_form($glob_id, 1)
               // $self->gen_node_form($glob_id)];
     }
-    # …and the bareword-filehandle forms, which read the node itself.  The
+    # …and the bareword-filehandle forms, which read the node itself (the
+    # two shapes a bareword argument arrives in, `_bareword_arg_word`).  The
     # shape test is the one every other handle site asks (#491), so
     # `defined main::FH` is the handle `FH` here as it is at open/print.
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($arg_node) eq 'PPI::Token::Word') {
-      my $name = $arg_node->content();
-      if (Pl::Environment::fh_bareword_shape($name)) {
+    # A name CALLABLE at this point -- a `use constant`, a sub declared
+    # above, an import -- is a CALL, as perl reads it (`use constant ON =>
+    # 1; defined ON` is 1): #266's one three-valued classifier, positional
+    # by #2871's parse clock, so a constant declared BELOW stays the handle
+    # reading (#4792).  NB perl has no handle test here at all (task #398):
+    # the handle reading is PCL's answer for an unknown bareword.
+    if (my $word = $self->_bareword_arg_word($kids->[1])) {
+      my $name = $word->content();
+      if (Pl::Environment::fh_bareword_shape($name)
+          && $self->expr_o->_bareword_callable_here($name, $word) ne 'yes') {
         return ['p-defined-fh', "'" . $self->_fh_sym($name)];
-      }
-    }
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'funcall') {
-      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids2 == 1) {
-        my $fn_node = $self->expr_o->get_a_node($arg_kids2->[0]);
-        if (ref($fn_node) eq 'PPI::Token::Word') {
-          my $name = $fn_node->content();
-          if (Pl::Environment::fh_bareword_shape($name)) {
-            return ['p-defined-fh', "'" . $self->_fh_sym($name)];
-          }
-        }
       }
     }
   }

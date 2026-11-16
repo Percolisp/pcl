@@ -2619,6 +2619,17 @@ answer.  `PCL_OPT=-const-fold` restores the call, which runs identically
 except for that redefinition.  Example: `use constant PI => 3.14; my $area =
 PI * $r * $r;` → `(p-let (($area :scalar (p-* (p-* 3.14 $r) $r))))`.
 
+**`defined NAME` of a name CALLABLE there is the definedness of the call
+(normative, s543b / #4792).**  `defined NAME`, `defined(NAME)` and `defined
+NAME()` ask #266's one classifier (`PExpr::_bareword_callable_here`,
+positional by #2871's clock) first: a `use constant`, a sub declared above or
+an import is CALLED (and folded like any use), so `use constant U => undef;
+defined U` is false and `defined ON` true.  Only a name NOT callable at that
+point (STDIN, a bareword handle, a constant declared BELOW) keeps PCL's
+`(p-defined-fh 'NAME)` handle reading -- perl itself has none (it reads the
+string, task #398).  Example: `use constant ON => 1; print defined ON` →
+`(p-print (p-defined 1))`.
+
 The plist is what the compiler proved **under the configuration that emitted
 the file**: `PCL_OPT` switches off Kind-A rules, and a fact whose analysis a
 switched-off rule pays for (`:returns`, the #77 family) is then simply absent.
