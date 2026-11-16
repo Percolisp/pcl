@@ -250,7 +250,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-scope-close #:%p-scope-close
+   #:p-scope-close #:%p-scope-close #:p-flush-dropped-handle
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-eof-argv #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
    #:p-use-open #:p-default-layers
@@ -22007,6 +22007,40 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; cell of the enclosing block (see Pl::Parser2::_fh_cond_late) that still
   ;; holds NIL when the statement never stored into it — nothing to close.
   (when (p-box-p fh) (%p-close-implicit fh))
+  (values))
+
+(defmacro p-flush-dropped-handle (var)
+  "`undef $x;' / `$x = undef;' on a lexical the scope-close licence does not
+   cover (task #4794; docs/ir-spec.md §6.5b): when VAR's OLD value is a
+   descriptor stream -- a handle that ESCAPED the block that opened it -- its
+   buffered output is written NOW, before the statement drops it.  perl closes
+   such a handle when its last reference goes; PCL has no reference counts, so
+   it cannot know this variable held the last one and never CLOSES here: a
+   flush is invisible to every other holder (the bytes would reach the file at
+   the close anyway).  The lock, the descriptor and a pipe's child stay as
+   they are, until a trigger or exit (§6.5b).  VAR is the variable itself (a
+   box, or a raw slot), never read through a tie: a non-handle value costs
+   the one type test."
+  (let ((v (gensym "V")))
+    `(let ((,v (%p-peek-slot ,var)))
+       (when (sb-sys:fd-stream-p ,v) (%p-flush-dropped-stream ,v)))))
+
+(declaim (inline %p-peek-slot))
+(defun %p-peek-slot (x)
+  "The raw payload of variable X -- a box's value, or X itself for a raw slot
+   -- without FETCH or any other magic."
+  (if (p-box-p x) (p-box-value x) x))
+
+(defun %p-flush-dropped-stream (s)
+  "p-flush-dropped-handle's write: an OPEN output fd-stream on a descriptor
+   above 2 (the standard handles keep their own buffering) has its buffer
+   written.  A failing write is perl's silent implicit-close failure: `$!' is
+   left as it was.  Never signals."
+  (when (and (output-stream-p s) (open-stream-p s)
+             (let ((fd (sb-sys:fd-stream-fd s))) (and (integerp fd) (> fd 2))))
+    (let ((errno *p-stored-errno*))
+      (ignore-errors (finish-output s))
+      (setf *p-stored-errno* errno)))
   (values))
 
 (defun %p-close-implicit (fh)

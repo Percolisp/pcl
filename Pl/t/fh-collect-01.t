@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -185,4 +185,29 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$guard' '$dir");
     is($pcl_out, $perl, 'a lock held by an in-scope lexical guard survives collections (no child gets it)');
+}
+
+# 7: #4794 (s543b) -- `undef $fh;' / `undef($fh);' / `$fh = undef;' on a
+# handle that ESCAPED its opening block (a helper returned it) FLUSHES it right
+# there: the read-back idiom sees the bytes (perl closes at the last reference;
+# PCL, without reference counts, writes the buffer and never closes).  At file
+# level too; a tied scalar is not FETCHed.  The handle-in-a-hash `delete' and
+# the object holding a handle are NOT covered (no statement names the handle).
+# INVERSE: main c5f618f2 printed 0 for rows a b c d.
+my $undef = write_prog('undef.pl', <<'PL');
+use strict; use warnings;
+my $f = "$ARGV[0]/undef.out";
+sub mk { open my $fh, ">", $f or die; $fh }
+sub size { -s $f // 0 }
+{ my $fh = mk(); print $fh "hello";  undef $fh;   print "a ", size(), "\n"; }
+{ my $fh = mk(); print $fh "hello!"; $fh = undef; print "b ", size(), "\n"; }
+{ my $fh = mk(); print $fh "paren7"; undef($fh);  print "c ", size(), "\n"; }
+{ open my $fh, ">", $f or die; print $fh "local77"; undef $fh; print "e ", size(), "\n"; }
+{ package TS; our @log; sub TIESCALAR { bless {}, shift } sub FETCH { push @log, "F"; 1 } sub STORE { push @log, "S" } }
+{ tie my $t, "TS"; undef $t; $t = undef; print "f ", join(",", @TS::log), "\n"; }
+my $top = mk(); print $top "file13"; undef $top; print "d ", size(), "\n";
+PL
+{
+    my ($perl, $pcl_out) = run_both("$undef' '$dir");
+    is($pcl_out, $perl, '#4794: undef / = undef of an escaped handle flushes it (read-back sees the bytes)');
 }

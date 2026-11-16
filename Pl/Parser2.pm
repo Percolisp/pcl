@@ -11190,6 +11190,15 @@ sub _blk_tail {
             $self->_lower_stmt($first, $vi, $first_tail),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
+  # -- the same statement on any other LEXICAL scalar: a handle that ESCAPED
+  # its opening block may sit in it, and the program says "done with it" --
+  # its buffered bytes are written NOW (a FLUSH, never a close: another holder
+  # may exist; task #4794).  One type test when the value is no handle.
+  if (defined(my $flush = $self->_fh_drop_flush_name($first, $vi))) {
+    return (['p-flush-dropped-handle', cl_sym($flush)],
+            $self->_lower_stmt($first, $vi, $first_tail),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
 
   # -- everything else appends a form and continues at the same depth.
   return ($self->_lower_stmt($first, $vi, $first_tail), $self->_lower_block(\@rest, $vi, $tail_ctx));
@@ -15648,6 +15657,32 @@ sub _fh_scope_close {
 # the licence's `fh-drop' use, and only as a whole statement.
 sub _fh_drop_name {
   my ($self, $stmt, $vi) = @_;
+  my $name = _fh_drop_stmt_name($stmt, $vi) // return undef;
+  return undef if !($vi->{$name}{fh_drop_at}{ refaddr($stmt) });
+  return undef if !Pl::Passes::enabled('fh-scope-close');
+  my $up = $stmt->parent;
+  return undef if !$up || $up->isa('PPI::Document');
+  return $name;
+}
+
+# The same three statement shapes on a LEXICAL SCALAR the licence does not
+# cover (task #4794): its name, for the flush of an escaped output handle the
+# old value may be (ir-spec §6.5b) -- at file level too, where the licence
+# closes nothing.  Gated with the licence: `fh-scope-close' is the family that
+# decides WHEN bytes reach a file (kept under PCL_OPT=none).
+sub _fh_drop_flush_name {
+  my ($self, $stmt, $vi) = @_;
+  my $name = _fh_drop_stmt_name($stmt, $vi) // return undef;
+  return undef if substr($name, 0, 1) ne '$';
+  return undef if !Pl::Passes::enabled('fh-scope-close');
+  return $name;
+}
+
+# `undef $x;' / `undef($x);' / `$x = undef;' as a whole statement, $x a
+# lexical VarAnnotator tracks: its name, else undef.  ONE reading of the
+# shape for the close (_fh_drop_name) and the flush (_fh_drop_flush_name).
+sub _fh_drop_stmt_name {
+  my ($stmt, $vi) = @_;
   return undef if !($vi && ref($stmt) eq 'PPI::Statement');
   my @k = _strip_semi($stmt->schildren);
   my $name;
@@ -15664,12 +15699,7 @@ sub _fh_drop_name {
          && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
     $name = $k[0]->content;
   }
-  return undef if !(defined $name && $vi->{$name}
-                 && $vi->{$name}{fh_drop_at}{ refaddr($stmt) });
-  return undef if !Pl::Passes::enabled('fh-scope-close');
-  my $up = $stmt->parent;
-  return undef if !$up || $up->isa('PPI::Document');
-  return $name;
+  return (defined $name && $vi->{$name}) ? $name : undef;
 }
 
 # The CONDITION-my half of the same licence: which handles declared in the

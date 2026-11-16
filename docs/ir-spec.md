@@ -4106,6 +4106,19 @@ open my $o, ">>", $f or die;
 flock($o, LOCK_EX);        # perl: the slurp handle is gone; PCL: closed here
 ```
 
+**`undef $x;` / `undef($x);` / `$x = undef;` FLUSH an escaped handle the
+variable held (normative, s543b / #4794).**  On a lexical scalar the §6.5
+licence does not cover (at file level too), the whole statement is preceded by
+`(p-flush-dropped-handle $x)`: when the variable's OLD value is an open output
+descriptor stream above fd 2, its buffer is written now -- the program has said
+it is done with the handle.  Never a close (PCL cannot know the variable held
+the LAST reference; a flush is invisible to any other holder), so the
+descriptor, a `flock` held through it and a pipe's child stay as §6.5b says;
+`$!` is untouched; a non-handle value costs one type test.  Not covered: a
+handle dropped through an element, `delete`, or an object holding it.
+Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5
+(was 0) -- `(p-flush-dropped-handle $fh) (p-undef $fh)`.
+
 ## 7. Packages, variables, and OO
 
 ### 7.1 Namespaces and case

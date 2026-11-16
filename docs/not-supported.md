@@ -2498,7 +2498,15 @@ stays different from perl, measured s540c / s541:
   `input_output*.t`'s 8 `openw`/`opena` -> `openr` rows, which also fail
   on task #5005; a `{ my $fh = $f->openw; print $fh ...; }` block followed
   by a read).  Close it explicitly when another step reads the file.  No
-  byte of an output-only handle is lost;
+  byte of an output-only handle is lost.  Where the program SAYS it is done
+  -- `undef $fh;`, `undef($fh);` or `$fh = undef;` on a lexical holding the
+  escaped handle (at file level too) -- the buffer is written at that
+  statement (s543b, #4794; ir-spec §6.5b): a flush, never a close, so a
+  second holder still writes through it, its bytes merely reach the file
+  sooner than perl's (perl keeps them buffered while another reference
+  lives), and the descriptor and a `flock` held through it stay until a
+  trigger or exit.  A handle dropped by `delete $h{fh}` or inside an object
+  that goes is not covered;
 * a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
   until one of the triggers or exit; only a blocking `flock` on the same file
   and running out of descriptors are triggers;
