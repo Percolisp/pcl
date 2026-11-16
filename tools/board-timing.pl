@@ -941,6 +941,26 @@ sub report_run {
   $o .= sprintf "| of the run: GC | - | %s | | |\n", f2($t{r_gc});
   $o .= sprintf "| subprocesses (NOT in the run) | %s | %s | | |\n", f2($t{q_sub}), f2($t{r_sub});
   $o .= sprintf "| perl's whole file, wall | %s | | | |\n\nMB consed in PCL's run phase: %.0f\n\n", f2($t{p_wall}), $t{r_mb};
+  # THE RUN SPLIT: PCL's run number by component against perl's, over the compared files
+  {
+    my ($ev, $lr, $rc, $gc, $q_lr) = (0, 0, 0, 0, 0);
+    for my $r (@cmp) {
+      $ev += num($r->{r_eval_cpu});
+      $lr += num($r->{r_late_cpu}) - num($r->{r_eval_cpu});
+      $rc += num($r->{r_rcomp});
+      $gc += num($r->{r_gc});
+      $q_lr += num($r->{q_late_cpu});
+    }
+    my $prest = $t{pr_cpu} - $ev - $lr - $rc;
+    my $qrest = $t{q_cpu} - $q_lr;
+    $o .= "## The run split by component (CPU seconds, compared files)\n\n| component | perl | PCL | PCL - perl |\n|---|---:|---:|---:|\n";
+    $o .= sprintf "| string evals: transpile + compile (perl: inside its rest) | - | %s | %s |\n", f2($ev), f2($ev);
+    $o .= sprintf "| modules first required at run time | %s | %s | %s |\n", f2($q_lr), f2($lr), f2($lr - $q_lr);
+    $o .= sprintf "| SBCL's CLOS compiles at run time | - | %s | %s |\n", f2($rc), f2($rc);
+    $o .= sprintf "| the rest: the program's own work | %s | %s | %s |\n", f2($qrest), f2($prest), f2($prest - $qrest);
+    $o .= sprintf "| **the run** | **%s** | **%s** | **%s** |\n", f2($t{q_cpu}), f2($t{pr_cpu}), f2($t{pr_cpu} - $t{q_cpu});
+    $o .= sprintf "| (GC inside the run, every component: PCL %s s) | | | |\n\n", f2($gc);
+  }
   # the distribution of ratios
   my @b = ([q{under 1x}, 0, 1], [q{1-2x}, 1, 2], [q{2-5x}, 2, 5], [q{5-10x}, 5, 10], [q{over 10x}, 10, 1e99]);
   $o .= "## Ratio distribution (PCL run / perl run)\n\n| ratio | files | perl s | PCL s | PCL - perl |\n|---|---:|---:|---:|---:|\n";
