@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s541a (Opus agent, 2026-11-16) from the CPAN board's RUN-PHASE measurement (#4791; docs/cpan-runtime-comparison-s541.md, the per-file table baselines/board-runtime-s541.tsv, the instrument tools/board-timing.pl --run).  Code c1fe4930 (MAIN-READY-97); timings on a quiet box (heavy.sh bench, best of 3, load < 2), scratch in the s541a worktree scratch/s541a/.\n\nWHAT: in the precise pass (warm cache, three reps) HTTP-Message t/request.t has r_build 0.414 / 0.420 / 0.419 s: a module transpiled (xpile 0.314-0.320 s, n_xpile 1) and fasl-built (cfile 0.100 s) inside the run, every rep.  PCL_FASL_DEBUG on a warm run: 'PCL: module Glob.pm -> fasl-build' (then GlobMapper.pm FASL HIT).  The dist's cache also holds two .fasl.failed markers from modules that need Compress::Raw::Bzip2 (XS, no PCL build) -- a candidate cause (a failed sibling invalidating the entry), not checked.  A plain `use HTTP::Request` program does not load Glob.pm and shows no rebuild.\n\nREPRODUCER: tools/board-timing.pl --run --dist HTTP-Message --only request.t --modes cold,warm --repeat 2 (a private --cache-root): the warm rows' r_build column; or PCL_FASL_DEBUG=1 on the second run.  Board seconds 0.55 s over 2 files (the other one not identified), but every program that reaches File::Glob this way pays it.  Size: find the cause first.",
+   "id" : "5066",
+   "status" : "pending",
+   "subject" : "CACHE MISS: HTTP-Message t/request.t re-transpiles AND fasl-builds lib/File/Glob.pm (PCL's shim) inside EVERY warm run -- 0.41 s a run (xpile 0.31 s + cfile 0.10 s, the same in all three reps of the precise pass); cause not found"
+}

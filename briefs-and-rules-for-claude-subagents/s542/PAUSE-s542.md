@@ -107,3 +107,16 @@ Read bottom-up after a cut.  The stop state this session started from is `s541/r
 * MERGED-MAIN check: 12 guard + records files / 376 rows PASS; its probes = perl on main.  No second full gate (main IS its gated tree: 379 / 12,303; the SWEEP, the gate for a rename change, was clean on it).
 * TASKS CLOSED: #4921 #4923 #4822.  Kept open: #4922 (blockers the binder made unnecessary, none fires in the gate-SET populations), #3694 (the parser program; notes).  Records: CLAUDE.md numbers paragraph replaced, STATUS, DECIDED (+ the USER's no-more-subtasks word), session-log.
 * RUNNING: s542r (the round), s541a.  Two slots stay EMPTY by the USER's word.
+
+## 04:2x .. 04:4x -- **THE ROUND s542r MERGED** (baselines + docs only; main's code stays `c5f618f2`, MAIN-READY-98)
+* MERGE-READY `b99763e3` at 04:1x (5 h 15 min after its launch), on main's head: ff 6 commits.
+* THE BOARD on `cc36604b` (MAIN-READY-95): **661 PASS / 144 PARTIAL / 24 FAIL / 67 SKIP of 896, 109,714 ok / 1,225 not ok** (s539 round: 641 / 161 / 27 / 67, 109,797 / 1,740).  `--diff` 9 NEW / 21 FIXED / 4 UNVERIFIED / 1,005 LOST passing rows; I read the six LOST lines: 970 = IO-Compress `105oneshot-zip.t` (the #4643 heap flap), 27 = three load timeouts (pass alone; allowances registered with measured times), 5 = the zip-bomb file (#5083), 3 = `060-caller.t` rows now failing as perl's TODO rows do.
+* THE COMPANION: `--all --quick` 132 rows FIXED out (each attributed to its merge), 78 NEW in (69 keyed to existing causes, 9 filed); the full run with stamps 0 NEW / 0 FIXED / 0 LOST against the edited baselines.  The snapshot is current as of MAIN-READY-95: a batch's `--all --quick` is readable against it again (the three merges after -95 are the next round's).
+* REVIEW: added baseline rows read by cause; 9 baseline-reading gate / tools files 259 rows PASS on merged main; CI green on `9e0702b6` (MAIN-READY-98).
+* CLOSED with their rows: #3493 (DONE note), #1840 (no DONE note: re-probed by me, main = perl on six compound assignments to a tied scalar; note written).
+* **THREE FINDINGS FOR THE NEXT BRIEF** (none started: the USER's word):
+  1. **#5082 -- a REGRESSION of s538a (MAIN-READY-91)**: `opendir $d, DIR` on a variable that held a dirhandle before (opened, read, closed) dies "Not a GLOB reference".  An ordinary idiom; `run/switches.t` lost 7 rows to it.  Bisected by the round to s538a's place check (#3618).
+  2. **#5083 -- less heap headroom since s539a (MAIN-READY-94)**: HTTP-Message's zip-bomb file went 5 of 9 -> 0 rows at the 1 GB default and 9 -> 8 at 1.8 GB.  Same direction as the gate flake #4904 (one `Heap exhausted` row in a cold full gate).  The discriminating measurement is in the task (dynamic usage after a full GC at the first test row, MR-93 vs MR-94).
+  3. #5081 -- `select NAME` / `open(NAME, ...)` through a symbolic name creates no glob that `defined *{NAME}` sees.
+* Runner gaps it reported (not patched): `cpan-board.sh` cannot pass `--refresh-oracle`; `heavy.sh`'s exclusive-waiting marker misses an exclusive leg that has not got slot 1 yet; a batch's back-to-back benches starve waiting bounded legs (s541a: ~30 minutes).
+* RUNNING: s541a only.

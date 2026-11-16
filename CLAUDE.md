@@ -398,15 +398,15 @@ from the review rounds".
 
 **s542, 2026-11-16: main = MAIN-READY-98 `a3d00a12` (code `c5f618f2`,
 generation v2-15000; six batches merged in this session: s540c, s539a,
-s540d, s540e, s539c, s539b).**  Gate **379 files / 12,303 rows
+s540d, s540e, s539c, s539b; and the round s542r, baselines only).**  Gate **379 files / 12,303 rows
 `Result: PASS`** (s539b's gate on merged main's code; MAIN-READY-97 measured
 378 / 12,283 on main itself, also on a cold module cache); full sweep
 **TOTAL passing 18,803**, GATE clean; corpus-diff population 111 files;
 ir-conform 328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN
-board (round of s539, on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL /
-67 SKIP of 896 files, 109,797 ok / 1,740 not ok -- THE ROUND IS RUNNING
-(batch s542r, on MAIN-READY-95; the companion snapshot dates from
-MAIN-READY-63); PPI `pcl` = `66e690d2`; CI green on MAIN-READY-97.  Known
+board (round of s542, on MAIN-READY-95): 661 PASS / 144 PARTIAL / 24 FAIL /
+67 SKIP of 896 files, 109,714 ok / 1,225 not ok; the companion re-based in
+the same round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of 528; the
+full run 0 NEW / 0 FIXED / 0 LOST against the edited baselines); PPI `pcl` = `66e690d2`; CI green on MAIN-READY-97.  Known
 default-build limits flagged to the USER: `caller` file/line and `croak`
 location only under `PCL_OPT=line-track`; `DESTROY` runs at program exit
 only; a filehandle that leaves its opening block is written out before the

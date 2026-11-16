@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s541a (Opus agent, 2026-11-16) from the CPAN board's RUN-PHASE measurement (#4791; docs/cpan-runtime-comparison-s541.md, the per-file table baselines/board-runtime-s541.tsv, the instrument tools/board-timing.pl --run).  Code c1fe4930 (MAIN-READY-97); timings on a quiet box (heavy.sh bench, best of 3, load < 2), scratch in the s541a worktree scratch/s541a/.\n\nWHAT: scratch/s541a/dev/lvprobe.pl --\n  sub _sub :lvalue { my $x }  my $r = eval q{return 1; &_sub = 1};  print defined $r ? \"r=$r\\n\" : \"err: $@\";\nperl 5.40.3: r=1 (twice).  pcl (c1fe4930): err: PCL: Can't modify non-lvalue subroutine call in assignment at (eval 1) line 1.  In Class::Method::Modifiers (lib/Class/Method/Modifiers.pm line 214) the probe decides whether an installed modifier keeps the :lvalue attribute: under PCL a modifier on an lvalue sub loses it.  The failing probe is also one of #5062's per-run transpile misses.  Size: small (the `&name` call form as an lvalue when the sub is :lvalue -- or when it cannot be known at compile time, at run time as perl does).",
+   "id" : "5068",
+   "status" : "pending",
+   "subject" : "CORRECTNESS (edge): an assignment to a call of an :lvalue sub -- `&_sub = 1` -- is rejected at compile time (\"PCL: Can't modify non-lvalue subroutine call in assignment\"), perl compiles it; Class::Method::Modifiers's lvalue probe (`eval 'return 1; &_sub = 1'`) then answers \"not lvalue\" for an lvalue sub"
+}
