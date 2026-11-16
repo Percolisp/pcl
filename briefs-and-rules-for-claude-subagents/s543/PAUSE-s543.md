@@ -39,7 +39,7 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * **IN, rarer shapes (the remaining ~54, subjects only, not probed):** the `local` list / element family #508 #509 #510 #690 #1339 #1341 #2112 #2742 #5001; string-eval name resolution #1943 #2630 #4821; autovivification on read #1350 #1352; handles #1423 #2594 #4842 #4844 #5081; the rest one each.
 * NEXT for a freed slot: a VERIFICATION batch -- run every open silent-wrong task's own reproducer perl vs main, close with rows what passes, narrow what half-passes; its output is the true count for exit criterion 1.
 
-## 22:34 -- THE BOX WENT DOWN under both batches; 22:5x both RESUMED (`s543/resume-s543.md`)
+## 22:34 -- THE BOX WENT DOWN under both batches; 22:39 both RESUMED (`s543/resume-s543.md`)
 * Cause as far as the journal shows: the previous boot ends in `amdgpu` DMCUB display errors and a gnome-shell restart; no OOM kill, no thermal event.  Three bounded legs ran (s543a board-both + gate-set-scan, s543b Path-Tiny), 2 GB used of 12.
 * Intact: `git fsck` clean, main `05e9867f` unchanged, s543a at `cd04e308` (WIP 5, clean tree), s543b at `f014f5e2` (WIP 6/7) + an uncommitted 17-line member-7 draft, both STOP.md current to 22:31, the tasks both filed (5101 5102 5104 5105, 5120-5125, appends to #398 #1291) valid JSON.
 * **DAMAGED: the module cache.**  A crash leaves files with their FINAL name and NO content: a zero-size core (`pcl-5d366543-…core`), a zero-size extension fasl, ~40 zero-size `proto/*.json`.  Removed: every cache file written from 22:28 on, every zero-size one, and the sibling files of each removed entry (239 files, 23 stems).  The write-to-temp-then-rename in `docs/caching.md` protects against a RACE, not against a power loss (no fsync before the rename) -- worth a task if it recurs: a reader that finds a zero-size core / fasl / proto file should treat it as a miss.
@@ -47,9 +47,14 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * `HEAVY.holder*` cleared (stale text; the flocks died with their holders).  New rule for this sitting: at most TWO bounded legs per batch queued or running (s543a held two slots and a third leg while s543b's stood in the queue up to 20 minutes).
 * Resumed as two new Opus 5.5 / xhigh agents in the SAME worktrees (no new worktree); MODEL.txt gets a `resumed` line -- to check.
 
-## 23:5x -- THE TRIAGE, first pass DONE (all 927 open tasks, from their subjects)
+## 22:5x -- THE TRIAGE, first pass DONE (all 927 open tasks, from their subjects)
 * `tools/task-triage.pl`: **927 open -- in 634, out 120, tooling 115, decision 36, untriaged 22; IN and marked silent wrong 117** (an upper bound: see the 18 of 28 above).  Fields `triage` + `triage_reason` in each task file; the flat list is `s543/triage-s543.tsv` (id, class, reason).
-* **The 22 untriaged are the tasks the running batches own** (5100-5139 so far filed; #233 #398 #1240-closed #1291 #1361 #4790 #4792 #4794 #4795 #4796 #5005 #5021 #5082): their rows ARE in `triage-s543.tsv`; write them at each batch's merge (a write now could be lost under an agent's read-modify-write).  New tasks the batches file after 23:5x have no row yet.
+* **The 22 untriaged are the tasks the running batches own** (5100-5139 so far filed; #233 #398 #1240-closed #1291 #1361 #4790 #4792 #4794 #4795 #4796 #5005 #5021 #5082): their rows ARE in `triage-s543.tsv`; write them at each batch's merge (a write now could be lost under an agent's read-modify-write).  New tasks the batches file after 22:5x have no row yet.
 * Definitions used: `out` = outside the SUBSET (section 4, not-supported, XS, parked, board widening) or outside the CLAIM (speed, message text, warnings); `tooling` = runners, baselines, harness, instruments, structure; `decision` = the USER's (21 constructs proposed for section 4 + the standing questions).
 * Families worth ONE brief each (from the reasons column): the `local` family (#508 #509 #510 #540 #1190 #690 #1339 #1341 #2112 #2742 #5001 #574 #652 #1192 #1243 #1451 #3414 #3415 #2598); string-eval name resolution (#246 #1455 #1943 #1957 #2557 #2630 #4821); autovivification (#1350 #1352 #1353 #1663 #3720); tidy errors (#1427 #1595 #1970 #2108 #2109 #2556 #2597 #4786 #5002 #1746 #3062 #2956); exit status (#524 #2740 #285 #3522); heap / stack (#5083 #4904 #4643 #4322 #160 #424 #935 #1929 #2113); "verify, probably long fixed" (grep the reasons for `verify`: 40 tasks -- the verification batch takes them with the silent wrongs).
 * For the USER: the 36 `decision` tasks (`tools/task-triage.pl --list decision`).
+
+## 23:0x -- the NEXT brief is written, NOT launched: `s543/s543c-prompt.md` (the VERIFICATION batch)
+* 139 tasks (`s543/s543c-tasks.tsv`: the 117 IN + marked silent wrong and the 39 whose reason says `verify`, the running batches' tasks excluded); no `Pl/*.pm` / `cl/` / `lib/` change, guard rows + task edits only; task IDs 5140-5159; no generation.
+* Launch it when s543a or s543b is MERGE-READY (two subtasks at a time), in a NEW isolated worktree, Opus 5.5 / xhigh, MODEL.txt checked.
+* Both resumed agents wrote `resumed ... claude-opus-5-5` (checked 22:49).

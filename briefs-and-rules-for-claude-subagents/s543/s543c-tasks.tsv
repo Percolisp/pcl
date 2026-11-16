@@ -1,0 +1,139 @@
+72	-	verify	a sub return aliases the live cell box -- verify
+209	-	verify	substr as an lvalue on an element writes nothing -- verify
+246	silent	-	string eval: a lowercase bareword array subscript
+286	silent	-	rare: `f {$k, $v}` in term position (perl's intuit_curly)
+314	silent	-	hard-refusal families (LOUD): six left; each family judged on its own when scheduled
+328	silent	-	name resolution (`our` after `my`); LOUD today (a refusal) -- narrowing it needs the global-read form
+333	silent	-	rare: a method name before a fat comma
+336	silent	-	qw inside a sliced list
+396	silent	-	pos() on an element
+404	silent	-	rare: stacked filetests through parentheses
+405	silent	-	rare: `print $fh -3`
+415	silent	-	dropped statements (LOUD, counted in the census): nine odd rows
+422	silent	-	review-probe residues, each small (drops / a PPI lexer failure)
+460	silent	-	rare: a lexical sub named like a quote operator
+476	silent	-	rare: unary minus on a declared sub's call
+502	-	verify	`use English` -- verify, probably fixed by the shim
+508	silent	-	the `local` family: a bare local under a modifier
+509	silent	-	the `local` family: element / slice in a local list
+510	silent	-	the `local` family: `$!` in a local list
+513	-	verify	`open($fh, ">&", \*STDOUT)` -- verify
+531	-	verify	`STDOUT->autoflush(1)` -- verify, probably long fixed
+540	silent	-	the `local` family: a chained subscript target (one family with #1190)
+630	silent	-	a failed open on an already-open handle leaves the old handle readable
+634	-	verify	IO::Handle methods on a lexical filehandle -- verify, probably fixed
+650	silent	-	rare: a diamond glob pattern with whitespace
+653	silent	-	rare: punctuation containers (`%/`, `@:` ...)
+683	silent	-	did not reproduce on one shape (s543 first pass) -- run its own reproducer, close with rows or narrow
+690	silent	-	the `local` family: a range slice target
+691	silent	-	a deref inside an s/// replacement writes the empty string
+692	silent	-	nested case shifts in interpolation
+750	silent	-	a dereferenced array in a list-assignment LHS is not greedy
+751	-	verify	`sub f { my ($x) = @_ }` returns nothing -- verify
+780	-	verify	unlink / chmod / utime / kill given an array -- verify
+960	silent	-	overload's binary refusal + substr's target as a place (LOUD)
+971	silent	verify	did not reproduce on one shape -- verify
+988	silent	-	a nested aggregate in a returned list in argument position
+1002	silent	-	join() flattens a reference argument
+1003	-	verify	the same box interpolated twice adjacently -- verify
+1008	silent	-	rare: `do { $lexical }` as an lvalue alias
+1029	silent	-	%SIG handler name not qualified
+1030	silent	-	`$ENV{X} = undef`
+1039	silent	-	an array in string context prints ARRAY(0x1) -- ordinary code, first candidate
+1040	silent	-	a numeric-looking string in a bitwise op
+1059	silent	verify	did not reproduce on one shape -- verify; still listed in STATUS.md
+1185	-	verify	JSON::PP encodes an integer as a string -- verify, probably long fixed
+1186	-	verify	Text::Wrap::wrap dies -- verify, probably long fixed
+1190	silent	-	the `local` family: a nested element (one family with #540)
+1285	silent	-	rare: a declared sub with no prototype followed by a block
+1339	silent	-	the `local` family: a parenthesised subscripted target
+1341	silent	-	the `local` family: a subscripted symbolic deref
+1349	silent	verify	did not reproduce on one shape -- verify
+1350	silent	-	autovivification on a single-level deref read
+1352	silent	-	autovivification of a slice root
+1369	-	verify	IV vs NV printing of an integral result -- verify
+1419	silent	verify	did not reproduce on one shape -- verify
+1420	silent	verify	did not reproduce on one shape -- verify
+1422	-	verify	`open(FH, "-|", LIST)` -- verify
+1423	silent	-	a typeglob's package dropped when resolved as a handle
+1425	silent	verify	did not reproduce on one shape -- verify
+1428	-	verify	a dirhandle reads as an array -- s543b member 1 (#5082) changes this: verify and close
+1440	silent	-	rare: a kv-array slice's key half
+1474	silent	-	rare: sprintf `%+vd`
+1483	silent	-	rare: a tied `$_` (scalar tie is IN)
+1494	silent	-	`\N{NAME}` not implemented
+1574	-	verify	Socket does not export AF_UNIX (one task with #1615) -- verify
+1578	-	verify	op/hash.t and Hash::Util -- the shim ships now: verify and close
+1580	silent	-	PPI lexer: a dereference as the foreach variable (LOUD; the PPI branch)
+1609	silent	verify	did not reproduce on one shape -- verify
+1617	-	verify	File::Copy cannot be loaded -- verify, probably long fixed
+1655	-	verify	`$| = 1;` desyncs the free-global scan -- verify
+1766	-	verify	`^` under /m matches once more at the end -- verify
+1848	silent	-	rare: `%+` with duplicate group names
+1943	silent	-	string eval: the last expression's context
+1955	silent	-	a foreach list holding a sub call that returns a reference is flattened -- ordinary code, first candidate
+1956	silent	verify	did not reproduce on one shape -- verify
+2003	silent	verify	did not reproduce on one shape -- verify
+2006	silent	-	implicit filehandle close (re-open flushes the old stream; the scope-exit half is section 4 OUT)
+2011	-	verify	HTTP::Tiny: IO::Handle::blocking -- verify
+2012	-	verify	File::Temp tempdir(CLEANUP => 1) without a template -- verify
+2030	silent	-	an aggregate leaf ignores its scalar context (`sprintf(@arr)`)
+2091	silent	verify	did not reproduce on one shape -- verify
+2105	-	verify	a module that sets up Exporter inside BEGIN crashes at load -- verify
+2112	silent	-	the `local` family: a local embedded in an expression statement is never restored
+2195	silent	-	LOUD, rare: an embedded `my` in a sub
+2260	silent	-	a die from a signal handler during a blocking read is swallowed (matters for services)
+2440	silent	-	Unicode classes `\d \s \w` on wide strings
+2500	silent	-	a qr// interpolated into a /x pattern takes the outer /x
+2540	silent	verify	did not reproduce on one shape (PPI group AZ) -- verify
+2555	silent	-	system() / qx// do not inherit STDIN
+2557	silent	-	string eval name resolution: a caller's `our` alias across a package switch
+2560	silent	-	Math::BigRat fraction strings (bigrat is a shipped module)
+2594	silent	-	close() on a pipe: a child killed by a signal
+2596	silent	-	chomp / chop on an object with overloaded ""
+2630	silent	-	string eval name resolution across a package switch
+2742	silent	-	the `local` family: a scalar local as a sub's last statement
+2760	silent	verify	did not reproduce on one shape -- verify
+2765	silent	-	evaluation order in a compound assignment
+2766	silent	-	a list slice as a sub's return value in scalar context
+2768	silent	verify	did not reproduce on one shape -- verify
+2774	silent	-	a regex after a word, cut by PPI at `;` / `#` (the PPI branch)
+2779	silent	-	rare: a replaced built-in gets the built-in's argument count
+2780	silent	verify	did not reproduce on one shape -- verify
+2781	silent	-	`our $x; my $x; sub f { $x }` reads the package variable
+3082	silent	-	rare: a reblessed qr// loses its class when copied
+3100	silent	-	a single-index slice of an empty list
+3101	silent	-	`defined &main::NAME` of an imported sub
+3102	silent	-	a chained `my $S = my $F = 0` under the package-switch requalify pass
+3182	silent	-	rare: a declared sub in print's handle slot
+3260	silent	-	`use File::stat` does not displace stat / lstat
+3415	silent	-	the `local` family: multi-level chain + postfix slice (one family with #540 #1190)
+3450	silent	-	a one-index list slice of an empty list (one family with #3100: merge)
+3451	silent	-	`utime` on a filehandle
+3490	silent	-	an expression-embedded `my` visible later in its own statement
+3610	silent	verify	did not reproduce on one shape -- verify
+3616	silent	-	Text-CSV encoding-layer rows that are not the UTF-8 flag
+3635	silent	-	rare: an interpolated stash element
+3675	silent	-	a reference assigned into a blessed scalar reports the referent's class
+3695	silent	-	`keys %Pkg::` lists lexicals (Class-Inspector-style stash reads are IN)
+3720	silent	-	autovivification: keys / values / each of a missing element (family #1350 #1352)
+3827	silent	verify	did not reproduce on one shape -- verify
+3880	silent	-	overload with fallback unset: perl dies, PCL continues
+4302	silent	verify	did not reproduce on one shape (s539c keep_line_endings) -- verify and close
+4522	silent	-	an inherited overload resolved breadth-first, not by MRO
+4582	silent	-	File::Spec shim: a subclass invocant is not shifted
+4702	silent	-	rare: `*` after a list-operator sub starts a glob argument
+4742	silent	-	rare: `\((@b)[7])` grows the array
+4803	silent	-	a tied scalar holding a reference loses it when returned
+4805	silent	-	`push @n, @n, @n` reads the array it is growing
+4821	silent	-	string eval name resolution: a `state` variable outside a named sub's own statement
+4841	silent	-	rare: a %! slice read after the block's `local $!` is restored
+4842	silent	-	a handle slot given a non-handle reference
+4843	silent	-	`%_` is per package (Text::CSV_PP uses it)
+4844	silent	-	a handle named with a leading `::` in a read slot
+4846	silent	-	`<>` after @ARGV is exhausted does not fall back to STDIN
+4887	silent	-	`BEGIN { use_ok('constant', ...) }` does not declare the constant for the parse
+4901	silent	-	rare: `x<digits>` after a handle or list-operator word
+4941	silent	-	caller's package inside `sub K::m` written in main
+5001	silent	-	the `local` family: `delete local` inside an expression
+5081	silent	-	`select NAME` / `open(NAME)` through a symbolic name do not create the glob
