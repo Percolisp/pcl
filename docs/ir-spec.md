@@ -1299,6 +1299,19 @@ Two consequences a consumer must know:
   the glob named `Pkg::` in main / `B::` in A, and a name the lowering cannot
   read is refused, never guessed.  (Localizing a stash glob does not alias the
   stash today: #4444.)
+- **`local` takes ONE term (normative, s543b / #5005).**  `local` binds
+  tighter than the comma (perly.y `local term`): `local $a, $b` localizes `$a`
+  alone and evaluates `$b`; `local $x = 1, $y = 2` localizes `$x` alone.  The
+  comma's right operand is an ordinary expression run INSIDE the new scope,
+  after the localization, and as a valued block's last statement it is the
+  value by context: LIST = `TERM, TAIL`, scalar / void = TAIL in scalar
+  context.  A parenthesised list `local ($a, $b)` is one term.  The split is
+  the statement's own comma, never a parenless list operator's (`local $x =
+  join ",", @a`); under a statement modifier, and before a second `local`,
+  the whole list stays the operand (residue).  Example: `my $s = do { local
+  $/, <$fh> }` is the whole file -- `(let (($/ (make-p-box nil))) (if (eq
+  *wantarray* t) (p-flatten-args (list |$/| (p-list-ctx (p-readline $fh))))
+  (p-scalar-ctx (p-readline $fh))))`.
 
 **Exception set** — names that keep `defvar` and the dynamic `let`, decided
 by name alone (`Pl::GlobalPartition`, the one authority both emitters ask):

@@ -286,7 +286,28 @@ sub local_shape {
     splice(@parts, $i);
     last;
   }
-  my %r = (parts => \@parts, mod => $mod, cond => $cond, assign => $assign ? 1 : 0);
+  # `local` binds TIGHTER than the comma (perly.y's `local term`): `local $a,
+  # $b` is `(local $a), $b` and `do { local $/, <$fh> }` reads the file -- the
+  # comma's right operand is an ordinary expression evaluated INSIDE the new
+  # scope, and the statement's value when it ends a valued block (#5005: every
+  # plan below took the whole comma list, localizing `$b` and silently dropping
+  # `<$fh>`).  The split is the statement's own comma, never a parenless list
+  # operator's (TokenUtils::lowprec_split_safe), and never under a modifier,
+  # whose condition must also govern the tail, nor before a second `local`
+  # (`local $x, local $y`: the items reading localizes both, as perl does) --
+  # those two stay as they were.
+  my ($tail_op, $tail);
+  if ($mod eq '') {
+    my $lp = Pl::PExpr::TokenUtils::lowprec_idx(\@parts, 1);
+    if (defined $lp && $parts[$lp]->content =~ /^(?:,|=>)$/ && $lp < $#parts
+        && !grep({ ref($_) eq 'PPI::Token::Word' && $_->content eq 'local' } @parts[$lp + 1 .. $#parts])
+        && Pl::PExpr::TokenUtils::lowprec_split_safe(\@parts, 0, $lp)) {
+      ($tail_op, $tail) = ($parts[$lp], [@parts[$lp + 1 .. $#parts]]);
+      splice(@parts, $lp);
+    }
+  }
+  my %r = (parts => \@parts, mod => $mod, cond => $cond, assign => $assign ? 1 : 0,
+           tail_op => $tail_op, tail => $tail);
   return { %r, lk => 'loopmod' } if $mod ne '' && $mod !~ /^(?:if|unless)$/;
   my @nonws = grep {
     my $x = ref $_;

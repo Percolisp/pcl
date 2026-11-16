@@ -461,6 +461,27 @@ sub _core_slots {
   return $CORE_SLOTS{$name} = [\@slots, $slurpy];
 }
 
+# Does core builtin NAME take AT MOST ONE argument -- a named unary or nullary
+# operator, which binds tighter than the comma and so can never swallow one
+# (`shift, ...` `lc $x, ...` `time, ...`)?  Asked of the running perl's
+# prototype("CORE::NAME"): one slot or none and no slurpy tail.  A keyword with
+# no prototype (`print`, `defined`, `sort`) or that is no keyword says NO --
+# the conservative answer (#5005, TokenUtils::lowprec_split_safe).
+my %CORE_ONE_ARG;
+sub core_takes_one_arg {
+  my $name = shift;
+  return 0 if !defined $name || !length $name;
+  return $CORE_ONE_ARG{$name} if exists $CORE_ONE_ARG{$name};
+  # `not` (prototype `$;`) binds LOOSER than the comma: `not $a, $b` is
+  # not($a, $b).
+  return $CORE_ONE_ARG{$name} = 0 if $name eq 'not' || !is_core_keyword($name);
+  my $p = eval { prototype("CORE::$name") };
+  return $CORE_ONE_ARG{$name} = 0 if !defined $p;
+  return $CORE_ONE_ARG{$name} = 1 if $p eq '';
+  my $rec = _core_slots($name);
+  return $CORE_ONE_ARG{$name} = ($rec && !defined $rec->[1] && @{ $rec->[0] } <= 1) ? 1 : 0;
+}
+
 # 'LIST' | 'SCALAR' | undef (= inherit the caller's context), for ARGUMENT
 # index $idx (0-based) of core builtin $name.
 sub core_arg_context {

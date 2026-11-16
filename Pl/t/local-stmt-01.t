@@ -34,7 +34,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 18;
 
 my $fixture = <<'PL';
 no strict 'refs';
@@ -107,6 +107,50 @@ line_is(10, 'L2|K|1 2', 'restored per iteration through next');
 line_is(11, 'S|K|1 2', 'local in a string eval');
 line_is(12, 'x0|K|1 2', '...restored after it');
 line_is(16, '5 3 9 2 4 x0', '#4443: a block whose last statement is a local takes its value');
+
+# -- #5005 (s543b): `local` binds TIGHTER than the comma ------------------------
+# `local $a, $b` is `(local $a), $b`; `do { local $/, <$fh> }` reads the whole
+# file (the readline was DROPPED: undef); the tail runs inside the new scope
+# and is the statement's value by context; a parenthesised list, an
+# initializer that is a list operator's (`join ",", @a`), a slice `(1, 2)[1]`
+# and `local $x, local $y` keep their readings.  The oracle is perl itself.
+# INVERSE: main c5f618f2 differs on rows 1 2 3 6 7 11 13 (and drops row 16's
+# statement at compile time).
+{
+  my $prog = <<'PL';
+no strict; no warnings;
+my $f = "/tmp/pcl-local-comma-$$.txt"; open my $w, ">", $f or die; print $w "abc\ndef\n"; close $w;
+our ($a1, $b1, $x, $y, @a, @b, %h, $p, $q);
+sub show { join " ", map { defined $_ ? $_ : "u" } @_ }
+{ open my $h, "<", $f or die; my $r = do { local $/, <$h> }; print "1 [", ($r =~ s/\n/|/gr), "]\n"; }
+{ open my $h, "<", $f or die; my @r = do { local $/, <$h> }; print "2 ", scalar(@r), " [", join(",", map { defined $_ ? s/\n/|/gr : "u" } @r), "]\n"; }
+{ ($a1, $b1) = (1, 2); sub f3 { local $a1, $b1; $a1 = 5; $b1 = 6 } f3(); print "3 ", show($a1, $b1), "\n"; }
+{ ($x, $y) = (10, 20); sub f4 { local $x = 1, $y = 2; "in:$x,$y" } my $r = f4(); print "4 $r out:", show($x, $y), "\n"; }
+{ %h = (a => 1, b => 2); sub f5 { local $h{a}, $h{b}; $h{a} = 9; $h{b} = 8 } f5(); print "5 ", show($h{a}, $h{b}), "\n"; }
+{ @a = (1); @b = (2); sub f6 { local @a, @b; push @a, 7; push @b, 8 } f6(); print "6 [@a] [@b]\n"; }
+{ ($p, $q) = (3, 4); sub f8 { local ($p, $q); $p = 7; $q = 8 } f8(); print "8 ", show($p, $q), "\n"; }
+{ $x = 10; sub f9 { local $x = (1, 2)[1]; $x } print "9 ", f9(), " ", $x, "\n"; }
+{ open my $h, "<", $f or die; local $/ = undef, my $t = <$h>; print "10 [", ($t =~ s/\n/|/gr), "]\n"; }
+{ $x = 1; $y = 2; sub f11 { local $x, $y } my @r = f11(); my $s = f11(); print "11 ", scalar(@r), " [", show(@r), "] [", show($s), "]\n"; }
+{ sub f13 { local $_ = shift, return "r:$_"; "notreached" } print "13 ", f13("v"), "\n"; }
+{ @a = (1, 2, 3); sub f14 { local $x = join ",", @a; $x } print "14 ", f14(), "\n"; }
+{ sub f15 { local $x, local $y; $x = 3; $y = 4; } ($x, $y) = (1, 2); f15(); print "15 ", show($x, $y), "\n"; }
+{ my @log; sub lg { push @log, @_; scalar @log } sub f16 { local $x, lg("t") } f16(); print "16 [@log]\n"; }
+unlink $f;
+PL
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $fh $prog;
+  close $fh;
+  my $want = `$^X $pl_file 2>&1`;
+  my $cl_code = `$pl2cl $pl_file 2>/dev/null`;
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+  print $cl_fh $cl_code;
+  close $cl_fh;
+  my $o = `sbcl @sbcl_rt --load $cl_file 2>&1`;
+  $o =~ s/^;.*\n//gm;
+  $o =~ s/^PCL Runtime loaded\n//gm;
+  is($o, $want, '#5005: `local` takes ONE term; the comma tail runs in the new scope and is the value by context');
+}
 
 # -- shape: the statement is a tree ---------------------------------------------
 my ($sfh, $shape_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);

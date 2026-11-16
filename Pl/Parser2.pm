@@ -14608,10 +14608,35 @@ sub _lower_local {
   }
   $self->_seam_note_local($stmt, $rec) if _seam_census();
   my @rest_forms = $self->_lower_block($rest, $vi, $tail_ctx);
-  # The LAST statement of a block whose value is used: its value is the
-  # localized target's (perl: `sub f { local $x = 5 }` returns 5; task #4443).
-  push @rest_forms, $plan->{value}
-    if !@rest_forms && defined $tail_ctx && defined $plan->{value};
+  my $valued = !@rest_forms && defined $tail_ctx;
+  if ($rec->{tail}) {
+    # `local TERM, TAIL` (#5005, Pl::Stmt::local_shape): TAIL runs inside the
+    # new scope, after the localization.  As a valued block's last statement
+    # the value is the comma operator's, by the block's context: in LIST
+    # context `TERM, TAIL` (TERM = the localized target, its initializer
+    # already run -- `my @r = do { local $/, <$fh> }` is (undef, TEXT)), in
+    # scalar (and void) context TAIL in SCALAR context (`my $s = do { local
+    # $/, <$fh> }` is the whole file).  The two are lowered apart, not as one inherit
+    # comma list: that lowering reads its last element in LIST context in
+    # both branches (#5125).
+    my @tail = @{ $rec->{tail} };
+    my $form;
+    if ($valued) {
+      my @head = @{ $rec->{parts} }[1 .. $#{ $rec->{parts} }];
+      my ($eq) = grep { ref($head[$_]) eq 'PPI::Token::Operator' && $head[$_]->content eq '=' } 0 .. $#head;
+      splice(@head, $eq) if defined $eq;
+      $form = ['if', ['eq', '*wantarray*', 't'],
+               $self->_lower_expr([@head, $rec->{tail_op}, @tail], $stmt, 1),
+               $self->_lower_expr(\@tail, $stmt)];
+    } else {
+      $form = $self->_lower_expr(\@tail, $stmt);
+    }
+    push @{ $plan->{inner} }, $form;
+  } elsif ($valued && defined $plan->{value}) {
+    # The LAST statement of a block whose value is used: its value is the
+    # localized target's (perl: `sub f { local $x = 5 }` returns 5; task #4443).
+    push @rest_forms, $plan->{value};
+  }
   return _local_nest($plan, \@rest_forms);
 }
 
@@ -14635,6 +14660,8 @@ sub local_stmt_text_for_v1 {
                       "PCL internal: a `local` open is not a list form: $t\n"; $t }
               @{ $plan->{opens} };
   push @lines, map { Pl::CLForm::to_flat($_) } @{ $plan->{inner} };
+  # `local TERM, TAIL` (#5005): the tail runs inside the new scope here too.
+  push @lines, Pl::CLForm::to_flat($self->_lower_expr($rec->{tail}, $stmt)) if $rec->{tail};
   return (\@lines, scalar @{ $plan->{opens} });
 }
 
@@ -15062,7 +15089,7 @@ sub _local_plan_items {
     my $m = ($v0 eq '$.' || $v0 eq '|$.|') ? 'p-local-dot' : 'p-local-pipe';
     return { opens => [_local_open([$m], $test)], inner => [] };
   }
-  my %st = (bindings => [], let_star => 0, tail => undef,
+  my %st = (bindings => [], let_star => 0,
             ctmp => ($mod ne '' ? $self->_local_tmp('pcl-local-cond-') : undef));
   if ($init_idx >= 0 && $solo) {
     $self->_local_solo_binding(\%st, $items[0], [@$parts[$init_idx + 1 .. $#$parts]], $mod, $stmt);
@@ -15086,7 +15113,7 @@ sub _local_plan_items {
   }
   push @opens, _local_open([$_->{macro}, $_->{cl}], $st{ctmp}) for grep { $_->{kind} eq 'deref' } @items;
   push @opens, _local_glob_opens(\@items, $rhs_tmp, $st{ctmp});
-  my @inner = defined $st{tail} ? ($st{tail}) : ();
+  my @inner;
   if ($rhs_tmp) {
     push @inner, _local_list_assign(\@items, $rhs_tmp, $mod ne '' ? $st{ctmp} : undef)
       if grep { $_->{kind} ne 'glob' } @items;
@@ -15139,14 +15166,9 @@ sub _local_our_decls {
 # the scope (#138: `=` binds tighter than `,`).
 sub _local_solo_binding {
   my ($self, $st, $item, $rhs, $mod, $stmt) = @_;
+  # (A comma TAIL after the initializer -- `local $x = 1, $y = 2` -- was split
+  # off by Pl::Stmt::local_shape for every `local` kind, #5005.)
   my @rhs = @$rhs;
-  my $lp = $mod ne '' ? undef : Pl::PExpr::TokenUtils::lowprec_idx(\@rhs, 0);
-  if (defined $lp && Pl::PExpr::TokenUtils::lowprec_split_safe(\@rhs, 0, $lp)
-      && $rhs[$lp]->content =~ /^(?:,|=>)$/) {
-    my @tail = @rhs[$lp + 1 .. $#rhs];
-    splice(@rhs, $lp);
-    $st->{tail} = $self->_lower_expr(\@tail, $stmt) if @tail;
-  }
   my $var = $item->{cl};
   my $sigil = _local_sigil($var);
   my $init = $self->_lower_expr(\@rhs, $stmt, ($sigil eq '@' || $sigil eq '%') ? 1 : undef);

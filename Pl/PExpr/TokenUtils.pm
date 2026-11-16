@@ -11,6 +11,7 @@ use warnings;
 
 use Moo;
 use Scalar::Util ();
+use Pl::PExpr::Config ();
 
 sub is_atomic {
   my $self      = shift;
@@ -247,12 +248,21 @@ sub lowprec_idx {
 # split is declined.  A caller that can hand the WHOLE run to the expression
 # parser should do that instead of splitting -- PExpr owns the ambiguity, and
 # only a caller that must interpose code between head and tail needs to split.
+#
+# Two kinds of bare Word provably eat NO comma, so they do not decline (#5005,
+# `local $_ = shift, return;`): a DECLARATOR (`my` `our` `local` `state` -- a
+# term-taking keyword, never a list operator) and a core builtin whose CORE
+# prototype takes at most ONE argument (`shift` `pop` `lc` `ref` `time` ...,
+# perl's named unary and nullary operators bind tighter than the comma; asked
+# of the running perl, `Pl::PExpr::Config::core_takes_one_arg`).
 sub lowprec_split_safe {
   my ($toks, $from, $idx) = @_;
   return 1 if $toks->[$idx]->content =~ /^(?:or|and|xor)$/;
   for my $i ($from .. $idx - 1) {
     my $t = $toks->[$i];
     next unless $t->isa('PPI::Token::Word');
+    next if $t->content =~ /\A(?:my|our|local|state)\z/;
+    next if Pl::PExpr::Config::core_takes_one_arg($t->content);
     my $nx = $toks->[$i + 1];
     return 0 unless $nx && $nx->isa('PPI::Structure::List');
   }
