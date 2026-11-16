@@ -58,3 +58,8 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * 139 tasks (`s543/s543c-tasks.tsv`: the 117 IN + marked silent wrong and the 39 whose reason says `verify`, the running batches' tasks excluded); no `Pl/*.pm` / `cl/` / `lib/` change, guard rows + task edits only; task IDs 5140-5159; no generation.
 * Launch it when s543a or s543b is MERGE-READY (two subtasks at a time), in a NEW isolated worktree, Opus 5.5 / xhigh, MODEL.txt checked.
 * Both resumed agents wrote `resumed ... claude-opus-5-5` (checked 22:49).
+
+## 23:3x -- SESSION ENDED by the USER; both batches STOPPED ON ORDER at clean checkpoints -> `s543/resume-after-stop.md`
+* s543a `bd8c819d` (13 commits, clean): every bounded bar met; owed the three exclusive timing legs, the cost numbers, everyday `--record`, MERGE-READY.
+* s543b `f99be16c` (14 commits, clean): seven members + two own regressions fixed, sweep / ir-conform / gate-set scan / A-B taken on the final code; owed artifacts re-run, companion before/after, everyday, inverse, the full gate, MERGE-READY.
+* Gate on main 379 / 12,303 PASS (22:54); the record commits pushed.  s543c written, not launched.  Nothing runs.
