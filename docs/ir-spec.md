@@ -1475,8 +1475,27 @@ seam, and every analysis pass see the new name with no further plumbing.
 Numbering comes from per-file counters iterated in **sorted order** —
 hash-order iteration once made the numbering nondeterministic per process,
 churning the module cache. Every rename preserves one Perl visibility
-rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
-(`_rename_decl_within` skips tokens inside the declaration statement).
+rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`.
+
+**A declaration's rename rewrites EXACTLY its binding's uses** (normative,
+s539b, 1c port 4): the declarator token takes the new name and so does
+every use `Pl::Binder::uses_of` records for that binding -- perl's pad,
+positional (`Pl::Parser2::_rename_binding`; the state cells, the exception
+partition, the re-read and the seam shadows).  So the declaring statement
+reads the outer variable, a nested or a later same-name declaration keeps
+its own uses (#296-B2), a loop or condition head's `my` covers its whole
+compound and a foreach list runs outside it (#297), and a use is rewritten
+as it is spelled: a Symbol keeps its access sigil, `$#x`, the name inside
+a `${x}` brace, interpolated text (a scalar deref with a subscript,
+`"$$x[0]"`, is the scalar's use, #4921; a whole hash in an interpolation's
+CODE, `"@{[ %h ]}"`, is the hash's, #4822), a one-token signature's default.
+A use the rewrite cannot reach, or a scope the binder does not hold whole,
+is a compile-time die (rule 12) -- never a use left on the old name.  The
+span pass and the capture promoter rename the DECLARATOR alone and rewrite
+the uses themselves (qualified in a later section, §2b.4).  Example:
+`my $a = [1, 2]; { my $a = 'x'; } print "$$a[1]"` prints `2` --
+`$a__excl__0` in both of the outer binding's places, the inner block's own
+`$a__excl__1`.
 
 | symbol shape | family | meaning |
 |---|---|---|
@@ -1505,8 +1524,11 @@ The suffixes matter only for mapping output back to source (strip
 
 ### 2b.4 The guard rails (when renaming refuses)
 
-Renaming by token rewrite is only sound when the token walk can *reach
-every use*. Each pass checks blockers (`_shadow_rename_blocker`,
+Renaming by token rewrite is only sound when the rewrite can *reach
+every use* (since 1c port 4 the binder names every use of the binding,
+§2b.3; several blockers below date from the region walk and refuse shapes
+it could not reach -- #4922 lists the ones the binder made unnecessary).
+Each pass checks blockers (`_shadow_rename_blocker`,
 `_scan_lex_facts` disqualifiers) and, on any hit, refuses the file with
 a hard `Parser2 TODO:` error rather than renaming unsoundly (before the
 E4.1 flip these conditions gated the file to the v1 pipeline; v1 is

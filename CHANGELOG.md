@@ -5,6 +5,18 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-11-16: **Interpolation reads the right variable after the compiler
+  renames one** (#4921, #4822, #4923).  `"${a}[0]"` and `"${a}{"` read `$a`
+  followed by the text, as perl does (perl's own `t/comp/parser.t` checks
+  it), `"$$a[1]"` and `"@$a[0,1]"` read the array `$a` refers to, and
+  `"@{[ %h ]}"` / `"@{[ scalar(keys %h) ]}"` read the hash -- also where the
+  compiler gives the variable a private name (a `my $a` / `my $b`, a `state`
+  variable, a lexical a named sub uses or a later `package` reads); before,
+  these read an empty variable or stopped the transpile.  A signature
+  default written on the line of its `use feature` (`sub f ($x = $a)`) reads
+  the `my $a` in scope.  Inside, every such rename now asks the binding table
+  for exactly the declaration's uses (the parser program's fourth binder
+  port).
 - 2026-11-15: **A sub named `x3` after `print`, a hash first in a list, and
   the CRs of a program** (#4784, #3555, #4761).  `print x64()`,
   `return x3()`, `print STDOUT x3()` and `print $fh x3()` call the sub named

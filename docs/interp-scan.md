@@ -97,6 +97,13 @@ probe-and-guard (fix) or by clamping to the event subset it consumes today.
    dies "Global symbol $m": braces close the reference, the SCALAR is read,
    `[0]` is literal.  A rename of `$x` must rewrite `${x}[`; a rename of
    `@x` must NOT.  Fixed for free when the fixer becomes a name_span splice.
+   **CLOSED s539b (#4921)** without the splice: the braced arms take no
+   subscript lookahead and belong to the sigil they spell (`${x}` -> $x,
+   `@{x}` -> @x); found by 1c port 4, whose binder (this scanner) held the
+   `"${a}{"` uses of t/comp/parser.t that the fixer could not reach.  The
+   same batch: a scalar deref with a subscript (`"$$x[0]"`) is $x's, and a
+   whole `%h` in an interpolation's CODE is a use (#4822) -- the code spans
+   are ONE reading, `Pl::InterpScan::code_spans`.
 3. **`$$r[0]` / `@$r[0]` / `$#$r`** — perl chains/derefs
    (`$r->[0]` / slice); StringInterpolation stopped after the name, leaving
    `[0]` literal.  Probed: dq `"$$ar[0]"` prints the element.

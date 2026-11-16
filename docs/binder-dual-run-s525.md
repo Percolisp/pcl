@@ -10,7 +10,9 @@ block-package requalifier reads it; the `binding_at` hook is gone and
 `PCL_BINDER_CHECK` arms the two remaining hooks only.  Since s535a (1c port
 3, §6 item 3) NO dual-run hook is left: the span pass and every rename pass's
 shadow test read the binder, and `PCL_BINDER_CHECK=log` logs only the
-measurement rows (S build / R rebuild / C query counts / E errors).**
+measurement rows (S build / R rebuild / C query counts / E errors).  Since
+s539b (1c port 4, §6 item 4) every declaration rename renames exactly the
+binding's uses, and the region walk `_rename_decl_within` is gone.**
 
 | file | what it is |
 |---|---|
@@ -311,6 +313,31 @@ tree).
    pass's three silent wrongs: an exception-partition name never takes the
    identity cell (#4547), a LIST declaration's container is offered (#4543),
    a one-token signature default is renamed in the token text (#4545).
+   **DONE (s539b, the commits "s539b D0" .. "s539b D1", 2026-11-16;
+   generation v2-15000).**  A declaration's rename is the declarator +
+   exactly `uses_of(decl_binding($sym))`, each use rewritten as spelled
+   (`Parser2::_rename_binding`); rule 12 on an unreachable use, a scope the
+   table does not hold whole (`Binder::holds`) or no binding.  The state
+   prepass renames every site before it rewrites any declaration; the
+   exception / re-read scope is the binding's `scope_node`; the
+   self-reading initializer asks `Binder::reads_outside`.  The span pass
+   and the promoter called the walk with the declaring statement as ROOT --
+   it renamed the declarator alone there; they set its content now.  No
+   second dual-run hook was needed: D0 logged, inside the walk, the tokens
+   it renamed next to the binder's set for every call (1,922 calls over
+   3,311 files) and compared the emission switch on vs off -- ONE file
+   differed, t/comp/parser.t, where the binder held uses (`"${a}{"`, perl
+   #20716) the old fixer could not reach (#4921, fixed beside the port).
+   The walk could only DROP uses the binder holds, never add one: port 3
+   had already made its shadow test the binder's.  Deleted:
+   `_rename_decl_within`, `_redecl_region`, `_lexical_decl_scope`,
+   `_is_decl_list`, `_init_reads_scalar`'s scan and nested-block walk.
+   STAY (other callers, so not retired as this item guessed):
+   `_enclosing_sub_body` (`_embedded_my_let`), `_lexsub_scope` (the
+   lexical-sub renames, which run before the build point).  Found: #4923
+   (a renamed one-token signature lost its other defaults' uses at the
+   binder's re-read -- fixed, `_proto_default_refs`), #4922 (the blockers
+   the walk needed, kept).
 5. Not identity (stay): `_scan_eval_site_features` (:189),
    `_rewrite_unreachable_gotos` (:261), `_classify_nested_gotos` (:307),
    `_ancestors` (:654), `_premerge_glob_const_prototypes` (:1150),
