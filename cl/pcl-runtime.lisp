@@ -19751,9 +19751,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    is `(eval N)`; the emitted text's own (p-line …) supplies the line) and
    restored on the way out by p-loc-save.  N counts eval EXECUTIONS, which is
    what perl counts (it compiles per execution); PCL caches the transpile, so
-   the number is perl's counting of a thing PCL does not repeat."
+   the number is perl's counting of a thing PCL does not repeat.
+   The LINE starts at 0, \"not recorded\" (s543a): until the eval's first
+   statement writes its own, the register would otherwise still hold the
+   CALLER's line, and an error raised before any of the eval's code runs -- a
+   transpile refusal or drop, which %p-eval-1 turns into $@ -- read
+   `(eval N) line <the caller's line>`, a wrong positive line.  With 0 it
+   reads `(eval N) line 1`, %p-eval-1's guess for that case."
   (p-loc-save
-   (setq *p-src-file-id* (- (incf *p-eval-counter*)))
+   (setq *p-src-file-id* (- (incf *p-eval-counter*))
+         *p-src-line* 0)
    (%p-eval-1 string lex-alist features)))
 
 (defun %p-eval-1 (string lex-alist features)

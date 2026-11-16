@@ -3793,7 +3793,11 @@ load (`p-load-module-cached`).
 
 A string eval has no file: perl calls it `(eval N)` and numbers lines within
 the eval'd text.  `p-eval` sets the file register to that on the way in and the
-emitted text's own `(p-line …)` forms supply the line.
+emitted text's own `(p-line …)` forms supply the line.  The line register
+starts at 0, "not recorded" (s543a): an error raised before the eval's first
+statement runs -- a transpile refusal or drop, which becomes `$@` -- must not
+read the CALLER's line under the eval's name; it reads `(eval N) line 1`, the
+guess for an eval PCL could not compile (perl: the line of the syntax error).
 
 **A backend implementing this IR needs a per-statement line write, a
 per-file/per-sub-body file write, and a save/restore at those five scopes.**

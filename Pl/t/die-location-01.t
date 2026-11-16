@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub write_pl {
     my ($code) = @_;
@@ -175,6 +175,25 @@ sub w { my @c = caller; $c[1] }
 BEGIN { my $f = w(); print "begin ", ($f =~ /Basename/ ? "BAD[$f]" : "ok"), "\n" }
 PL
    'a caller() in a BEGIN block does not name a module loaded before it');
+
+# ── 5d. An error raised BEFORE an eval's own code runs -- a transpile-time
+# refusal (here `given', ruled out) or drop, which p-eval turns into $@ -- is
+# located in the eval, never at the CALLER's line (s543a: p-eval starts the
+# line register at 0; with line tracking on it still held the caller's line,
+# 4 here).  perl: `syntax error at (eval 1) line 3'; PCL keeps its line-1
+# guess for an eval it could not compile.  The second eval's runtime die
+# names its own line 3 (perl's answer). ──────────────────────────────────
+is(run_cl(<<'PL'), "refused 1\nrun 3\n",
+my $x = 1;
+
+
+eval "\n\ngiven (\$x) { }\n1";
+print "refused ", ($@ =~ / at \(eval \d+\) line (\d+)\.$/m ? $1 : "BAD[$@]"), "\n";
+my $z = 0;
+eval "\n\n1 / \$z;\n1";
+print "run ", ($@ =~ /^Illegal division by zero at \(eval \d+\) line (\d+)\.$/m ? $1 : "BAD[$@]"), "\n";
+PL
+   'a string eval that fails to compile is not located at the caller\'s line');
 
 # ── 6. THE GATE (s543a).  The DEFAULT emission and `PCL_OPT=none' (the
 # general form) write the registers; the A/B switch `PCL_OPT=-line-track'
