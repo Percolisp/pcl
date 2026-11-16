@@ -5822,9 +5822,21 @@ sub _rename_binding {
   my $b  = $bd ? $bd->decl_binding($sym) : undef;
   die sprintf("PCL internal: the binder holds no declaration for `%s` at line %s (renaming it %s)\n",
     $sym->content, $sym->line_number // '?', $new) unless $b;
+  my ($r, $toks) = $self->_binding_uses_plan($bd, $b, $sym->content, $new, $sym);
+  $sym->set_content($new);
+  $self->_rename_binding_use($_, $r, 0) for @$toks;
+  return $new;
+}
+
+# The rewrite plan for EXACTLY the uses of binding $b ($old -> $new), every use
+# first proven reachable (so a die leaves the document as it was): (\%r, \@toks)
+# for _rename_binding_use.  $at = a token for the messages.  Shared by the
+# declaration rename above and the eval capture rename (#4796), whose binding
+# -- the caller's lexical -- has no declarator in the text.
+sub _binding_uses_plan {
+  my ($self, $bd, $b, $old, $new, $at) = @_;
   die sprintf("PCL internal: the binder does not hold every token of the scope of `%s` (line %s), so a use of it could go unrenamed\n",
-    $sym->content, $sym->line_number // '?') unless $bd->holds($b->{scope_node});
-  my $old = $sym->content;
+    $old, $at->line_number // '?') unless $bd->holds($b->{scope_node});
   my %r = (old => $old, new => $new, fix => _interp_fixer($old, substr($new, 1)));
   ($r{bare} = $old) =~ s/^[\$\@\%]//;
   ($r{newbare} = $new) =~ s/^[\$\@\%]//;
@@ -5832,16 +5844,13 @@ sub _rename_binding {
   for my $u ($bd->uses_of($b)) {
     push @toks, $u->{tok} unless $seen{ refaddr $u->{tok} }++;
   }
-  # every use first proven reachable, so a die leaves the document as it was
   for my $t (@toks) {
     my ($kind, $ok) = $self->_rename_binding_use($t, \%r, 1);
     next if $ok;
     die sprintf("PCL internal: the rename of `%s` to %s cannot reach its use at line %s (%s): %s\n",
       $old, $new, $t->line_number // '?', $kind, substr($t->content, 0, 60));
   }
-  $sym->set_content($new);
-  $self->_rename_binding_use($_, \%r, 0) for @toks;
-  return $new;
+  return (\%r, \@toks);
 }
 
 # One use's rewrite: (KIND, OK) -- OK = the token spells the old name where
@@ -8663,11 +8672,39 @@ sub _register_eval_protos {
 # Skipped when the eval body DECLARES the name itself: a `my $a` inside the
 # string is its own variable, and if _rename_exception_mys could not rename it
 # (a blocker fired) the remaining `$a` tokens are that declaration's, not the
-# caller's.  Leaving them is today's emission — never worse.
+# caller's.  (A declared name the text ALSO reads from the caller takes the
+# #4796 branch below instead, which renames exactly the caller's uses.)
+#
+# #4796, the same rename for ANY capture the eval text RE-DECLARES and also
+# reads (`my $x = $x + 1` -- a `my` is visible from the next statement, so the
+# initializer reads the caller's $x --, `$x = 5; { my $x = 3 }`): one spelling
+# then names two variables, and the free-name walk (which saw the declaration
+# and left $x out of the thunk) and the name-keyed raw verdicts (`(setf $x 5)`
+# of the thunk parameter) both read it as the eval's own.  EXACTLY the binder's
+# uses of the caller's binding (Binder::shadowed_capture -- the capture alist
+# is the outermost pad) take the fresh name, through the declaration rename's
+# own plan (_binding_uses_plan, s539b); the eval's declarations keep theirs.
 sub _rename_free_eval_captures {
   my ($self, $doc) = @_;
-  my @caps = grep { /^[\$\@\%]\w+$/ && Pl::GlobalPartition::is_exception_global($_) }
-             @{ $self->eval_captures // [] };
+  # (a key repeats when the site alist chains an enclosing eval's: one name)
+  my %seen;
+  my @all = grep { /^[\$\@\%]\w+$/ && !$seen{$_}++ } @{ $self->eval_captures // [] };
+  return unless @all;
+  my $bd = $self->{_binder}
+    or die "PCL internal: the eval capture rename has no binder for this document\n";
+  my @caps;
+  for my $old (@all) {
+    my $ob = $bd->shadowed_capture($old);
+    if (!$ob) {
+      push @caps, $old if Pl::GlobalPartition::is_exception_global($old);
+      next;
+    }
+    my $new = $old . '__evalcap__' . $self->{_evalcap_counter}++;
+    my @u = $bd->uses_of($ob);
+    my ($r, $toks) = $self->_binding_uses_plan($bd, $ob, $old, $new, $u[0]{tok});
+    $self->_rename_binding_use($_, $r, 0) for @$toks;
+    $self->{_evalcap_names}{$new} = $old;
+  }
   return unless @caps;
   my $never_shadowed = sub { 0 };
   for my $old (@caps) {
@@ -8948,7 +8985,7 @@ sub _assemble_eval_mode {
     next if $cl eq $v;
     delete $free{$v};
     $free{$cl} = 1;
-    $caps0->{$cl} //= $v;
+    $caps0->{$cl} //= $caps0->{$v} // $v;   # a renamed capture keeps its lookup name (#4796)
   }
   my @names = sort keys %free;
   # #240 step 2 (RULED s349 §2c): a `package X; …` eval region runs with X as

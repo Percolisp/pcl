@@ -103,6 +103,28 @@ my $cap9 = sub { "cap(@_)" }; my @arr9 = (4, 5);
 sub use_cap9      { return ($cap9, @arr9) }
 sub pkg_promoted  { my $s = eval 'sub { package Other; $cap9->(1) . scalar(@arr9) }'; return $s->(); }
 sub pkg_made      { eval 'package Made9; sub mk { __PACKAGE__ . ":" . $cap9->(2) } 1' or return "ERR"; return Made9::mk(); }
+# #4796 (s543b): an eval that RE-DECLARES a captured lexical and reads it -- the
+# initializer (and a use before the declaration) is the CALLER's variable: the
+# sub-level lexical, a nested block, a sub argument, a write, nested evals, a
+# list declaration, a loop (fresh each time), Sub::Quote's shape, a file lexical.
+sub reread_init   { my $x = 7; return eval 'my $x = $x + 1; $x'; }
+sub reread_block  { my $r; { my $z = 3; $r = eval 'my $z = $z * 2; my $w = $z + 1; "$z $w"'; } return $r; }
+sub reread_arg    { my $p = shift; return eval 'my $p = $p . "!"; $p'; }
+sub reread_write  { my $y = 7; eval '$y = 5; { my $y = 3; } 1'; return $y; }
+sub reread_nested { my $n = 1; return eval 'my $n = $n + 10; eval q{my $n = $n + 100; $n}'; }
+sub reread_list   { my ($p1, $p2) = (1, 2); return eval('my ($p1, $p2) = ($p2, $p1); "$p1 $p2"') . " $p1 $p2"; }
+sub reread_loop   { my $l = 0; my @r; for (1 .. 3) { push @r, eval 'my $l = $l + $_; $l'; $l += 10; } return "@r"; }
+sub reread_quote  { my $captures = { '$v' => \"V" }; return eval 'my $v = ${$captures->{q{$v}}}; my $captures = "own"; "$v $captures"'; }
+my $fl9 = 100;
+print "reread_file=",   eval('my $fl9 = $fl9 + 1; $fl9'), " $fl9\n";
+print "reread_init=",   reread_init(),   "\n";
+print "reread_block=",  reread_block(),  "\n";
+print "reread_arg=",    reread_arg("a"), "\n";
+print "reread_write=",  reread_write(),  "\n";
+print "reread_nested=", reread_nested(), "\n";
+print "reread_list=",   reread_list(),   "\n";
+print "reread_loop=",   reread_loop(),   "\n";
+print "reread_quote=",  reread_quote(),  "\n";
 print "pkg_amp=",       (eval { pkg_amp() } // "DIED"),       "\n";
 print "pkg_arrow=",     (eval { pkg_arrow() } // "DIED"),     "\n";
 print "pkg_other=",     (eval { pkg_other() } // "DIED"),     "\n";
@@ -190,6 +212,15 @@ my %expect = (
     pkg_global    => '7',
     pkg_promoted  => 'cap(1)2',
     pkg_made      => 'Made9:cap(2)',
+    reread_file   => '101 100',
+    reread_init   => '8',
+    reread_block  => '6 7',
+    reread_arg    => 'a!',
+    reread_write  => '5',
+    reread_nested => '111',
+    reread_list   => '2 1 1 2',
+    reread_loop   => '1 12 23',
+    reread_quote  => 'V own',
 );
 
 plan tests => scalar(keys %expect);

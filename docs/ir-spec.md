@@ -5878,6 +5878,23 @@ to parameters of a wrapper lambda:
 `p-eval-thunk` resolves each name via `p-eval-lex-lookup` (piece 3) and
 applies the lambda to the resulting containers.
 
+**A capture the text re-declares (normative, s543b, task #4796).** When the
+eval text DECLARES a name the site alist carries (`my`, `state`, `our` or a
+parameter, anywhere in the text) AND reads or writes the caller's variable of
+that name somewhere -- a use the binder resolves to the outermost pad: an
+initializer (a declaration is visible from the next statement only), a use
+before the declaration, a use outside the declaring block -- exactly those
+uses (`Binder::uses_of` of the capture, each as spelled) take a fresh body
+symbol `NAME__evalcap__N`, and the thunk keeps `"NAME"` as the LOOKUP name;
+the text's own declaration and its uses keep `NAME`.  One spelling never names
+two variables inside the lambda, so neither the free-name set nor a raw-scalar
+verdict of the text's own `my` can claim the caller's.  Example: `my $x = 7;
+print eval 'my $x = $x + 1; $x'` prints 8 (was 1), compiled as
+`(pcl:p-eval-thunk (list "$x") (lambda ($x__evalcap__0) (p-let (($x :scalar
+(p-+ $x__evalcap__0 1))) $x)))`; `eval '$x = 5; { my $x = 3 } 1'` writes the
+caller's `$x`.  The rename depends on the capture NAMES, which already key the
+eval cache (#296-B1).
+
 An eval whose whole body is one `package X; …` region takes a third
 argument — the region's CL package designator:
 

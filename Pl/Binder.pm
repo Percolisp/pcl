@@ -89,6 +89,7 @@ package Pl::Binder;
 #       Pl::Binder::for_captures($p2, $n)  the binder answering the capture question
 #       ->spans($ranges, $skip, kinds => {...})  "does B have a ref in segment j" (s535a)
 #       ->uses_of($b), ->text_uses_in($b, $lo, $hi)  a binding's uses; its eval-text uses
+#       ->shadowed_capture($canon)     eval mode: the capture the text both reads and re-declares (#4796)
 #       ->refers_to_decl($tok, $canon, $decl)  the shadow question (s535a)
 #       ->binding_after($node, $canon), ->decl_binding($tok), ->ord_range($a, $z)
 #       ->mentions_in($node, $canon)   $node's non-declarator mentions of $canon, as spelled now (s536e)
@@ -135,7 +136,11 @@ sub bind {
   # eval-mode: the caller's lexicals (the capture alist) are the outermost
   # pad, visible everywhere a declaration of the eval text does not shadow
   # (pad_findlex's CvOUTSIDE of an eval is the caller's pad; ir-spec §2b).
-  for my $c (@{ $self->{opt}{outer} || [] }) {
+  # One binding per name: a key repeats when the site alist chains an
+  # enclosing eval's (`%p-eval-env%`), and first-match lookup makes it one pad
+  # entry (#4796: two records split the uses between them).
+  my %one;
+  for my $c (grep { !$one{$_}++ } @{ $self->{opt}{outer} || [] }) {
     $self->_add_binding(kind => 'outer', canon => $c, pkg => undef,
                         decl => undef, decl_ord => -1, scope => $doc,
                         from => -1, to => $self->{last});
@@ -944,6 +949,20 @@ sub uses_of {
     \%h;
   };
   return @{ $idx->{ refaddr $b } || [] };
+}
+
+# eval-mode: the caller's lexical $canon (a capture-alist key, the outermost
+# pad) when the eval text ALSO declares $canon -- a `my` / `state` / `our` /
+# parameter of that spelling anywhere in it -- and reads the caller's one
+# somewhere (`my $x = $x + 1`, `$x = 5; { my $x }`); else undef.  Then one
+# spelling names two variables and the capture must take a name of its own
+# (Parser2::_rename_free_eval_captures, #4796).
+sub shadowed_capture {
+  my ($self, $canon) = @_;
+  my @b = @{ $self->{by_canon}{$canon} || [] };
+  my ($outer) = grep { $_->{kind} eq 'outer' } @b;
+  return undef unless $outer && grep { $_->{kind} ne 'outer' && $_->{decl_node} } @b;
+  return $self->uses_of($outer) ? $outer : undef;
 }
 
 # The literal-TEXT uses of $b in [$lo, $hi] -- the string-eval rule of port 2
