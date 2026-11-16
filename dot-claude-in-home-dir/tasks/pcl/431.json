@@ -4,5 +4,7 @@
    "id" : 431,
    "session" : "s423",
    "status" : "pending",
-   "title" : "AUTOLOAD is not consulted for a plain qualified sub call (Foo::other())"
+   "title" : "AUTOLOAD is not consulted for a plain qualified sub call (Foo::other())",
+   "triage" : "in",
+   "triage_reason" : "AUTOLOAD is not consulted for a qualified sub call"
 }

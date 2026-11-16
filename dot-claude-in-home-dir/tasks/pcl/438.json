@@ -4,5 +4,7 @@
    "id" : 438,
    "session" : "s424",
    "status" : "pending",
-   "title" : "*glob = $pkgvar where the package variable holds \\*foo installs the SCALAR slot instead of copying the glob (p-scalar-='s box-in-box shape is invisible to %p-glob-assign-slots)"
+   "title" : "*glob = $pkgvar where the package variable holds \\*foo installs the SCALAR slot instead of copying the glob (p-scalar-='s box-in-box shape is invisible to %p-glob-assign-slots)",
+   "triage" : "decision",
+   "triage_reason" : "proposed OUT: glob surgery (`*glob = $pkgvar` holding a glob ref)"
 }

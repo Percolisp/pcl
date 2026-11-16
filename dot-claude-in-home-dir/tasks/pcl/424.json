@@ -4,5 +4,7 @@
    "id" : 424,
    "session" : "s422",
    "status" : "pending",
-   "title" : "t/re/pat.t: after #419 the file LOADS but hits SBCL's 1 GB heap (0 rows); 3 GB gives 225/140 then a `Failed to match` die"
+   "title" : "t/re/pat.t: after #419 the file LOADS but hits SBCL's 1 GB heap (0 rows); 3 GB gives 225/140 then a `Failed to match` die",
+   "triage" : "in",
+   "triage_reason" : "heap exhaustion (criterion 4): re/pat.t -- one family with #935"
 }

@@ -4,5 +4,7 @@
    "id" : 437,
    "session" : "s424",
    "status" : "pending",
-   "title" : "Two \\*main::foo are NOT the same reference: p-make-typeglob mints a fresh struct per evaluation, so == is false and the two print different addresses (#163 family)"
+   "title" : "Two \\*main::foo are NOT the same reference: p-make-typeglob mints a fresh struct per evaluation, so == is false and the two print different addresses (#163 family)",
+   "triage" : "decision",
+   "triage_reason" : "proposed OUT: glob identity (one family with #3491)"
 }

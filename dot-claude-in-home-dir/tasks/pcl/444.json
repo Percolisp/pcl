@@ -4,5 +4,7 @@
    "id" : 444,
    "session" : "s426",
    "status" : "pending",
-   "title" : "\"${ \\\"a\\\" }\" â the ${ EXPR } interpolation path does not unescape the block text (the @{ EXPR } path does), and PCL then emits UNREADABLE CL: the whole file is lost to an SBCL read error"
+   "title" : "\"${ \\\"a\\\" }\" â the ${ EXPR } interpolation path does not unescape the block text (the @{ EXPR } path does), and PCL then emits UNREADABLE CL: the whole file is lost to an SBCL read error",
+   "triage" : "in",
+   "triage_reason" : "`\"${ \\\"a\\\" }\"` emits unreadable CL (LOUD, whole file)"
 }

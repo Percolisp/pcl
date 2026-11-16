@@ -5,5 +5,7 @@
    "description" : "FILED s540e (Opus 5.5, 2026-11-15) while building #4988.  Probe scratch/s540e/probe/md5layer.pl in the s540e worktree (a file \"caf\\xc3\\xa9\\r\\nline2\\r\\n\\xe2\\x98\\xba\\n\"): perl '<' and '<:raw' 536f50af..., '<:crlf' 1b6e1921..., '<:utf8' and '<:encoding(UTF-8)' 536f50af... (the raw bytes: PerlIO_read below the decoding).  PCL (base and tree alike): '<:crlf' 536f50af..., '<:utf8' / '<:encoding(UTF-8)' die.  The shim's addfile is `read($fh, $buf, 65536)` -- a character read.  perl's XS reads with PerlIO_read, which for :utf8 hands over the encoded octets and for :crlf the translated ones.\n\nBAR: probe perl -> base -> tree; a row in Pl/t/digest-shim-01.t.  The :crlf half may be PCL's read() and :crlf (probe `read` alone first).",
    "id" : "5045",
    "status" : "pending",
-   "subject" : "PRE-EXISTING (s540e, probed): Digest::MD5->addfile on a handle with a layer hashes the DECODED characters under PCL -- :utf8 / :encoding(UTF-8) die \"Wide character in subroutine entry\" where perl's XS hashes the file's bytes, and :crlf gives the untranslated digest where perl hashes the CRLF-translated text"
+   "subject" : "PRE-EXISTING (s540e, probed): Digest::MD5->addfile on a handle with a layer hashes the DECODED characters under PCL -- :utf8 / :encoding(UTF-8) die \"Wide character in subroutine entry\" where perl's XS hashes the file's bytes, and :crlf gives the untranslated digest where perl hashes the CRLF-translated text",
+   "triage" : "in",
+   "triage_reason" : "Digest::MD5->addfile on a handle with a layer"
 }

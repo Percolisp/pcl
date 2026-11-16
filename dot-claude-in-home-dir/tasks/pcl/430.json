@@ -4,5 +4,7 @@
    "id" : 430,
    "session" : "s423",
    "status" : "pending",
-   "title" : "keys %Pkg:: lists only SUBS — package VARIABLES are missing from the stash"
+   "title" : "keys %Pkg:: lists only SUBS — package VARIABLES are missing from the stash",
+   "triage" : "in",
+   "triage_reason" : "`keys %Pkg::` lists only subs"
 }

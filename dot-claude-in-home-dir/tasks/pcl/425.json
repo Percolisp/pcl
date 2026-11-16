@@ -4,5 +4,7 @@
    "id" : 425,
    "session" : "s422",
    "status" : "pending",
-   "title" : "A >U+10FFFF code point in a PATTERN leaks cl-ppcre's own warning instead of a PCL announce"
+   "title" : "A >U+10FFFF code point in a PATTERN leaks cl-ppcre's own warning instead of a PCL announce",
+   "triage" : "in",
+   "triage_reason" : "rare: a code point above U+10FFFF in a pattern"
 }

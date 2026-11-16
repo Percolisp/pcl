@@ -4,5 +4,7 @@
    "id" : 434,
    "session" : "s425",
    "status" : "pending",
-   "title" : "gen_leaf's Word branch is a MIXED site: a PPI Word whose content was overwritten in place with a qualified CL symbol is fed back to cl_name as a perl name (B/s423 ask 2)"
+   "title" : "gen_leaf's Word branch is a MIXED site: a PPI Word whose content was overwritten in place with a qualified CL symbol is fed back to cl_name as a perl name (B/s423 ask 2)",
+   "triage" : "tooling",
+   "triage_reason" : "gen_leaf's Word branch is a mixed site (structure)"
 }

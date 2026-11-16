@@ -1,0 +1,927 @@
+328	in	name resolution (`our` after `my`); LOUD today (a refusal) -- narrowing it needs the global-read form
+332	decision	proposed OUT: refaliasing array spellings (an experimental feature)
+333	in	rare: a method name before a fat comma
+336	in	qw inside a sliced list
+396	in	pos() on an element
+460	in	rare: a lexical sub named like a quote operator
+476	in	rare: unary minus on a declared sub's call
+486	decision	proposed OUT: an illegal named prototype (perl warns and ignores it)
+487	decision	proposed OUT: `$![1]` (nobody writes it)
+508	in	the `local` family: a bare local under a modifier
+509	in	the `local` family: element / slice in a local list
+510	in	the `local` family: `$!` in a local list
+540	in	the `local` family: a chained subscript target (one family with #1190)
+683	in	did not reproduce on one shape (s543 first pass) -- run its own reproducer, close with rows or narrow
+690	in	the `local` family: a range slice target
+691	in	a deref inside an s/// replacement writes the empty string
+692	in	nested case shifts in interpolation
+822	out	regex code block (section 4)
+971	in	did not reproduce on one shape -- verify
+988	in	a nested aggregate in a returned list in argument position
+1029	in	%SIG handler name not qualified
+1030	in	`$ENV{X} = undef`
+1039	in	an array in string context prints ARRAY(0x1) -- ordinary code, first candidate
+1040	in	a numeric-looking string in a bitwise op
+1050	decision	perl's false is a dualvar: a representation decision
+1059	in	did not reproduce on one shape -- verify; still listed in STATUS.md
+1190	in	the `local` family: a nested element (one family with #540)
+1242	decision	proposed OUT: glob surgery (`undef *GLOB` slots)
+1285	in	rare: a declared sub with no prototype followed by a block
+1339	in	the `local` family: a parenthesised subscripted target
+1341	in	the `local` family: a subscripted symbolic deref
+1349	in	did not reproduce on one shape -- verify
+1350	in	autovivification on a single-level deref read
+1352	in	autovivification of a slice root
+1419	in	did not reproduce on one shape -- verify
+1420	in	did not reproduce on one shape -- verify
+1423	in	a typeglob's package dropped when resolved as a handle
+1425	in	did not reproduce on one shape -- verify
+1474	in	rare: sprintf `%+vd`
+1480	decision	proposed OUT: arylen magic through a foreach alias
+1483	in	rare: a tied `$_` (scalar tie is IN)
+1484	decision	proposed OUT: stash surgery (a code ref assigned into a stash slot)
+1487	decision	proposed OUT: `$$qr = VALUE`
+1491	decision	proposed OUT: a sort comparator that redefines itself
+1494	in	`\N{NAME}` not implemented
+1609	in	did not reproduce on one shape -- verify
+1848	in	rare: `%+` with duplicate group names
+1943	in	string eval: the last expression's context
+1955	in	a foreach list holding a sub call that returns a reference is flattened -- ordinary code, first candidate
+1956	in	did not reproduce on one shape -- verify
+1960	decision	proposed OUT: exotic interpolation (a fullwidth digit after `@` in a string eval)
+1971	decision	proposed OUT: exotic interpolation (`"$#ar->[0]"`)
+2003	in	did not reproduce on one shape -- verify
+2030	in	an aggregate leaf ignores its scalar context (`sprintf(@arr)`)
+2091	in	did not reproduce on one shape -- verify
+2092	decision	lc / uc on bytes 128-255 in a source without `use utf8`: a design decision
+2110	out	unbounded integers: ruled by design
+2112	in	the `local` family: a local embedded in an expression statement is never restored
+2260	in	a die from a signal handler during a blocking read is swallowed (matters for services)
+2500	in	a qr// interpolated into a /x pattern takes the outer /x
+2540	in	did not reproduce on one shape (PPI group AZ) -- verify
+2560	in	Math::BigRat fraction strings (bigrat is a shipped module)
+2594	in	close() on a pipe: a child killed by a signal
+2596	in	chomp / chop on an object with overloaded ""
+2630	in	string eval name resolution across a package switch
+2638	out	`@_` aliasing through an expression (section 4) -- the USER to confirm
+2742	in	the `local` family: a scalar local as a sub's last statement
+2760	in	did not reproduce on one shape -- verify
+2765	in	evaluation order in a compound assignment
+2766	in	a list slice as a sub's return value in scalar context
+2768	in	did not reproduce on one shape -- verify
+2779	in	rare: a replaced built-in gets the built-in's argument count
+2780	in	did not reproduce on one shape -- verify
+2781	in	`our $x; my $x; sub f { $x }` reads the package variable
+2876	out	`@_` aliasing through an expression (section 4) -- the USER to confirm
+3082	in	rare: a reblessed qr// loses its class when copied
+3100	in	a single-index slice of an empty list
+3101	in	`defined &main::NAME` of an imported sub
+3102	in	a chained `my $S = my $F = 0` under the package-switch requalify pass
+3182	in	rare: a declared sub in print's handle slot
+3490	in	an expression-embedded `my` visible later in its own statement
+3491	decision	proposed OUT: glob identity (blessing one `\*FOO` does not reach another)
+3610	in	did not reproduce on one shape -- verify
+3695	in	`keys %Pkg::` lists lexicals (Class-Inspector-style stash reads are IN)
+3827	in	did not reproduce on one shape -- verify
+3880	in	overload with fallback unset: perl dies, PCL continues
+4204	decision	proposed OUT: a stash glob as a value
+4302	in	did not reproduce on one shape (s539c keep_line_endings) -- verify and close
+4522	in	an inherited overload resolved breadth-first, not by MRO
+4702	in	rare: `*` after a list-operator sub starts a glob argument
+4742	in	rare: `\((@b)[7])` grows the array
+4792	in	in batch s543b
+4795	in	in batch s543b
+4796	in	in batch s543b
+4821	in	string eval name resolution: a `state` variable outside a named sub's own statement
+4841	in	rare: a %! slice read after the block's `local $!` is restored
+4842	in	a handle slot given a non-handle reference
+4843	in	`%_` is per package (Text::CSV_PP uses it)
+4844	in	a handle named with a leading `::` in a read slot
+4846	in	`<>` after @ARGV is exhausted does not fall back to STDIN
+4887	in	`BEGIN { use_ok('constant', ...) }` does not declare the constant for the parse
+4901	in	rare: `x<digits>` after a handle or list-operator word
+5001	in	the `local` family: `delete local` inside an expression
+5005	in	in batch s543b
+5021	in	in batch s543b
+5081	in	`select NAME` / `open(NAME)` through a symbolic name do not create the glob
+5105	in	grep BLOCK over %INC / %ENV returns the empty list
+5121	in	re-opening a handle through a copy
+5122	in	opendir on an open filehandle succeeds where perl dies (safe direction)
+5123	in	rare: `fileno` of a dirhandle
+5125	in	a comma expression in a valued block tail reads its last element in list context
+246	in	string eval: a lowercase bareword array subscript
+286	in	rare: `f {$k, $v}` in term position (perl's intuit_curly)
+314	in	hard-refusal families (LOUD): six left; each family judged on its own when scheduled
+404	in	rare: stacked filetests through parentheses
+405	in	rare: `print $fh -3`
+415	in	dropped statements (LOUD, counted in the census): nine odd rows
+422	in	review-probe residues, each small (drops / a PPI lexer failure)
+463	decision	proposed OUT: glob surgery / symbolic-ref spellings (13 census rows)
+630	in	a failed open on an already-open handle leaves the old handle readable
+650	in	rare: a diamond glob pattern with whitespace
+653	in	rare: punctuation containers (`%/`, `@:` ...)
+750	in	a dereferenced array in a list-assignment LHS is not greedy
+860	out	`@_` aliasing through a reference (section 4)
+930	decision	user `:lvalue` subs: lvalue-context propagation, sized as a design item -- IN or OUT is the USER's
+960	in	overload's binary refusal + substr's target as a place (LOUD)
+1002	in	join() flattens a reference argument
+1008	in	rare: `do { $lexical }` as an lvalue alias
+1411	tooling	emission-ab --out with a relative path
+1440	in	rare: a kv-array slice's key half
+1501	tooling	the triage checks for the companion suite
+1580	in	PPI lexer: a dereference as the foreach variable (LOUD; the PPI branch)
+2006	in	implicit filehandle close (re-open flushes the old stream; the scope-exit half is section 4 OUT)
+2195	in	LOUD, rare: an embedded `my` in a sub
+2440	in	Unicode classes `\d \s \w` on wide strings
+2555	in	system() / qx// do not inherit STDIN
+2557	in	string eval name resolution: a caller's `our` alias across a package switch
+2774	in	a regex after a word, cut by PPI at `;` / `#` (the PPI branch)
+3060	out	`@_` aliasing: a write through `$_[N]` in a sub of another file (section 4 family) -- the USER to confirm; it hits Encode
+3260	in	`use File::stat` does not displace stat / lstat
+3415	in	the `local` family: multi-level chain + postfix slice (one family with #540 #1190)
+3450	in	a one-index list slice of an empty list (one family with #3100: merge)
+3451	in	`utime` on a filehandle
+3616	in	Text-CSV encoding-layer rows that are not the UTF-8 flag
+3635	in	rare: an interpolated stash element
+3675	in	a reference assigned into a blessed scalar reports the referent's class
+3692	decision	integer vs double comparison is exact in PCL (the #2110 / #1513 numeric-model question)
+3694	tooling	the parser program (checkers first): structure work, not a subset bug
+3720	in	autovivification: keys / values / each of a missing element (family #1350 #1352)
+4444	decision	proposed OUT: a localized stash alias
+4582	in	File::Spec shim: a subclass invocant is not shifted
+4803	in	a tied scalar holding a reference loses it when returned
+4805	in	`push @n, @n, @n` reads the array it is growing
+4941	in	caller's package inside `sub K::m` written in main
+407	in	`\s` under /u does not match NBSP
+408	in	rare: bless through a tied scalar does not FETCH
+409	tooling	the pl2cl server's memory during a sweep
+519	in	`our` after `my` in a block (LOUD)
+523	in	rare: %SIG does not show an inherited disposition
+524	in	die's exit status is taken from errno (exit status is part of the claim)
+525	in	the unqualified symbolic-variable resolver
+528	in	rare: pragmas record no %INC entry
+530	in	rare: a registered bareword handle used as a word in an expression (crash)
+531	in	`STDOUT->autoflush(1)` -- verify, probably long fixed
+580	in	`bless {}, "main::Bar"` reports the wrong class name
+581	in	isa() compares class names case-insensitively
+582	out	speed: the per-class method cache (outside the claim)
+622	out	the JS target (parked, USER s448)
+756	out	single-binary plan (planning only, unscheduled)
+757	in	make the silent classes of unsupported features LOUD -- this is claim 2
+810	in	a foreach alias case (pre-existing)
+66	in	forward-declaration scan false positives; effect unmeasured
+71	out	PCRE2 backend (parked by the USER, s476)
+72	in	a sub return aliases the live cell box -- verify
+74	out	speed (outside the claim)
+75	tooling	Target B: the IR vocabulary
+85	in	a user sub named like an internal helper
+92	out	XS (pclxs parked)
+107	out	XS (pclxs parked)
+108	out	XS (pclxs parked)
+117	out	XS (pclxs parked)
+118	out	XS (pclxs parked)
+132	tooling	source-echo comments in the output
+139	decision	the :crlf layer needs a layer-model decision
+141	in	rare: scalar flip-flop with constant operands
+143	in	rare: printf `%n`
+144	in	rare: `\$!` snapshots instead of aliasing
+145	out	perl's own suite rows no IN program reaches (freed stash, RT#3305)
+146	in	rare: quotemeta on high bytes (related to #2092)
+147	in	rare: `[] // 0` in a `$`-prototype slot
+148	in	rare: pack / unpack `U`
+149	out	error message text (outside the claim)
+156	out	parked behind the warnings model (s320)
+160	in	heap exhaustion (criterion 4): op/list.t, quarantined -- diagnose
+161	in	rare: wantarray in a void string eval
+164	in	rare: a trailing BEGIN block steals the tail position
+165	in	rare: `||` does not propagate lvalue context
+174	in	rare: UNITCHECK inside a string eval
+175	out	perl's own suite survey (paused by the freeze)
+180	tooling	suite wall-time swings
+191	out	indirect method syntax on a scalar inside parens (ruled deferred s323)
+196	out	a regex beyond cl-ppcre's reach (catastrophic backtracking)
+198	decision	scope-exit DESTROY (6c)
+201	in	Capture-Tiny residue (a board dist)
+206	in	UNIVERSAL::isa and the reftype rule
+208	tooling	board baseline drift
+209	in	substr as an lvalue on an element writes nothing -- verify
+212	tooling	the board runner loads the runtime from source
+213	out	speed: quadratic emission of nested statements
+218	tooling	Target B: flatten if / elsif chains
+219	tooling	Target B: readability of the void comma expression
+220	in	rare: the value close() leaves behind
+221	out	`use warnings` diagnostics (section 4)
+232	in	goto LABEL from inside and outside a loop
+233	decision	caller() fidelity residue after s543a (a USER decision of the s538 plan)
+237	in	regex interpolation drops direct subscripts
+238	in	List::Util / Scalar::Util shim parity
+249	in	rare: referent-kind tag residue
+250	in	rare: evaluation order of an eval in print's arguments
+257	tooling	baseline hygiene
+258	in	`\@a[0,1]` does not distribute the reference
+260	in	the `_` prototype does not default to `$_`
+261	in	rare: pos through an argument element
+269	out	regex code blocks (section 4)
+271	in	`pipe my ($r, $w)`
+273	tooling	the sweep verdict can be swallowed
+281	tooling	the IR pass over the docs
+284	in	the subname family (Sub::Util is shipped; 1575 board rows)
+285	in	the no-plan ending: exit 254 (exit status is part of the claim)
+288	in	a bareword call in a package-switched region
+293	out	taint (section 4)
+307	tooling	rename of the `_form` emitters
+309	out	XS (pclxs parked)
+310	out	XS (pclxs parked)
+312	out	XS (pclxs parked)
+318	in	`my VAR, <tail>` reads the fresh binding
+321	in	rare: code refs in @INC
+322	in	rare: the attribute protocol
+323	tooling	harness: warning_is manufactures a PASS
+326	out	a regex beyond cl-ppcre's reach (the re_tests hang)
+330	in	rare: read-only scalars never die
+331	tooling	stale artifacts -- obsolete since the staleness guard; verify and close
+334	in	`->can("Pkg::name")`
+338	in	a container spanning a package boundary (LOUD refusal)
+340	in	try / catch / finally (LOUD)
+352	tooling	an uninitialized warning in VarAnnotator
+357	tooling	the PPI ternary-label workaround may be obsolete
+359	in	rare: `$^F` / descriptor inheritance across exec
+373	in	rare: a string eval cannot see a lexical sub
+379	tooling	the two-compiler entanglement (structure)
+380	in	`our $x = E while COND` drops the tail (LOUD drop)
+381	in	indirect-object method call `h F` crashes (old-style `new Foo` code)
+382	in	rare: a heredoc opened inside an interpolation block
+388	tooling	InterpScan consumers 2 and 3 (structure)
+389	in	`++$$r` is a whole-statement drop (LOUD; ordinary code)
+392	in	rare: a block whose last statement is `use` / `no`
+398	decision	`defined BAREWORD` for a name that is not callable (its own text asks for a decision)
+400	out	given / when (section 4)
+406	in	rare: a bareword argument to a paren-less user sub call
+424	in	heap exhaustion (criterion 4): re/pat.t -- one family with #935
+425	in	rare: a code point above U+10FFFF in a pattern
+430	in	`keys %Pkg::` lists only subs
+431	in	AUTOLOAD is not consulted for a qualified sub call
+432	tooling	runpcl emits a spurious blank line
+433	decision	proposed OUT: glob surgery (`local *NAME = *NAME`)
+434	tooling	gen_leaf's Word branch is a mixed site (structure)
+436	in	ref() of a lexical filehandle
+437	decision	proposed OUT: glob identity (one family with #3491)
+438	decision	proposed OUT: glob surgery (`*glob = $pkgvar` holding a glob ref)
+443	in	a wrong-kind deref is lenient where perl dies
+444	in	`"${ \"a\" }"` emits unreadable CL (LOUD, whole file)
+458	in	the PPI word-match repair declines on a quantifier (the PPI branch)
+461	in	rare: non-ASCII identifier drops
+474	in	rare: p-BEGIN does not restore the current package
+478	in	the prototype pre-scan skips Test:: modules by name
+479	in	`COND ? <$fh> // "" : ""` cannot be lowered
+483	in	PPI lexes `1<<index(...)` as a heredoc (the PPI branch)
+488	in	rare: glob brace expansion
+489	in	rare: the scalar glob iterator is keyed by pattern
+490	in	rare: glob quote stripping
+493	tooling	a pointer record -- close into its targets
+495	in	rare: a bareword operand of a prototyped user sub
+496	tooling	a shapes corpus for the emission A/B
+502	in	`use English` -- verify, probably fixed by the shim
+504	tooling	runpcl merges SBCL's stderr into stdout
+512	in	`$0` is not writable
+513	in	`open($fh, ">&", \*STDOUT)` -- verify
+518	tooling	a CI flake
+551	in	rare: a numeric symbolic-ref name
+574	in	the `local` family: `local ${"n"} = VALUE` (one family with #652)
+575	in	rare: an interpolated symbolic deref emits an unterminated string (LOUD)
+576	tooling	parallel agents share the module cache
+583	tooling	emitter indentation around a comment
+600	in	rare: local on a caret variable
+601	in	rare: `$^C` assignment
+631	in	rare: EINVAL vs EBADF on a dup from a closed handle
+632	in	rare: a false close returns undef
+633	in	a spawned child inherits no descriptor above 2
+634	in	IO::Handle methods on a lexical filehandle -- verify, probably fixed
+640	in	rare: a declared sub beats the handle in `print FH` (family #3182)
+641	in	rare: a registered bareword handle outside a handle slot
+651	in	a diamond glob with a bracket class drops
+652	in	the `local` family: `local ${EXPR} = RHS` drops the assignment (one family with #574)
+661	in	rare: fcntl on a never-opened lexical
+662	in	rare: `f % 3` after a declared sub
+670	in	rare: %! residue
+671	in	rare: a subscript on a glob-slot access (LOUD drop)
+672	in	rare: `%-` values
+673	in	the Errno shim's constants
+674	tooling	English.pm cleanup after #561
+681	tooling	a per-process memo: measure first
+684	in	match variables are block-scoped in perl (one family with #932)
+693	in	rare: an escaped quote in a `${ }` block of an s/// replacement (LOUD drop)
+722	in	rare: a self-referential container init under a modifier (LOUD drop)
+735	in	a warning on stderr from File::Temp::tempfile
+741	tooling	runpcl always exits 0
+751	in	`sub f { my ($x) = @_ }` returns nothing -- verify
+753	in	`${ELEM}[i]` writes nowhere
+754	in	an interpolated backslash-ref block's context
+780	in	unlink / chmod / utime / kill given an array -- verify
+781	in	rare: a use-subs-overridden named unary
+782	in	rare: `-f 'TEST';` as a void statement
+816	tooling	the boxed-aggregates design (structure / speed)
+830	in	rare: glob backslash escape
+840	in	%feature::feature is empty: experimental.pm cannot load
+851	out	rejection of invalid Perl (principle 9)
+852	in	rare: a bareword filehandle in a caseless script
+871	in	`$]` reports 5.030
+921	in	unary minus on a non-numeric string
+932	in	capture variables are not dynamically scoped (one family with #684)
+933	out	perl's own suite plumbing (${^SAFE_LOCALES})
+935	in	heap exhaustion (criterion 4): re/pat.t at compile -- one family with #424
+936	in	rare: read-only residue
+937	in	PPI lexes an empty bare block as an anon hash (the PPI branch)
+938	in	drop-census singles
+961	in	rare: overload fallback => 1 with nothing to autogenerate
+963	in	a reference constructor assigned to a tied scalar
+965	tooling	132 hand-edited SKIP rows in perl-tests
+967	in	rare: the value of a substr assignment
+970	in	printf's argument list is not in list context
+983	out	speed: the optimization-note census
+984	in	rare: a deleted array element's hole survives a copy
+993	tooling	the ignored-tests audit
+995	out	speed: a fresh box per loop iteration
+1000	in	rare: `use integer` bypasses overloading
+1001	in	compound assignment and overload dispatch
+1003	in	the same box interpolated twice adjacently -- verify
+1006	in	rare: the `=` copy constructor
+1007	in	`$aryref x N` loses the reference
+1011	in	rare: a kv array slice's index (one family with #1440)
+1034	out	a future feature: user type hints
+1035	tooling	export the compiler's facts into the IR
+1036	out	Unicode case folding (section 4; ruled s465)
+1037	in	a ruled refusal is a statement-level die: the LOUD half of the claim
+1038	tooling	the ignored-tests audit, phase 4
+1041	tooling	sweep-diff keys collapse unnamed rows
+1051	tooling	the companion row baseline is partial for 19 files
+1052	tooling	two unspliced companion movers
+1053	in	`format` is OUT but this shape is lost SILENTLY: it must be refused loudly (claim 2)
+1054	in	`defer` ending a file lowers as a call: must be loud (claim 2)
+1055	in	the blast radius of a drop / refusal is the whole top-level form (one family with #1433)
+1056	out	speed (outside the claim)
+1073	out	perl's own suite: `&CORE::` rows
+1082	tooling	nondeterministic companion row keys
+1085	tooling	harness: the tempfile stub's name
+1095	tooling	bench-emission-ab and a macro's lambda list
+1096	tooling	the rename manifest of a qualified twin declaration
+1142	out	speed: alias-escape refinement
+1143	in	rare: Internals::SvREADONLY on an array
+1144	out	speed: alias-escape refinement
+1175	tooling	host leaks into the IR
+1176	tooling	the quoted symbol in the IR
+1182	out	speed
+1185	in	JSON::PP encodes an integer as a string -- verify, probably long fixed
+1186	in	Text::Wrap::wrap dies -- verify, probably long fixed
+1192	in	the `local` family: a local inside a call argument
+1206	in	a slice assignment in scalar context
+1216	tooling	--facts coverage
+1217	tooling	--emit-sexp coverage
+1218	in	the undeclared-global scan can read an eval string as code; effect unmeasured
+1232	tooling	harness: a sub defined at the end of perl's test.pl
+1234	in	rare: stacked filetests and the `-X` overload
+1235	in	rare: `-t -T -B` on an IO ref
+1243	in	the `local` family: three divergences
+1249	in	singleton residue of the ir-conform corpus
+1270	in	`use open IO => "utf8"` without the colon
+1272	in	rare: the `-C` switch
+1274	in	rare: a non-ASCII package name in stringification
+1275	in	rare: `$0 = <wide string>`
+1276	tooling	attribution debt in the companion snapshot
+1290	in	`\FUNC(...)` does not spread over the list
+1291	in	a constant in a glob handle slot (`close(CPATH)`)
+1292	in	a glob with 3+ interpolation pieces dies at load (LOUD)
+1305	tooling	a stale skip-registry entry
+1306	in	rare: a write through an @_ alias to a negative index (perl dies)
+1315	tooling	pcl ignores PCL_SHOW_SBCL
+1325	tooling	a warning on every runner's stderr
+1326	tooling	ProtoCache derives the tree root itself
+1327	in	the installer: a saved core memoises the builder's ASDF cache directory
+1340	tooling	Target B: the manifest misses a magic-scalar local
+1351	in	a compound assign over a deref element evaluates its key twice
+1353	in	rare: autovivification of a single element under map / grep
+1359	tooling	the module cache key and PCL_OPT -- verify against docs/caching.md and close
+1360	in	the location of a die inside a string eval (s543a residue)
+1361	in	in batch s543a
+1369	in	IV vs NV printing of an integral result -- verify
+1370	in	an array in string context (one family with #1039: merge)
+1379	in	`$@` is cleared when an eval is entered
+1389	out	the UTF-8 flag (6a: done last)
+1390	out	`use strict 'refs'` is not enforced (not-supported ns-strict-refs)
+1391	in	a literal is not read-only (the one everyday row that is not OUT, criterion 5)
+1399	tooling	board baseline rows
+1410	out	speed: a cached string eval as a fasl (becomes a subset item if Moo is IN, 6d)
+1421	in	rare: `print {$u}` on undef should die
+1422	in	`open(FH, "-|", LIST)` -- verify
+1424	decision	the glob model: a glob value vs a glob ref
+1427	in	perl-level errors raised as a bare CL error keep a backtrace and exit 1 (tidy errors, exit status)
+1428	in	a dirhandle reads as an array -- s543b member 1 (#5082) changes this: verify and close
+1429	in	rare: a tied array with $NEGATIVE_INDICES
+1433	in	the blast radius of the announce-die flip (one family with #1055)
+1434	in	rare: `*glob->method`
+1435	in	rare: `DESTROY { }` without `sub`
+1436	in	rare: a bareword invocant of a postfix deref
+1437	in	`local *STDOUT` does not detach the handle
+1439	tooling	harness: skip_if_miniperl
+1446	in	in-memory filehandle on a tied scalar
+1447	in	rare: in-memory filehandle with wide characters
+1448	in	rare: `${^LAST_FH}`
+1449	in	rare: a die inside BEGIN stops the phase sequence
+1450	in	rare: `@DB::args` (Carp's argument lists)
+1451	in	the `local` family: local in a non-leading position (LOUD)
+1452	in	rare: list assignment resolves its LHS lvalues late
+1453	in	rare: `*FH{IO}`
+1454	in	rare: the postfix glob deref (LOUD drop)
+1455	in	string eval name resolution: binds a file lexical declared later
+1457	in	rare: pos residue
+1458	in	rare: %ENV encoding
+1459	in	a pool of seven one-row shapes
+1460	in	a pool: eval.t / ref.t shapes
+1471	in	rare: sprintf `%vd` of a version object
+1472	out	warning accounting in sprintf (section 4: no warnings)
+1473	in	rare: sprintf positional + vector
+1475	in	rare: sprintf negative zero
+1476	in	rare: sprintf `%a` subnormal
+1477	in	rare: sprintf `%a` tie rounding
+1478	decision	proposed OUT: arylen magic (one family with #1480)
+1479	in	indirect object syntax on a lowercase package (one family with #381)
+1481	in	rare: `\delete $h{k}` identity
+1485	in	rare: UNIVERSAL::AUTOLOAD
+1488	in	rare: the ref type of `${qr//}`
+1490	in	rare: argument-less `tell`
+1492	in	rare: a list assignment as an lvalue
+1495	tooling	a stale blessed row
+1503	out	a second CPAN population (paused by the freeze)
+1504	out	widening the board (paused by the freeze)
+1509	in	a prototype installed by a string eval (Capture::Tiny)
+1511	in	two board files that fail honestly (Algorithm-Diff)
+1515	out	integers above 2**53 stay exact (documented divergence, the USER)
+1516	out	speed
+1526	tooling	a duplicated predicate (rule 11)
+1528	out	PCRE2 measurement (parked)
+1530	in	rare: `undef &Foo::bar`
+1540	in	a foreach alias write to an element of a read-only array
+1541	in	rare: isdual($!)
+1542	in	rare: `$h{x} &&= 1` creates the key
+1543	in	an rvalue deref of an undef element vivifies where perl dies
+1546	tooling	the gate's wall time
+1555	out	error message text (outside the claim)
+1556	in	rare: getprotobyname without /etc/protocols
+1569	in	rare: `no overload OP`
+1571	in	the introspection primitives (refaddr, reftype, openhandle)
+1572	in	Class::Method::Modifiers: three files die at the CLOS level
+1574	in	Socket does not export AF_UNIX (one task with #1615) -- verify
+1577	out	perl's own suite: `&CORE::NAME`
+1578	in	op/hash.t and Hash::Util -- the shim ships now: verify and close
+1582	in	rare: a comma-sequenced `my`
+1583	in	rare: `our $y = $y` under a `my $y` (LOUD)
+1588	out	hash order randomisation (perl does not promise an order)
+1589	in	a failing open whose errno SBCL raises kills the program
+1593	in	rare: `$#{$scalarref}`
+1594	in	an undeclared bareword in a list is called (one family with #1682)
+1595	in	an uncaught die prints SBCL's load context (tidy errors)
+1596	in	rare: `<{EXPR}>` crashes the compiler
+1610	in	`local *Pkg::NAME` loses the whole file (LOUD)
+1612	in	`re::is_regexp` is missing (Data-Dumper)
+1614	in	a glob as per-handle storage `${*$fh}{KEY}` (the IO::Handle idiom)
+1615	in	one task with #1574
+1617	in	File::Copy cannot be loaded -- verify, probably long fixed
+1629	out	speed
+1638	in	rare: a glob ref in container position
+1639	in	rare: the wrong-kind whole-aggregate fatal
+1640	in	rare: `package Foo v1.2.3`
+1641	in	rare: the value of `eval 'package Foo;'`
+1642	in	rare: a block-form package in an eval (LOUD refusal)
+1648	in	rare: `state (LIST)` mid-statement (LOUD refusal)
+1649	decision	proposed OUT: declared references (one family with #332)
+1651	out	perl's own suite: op/gv.t (glob model)
+1654	in	a forward goto to a standalone label (LOUD)
+1655	in	`$| = 1;` desyncs the free-global scan -- verify
+1663	in	autovivification: an rvalue element through an undef scalar
+1664	decision	the typeglob model
+1665	out	rejection of invalid Perl (principle 9)
+1666	in	rare: a heredoc inside an s///e replacement (PPI)
+1679	in	rare: an element of an all-digit container
+1680	in	rare: PPI and an all-digit hash name
+1682	in	an undeclared bareword is called where perl reads a string (one family with #1594)
+1683	in	rare: `\(A, B)` in scalar context
+1684	out	the debugger (section 4)
+1685	in	the old `'` package separator
+1686	in	rare: a quote-like operator name as a package
+1689	in	`use VERSION` never checks the version
+1690	in	a version bundle does not import builtin's functions
+1691	in	rare: the eval block-form package collapse
+1692	in	rare: `$x =~ (1 ? /foo/ : /bar/)`
+1693	in	rare: a UTF-16 source
+1694	in	comp/parser.t: five drops
+1695	in	comp/parser.t: a 24-row scatter
+1703	in	closing a `>&=` handle closes the shared descriptor
+1704	in	rare: IO::Handle::ungetc (LOUD)
+1706	out	the debugger (section 4)
+1707	in	a descriptor above `$^F` across exec (one family with #359 #633)
+1708	tooling	pclperl-for-tests -I
+1710	in	the io/ + run/ residue: eleven files
+1712	in	rare: a surrogate in a string eval's source
+1714	out	a regex beyond cl-ppcre's reach (one family with #196 #326)
+1716	in	rare: `seek DATA, 0, 0`
+1717	in	rare: Tie::Hash::NamedCapture
+1718	in	the `/p` modifier and `${^MATCH}`
+1720	in	re/pat.t: one failing assertion aborts 898 rows
+1721	in	rare: re/pat_rt_report.t grab-bag
+1723	in	rare: the `/o` modifier
+1724	decision	the typeglob model (`*X = *-`)
+1725	in	rare: one-row re/ files
+1738	in	rare: UNIVERSAL::isa on a class that does not exist
+1739	in	rare: the infix isa operator on a string
+1740	in	rare: UNIVERSAL::DOES on an unblessed ref
+1742	in	caller() elements 3 and 4 (after s543a)
+1744	in	rare: can() on a forward-declared sub
+1745	in	rare: select(FH) returns an unqualified name
+1746	in	last / next to a label that does not exist leaks an SBCL error (tidy errors)
+1748	in	rare: a reference to a magic scalar freezes its value (one family with #144)
+1749	in	rare: pack / unpack `U` (one family with #148)
+1750	out	rejection of invalid identifiers / Unicode property tables
+1751	in	after s///g `$1` is the first match's capture
+1752	in	rare: a lexical filehandle in element position
+1753	in	rare: `local *c` leaves `defined &c` true
+1754	in	rare: `*FH{IO}` after close
+1766	in	`^` under /m matches once more at the end -- verify
+1767	in	rare: tell(DATA)
+1768	in	op/tie.t residue: five clusters are plain bugs
+1769	in	rare: op/runlevel.t loop control and goto
+1770	in	op/fork.t: the child's exit / signal reporting
+1771	in	rare: a sub defined in a string eval, __ANON__ naming
+1772	in	rare: op/stat.t clusters
+1773	tooling	a child's compiler diagnostics in the compared output
+1781	tooling	two files straddle the companion clock
+1783	tooling	a companion row without a reason row
+1798	tooling	dev runners: predictable /tmp names (security review)
+1799	in	product: `pcl --clear-cache` deletes under whatever PCL_CACHE_DIR names
+1800	in	product: bind *read-eval* to NIL around generated code
+1801	in	rare: a pipe-open whose reader never reads
+1802	tooling	runner drift
+1808	out	speed (outside the claim)
+1814	in	a tied scalar copied into an aggregate stores the proxy
+1816	in	rare: `-X` overload under stacking (one family with #1234)
+1819	in	rare: can() residue
+1821	in	rare: `CLASS->CORE::uc`
+1823	in	rare: a dereference of `*GLOB{IO}` must die
+1825	in	a value aliased to a literal is writable (one family with #1391)
+1826	in	one indirect-object drop costs 26 rows (the blast-radius family #1055)
+1828	out	error message text (outside the claim)
+1829	in	rare: `*$ref` of a scalar referent must die
+1833	tooling	handover readiness
+1836	tooling	retire the skip registry
+1837	tooling	the companion row diff reports NEW and FIXED for one row
+1842	in	rare: sprintf reads a tied argument twice
+1845	in	rare: two filetest falses answer undef
+1849	tooling	companion snapshot under load
+1851	tooling	the companion has no count-level flaky registry
+1852	in	`my $y = ++$_ for @a` is a drop (LOUD)
+1853	tooling	companion row diff re-keys
+1862	tooling	the script cache does not cover `pcl -e` and `-M`
+1871	decision	proposed OUT: arylen magic (one family with #1480)
+1872	in	rare: `${^LAST_FH}` (one task with #1448: merge)
+1873	in	%SIG handler name (one task with #1029: merge)
+1874	in	rare: sprintf `%n` (one task with #143: merge)
+1875	in	rare: an invalid sprintf conversion
+1876	in	rare: extra_paired_delimiters (PPI)
+1877	in	rare: the postfix glob-slot deref (one family with #1454)
+1890	out	speed
+1891	out	speed
+1910	out	speed
+1911	in	rare: `.pmc` files
+1913	tooling	board snapshot drift
+1915	in	overload `fallback => 0` never dies (one family with #3880)
+1916	in	rare: the empty pattern means the last successful pattern
+1922	in	pos on an element (one task with #396: merge)
+1924	in	rare: %Config is a subset
+1925	in	rare: `reset EXPR`
+1926	in	rare: `lock`
+1927	in	rare: op/signame_canonical.t produces no rows
+1928	in	rare: %SIG lookups and nested signals
+1929	in	deep recursion exhausts the binding stack (one family with #2113 #2556)
+1930	in	`unlink` with no argument
+1931	in	seek / tell on a 2-argument open handle
+1932	in	rare: match variables after a `while (//g)` loop ends
+1933	out	perl's in-place split optimisation (identity of an internal)
+1934	in	rare: 4-argument select with a string
+1935	tooling	a test fixture's @INC
+1936	in	rare: an @INC hook returning a filehandle (one family with #321)
+1937	in	rare: kv-slice residue
+1938	in	rare: a reblessed qr// (one task with #3082: merge)
+1939	in	rare: grep / map in void and postfix context
+1940	in	rare: `$@` at the start of a re-entered eval
+1941	in	rare: flip-flop with constant operands (one task with #141: merge)
+1942	in	rare: try / catch residue
+1951	tooling	harness: tempfile() path
+1952	in	rare: `${ no strict; EXPR }` is a drop
+1953	tooling	harness: isa_ok defined twice
+1957	in	string eval name resolution: no fallback to the package variable
+1958	out	the debugger's package-DB eval rule (section 4)
+1959	in	rare: UNITCHECK never runs (one family with #174 #2762)
+1961	in	rare: sprintf `%v` family (one family with #1471 #1474)
+1962	in	rare: sprintf numeric residue (one family with #1475)
+1963	in	rare: sprintf `%a` (one family with #1476 #1477)
+1965	tooling	hash-order row keys in the companion
+1967	tooling	phantom rows of op/gv.t
+1968	in	rare: `$^S` during compilation
+1970	in	a die while loading a module prints SBCL's load context (tidy errors; family #1595)
+1972	in	`\d` and non-ASCII digits (one family with #2440)
+1993	tooling	companion snapshot drift
+1994	tooling	the everyday battery instrument
+2010	in	IPC::Cmd does not load (IO::Seekable getpos / setpos)
+2011	in	HTTP::Tiny: IO::Handle::blocking -- verify
+2012	in	File::Temp tempdir(CLEANUP => 1) without a template -- verify
+2013	in	a forward goto lowered two ways in one sub
+2014	in	a braced interpolation of a renamed file lexical refuses the whole file (LOUD)
+2015	in	rare: a declared sub in the class-name slot of bless / tie
+2032	tooling	rows-unstable companion files
+2033	tooling	companion snapshot rows
+2052	in	rare: `use subs "NAME"` with no such sub hangs
+2053	in	rare: a builtin override through `BEGIN { M->import }`
+2054	in	rare: `*CORE::GLOBAL::require` / do / readline
+2055	tooling	runpcl skips the module cache
+2057	tooling	a measurement that cannot be taken
+2058	in	`use IPC::Cmd`: a refusal in Module::Metadata (LOUD)
+2059	in	MIME::QuotedPrint is absent (the MIME-Base64 dist)
+2061	in	rare: UNIVERSAL::AUTOLOAD (one task with #1485: merge)
+2063	tooling	a stale snapshot row
+2064	out	deprecation warnings (section 4: no warnings)
+2065	in	lib/POSIX.pm hardcodes this machine's errno numbers
+2068	in	a child left unreaped
+2086	out	speed: pre-built extensions in the install tree
+2095	in	PPI mis-lex: a float literal followed by `-DIGIT` (LOUD, everyday; the PPI branch)
+2096	in	rare: two B::Deparse spellings
+2099	tooling	the everyday instrument's residue
+2103	in	16 run-time errors perl dies on and PCL lives through (the strict-refs part is OUT)
+2104	tooling	the Rosetta census: the instrument of exit criterion 2
+2105	in	a module that sets up Exporter inside BEGIN crashes at load -- verify
+2106	tooling	a core-module leg for the companion
+2108	in	uncaught failures put Lisp in the user's face (tidy errors)
+2109	in	the location in a parse-failure message (tidy errors)
+2113	in	deep recursion of an anonymous sub exhausts the binding stack (family #1929 #2556)
+2190	in	the string-eval disk cache is unbounded inside a run (services)
+2191	out	speed
+2194	tooling	`pcl --check`: an approved tool
+2196	decision	the macOS CI leg (needed for the service claim)
+2197	in	rare: `$.` on a reopened handle
+2199	in	POSIX lacks uname / times / dup2 / setsid
+2200	in	an embedded `my` inside another `my` declaration is the package cell
+2215	in	rare: quotemeta on high bytes (one family with #146 #2092)
+2216	in	a file-level `my` written inside BEGIN in a `do FILE` (seven files 0/0)
+2261	in	qx discards the child's STDERR (one family with #2555)
+2262	in	rare: system does not ignore INT / QUIT in the parent
+2264	in	rare: `%SIG = (...)` and `local %SIG`
+2265	out	`$SIG{CHLD} = "IGNORE"` (not-supported, announced)
+2266	in	rare: caller at the top level of a required file
+2267	tooling	companion snapshot drift
+2275	in	the pcl driver keeps a literal `--` in @ARGV
+2340	in	rare: a reblessed qr// with a `""` overload
+2342	tooling	companion snapshot drift
+2370	decision	scope-exit DESTROY (6c; one decision with #198)
+2373	in	rare: print to a pipe whose reader exited
+2374	in	rare: `kill "USR2", $$` hangs
+2377	in	rare: an inherited blocked signal mask
+2381	in	rare: `\X` is not UAX #29
+2382	out	regex recursion (section 4)
+2383	out	regex code blocks (section 4)
+2384	in	a flaky gate row caused by a PPI mis-lex (the PPI branch)
+2385	out	regex branch reset: beyond cl-ppcre's reach (LOUD since #2372)
+2386	out	regex control verbs (section 4)
+2387	in	rare: user-defined `\p{IsFoo}` properties
+2388	in	rare: matching against an undef pattern
+2403	out	strict refs on the write path (not-supported ns-strict-refs)
+2404	in	rare: a raw undef temporary in a vivifying deref
+2405	in	rare: `$/ = \0` is accepted where perl dies
+2406	out	strict refs imported into the caller (not-supported ns-strict-refs)
+2407	tooling	companion snapshot drift
+2408	in	rare: `scalar(@$undef)` without strict
+2409	in	rare: `$SIG{__DIE__}` on a string eval's compile error
+2420	out	speed
+2421	out	speed: the eval compile policy (becomes a subset item if Moo is IN, 6d)
+2422	out	speed
+2423	out	speed
+2463	in	tie with a class that has no TIESCALAR is silent where perl dies
+2491	in	rare: perl's real Carp.pm does not run
+2516	in	`<<` / `>>` with a negative operand
+2531	in	sprintf `%.17g` prints wrong text (float round-trip printing)
+2532	in	rare: numeric spelling residues
+2541	in	rare: a list slice followed by `-N` drops
+2542	in	rare: a file-level `my sub NAME :prototype(...)`
+2543	tooling	a snapshot row to re-base
+2556	in	a runaway recursion ends as a raw SBCL abort (tidy errors; family #1929 #2113)
+2558	in	a file-level block with `open(my $g)` and subs is dropped (LOUD)
+2573	in	rare: `$_[0] = ...` in a signature sub differs under PCL_OPT=none
+2574	in	rare: sort with a comparator reading lexical $a / $b
+2575	in	a reference argument is still shared by a raw parameter
+2591	in	an array in string context (one task with #1039 #1370: merge)
+2592	tooling	run-perl-suite hands its stdin to the child
+2593	in	a file-level expression-embedded `my` is invisible after a later package section
+2595	in	rare: autovivification through a tied scalar
+2597	in	`keys %$aref` does not die; a raw CL type error on the write path (tidy errors)
+2598	in	the `local` family: a nested hash element crashes (family #540)
+2599	in	rare: `BEGIN { package P; ... our @ISA }` is a read error
+2600	in	a tied scalar holding a blessed ref (one family with #4803)
+2610	in	rare: a prototype set at run time does not change later calls
+2611	in	rare: glob-as-object residue
+2634	in	rare: the braced stash spelling
+2635	in	rare: an inline `p` regex flag (one family with #1718)
+2639	in	rare: `scalar(%tied)` without a SCALAR method
+2640	in	unit identity: an alias residue in a non-program unit
+2641	in	unit identity: the fallbacks
+2642	in	unit identity: a program's promoted file lexical is the package global
+2643	in	a `do FILE` sees the calling program's file lexicals
+2644	in	a file-level `my $x;` keeps its old value when the unit runs twice
+2647	out	speed
+2660	out	error message text: the `<FH> line N` suffix
+2662	out	error message text: the temp file's name in an announcement
+2663	in	rare: PERL5OPT
+2665	in	rare: List::Util max over equal-numifying strings
+2667	tooling	harness residue of run/switches.t
+2668	in	rare: `$^W` magic
+2670	in	rare: a filetest right after a BEGIN block (PPI)
+2685	decision	@ARGV elements arrive decoded as UTF-8 characters: a design question
+2689	in	op/die_exit.t fails on a cold cache: a cold / warm behaviour difference to find
+2720	out	speed
+2721	in	rare: tied($RS) under `use English`
+2722	out	speed
+2740	in	the exit status of a die after a `use` found past the first @INC directory (family #524)
+2741	in	rare: the punctuation variable `$}`
+2762	in	rare: UNITCHECK in an eval / do (family #174)
+2763	in	rare: UNITCHECK / CHECK when the compile phase ends abnormally
+2767	in	ARGV residue: data loss in an in-place edit through ARGVOUT
+2769	in	rare: `use constant` after a package statement inside a sub body
+2776	out	a warning on stderr (section 4: warnings) -- the compiler's own perl warning leaking is tidy work
+2782	in	rare: a method named like a handle builtin with bareword arguments
+2802	in	rare: getpwuid's password field
+2850	in	rare: a tied `$,` / `$\`
+2851	in	rare: `binmode($fh, "")`
+2852	in	rare: binmode on a partly read pipe
+2853	decision	explicit `:crlf` on Unix (the layer-model decision, with #139)
+2862	in	rare: `do EXPR` evaluates its operand in the do's context
+2882	out	speed (outside the claim)
+2940	out	a warning printed at run time (section 4: warnings are not emitted -- this one is, so it is noise to remove)
+2941	in	rare: seek with an invalid whence
+2942	in	rare: sysread on an in-memory handle
+2944	tooling	facts overlays and version drift
+2945	tooling	the SOAK TEST: the instrument of exit criterion 3
+2949	out	speed: the pure-Perl Digest shims (parked by the USER)
+2952	in	a bareword call of a non-imported name resolves package-blind
+2955	in	rare: Data::Dumper quotes a large integer by the IV flag
+2956	in	a plain Moo program prints SBCL diagnostic headers on stderr (tidy)
+2957	in	rare: Encode UTF-16LE with FB_CROAK
+3000	in	Math::BigRat arithmetic (one family with #2560; bigrat is shipped)
+3020	in	a glob-assign of a code ref after a loop is dropped (LOUD)
+3022	tooling	the shared pl2cl server loses -I
+3024	tooling	learned prototype facts
+3041	out	speed
+3062	in	a trapped require of an unloadable XS module still prints SBCL text (tidy)
+3164	in	rare: a forward `sub NAME :lvalue;`
+3165	in	rare: Attribute::Handlers (LOUD refusal)
+3181	in	rare: `->can('print')` on an unblessed handle
+3200	in	rare: a sub imported by a computed BEGIN-time string eval
+3201	in	`use lib "$FindBin::Bin/lib"` is not on the transpile-time search list
+3204	out	regex `(?[ ... ])` extended classes: beyond cl-ppcre's reach
+3209	in	rare: a dup of an in-memory handle
+3261	in	the detector and Getopt::Long's GetOptions
+3300	in	m//g with a multi-line `^` re-matches (one family with #1766)
+3301	out	speed
+3302	out	speed
+3320	in	goto into a nested block (LOUD)
+3322	in	stable booleans residue
+3323	in	the TAP layer interpolates a `like` string pattern
+3325	in	rare: a filetest after a map block
+3327	in	Capture::Tiny capture_merged order (148 board rows)
+3360	out	a platform other than Linux x86-64 (section 4)
+3398	out	widening the board (paused by the freeze)
+3414	in	the `local` family: a local in a void expression position (announced)
+3430	in	rare: a string-eval sub named like a :pcl function
+3434	in	Capture-Tiny tied files: the last rows
+3494	in	IO-Compress failing rows (a board dist)
+3522	in	the TAP layer exits 0 after failing tests (exit status is part of the claim)
+3523	in	rare: `open STDOUT, '>', \$buf` without closing first
+3525	out	speed: a bench comparison to take
+3531	in	rare: a readline on a write handle and the error flag
+3550	in	a List::Util block must see the enclosing sub's @_
+3552	in	a blessed glob returned from a sub loses its class (Path-Tiny)
+3570	in	rare: a `local *FH` glob's name shows the internal rename
+3571	in	rare: `local $. = N`
+3590	in	rare: an opener's element target leaves the glob anonymous
+3630	in	`BEGIN { package C2; use parent ... }` loses the parents
+3631	in	method dispatch ignores `use mro 'c3'` with a non-empty @ISA
+3632	in	rare: a BEGIN nested inside a BEGIN
+3633	in	rare: `undef &P::m; P->can("m")`
+3634	in	a constant installed at BEGIN time by a run-time import
+3670	decision	proposed OUT: a stash alias (Scalar-List-Utils' 388 rows in one file)
+3671	in	a package first named in a qualified sub definition reports its name upper-cased
+3673	in	rare: a tied scalar whose FETCH returns a reference is fetched twice
+3674	in	rare: `*FH{IO}` (one family with #1453 #2611)
+3690	out	a warning printed at run time (section 4) -- noise to remove
+3693	tooling	an unstable companion row
+3697	tooling	the PPI branch: the standing program
+3698	in	an escaped delimiter inside an s///e replacement
+3700	in	int() of a double beyond the IV range (the numeric-model family #1515)
+3701	tooling	the core prune deletes the other SBCL's core (one task with #5006)
+3780	in	a raw value used as a number keeps no flag (the raw face of #1040)
+3805	tooling	a deliberate PPI lexing of `$#+`
+3820	in	rare: a BEGIN-time CORE::GLOBAL override does not reach a module
+3828	in	MIME::QuotedPrint is not usable (one task with #2059: merge)
+3829	in	the TAP layer takes arguments positionally: a list-returning call shifts them
+3833	in	rare: a reference to a v-string
+3834	in	two-argument open does not strip whitespace around the name
+3835	in	a read-only die perl does not raise stops YAML-Tiny
+3836	in	rare: a blessed qr// with overloaded "" read from an array element
+3837	in	rare: a symbolic glob name with a leading `::`
+3838	in	rare: an indirect-object call chained after a fat comma (LOUD drop)
+3920	in	emission depends on a cold vs warm prototype cache
+3922	in	rare: a call of a sub named `_` (the PPI branch)
+3943	in	rare: an anonymous sub with attributes is not marked as capturing
+3944	in	rare: an anonymous sub's attribute handler timing
+4087	in	Template-Toolkit residue (34 board rows)
+4161	in	rare: a module loaded through an @INC hook reports the spool file
+4170	in	rare: `defined &Pkg::name` after a run-time stash delete
+4221	in	Mojo-DOM58 dom.t residue
+4261	in	rare: `print {OUT} LIST` in a string eval
+4265	in	rare: Template-Toolkit chomp.t CR rows
+4282	in	the first run of a test script prints the plan line twice (cold vs warm)
+4285	out	XS: I18N::Langinfo
+4286	in	rare: `package Q; our @INC;`
+4307	in	a pipe close interrupted by a signal does not wait for the child
+4322	in	heap: a 16 MB byte string is a 64 MB character string (criterion 4, with #5083)
+4324	in	a `require` merges prototypes into the requiring file from its line on
+4480	tooling	the plan: string eval with no perl subprocess
+4501	out	speed
+4503	tooling	the review of the front half's structure
+4523	out	speed
+4524	out	speed
+4525	out	speed
+4563	tooling	harness: is_deeply on a tied scalar
+4583	in	rare: a forward declaration is in the stash from its section head
+4621	out	speed: benchmarking real programs (later, the USER)
+4643	in	heap exhaustion (criterion 4): IO-Compress oneshot, nondeterministic
+4663	in	a named sub in a loop body shares one cell with every iteration
+4721	in	rare: 2-arg `open(F, ">-:raw")`
+4722	in	rare: sysread after a buffered read
+4763	tooling	the runtime version string in a nested tree
+4781	tooling	`pl2cl --xserver` can outlive its owner
+4783	in	rare: `\(scalar($x))` references a copy
+4785	in	rare: `bless REF, $tied` fetches three times
+4786	in	a raw CL error for the `-l _` die (tidy)
+4789	in	rare: `**` under `use integer`
+4790	in	in batch s543a
+4793	in	a `()` sub installed by a BEGIN-time glob assignment is unknown to the parse
+4794	in	in batch s543b
+4801	in	rare: a loop left by `last` as a sub's last statement
+4804	in	rare: a void sub call copies its tied last value
+4806	in	rare: syswrite after a buffered print
+4807	in	`&$_()` is dropped (LOUD)
+4823	decision	proposed OUT: refaliasing a slice (one family with #332)
+4824	in	a captured scalar in a BEGIN / END body with a string eval refuses the whole file (LOUD)
+4845	in	rare: `pack("w", N)` above 2**64
+4861	in	`$@` is not cleared before the END blocks
+4862	out	error message text: the global-destruction suffix
+4863	in	an object blessed before any DESTROY existed gets no DESTROY at exit
+4864	decision	a DESTROY proposal (6c)
+4865	in	rare: an explicit `->DESTROY` with AUTOLOAD
+4882	tooling	the detector's harmless class
+4885	out	Encode: CJK codecs SBCL has no external format for (not-supported codec list)
+4886	in	Test::Builder lacks 17 public methods
+4902	in	rare: an eval string whose here-doc lines end in a lone CR
+4903	tooling	the PPIExpect checker's refinements
+4904	in	heap exhaustion (criterion 4): a gate flake
+4922	in	rename blockers that still refuse valid perl (LOUD)
+4942	in	the location of a die inside a string eval (one task with #1360: merge)
+4964	out	speed
+4965	out	speed
+4966	out	speed
+4967	out	speed
+4992	tooling	optimization-registry names to measure before deleting
+5002	in	print to a selected input-only handle dies with a raw SBCL error (tidy)
+5003	in	a read-write handle the collector reaches loses its unflushed writes
+5004	in	fork right after a dropped locked handle
+5006	tooling	building a core deletes the other SBCL version's core
+5022	out	speed
+5023	out	speed
+5024	out	speed
+5041	in	Storable's format path diverges (Storable is shipped)
+5042	in	POSIX::strftime locale letters
+5043	in	`$ENV{TZ}` set at run time does not reach localtime
+5044	in	rare: File::Spec->canonpath with a trailing newline
+5045	in	Digest::MD5->addfile on a handle with a layer
+5046	tooling	route the Clone shim through the one copier (rule 11)
+5061	in	a lone surrogate in a string eval's text poisons the eval server's wire
+5062	out	speed
+5063	out	speed
+5064	out	speed
+5065	out	speed
+5066	out	speed: a cache miss in every warm run
+5067	out	speed
+5068	in	rare: an assignment to a call of an :lvalue sub (LOUD)
+5082	in	in batch s543b
+5083	in	heap exhaustion (criterion 4): the zipbomb test
+5101	in	compile-phase code writes no location (s543a residue)
+5102	in	an elsif condition's die names the if's line (s543a residue)
+5104	in	a module found through a relative @INC entry is named by its real path (s543a residue)
+5120	in	`pipe $r, $w` on two undef lexicals dies (LOUD)
+5124	in	a bare word naming another package's sub is called in the current package (LOUD)

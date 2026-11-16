@@ -214,6 +214,7 @@ tools/run-dist-t.pl --rows DIST t/FILE           # one CPAN-board file
 tools/ir-host-leak.pl ; tools/ir-inventory.pl    # the IR stays in its three vocabularies
 tools/ir-conform --jobs 2                        # after any cl/ or emission change: 0 fail / 0 stale
 tools/gate-set-scan.pl ; tools/drop-census.pl    # population-wide instruments
+tools/task-triage.pl              # open tasks by triage class (docs/supported-subset.md 7); the IN silent-wrong count
 tools/rebuild-pack                 # regenerates cl/pcl-pack.lisp ONLY (mro + warnings: "Generated artifacts" below)
 tools/tag-license FILE             # every new code file carries the license tag
 tools/install-pcl --prefix ~/.local   # installer; test: prove tools/t/install-pcl.t

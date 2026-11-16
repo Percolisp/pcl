@@ -9,5 +9,7 @@
    "tags" : [
       "diagnostics",
       "flip-flop"
-   ]
+   ],
+   "triage" : "out",
+   "triage_reason" : "a warning printed at run time (section 4) -- noise to remove"
 }

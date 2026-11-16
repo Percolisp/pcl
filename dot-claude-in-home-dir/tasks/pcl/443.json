@@ -4,5 +4,7 @@
    "id" : 443,
    "session" : "s426",
    "status" : "pending",
-   "title" : "PCL is LENIENT where perl is FATAL on a wrong-kind deref: \"${$aref}\" returns the array (perl dies \"Not a SCALAR reference\"), \"$$scalarref_to_aref[1]\" returns undef (perl dies \"Not an ARRAY reference\")"
+   "title" : "PCL is LENIENT where perl is FATAL on a wrong-kind deref: \"${$aref}\" returns the array (perl dies \"Not a SCALAR reference\"), \"$$scalarref_to_aref[1]\" returns undef (perl dies \"Not an ARRAY reference\")",
+   "triage" : "in",
+   "triage_reason" : "a wrong-kind deref is lenient where perl dies"
 }

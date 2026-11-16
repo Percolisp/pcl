@@ -42,3 +42,10 @@ from 14 to 30 dists; a widening target finds bugs as fast as they close, so no e
 - A lesson of this session: I told the USER line tracking's cost was unmeasured when it was recorded
   in `Pl/Passes.pm` and `docs/caller-implementation.md` -- grep DECIDED for the switch name BEFORE
   saying "not measured".
+
+**Triage, first pass DONE 2026-11-16 (s543):** every open task has `triage` (in / out / tooling / decision) +
+`triage_reason`; `tools/task-triage.pl` counts (927 open: 634 in, 120 out, 115 tooling, 36 decision; 117 IN and
+marked silent wrong -- an upper bound, classified from subjects). The next brief is the VERIFICATION batch (each
+silent-wrong task`s own reproducer, plus the ~40 reasons that say `verify`). The 36 `decision` tasks are the
+USER`s to rule (21 constructs proposed for section 4). A new task gets its triage field when it is filed or at
+the merge that commits it. Notes: `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`.

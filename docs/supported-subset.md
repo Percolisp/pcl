@@ -155,6 +155,31 @@ One pass over the open tasks (917 on 2026-11-16), two review sessions:
 * a finding outside the subset is filed and marked `out` -- it does not
   start a batch.
 
+**The first pass is done (s543, 2026-11-16)**: every open task carries a
+`triage` field (`in` / `out` / `tooling` / `decision`) and a one-line
+`triage_reason`; `tools/task-triage.pl` prints the counts and the number
+criterion 1 asks for, and `--list CLASS` prints one class. On 2026-11-16:
+927 open -- 634 in, 120 out, 115 tooling, 36 decision, 22 not yet written
+(the tasks the two running batches own); **117 IN and marked silent wrong**.
+What the pass is and is not:
+
+* it was made from each task`s SUBJECT, not by running its reproducer: 28 of
+  the silent wrongs were probed with one shape each and 18 of those did not
+  reproduce, so the 117 is an upper bound, and a VERIFICATION batch (each
+  task`s own reproducer, perl vs main; close with rows or narrow) gives the
+  true count;
+* `out` covers both "outside the subset" (section 4, `not-supported.md`, XS,
+  parked work, the board`s widening) and "outside the claim" (speed, message
+  text, warnings);
+* the 36 `decision` tasks are the USER`s: 21 are constructs PROPOSED for
+  section 4 (glob and stash surgery, arylen magic, refaliasing and declared
+  references, a few exotic spellings), the rest are standing questions
+  (scope-exit DESTROY 6c, perl`s false as a dualvar, bytes 128-255 without
+  `use utf8`, the layer model, the numeric model, `:lvalue` subs, the macOS
+  leg);
+* a silent wrong is counted only when its task SAYS so (subject or
+  description): the label is part of filing one.
+
 What pauses: widening the board, new steering populations, perl's own suite
 rows that no IN program reaches. What does not pause: the round instruments,
 the PPI branch when the expect-state checker reports a new mis-lex in an IN

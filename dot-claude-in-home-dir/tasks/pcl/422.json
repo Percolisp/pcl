@@ -4,5 +4,7 @@
    "id" : 422,
    "session" : "s421",
    "status" : "pending",
-   "title" : "s421 review-probe residues (small, each its own spelling): \"@{^CAPTURE}\" interpolation drops; `$Ｘ {a}` after a repaired non-ASCII symbol; PPI's LEXER fails a file on a non-ASCII foreach variable"
+   "title" : "s421 review-probe residues (small, each its own spelling): \"@{^CAPTURE}\" interpolation drops; `$Ｘ {a}` after a repaired non-ASCII symbol; PPI's LEXER fails a file on a non-ASCII foreach variable",
+   "triage" : "in",
+   "triage_reason" : "review-probe residues, each small (drops / a PPI lexer failure)"
 }

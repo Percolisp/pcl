@@ -4,5 +4,7 @@
    "id" : "415",
    "session" : "s419",
    "status" : "pending",
-   "title" : "Odd-single drops from the s419 flip-gate census (9 rows, each its own spelling)"
+   "title" : "Odd-single drops from the s419 flip-gate census (9 rows, each its own spelling)",
+   "triage" : "in",
+   "triage_reason" : "dropped statements (LOUD, counted in the census): nine odd rows"
 }

@@ -4,5 +4,7 @@
    "id" : 432,
    "session" : "s423",
    "status" : "pending",
-   "title" : "runpcl can emit a spurious blank line, falsifying a byte-compare against perl"
+   "title" : "runpcl can emit a spurious blank line, falsifying a byte-compare against perl",
+   "triage" : "tooling",
+   "triage_reason" : "runpcl emits a spurious blank line"
 }

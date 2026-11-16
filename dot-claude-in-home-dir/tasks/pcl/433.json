@@ -4,5 +4,7 @@
    "id" : 433,
    "session" : "s423",
    "status" : "pending",
-   "title" : "local *NAME = *NAME loses the glob's scalar/array/hash slots"
+   "title" : "local *NAME = *NAME loses the glob's scalar/array/hash slots",
+   "triage" : "decision",
+   "triage_reason" : "proposed OUT: glob surgery (`local *NAME = *NAME`)"
 }

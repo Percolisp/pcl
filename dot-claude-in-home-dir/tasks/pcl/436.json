@@ -4,5 +4,7 @@
    "id" : 436,
    "session" : "s424",
    "status" : "pending",
-   "title" : "A lexical filehandle is not a GLOB to ref(): ref($fh) is \"\" and ref(\\$fh) is SCALAR where perl says GLOB / REF (the stream referent has no arm)"
+   "title" : "A lexical filehandle is not a GLOB to ref(): ref($fh) is \"\" and ref(\\$fh) is SCALAR where perl says GLOB / REF (the stream referent has no arm)",
+   "triage" : "in",
+   "triage_reason" : "ref() of a lexical filehandle"
 }
