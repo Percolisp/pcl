@@ -85,7 +85,7 @@ changes, and each fails or differs as that file describes.
 | XS modules without a shim (DBI, JSON::XS, Time::Piece, Unicode::Normalize, ...) | `Can't locate ...` naming the XS bridge |
 | `DESTROY` at scope exit or at the last reference | runs at program exit; a guard, lock or temp file is released late |
 | a filehandle closed by going out of scope | written out at a trigger or at exit, not at the drop |
-| `caller` file / line, the location in a `croak` message | right only under `PCL_OPT=line-track` until batch s543a turns it on by default (6b); frames a program hides (`Sub::Uplevel`) stay OUT |
+| `caller` file / line, the location in a `croak` message | perl's in the default build since s543a (6b), except from a BEGIN / END body or an `import` (#5101); frames a program hides (`Sub::Uplevel`), `@DB::args` and eval frames stay OUT |
 | `utf8::is_utf8` | always 1 until a real flag exists (6a: the last item of the freeze) |
 | `use warnings` diagnostics | none are emitted |
 | `format` / `write`, source filters, `given` / `when`, 5.38 `class` | refused with a message |
@@ -126,17 +126,11 @@ services adds: scope-exit `DESTROY` decided (6c) and a macOS leg in CI.
   its turn comes, is a real flag, and it needs its own design (the cost of
   carrying it through string operations has never been measured). Until
   then the 262 board rows keyed on #1389 are OUT.
-* **6b. Line tracking by default -- SETTLED (the USER, s543): ON**, batch
-  s543a. `caller` and `croak` locations are right
-  only under `PCL_OPT=line-track` today. The cost is measured (`Pl/Passes.pm`
-  `%DEFAULT_OFF`, `docs/caller-implementation.md`): about 0.25 ns per
-  statement, nothing on the macro bench rows, +4..6 % on the counting-loop
-  micro rows, +17 % emitted text on a large file; three programs re-timed on
-  2026-11-16 read +1.0 % / -3.1 % / +0.7 %. The flip is one line plus the
-  gate, the sweep, ir-conform and the baseline edits. It was off because of a
-  3 % micro-row bar (s473) and a +0.5 % text bar (s539d); the batch reports
-  the cost on the full bench and keeps the fix (the s536 rule: correctness
-  over a fix`s speed cost, flagged).
+* **6b. Line tracking by default -- SETTLED (the USER, s543): ON, DONE in
+  batch s543a.** `caller`, `croak` and a runtime die name perl's file and
+  line in the default build; the cost, measured on the full bench and the
+  emitted text, is in `docs/caller-implementation.md` ("What it costs"):
+  COST_SENTENCE_PLACEHOLDER
 * **6c. Scope-exit `DESTROY`.** Parked twice. Not needed for the batch claim;
   needed before the service claim.
 * **6d. Moo.** IN or OUT changes the weight of the string-eval compile cost

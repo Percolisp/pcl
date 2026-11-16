@@ -479,14 +479,28 @@ arguments.
 wantarray field are perl's; `caller` with no argument is three fields and
 `caller(N)` eleven; the empty list past the outermost frame; an anonymous sub
 whose body calls `caller` is a frame; `# line` directives are honoured; Carp
-reports its caller's location by perl's algorithm.  What is NOT:
+reports its caller's location by perl's algorithm.  **Since s543a the FILE
+and LINE are perl's in the default build** (the USER's ruling of s543: the
+location registers are always written, `docs/caller-implementation.md` has
+the cost); `PCL_OPT=-line-track` is the A/B switch that turns them off again
+(`-` line 0).  What is NOT perl's:
 
-- **The FILE and LINE in the default build.**  A frame records the location
-  registers, which only `PCL_OPT=line-track` writes, so a default build
-  answers file `-` (or `(eval N)`) and line 0, and Carp says `at - line 0.`
-  Recording them by default costs +17.9 % emitted text (Math::BigInt::Calc,
-  every statement) or ≥ +1.5 % (only the statements that can call), against
-  the ruling's +0.5 % — LEFT OUT.  `PCL_OPT=line-track` gives perl's answers.
+- **A call made from a BEGIN / END / CHECK / INIT body, or an `import`
+  reached by `use`.**  Those bodies are emitted by the v1 text path, which
+  writes no location: `caller` answers `-` line 0 in a BEGIN body or an
+  `import` (perl: the main file and the `use` / call line), and in an END
+  body the line of the main program's LAST statement (perl: the END body's
+  line).  A runtime die there has the same location.  #5101.
+- **A sub DEFINED by a string eval** reports its caller's file with the
+  eval's line (perl: `(eval N)`), #1360; `__FILE__` inside a string eval and
+  an explicit die there say `-` (#4942).
+- **An `elsif` condition** reports the `if` line; perl 5.40 reports the
+  `elsif` line (#5102).
+- **`DESTROY` at global destruction** sees the main program's last line;
+  perl says line 0 there.
+- **A Carp backtrace line** names a sub without its argument list's parens
+  (`main::f called at`, perl `main::f() called at`) and has no
+  `eval {...} called at` lines (no eval frames, below).
 - **A frame for EVERY anonymous sub.**  Only one whose body calls `caller`
   (or compiles perl at run time) is a frame: the frame costs +3.5 ns on a
   28 ns anonymous call (+12 %; the anoncall bench row +4 %) — LEFT OUT.  So a
@@ -505,8 +519,7 @@ reports its caller's location by perl's algorithm.  What is NOT:
 
 **Affected tests:** `perl-tests/caller.t` (the rows left in the sweep
 baseline); t/op/caller.t and neighbours in the companion; the CPAN board's
-`Sub-Uplevel` files (frame hiding) and the Log-Log4perl rows that print
-`%F` / `%L` (the default build's location).
+`Sub-Uplevel` files (frame hiding).
 
 ---
 
@@ -561,33 +574,34 @@ nothing else:
 ---
 
 <a id="ns-error-location"></a>
-## Error messages: the "at FILE line N" location (narrowed s539d)
+## Error messages: the "at FILE line N" location (narrowed s539d, s543a)
 
 **Perl behaviour:** Die/warn/croak messages append `" at FILE line N.\n"` when
 the message does not already end with a newline (Carp appends it always);
 `die if $@` propagates with `"... propagated at FILE line N."`.
 
-**PCL behaviour:** the SHAPE is perl's everywhere; the CONTENT is perl's where
-the location is known at compile time or recorded at run time:
+**PCL behaviour since s543a:** the SHAPE and the CONTENT are perl's: an
+explicit `die` / `warn` carries its file and line as a compile-time constant
+(s473c, after any `# line` directive since s539d); a die raised BY THE
+RUNTIME (`Illegal division by zero`, `Can't "last" outside a loop block`,
+...) and a Carp message (croak / carp / confess, s539d, #1361) name the
+location from the location registers, which every build writes since s543a
+(`PCL_OPT=-line-track`, the A/B switch, gives back the placeholders `at
+(eval 0) line 0.` and `at - line 0.`).  What is left:
 
-- an explicit `die` / `warn` carries its file and line as a compile-time
-  constant (s473c), after any `# line` directive (s539d) -- right in every
-  build;
-- a die raised BY THE RUNTIME (`Illegal division by zero`, ...) and a Carp
-  message (croak / carp / confess, s539d, task #1361) name the location from
-  the location registers, which only `PCL_OPT=line-track` writes; the default
-  build says `at (eval 0) line 0.` (a runtime die) and `at - line 0.` (Carp,
-  through `caller`, docs/not-supported.md ns-caller-fidelity);
+- a runtime die inside a BEGIN / END / CHECK / INIT body or an `import`
+  reached by `use` (`- line 0`, or in an END body the main program's last
+  line; #5101) and inside a sub DEFINED by a string eval (the caller's file,
+  #1360) -- the residue in ns-caller-fidelity;
 - an explicit die inside a string eval names `-` where perl names
-  `(eval N)` (task #4942).
+  `(eval N)` (task #4942);
+- a module found through a relative or symlinked `@INC` entry (`-Ilib`,
+  `use lib 'lib'`, `push @INC, 'lnk'`) is named by its absolute real path
+  where perl keeps the spelling (`lib/M.pm`, `lnk/M.pm`) -- every build,
+  `$INC{...}` and `__FILE__` alike (probed s543a; #5104).
 
-**Rationale:** the default build writes no location register because doing so
-costs +17.9 % emitted text and +4..6 % on counting loops (s473c, s539d); the
-switch is `PCL_OPT=line-track`.
-
-**Affected tests:** rows that compare the exact file and line of a runtime die
-or a croak (perl-tests `warn.t`, `die.t`, ...); rows that only need the
-` at ... line N.` tail now pass.
+**Affected tests:** rows that compare the exact file of a die in the cases
+above.
 
 ---
 

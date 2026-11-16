@@ -90,27 +90,48 @@ hasargs is not a slot: `&name;` (`p-amp-call`, which shares the caller's
 `caller` answers `''` for exactly those depths -- the rare spelling pays a
 cons and a binding, an ordinary call nothing.
 
-## The location: only where it is recorded
+## The location: recorded in every build (s543a)
 
 A frame stores the location REGISTERS as they stood at the call.  The
 registers are written by the `line-track` emission (`(p-line N)` per
 statement, `(p-file …)` per file run bucket and sub body; ir-spec §6.3b),
-which is **DEFAULT OFF**.  So:
+which is **ON BY DEFAULT since s543a** (the USER's ruling of s543; until
+then it was off, s473c-s542) and kept by `PCL_OPT=none`.  So `caller`'s file
+and line are perl's — the call site, through `goto &sub`, a string eval
+(`(eval N)`), an anonymous sub, a `# line` directive — and so are Carp's
+`at FILE line N.` and a runtime-raised die's location.
 
-* compiled with `PCL_OPT=line-track`: `caller`'s file and line are perl's —
-  the call site, through `goto &sub`, a string eval (`(eval N)`), an
-  anonymous sub, a `# line` directive;
-* in the default build no register is written: a frame answers file `-`,
-  line 0 (or `(eval N)` line 0 for a call made from a string eval's code,
-  whose file id `p-eval` sets in every build).  Line 0 is never a real
-  line; it says "not recorded".
+* `PCL_OPT=-line-track` is the A/B switch: no register is written, a frame
+  answers file `-` line 0 (or `(eval N)` line 0 from a string eval's code,
+  whose file id `p-eval` sets in every build), Carp says `at - line 0.` and
+  a runtime die `at (eval 0) line 0.`.  Line 0 is never a real line.
+* File id 0 is reserved for `-`: a register nobody wrote names no file.
+* Not yet perl's (not-supported `ns-caller-fidelity`): a call from a BEGIN /
+  END / CHECK / INIT body or an `import` reached by `use` (those bodies are
+  v1 text and write no location, #5101), from a sub defined by a string
+  eval (#1360), an `elsif` condition (#5102).
 
-Recording the location by default is NOT cheap, and is left out (measured
-s539d): `line-track` on is +17.9 % emitted text on Math::BigInt::Calc
-(221,629 → 261,201 bytes) and +4..6 % on the counting-loop bench rows
-(s473c).  A narrower emission — a line store only before a statement that
-can make a call — still writes one form per call site: Calc.pm has ~280
-of them, ≥ +1.5 % text against a +0.5 % bar.
+### What it costs (measured s543a, base c5f618f2 vs the s543a tree)
+
+COST_TABLE_PLACEHOLDER
+
+The flip defeated one optimisation, found by stripping the location forms
+from the default emission and comparing it with `PCL_OPT=-line-track` over
+2,053 files (35 differed): the classic-sort pass's comparator match
+(`(p-scalar-ctx (p-line N) (p-<=> $a $b))` is not the classic shape, so 26
+files fell back to the general `p-sort` with a store per comparison) --
+fixed in `Pl/ClassicSort.pm`.  The other 11 are the 20,000-character
+inlining cap (`(locally (declare (notinline …)))`) that the extra text pushes
+a few huge top-level forms over: cold code that runs once, left as it is.
+No file moved across the 64,000-character refusal gate.
+
+What was measured before the flip (s473c, s539d): one store ~0.25 ns, one
+cycle per statement; +4..6 % on the counting-loop micro rows, nothing on the
+macro rows; a narrower emission (a store only before a statement that can
+make a call) still writes one form per call site (~280 in Calc.pm, >= +1.5 %
+text).  The narrowing that is left is the PERF task #5103: a store before a
+statement made only of raw forms that cannot raise is dead, and so is a
+store of the line the register already holds.
 
 ## `# line N "FILE"`
 
@@ -127,9 +148,10 @@ a directive changes the file).  No run-time cost: the constants change.
 `short_error_loc` (the first call whose caller does not trust the called
 package: `%CarpInternal`, `%Internal`, `@CARP_NOT` / `@ISA`, `$CarpLevel`),
 `long_error_loc`, `ret_summary`, `ret_backtrace`.  So croak / carp report
-their caller's location as perl does — exactly in a `line-track` build,
-`at - line 0.` in the default build (perl's message SHAPE, which a test
-matching `\s+at` or normalising ` at \S+ line \d+` reads).  A backtrace line
+their caller's location as perl does, in the default build since s543a
+(`at - line 0.` under the A/B switch `PCL_OPT=-line-track`: perl's message
+SHAPE, which a test matching `\s+at` or normalising ` at \S+ line \d+`
+reads).  A backtrace line
 names the sub without its arguments (`@DB::args` is not kept), and there is
 no `, <FH> line N` tail.
 
@@ -137,7 +159,6 @@ no `, <FH> line N` tail.
 
 | item | why | cost if added |
 |---|---|---|
-| file / line in the default build | needs a per-statement or per-call-site register write | text +17.9 % (all statements) / ≥ +1.5 % (call sites) |
 | a frame for every anonymous sub | +3.5 ns on a 28 ns anonymous call (+12 %), the anoncall row +4 % | measured, left out |
 | `eval {}` / `eval STRING` / `require` frames (`(eval)`, evaltext, is_require) | each would be the same prologue as an anonymous frame, on every eval execution | ~+3.5 ns per eval (the anonymous frame's number) |
 | hints / bitmask / hinthash (fields 8-10) | PCL keeps no per-frame pragma state | — |
@@ -148,4 +169,4 @@ no `, <FH> line N` tail.
 XS asks `caller` too (Params::Validate's `get_caller` reads the package and
 sub name for an error message).  When pclxs forwards that question it gets
 this file's answers: the package and the sub name are right; the file and
-line are perl's only in a `line-track` build.
+line are perl's too (s543a).

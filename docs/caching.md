@@ -391,7 +391,11 @@ saved core's development history and how PCL's own tests use it).
 ## Appendix A. What the cache key holds, and why
 
 **What the key holds, and so what a change to it re-transpiles.** The
-`<key>` is a hash of the module's absolute path, the cache *generation*
+`<key>` is a hash of the module's absolute path (its true name, plus the
+path as the loader spelled it when that differs: the transpile embeds the
+spelling in `__FILE__`, a die's location and the location registers, so
+`require "./lib/M.pm"` and an `@INC` search finding `lib/M.pm` are two
+entries; s543a), the cache *generation*
 string (which changes whenever the compiler's output changes), and a
 **fingerprint of the compiler that writes the entry**: the PCL tree's own
 path, the modification time and size of every `Pl/**.pm` and of `pl2cl`,
