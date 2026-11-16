@@ -1305,7 +1305,9 @@ Two consequences a consumer must know:
   comma's right operand is an ordinary expression run INSIDE the new scope,
   after the localization, and as a valued block's last statement it is the
   value by context: LIST = `TERM, TAIL`, scalar / void = TAIL in scalar
-  context.  A parenthesised list `local ($a, $b)` is one term.  The split is
+  context -- a sub's implicit return by the CALLER's context (`p-caller-ctx`
+  under the body's :void regime, like every implicit-return leaf).  A
+  parenthesised list `local ($a, $b)` is one term.  The split is
   the statement's own comma, never a parenless list operator's (`local $x =
   join ",", @a`); under a statement modifier, and before a second `local`,
   the whole list stays the operand (residue).  Example: `my $s = do { local
