@@ -151,6 +151,10 @@ PL
     open my $mfh, '>', "$dir/PclSpellMod.pm" or die $!;
     print $mfh "package PclSpellMod;\nsub kaboom { my \$z = 0; return 1 / \$z }\n1;\n";
     close $mfh;
+    # Back-date the source: an entry is valid only when it is STRICTLY newer
+    # than its source, so a module written in the same second as the first
+    # run's entry would be re-transpiled by the second run and hide the bug.
+    utime(time - 100, time - 100, "$dir/PclSpellMod.pm") or die $!;
     my $check = q{eval { PclSpellMod::kaboom() };
 my ($k) = grep { /PclSpellMod/ } keys %INC;
 print "SPELL ", ($@ =~ /^Illegal division by zero at \Q$INC{$k}\E line 2\.$/m ? "ok" : "BAD[$INC{$k}][$@]"), "\n";
