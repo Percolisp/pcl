@@ -505,12 +505,16 @@ the cost); `PCL_OPT=-line-track` is the A/B switch that turns them off again
   (or compiles perl at run time) is a frame: the frame costs +3.5 ns on a
   28 ns anonymous call (+12 %; the anoncall bench row +4 %) — LEFT OUT.  So a
   named sub called from an anonymous sub that does not itself read `caller`
-  sees that sub's CALLER one level up, not the anonymous frame.
+  sees that sub's CALLER one level up, not the anonymous frame.  Log::Log4perl
+  counts perl's frames past its anonymous logger methods (#5106, with the
+  bitmask below).
 - **`eval` / `require` frames** — `(eval)`, evaltext, is_require.  The same
   prologue on every eval execution (~+3.5 ns each); not built.  caller(N)
   across an `eval {}` counts one frame fewer than perl.
 - **The hint fields 8-10** (hints, bitmask, hinthash) are undef: PCL keeps
-  no per-frame pragma state.  (hasargs is right: `''` for a frame `&name;`
+  no per-frame pragma state.  perl's bitmask is defined under `use warnings`,
+  and Log::Log4perl's PatternLayout reads an undefined one as "caller choked"
+  and prints `[undef]` for %F %L %C (#5106).  (hasargs is right: `''` for a frame `&name;`
   made, which `p-amp-call` records -- that spelling's cost only.)
 - **Tier 2, not scheduled:** frames a program can hide (`Sub::Uplevel`, which
   `Test::Exception` is built on), the `*CORE::GLOBAL::caller` override,
@@ -519,7 +523,8 @@ the cost); `PCL_OPT=-line-track` is the A/B switch that turns them off again
 
 **Affected tests:** `perl-tests/caller.t` (the rows left in the sweep
 baseline); t/op/caller.t and neighbours in the companion; the CPAN board's
-`Sub-Uplevel` files (frame hiding).
+`Sub-Uplevel` files (frame hiding) and the Log-Log4perl layout rows (#5106:
+the anonymous-sub frames and the bitmask; the location itself is recorded).
 
 ---
 
