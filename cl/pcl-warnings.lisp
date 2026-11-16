@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-15000
+;;; pcl: pipeline=v2 gen=v2-15100
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -71,50 +71,57 @@
 (p-sub pl-import
   (&rest %_args)
   (:writes-args nil :needs ())
-  (p-args-body (block nil (p-return-empty))))
+  (p-args-body (block nil (p-file "lib/warnings.pm") (p-return-empty))))
 
 (p-sub pl-unimport
   (&rest %_args)
   (:writes-args nil :needs ())
-  (p-args-body (block nil (p-return-empty))))
+  (p-args-body (block nil (p-file "lib/warnings.pm") (p-return-empty))))
 
 (p-sub pl-enabled
   (&rest %_args)
   (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
-  (p-args-body (block nil (p-tail-value 1))))
+  (p-args-body (block nil (p-file "lib/warnings.pm") (p-line 28) (p-tail-value 1))))
 
 (p-sub pl-fatal_enabled
   (&rest %_args)
   (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
-  (p-args-body (block nil (p-tail-value 0))))
+  (p-args-body (block nil (p-file "lib/warnings.pm") (p-line 29) (p-tail-value 0))))
 
 (p-sub pl-enabled_at_level
   (&rest %_args)
   (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
-  (p-args-body (block nil (p-tail-value 1))))
+  (p-args-body (block nil (p-file "lib/warnings.pm") (p-line 30) (p-tail-value 1))))
 
 (p-sub pl-fatal_enabled_at_level
   (&rest %_args)
   (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
-  (p-args-body (block nil (p-tail-value 0))))
+  (p-args-body (block nil (p-file "lib/warnings.pm") (p-line 31) (p-tail-value 0))))
 
 (p-sub pl-register_categories
   (&rest %_args)
   (:writes-args nil :needs (:nonlocal_exit.loop_control))
   (p-args-body
     (block nil
-      (p-void-ctx
+      (p-file "lib/warnings.pm")
+      (p-void-ctx (p-line 55)
         (p-foreach-raw ($name @_)
           :my
           t
+          (p-line 56)
           (p-if (p-defined (p-gethash warnings::%Offsets $name)) (p-next))
+          (p-line 57)
           (p-let (($bit :box (make-p-box nil)))
             (p-my-= $bit 0)
+            (p-line 58)
             (p-foreach-raw ($off (p-values warnings::%Offsets))
               :my
               t
+              (p-line 59)
               (p-if (p-> $off $bit) (p-my-= $bit $off)))
+            (p-line 61)
             (p-setf (p-gethash warnings::%Offsets $name) (p-+ $bit 2))))
+        (p-line 63)
         (p-caller-ctx (p-return-empty))))))
 
 (p-sub pl-warn
@@ -122,9 +129,11 @@
   (:writes-args nil :needs ())
   (p-args-body
     (block nil
-      (p-void-ctx
+      (p-file "lib/warnings.pm")
+      (p-void-ctx (p-line 68)
         (p-let (($message :box (make-p-box nil)))
           (p-my-= $message (p-pop @_))
+          (p-line 69)
           (p-caller-ctx (p-warn :loc "lib/warnings.pm line 69" $message)))))))
 
 (p-sub pl-warnif
@@ -132,9 +141,11 @@
   (:writes-args nil :needs ())
   (p-args-body
     (block nil
-      (p-void-ctx
+      (p-file "lib/warnings.pm")
+      (p-void-ctx (p-line 74)
         (p-let (($message :box (make-p-box nil)))
           (p-my-= $message (p-pop @_))
+          (p-line 75)
           (p-caller-ctx (p-warn :loc "lib/warnings.pm line 75" $message)))))))
 
 (pcl::p-eval-always (pcl::p-detect-end "lib/warnings.pm"))
@@ -142,7 +153,15 @@
 
 (p-set-current-package :warnings "warnings")
 
+(p-file "lib/warnings.pm")
+
+(p-line 19)
+
+(p-line 21)
+
 (p-scalar-= warnings::$VERSION "1.70")
+
+(p-line 78)
 
 (p-unit-value
 1
