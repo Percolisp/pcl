@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub write_pl {
     my ($code) = @_;
@@ -53,7 +53,8 @@ sub run_cl {
     # The row that requires a module runs on its own PCL_CACHE_DIR, so the
     # module is transpiled by THIS tree's compiler and not taken from an
     # entry another tree wrote.
-    my $env = defined $opt{cache} ? "PCL_CACHE_DIR=$opt{cache} " : '';
+    my $env = (defined $opt{cache} ? "PCL_CACHE_DIR=$opt{cache} " : '')
+            . (defined $opt{opt} ? "PCL_OPT=$opt{opt} " : '');
     my $cl_code = PCLCore::transpile($env . "$pl2cl " . write_pl($code));
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
@@ -208,3 +209,10 @@ PL
        && $off !~ /\(p-line \d/ && $off !~ /\(p-file "/,
        'line-track is ON by default and under PCL_OPT=none; PCL_OPT=-line-track emits no (p-line …)/(p-file …)');
 }
+
+# ... and the A/B switch still RUNS without a location: a caught runtime die
+# carries the placeholder every PCL before s543a printed by default (ir-spec
+# §6.3b) -- the off switch stays tested at run time, not only in the emission.
+is(run_cl("my \$z = 0;\neval { my \$q = 1 / \$z };\nprint \$\@;\n", opt => '-line-track'),
+   "Illegal division by zero at (eval 0) line 0.\n",
+   'PCL_OPT=-line-track: a caught runtime die reads the placeholder `at (eval 0) line 0.`');
