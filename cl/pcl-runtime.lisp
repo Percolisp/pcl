@@ -481,7 +481,7 @@
                 ;; (task #1005) — declaimed so the compile stays silent.
                 p-< p--
                 p-load-extension))
-(declaim (special *p-filehandles* *p-dirhandles* *p-dirhandle-paths*))
+(declaim (special *p-filehandles* *p-dirhandles*))
 
 ;;; Capture the runtime's directory at load time so extensions can be found.
 ;;; Must be near the top — *load-truename* changes as nested loads execute.
@@ -5868,8 +5868,10 @@
                               (%p-glob-perl-name v)))
     ;; A raw I/O stream is a lexical filehandle (`open my $fh, …`), which in
     ;; Perl is a GLOB ref — stringify as GLOB(0xADDR), not SBCL's #<fd-stream …>.
-    ;; (Named handles reach here as typeglobs, handled above.)
-    ((streamp v) (format nil "GLOB(0x~(~X~))" (object-address v)))
+    ;; (Named handles reach here as typeglobs, handled above.)  A lexical
+    ;; DIRHANDLE is the same glob ref (task #5082: it printed its listing).
+    ((or (streamp v) (p-dirhandle-p v))
+     (format nil "GLOB(0x~(~X~))" (object-address v)))
     ;; Code reference - stringify as CODE(0xADDR) like Perl
     ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
     ;; Compiled regex (qr//) — stringify as (?^modifiers:pattern) like Perl 5.14+
@@ -24775,18 +24777,18 @@ would consume, so it dies naming the stream (rule 12)."
     (and s (open-stream-p s) (%p-fd-of-stream s))))
 
 (defun %p-resolve-dh (dh)
-  "THE dirhandle resolver — the `(index . names)' cons DH designates, or nil.
-   Three spellings reach it and all three are one reading: the cons ITSELF
+  "THE dirhandle resolver — the P-DIRHANDLE record DH designates, or nil.
+   Three spellings reach it and all three are one reading: the record ITSELF
    (what an element place hands back once its slot holds the handle — #1309),
-   a bareword SYMBOL through *p-dirhandles*, and a BOX holding the cons
+   a bareword SYMBOL through *p-dirhandles*, and a BOX holding the record
    (`opendir my $dh').  It is %p-resolve-fh's dirhandle twin and exists for
    the same reason: readdir/closedir/rewinddir each carried their own
    two-armed copy, so an element dirhandle opened fine and then read NOTHING
    (rule 11 — three copies of one question, disagreeing)."
   (let ((key (%p-dh-key dh)))
-    (cond ((consp dh) dh)
+    (cond ((p-dirhandle-p dh) dh)
           (key (gethash key *p-dirhandles*))
-          ((p-box-p dh) (let ((x (p-box-value dh))) (and (consp x) x))))))
+          ((p-box-p dh) (let ((x (p-box-value dh))) (and (p-dirhandle-p x) x))))))
 
 (defun %p-dh-key (dh)
   "The *p-dirhandles* key DH denotes, or nil when its handle lives in a box:
@@ -24800,23 +24802,25 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %p-dirhandle-path (v)
   "The directory an open DIRHANDLE operand was opened on, or nil when V is not
-   one.  A dirhandle's value is a `(index . names)' cons — the object BOTH
-   spellings hold, `opendir DIR' through *p-dirhandles* and `opendir my $dh'
-   in its box — so the path table is keyed on that cons and one lookup serves
-   both.  perl fstat(2)s the dirfd for `-d DIR' / `stat DIR' (5.10+); PCL has
-   no dirfd, so the resolver answers with the PATH, the same operand-not-buffer
-   divergence `_' already documents.  A CLOSED dirhandle has no entry, which is
-   what makes it EBADF."
+   one (or is closed).  A dirhandle's value is a P-DIRHANDLE record — the
+   object BOTH spellings hold, `opendir DIR' through *p-dirhandles* and
+   `opendir my $dh' in its box — and the path rides on it, so one lookup
+   serves both.  perl fstat(2)s the dirfd for `-d DIR' / `stat DIR' (5.10+);
+   PCL has no dirfd, so the resolver answers with the PATH, the same
+   operand-not-buffer divergence `_' already documents.  A CLOSED dirhandle
+   has no path, which is what makes it EBADF."
   (let ((h (%p-resolve-dh v)))
-    (and h (gethash h *p-dirhandle-paths*))))
+    (and h (%dh-path h))))
 
 (defun %p-stat-handle-shaped-p (v)
   "Whether the RAW value V (a box already peeled) is a filehandle DESIGNATOR
-   rather than a name: a stream, a socket object, a typeglob or an open
-   dirhandle.  A SYMBOL is handle-shaped too but is asked separately, because
-   `-l' reads a bareword and a glob differently."
-  (or (streamp v) (%p-socket-p v) (p-typeglob-p v)
-      (and (consp v) (%p-dirhandle-path v) t)))
+   rather than a name: a stream, a socket object, a typeglob or a dirhandle
+   -- open or CLOSED, as a closed stream is still a stream: a closed one
+   resolves to EBADF (%p-stat-descriptor), and an opener's place check
+   (%p-fh-place-check) must accept the variable that held it (task #5082).
+   A SYMBOL is handle-shaped too but is asked separately, because `-l' reads
+   a bareword and a glob differently."
+  (or (streamp v) (%p-socket-p v) (p-typeglob-p v) (p-dirhandle-p v)))
 
 (defun %p-stat-descriptor (v)
   "The resolved form of a handle-shaped operand V: its descriptor when the
@@ -25969,14 +25973,24 @@ would consume, so it dies naming the stream (rule 12)."
 ;; Directory handle storage
 (defvar *p-dirhandles* (make-hash-table :test 'eq))
 
-(defvar *p-dirhandle-paths* (make-hash-table :test 'eq)
-  "Directory each OPEN dirhandle was opened on, keyed by the handle's own
-   `(index . names)' cons — the object both spellings hold, `opendir DIR'
-   through *p-dirhandles* and `opendir my $dh' in its box.  It exists because
-   perl fstat(2)s the dirfd for `-d DIR' / `stat DIR' (5.10+) and PCL has no
-   dirfd: the ONE stat operand resolver answers with this PATH instead
-   (task #1048).  `closedir' drops the entry, which is what makes a closed
-   dirhandle EBADF rather than a silently working one.")
+(defstruct (p-dirhandle (:constructor %make-p-dirhandle (names path))
+                        (:conc-name %dh-))
+  "A DIRHANDLE -- the object BOTH spellings hold, `opendir DIR' through
+   *p-dirhandles* and `opendir my $dh' in its box.  perl's `opendir my $dh'
+   leaves a GLOB REFERENCE in $dh, and this record is PCL's spelling of it,
+   as a stream is for `open my $fh' (%p-handle-payload-p): `ref $dh' is GLOB,
+   `\"$dh\"' GLOB(0x...), and it STAYS a handle once closed, so the next
+   opener accepts the variable (task #5082: it was a bare `(index . names)'
+   cons, which every generic reader took for a LIST -- `ref' said ARRAY,
+   `\"$dh\"' printed the listing, and a closed one was no handle at all).
+   The listing is readdir(3)'s, read once at open; POS indexes it.  PATH is
+   the directory while the handle is OPEN and NIL once closed: perl
+   fstat(2)s the dirfd for `-d DIR' / `stat DIR' (5.10+) and PCL has no
+   dirfd, so the ONE stat operand resolver answers with this PATH instead
+   (task #1048), and its absence is what makes a closed dirhandle EBADF."
+  (pos 0 :type fixnum)
+  (names nil :type list)
+  (path nil))
 
 (defun %p-dirent-name (path)
   "The entry's OWN name, LITERALLY: cut from the NATIVE namestring, because
@@ -26024,11 +26038,10 @@ would consume, so it dies naming the stream (rule 12)."
                     (%p-io-errno-fail (sb-posix:syscall-errno e))
                     :fail))))
     (unless (eq names :fail)
-      (let ((handle (cons 0 names)))
-        ;; Remember the DIRECTORY beside the handle: `-d DIR` / `stat DIR`
-        ;; fstat the dirfd in perl, and the one stat operand resolver answers
-        ;; from this path instead (task #1048).
-        (setf (gethash handle *p-dirhandle-paths*) dir-str)
+      ;; The DIRECTORY rides on the handle: `-d DIR` / `stat DIR` fstat the
+      ;; dirfd in perl, and the one stat operand resolver answers from this
+      ;; path instead (task #1048).
+      (let ((handle (%make-p-dirhandle names dir-str)))
         (let ((key (%p-dh-key dh)))
           (if key
               (setf (gethash key *p-dirhandles*) handle)
@@ -26048,16 +26061,16 @@ would consume, so it dies naming the stream (rule 12)."
    so an ambient list binding cannot leak in."
   (let ((handle (%p-resolve-dh dh)))
     (when handle
-      (let ((idx (car handle))
-            (entries (cdr handle)))
+      (let ((idx (%dh-pos handle))
+            (entries (%dh-names handle)))
         (if (eq *wantarray* t)
             (let ((rest (nthcdr idx entries)))
-              (setf (car handle) (length entries))
+              (setf (%dh-pos handle) (length entries))
               (make-array (length rest) :initial-contents rest
                           :adjustable t :fill-pointer t))
             (if (< idx (length entries))
                 (progn
-                  (setf (car handle) (1+ idx))
+                  (setf (%dh-pos handle) (1+ idx))
                   (nth idx entries))
                 nil))))))
 
@@ -26072,13 +26085,18 @@ would consume, so it dies naming the stream (rule 12)."
 
    TWO ANSWERS, AND THEY ARE NOT `close''s (probed 5.40.3, task #1307): 1 when
    a dirhandle was open, UNDEF when it was not — never-opened and
-   already-closed alike, where `close' answers a defined \"\".  The path entry
+   already-closed alike, where `close' answers a defined \"\".  The PATH slot
    IS the openness marker (opendir always writes one, this drops it), so the
-   second closedir sees no entry and answers undef the way perl does."
+   second closedir sees none and answers undef the way perl does.
+   The record itself stays in a lexical's box -- a closed handle is still a
+   handle (task #5082) -- with its listing dropped, so a readdir on it reads
+   nothing, as perl's does."
   (let* ((handle (%p-resolve-dh dh))
-         (open-p (and (consp handle)
-                      (nth-value 1 (gethash handle *p-dirhandle-paths*)))))
-    (when (consp handle) (remhash handle *p-dirhandle-paths*))
+         (open-p (and handle (%dh-path handle) t)))
+    (when handle
+      (setf (%dh-path handle) nil
+            (%dh-names handle) nil
+            (%dh-pos handle) 0))
     (let ((key (%p-dh-key dh))) (when key (remhash key *p-dirhandles*)))
     (if open-p
         1
@@ -26092,7 +26110,7 @@ would consume, so it dies naming the stream (rule 12)."
   "Perl rewinddir - reset directory to beginning"
   (let ((handle (%p-resolve-dh dh)))
     (when handle
-      (setf (car handle) 0))
+      (setf (%dh-pos handle) 0))
     t))
 
 (defmacro p-rewinddir (dh)
@@ -26100,10 +26118,10 @@ would consume, so it dies naming the stream (rule 12)."
   `(%p-rewinddir-impl (%p-fh-arg ,dh)))
 
 (defun %p-open-dh (dh)
-  "The OPEN dirhandle cons DH designates, or nil — the %p-resolve-dh reading
-   plus openness: closedir drops the path entry, so a closed handle is nil."
+  "The OPEN dirhandle record DH designates, or nil — the %p-resolve-dh reading
+   plus openness: closedir drops the path, so a closed handle is nil."
   (let ((handle (%p-resolve-dh dh)))
-    (and (consp handle) (%p-dirhandle-path handle) handle)))
+    (and handle (%dh-path handle) handle)))
 
 (defun %p-telldir-impl (dh)
   "Perl telldir DIRHANDLE — the current position.  opendir materialises the
@@ -26112,7 +26130,7 @@ would consume, so it dies naming the stream (rule 12)."
    #2093).  Unopened or closed: undef with $! = EBADF, as perl."
   (let ((handle (%p-open-dh dh)))
     (if handle
-        (car handle)
+        (%dh-pos handle)
         (progn (%p-io-errno-fail 9) *p-undef*))))
 
 (defmacro p-telldir (dh)
@@ -26126,7 +26144,7 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((handle (%p-open-dh dh)))
     (if handle
         (let ((i (truncate (to-number pos))))
-          (setf (car handle) (max 0 (min i (length (cdr handle)))))
+          (setf (%dh-pos handle) (max 0 (min i (length (%dh-names handle)))))
           1)
         (progn (%p-io-errno-fail 9) *p-undef*))))
 
@@ -33841,8 +33859,9 @@ would consume, so it dies naming the stream (rule 12)."
        (p-box-value (%p-glob-scalar-box inner)))
       ;; `$$fh` on a LEXICAL handle: perl's $fh is a ref to the vivified glob,
       ;; so `$$fh` IS that glob, `*main::$fh` (task #3517) -- not the handle
-      ;; object, which stringified as a (blessed) GLOB(0x...) reference.
-      ((or (streamp inner) (%p-socket-p inner)) (%p-stream-glob inner))
+      ;; object, which stringified as a (blessed) GLOB(0x...) reference.  A
+      ;; lexical DIRHANDLE is the same glob ref (task #5082).
+      ((%p-handle-payload-p inner) (%p-stream-glob inner))
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val &optional site)
@@ -34074,8 +34093,11 @@ would consume, so it dies naming the stream (rule 12)."
    $fh, so a closed handle is a CLOSED STREAM here, and `defined $fh',
    `ref($fh)', `\"$fh\"' and the stat/filetest EBADF all follow from that one
    fact.  %p-fileno-impl's contract (#529) is unchanged: it reads
-   `open-stream-p', not emptiness."
-  (or (streamp v) (%p-socket-p v)))
+   `open-stream-p', not emptiness.
+
+   A DIRHANDLE record (`opendir my $dh') is the same glob ref in perl, open
+   or closed (task #5082)."
+  (or (streamp v) (%p-socket-p v) (p-dirhandle-p v)))
 
 (defun %p-glob-value-box-p (b)
   "True when box B holds a typeglob VALUE (`$g = *foo`) rather than a glob
@@ -35472,7 +35494,10 @@ would consume, so it dies naming the stream (rule 12)."
       ;; *foo = $fh (a lexical handle: PCL's spelling of perl's glob REF,
       ;; %p-handle-payload-p) -- the handle becomes foo's IO slot, so `local
       ;; *ARGV = $in; while (<>)` reads $in (Fable review F4 on #2666).  It
-      ;; used to fall through every arm and assign NOTHING.
+      ;; used to fall through every arm and assign NOTHING.  A DIRHANDLE
+      ;; record goes to the dirhandle table, where `readdir NAME' looks.
+      ((p-dirhandle-p inner)
+       (setf (gethash (intern uname pkg) *p-dirhandles*) inner))
       ((%p-handle-payload-p inner)
        (%p-glob-clear-io-slot pkg uname)
        (setf (gethash (intern uname pkg) *p-filehandles*) inner)
@@ -35637,14 +35662,11 @@ would consume, so it dies naming the stream (rule 12)."
              (glob (make-p-typeglob pkg name))
              (shown (gethash stream *p-handle-names*)))
         (when shown (setf (gethash glob *p-glob-display-names*) shown))
-        (if (%p-dirhandle-record-p stream)
+        (if (p-dirhandle-p stream)
             (setf (gethash (intern name pkg) *p-dirhandles*) stream)
             (setf (gethash (intern name pkg) *p-filehandles*) stream))
         (setf (gethash stream *p-stream-globs*) glob))))
 
-(defun %p-dirhandle-record-p (v)
-  "True for an OPEN dirhandle's (index . names) record (%p-dirhandle-path)."
-  (and (consp v) (nth-value 1 (gethash v *p-dirhandle-paths*))))
 
 (defvar *p-glob-display-names* (make-hash-table :test 'eq :weakness :key)
   "GLOB -> (PERL-PACKAGE . NAME) when the glob's perl-visible name is not its
@@ -35675,9 +35697,9 @@ would consume, so it dies naming the stream (rule 12)."
       ;; GLOB slots from it (task #1047).  Stringifying it into a glob NAME
       ;; (which is what this used to do) made `*$fh{IO}` undef.
       ((or (streamp inner) (%p-socket-p inner)) (%p-stream-glob inner))
-      ;; A DIRHANDLE too (task #3517): its value is PCL's (index . entries)
-      ;; record, which the name arm below stringified into `*main::0 . ..`.
-      ((%p-dirhandle-record-p inner) (%p-stream-glob inner))
+      ;; A DIRHANDLE too (task #3517), open or closed: its value is PCL's
+      ;; P-DIRHANDLE record, which the name arm below would stringify.
+      ((p-dirhandle-p inner) (%p-stream-glob inner))
       ;; A SCALAR REFERENCE whose referent holds a glob VALUE (`$$r = *foo'
       ;; makes the referent SV a GV): `*{$r}' is that glob -- blessed or not,
       ;; so it never goes through the reference's STRING (`Foo=GLOB(0x…)'
@@ -35741,7 +35763,7 @@ would consume, so it dies naming the stream (rule 12)."
     (p-bool
      (cond
        ((or (p-typeglob-p inner) (streamp inner) (%p-socket-p inner)
-            (%p-dirhandle-record-p inner))
+            (p-dirhandle-p inner))
         t)
        ((let ((r (%p-scalar-ref-referent name-box)))
           (and r (p-typeglob-p (p-box-value r))))

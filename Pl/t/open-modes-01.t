@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -349,4 +349,40 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'a glob ref stored by `=` into a package scalar or by ||= //= &&= is a handle (#3618 next stop)');
+}
+
+# #5082 (s543b): a variable that HELD A DIRHANDLE is a legal place for the next
+# opener, closed or not -- #3618's place check took PCL's dirhandle (a bare
+# `(index . names)' cons) for a non-handle reference once closedir dropped it
+# (`opendir $d` again died "Not a GLOB reference": run/switches.t stopped at
+# row 131).  The record is now a handle type of its own: `ref $d` is GLOB and
+# `ref \$d` REF (was ARRAY / SCALAR), "$d" is GLOB(0x...) (was the whole
+# listing), `$$d` the glob, a closed one is EBADF for stat and reads nothing.
+{
+    my $code = <<'PERL';
+my $d0 = "/tmp/pcl-reopendir-$$"; mkdir $d0; my $f = "$d0/in.txt";
+open(my $w, ">", $f) or die; print $w "L1\n"; close $w;
+sub names { my $h = shift; join ",", sort grep { !/^\./ } readdir $h }
+{ opendir my $d, $d0 or die; my $a = names($d); closedir $d;
+  opendir $d, $d0 or die "again: $!"; print "dir-close-dir: $a ", names($d), " ", ref(\$d), " ", ref($d), "\n"; closedir $d; }
+{ opendir my $d, $d0 or die; opendir $d, $d0 or die; print "dir-dir: ", names($d), "\n"; }
+{ open my $d, "<", $f or die; close $d; opendir $d, $d0 or die; print "file-close-dir: ", names($d), "\n"; }
+{ opendir my $d, $d0 or die; closedir $d; open $d, "<", $f or die; print "dir-close-file: ", scalar <$d>; }
+{ use Fcntl; opendir my $d, $d0 or die; closedir $d; sysopen $d, $f, O_RDONLY or die; print "sysopen: ", scalar <$d>; }
+{ use Socket; opendir my $s, $d0 or die; closedir $s; socket($s, PF_INET, SOCK_STREAM, 0) or die; print "socket: ", ref($s), "\n"; close $s; }
+{ my %h; opendir $h{d}, $d0 or die; closedir $h{d}; opendir $h{d}, $d0 or die; print "elem: ", names($h{d}), " ", ref($h{d}), " ", ref(\$h{d}), "\n"; }
+{ opendir my $d, $d0 or die; my $c = $d; closedir $d; opendir $c, $d0 or die; print "copy: ", names($c), "\n"; }
+{ opendir my $d, $d0 or die; my $s = "$d"; $s =~ s/0x[0-9a-f]+/A/; my $g = $$d;
+  print "str: $s num: ", ($d + 0 ? "addr" : "0"), " deref: $g ", ref(\$g), "\n";
+  closedir $d; my @n = readdir $d; my @st = stat $d;
+  print "closed: ", scalar(@n), " ", scalar(@st), " ", ($!{EBADF} ? "EBADF" : 0+$!), " ", ref($d), "\n"; }
+{ my $d = [1]; my $r = eval { opendir $d, $d0; 1 }; print "aref: ", ($r ? "opened" : $@ =~ /^(.*?) at /s ? $1 : $@), "\n"; }
+unlink $f; rmdir $d0;
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'a variable that held a dirhandle (closed or not) reopens; ref GLOB / REF; a closed one is EBADF (#5082)');
 }
