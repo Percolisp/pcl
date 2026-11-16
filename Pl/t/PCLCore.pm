@@ -132,4 +132,24 @@ sub transpile {
     return $cl;
 }
 
+# The emission with its LOCATION-REGISTER forms removed: every `(p-line N)'
+# and `(p-file "…")' (ir-spec §6.3b; `line-track', on by default since
+# s543a).  For a row that asserts the SHAPE of some other emission in the
+# default build: the forms head every statement, so a pattern spanning two
+# statements (or a block body's first form) would otherwise fail on the forms
+# alone.  Only the forms go -- a shape the forms CHANGE (a recognizer they
+# defeat, as they defeated classic-sort's comparator match) still fails the
+# row, which is the point of asserting the default build and not
+# `PCL_OPT=-line-track'.  The rows that assert the forms themselves are
+# Pl/t/die-location-01.t and Pl/t/caller-fidelity-01.t.
+sub strip_loc {
+    my ($cl) = @_;
+    return $cl unless defined $cl;
+    my $form = qr/\((?:p-line\s+\d+|p-file\s+"(?:[^"\\]|\\.)*")\)/;
+    $cl =~ s/^[ \t]*$form[ \t]*\n//mg;          # a form alone on its line
+    $cl =~ s/[ \t]+$form(?=[ \t]*\n)//g;         # ... last on a line
+    $cl =~ s/$form[ \t]*//g;                     # ... inside a line
+    return $cl;
+}
+
 1;

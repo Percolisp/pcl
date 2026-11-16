@@ -288,7 +288,7 @@ PERL
            '#1035: ... no fact keys');
     like($plain, qr/\(p-raw-params \(\$p \$q\)/,
          '#1035: ... bare p-raw-params names');
-    like($plain, qr/\(p-sub pl-add \(&rest %_args\) \(p-raw-params/,
+    like(PCLCore::strip_loc($plain), qr/\(p-sub pl-add\s+\(&rest %_args\)\s+\(p-raw-params/,
          '#1035: ... and no p-sub facts plist');
     my $cell = cl_of('my $x = 1; sub f { $x + 1 } { my $x = 20; } print f();',
                      PCL_IR_PLAIN => 1);

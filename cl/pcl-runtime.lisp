@@ -18939,10 +18939,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;;   * the cost is LINEAR in the number of stores (0/1/2/4 stores per
 ;;;     iteration of a 3.7 ns loop body read +0 / +6.7 / +12.8 / +19.7 %), so
 ;;;     it is a real ~0.25 ns per statement and not an alignment artefact.
+;;; ID 0 IS RESERVED for "-", the file a register that was never written
+;;; names (s543a): the file register starts at 0, and before this the first
+;;; path INTERNED (load-time-value, so whichever fasl loaded first -- often a
+;;; module's, Exporter.pm) took index 0, so a caller() or a runtime die in a
+;;; BEGIN block, before the main file's run bucket wrote its own id, named
+;;; THAT file.  "-" is perl's own name for a program with no file (stdin).
 (sb-ext:defglobal *p-src-line* 0)
 (sb-ext:defglobal *p-src-file-id* 0)
 (sb-ext:defglobal *p-src-files*
-    (make-array 4 :adjustable t :fill-pointer 0 :initial-element "-"))
+    (make-array 4 :adjustable t :fill-pointer 1 :initial-element "-"))
 (declaim (type fixnum *p-src-line* *p-src-file-id*))
 
 (defun %p-file-id (path)
@@ -29304,8 +29310,18 @@ would consume, so it dies naming the stream (rule 12)."
    the transpiler's prototype memo in <cache>/proto/ — moved there with the
    dependency manifest (task #1261), when every pre-manifest entry was invalid
    anyway and the move therefore cost nothing.  The directory is derived from
-   *PCL-CACHE-DIR* HERE, at call time, never at load time."
-  (let* ((abs-path (namestring (truename source-path)))
+   *PCL-CACHE-DIR* HERE, at call time, never at load time.
+   THE SPELLING IS IN THE KEY when it is not the true name (s543a): the
+   transpile embeds SOURCE-PATH verbatim -- `__FILE__', an explicit die's
+   location, every (p-file …) a runtime die and caller() read -- so one file
+   reached as `/d/./lib/M.pm' (`require \"./lib/M.pm\"') and as `/d/lib/M.pm'
+   (an @INC search) is two texts, and a key of the true name alone handed the
+   second spelling the first one's text on a warm cache."
+  (let* ((true-path (namestring (truename source-path)))
+         (spelled (if (stringp source-path) source-path (namestring source-path)))
+         (abs-path (if (string= spelled true-path)
+                       true-path
+                       (concatenate 'string true-path "|" spelled)))
          (stem (%p-cache-stem (concatenate 'string abs-path "|"
                                            *pcl-cache-generation* "|" "v2" "|"
                                            (p-compiler-stamp))))

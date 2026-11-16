@@ -180,8 +180,16 @@ sub _comparator_mode {
                 && @$params == 3 && !ref($params->[1]) && !ref($params->[2])
                 && $params->[1] ne $params->[2];
   my $body = $rest[0];
-  return () unless ref $body eq 'ARRAY' && ($body->[0] // '') eq 'p-scalar-ctx' && @$body == 2;
-  my $op = $body->[1];
+  return () unless ref $body eq 'ARRAY' && ($body->[0] // '') eq 'p-scalar-ctx';
+  # The block's statement-location store (`line-track', on by default since
+  # s543a) heads the body: `(p-scalar-ctx (p-line N) (p-<=> $a $b))'.  It is
+  # not part of the comparison, and %p-sort-classic runs no block at all, so
+  # the store goes with the block (the register keeps the sort statement's own
+  # line, which is the block's whenever the block sits on that line).
+  my @body = @$body[1 .. $#$body];
+  shift @body while @body > 1 && ref $body[0] eq 'ARRAY' && ($body[0][0] // '') eq 'p-line';
+  return () unless @body == 1;
+  my $op = $body[0];
   return () unless ref $op eq 'ARRAY' && @$op == 3 && !ref($op->[0]);
   my $modes = $OP_MODE{ $op->[0] } or return ();
   my ($a, $b) = ($params->[1], $params->[2]);

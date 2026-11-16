@@ -11,11 +11,11 @@
 # statement writes *p-src-line*, `(p-file "…")` at a file's run bucket and at
 # every sub body writes *p-src-file-id*, and p-sub-frame saves and restores
 # the pair so the CALLER's location is back when a call returns.  It is the
-# Kind-A gate `line-track` (Pl/Passes.pm) and it is DEFAULT OFF — it costs
-# ~0.25 ns per statement, which is nothing on real programs (json-rt -0.5 %,
-# textproc -1.2 %) and +4…6 % on the counting-loop microbench rows — so every
-# row here transpiles with PCL_OPT=line-track, and the last row asserts that
-# the DEFAULT emission still carries no register writes at all.
+# Kind-A gate `line-track` (Pl/Passes.pm), ON BY DEFAULT since s543a (the
+# USER, s543; its cost is in docs/caller-implementation.md) and kept by
+# `PCL_OPT=none' -- so every row here runs the DEFAULT build, and the last row
+# asserts the emission under the three settings: the default and `none' write
+# the registers, the A/B switch `PCL_OPT=-line-track' writes none.
 #
 # Each program ASSERTS AGAINST ITS OWN $0, so the tempfile path never reaches
 # an expectation.  Every expectation below is the live `perl` answer (probed
@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -50,13 +50,10 @@ sub write_pl {
 
 sub run_cl {
     my ($code, %opt) = @_;
-    # PCL_OPT must reach the RUN too, not only this transpile: a `require`d
-    # module is transpiled by a child pl2cl launched from the runtime, and the
-    # module cache is keyed by path + cache generation and NOT by PCL_OPT
-    # (task #1359), so the row that requires a module also runs on its own
-    # PCL_CACHE_DIR.
-    my $env = 'PCL_OPT=line-track '
-            . (defined $opt{cache} ? "PCL_CACHE_DIR=$opt{cache} " : '');
+    # The row that requires a module runs on its own PCL_CACHE_DIR, so the
+    # module is transpiled by THIS tree's compiler and not taken from an
+    # entry another tree wrote.
+    my $env = defined $opt{cache} ? "PCL_CACHE_DIR=$opt{cache} " : '';
     my $cl_code = PCLCore::transpile($env . "$pl2cl " . write_pl($code));
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
@@ -143,14 +140,48 @@ print "ev ", ($@ =~ /^Illegal division by zero at \(eval \d+\) line 1\.$/m ? "ok
 PL
    'a runtime die inside a string eval reports (eval N) line M');
 
-# ── 6. THE GATE.  With `line-track` off — the DEFAULT — the emission carries
-# no register writes at all and the pre-#1240 placeholder is still what a
-# caught runtime die reports.  This row is what makes the flip one line. ───
+# ── 5b. ONE MODULE, TWO SPELLINGS, ONE CACHE (s543a).  The transpile embeds
+# the path it was given, so `require "DIR/./M.pm"' and an @INC search for M
+# are two texts; the module cache keyed them by the true name alone, and the
+# second program reported the FIRST one's spelling on a warm cache.  Each
+# program asserts against its own %INC value (perl's die names exactly that).
+{
+    my $dir = File::Temp->newdir;
+    my $cache = File::Temp->newdir;
+    open my $mfh, '>', "$dir/PclSpellMod.pm" or die $!;
+    print $mfh "package PclSpellMod;\nsub kaboom { my \$z = 0; return 1 / \$z }\n1;\n";
+    close $mfh;
+    my $check = q{eval { PclSpellMod::kaboom() };
+my ($k) = grep { /PclSpellMod/ } keys %INC;
+print "SPELL ", ($@ =~ /^Illegal division by zero at \Q$INC{$k}\E line 2\.$/m ? "ok" : "BAD[$INC{$k}][$@]"), "\n";
+};
+    my $a = run_cl(qq{require "$dir/./PclSpellMod.pm";\n} . $check, cache => "$cache");
+    my $b = run_cl(qq{push \@INC, "$dir";\nrequire PclSpellMod;\n} . $check, cache => "$cache");
+    is("$a$b", "SPELL ok\nSPELL ok\n",
+       'a module reached by two spellings on one warm cache names each its own path');
+}
+
+# ── 5c. A file id that was never written names no file (s543a).  Id 0 is
+# reserved for `-': before, the first path INTERNED took it, so a caller()
+# in a BEGIN block after a module load named the MODULE.  (perl names the
+# main file; PCL writes no location in a BEGIN body yet -- #5101.) ─────────
+is(run_cl(<<'PL'), "begin ok\n",
+BEGIN { require File::Basename }
+sub w { my @c = caller; $c[1] }
+BEGIN { my $f = w(); print "begin ", ($f =~ /Basename/ ? "BAD[$f]" : "ok"), "\n" }
+PL
+   'a caller() in a BEGIN block does not name a module loaded before it');
+
+# ── 6. THE GATE (s543a).  The DEFAULT emission and `PCL_OPT=none' (the
+# general form) write the registers; the A/B switch `PCL_OPT=-line-track'
+# writes none, so it still measures what the flip costs. ───────────────────
 {
     my $pl = write_pl("my \$z = 0;\nmy \$q = eval { 1 / \$z };\nprint \"E:[\$\@]\";\n");
-    my $off = PCLCore::transpile("$pl2cl $pl");
-    my $on  = PCLCore::transpile("PCL_OPT=line-track $pl2cl $pl");
-    ok($off !~ /\(p-line \d/ && $off !~ /\(p-file "/
-       && $on =~ /\(p-line 2\)/ && $on =~ /\(p-file "/,
-       'line-track is default OFF: no (p-line …)/(p-file …) in the default emission');
+    my $on   = PCLCore::transpile("$pl2cl $pl");
+    my $none = PCLCore::transpile("PCL_OPT=none $pl2cl $pl");
+    my $off  = PCLCore::transpile("PCL_OPT=-line-track $pl2cl $pl");
+    ok($on =~ /\(p-line 2\)/ && $on =~ /\(p-file "/
+       && $none =~ /\(p-line 2\)/ && $none =~ /\(p-file "/
+       && $off !~ /\(p-line \d/ && $off !~ /\(p-file "/,
+       'line-track is ON by default and under PCL_OPT=none; PCL_OPT=-line-track emits no (p-line …)/(p-file …)');
 }

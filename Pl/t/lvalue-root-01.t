@@ -74,48 +74,48 @@ sub cl_of {
 # --- the subscript is a READ: a raw let slot, no box ----------------------
 
 my $inc = cl_of('my %h; for my $n (1..3) { my $k = "k" . $n; $h{$k}++; }');
-like($inc, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-post\+\+ \(p-gethash-box %h \$k\)\)\)/,
+like(PCLCore::strip_loc($inc), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-post\+\+ \(p-gethash-box %h \$k\)\)\)/,
      'hash-incdec: $h{$k}++ leaves $k a raw slot');
 unlike($inc, qr/\(\$k :box \(make-p-box nil\)\)/,
      'hash-incdec: no box allocated for the key');
 
 my $ainc = cl_of('my @a; for my $n (1..3) { my $i = 0 + $n; $a[$i]++; }');
-like($ainc, qr/\(p-let \(\(\$i :scalar \(p-\+ 0 \$n\)\)\) \(p-post\+\+ \(p-aref-box \@a \$i\)\)\)/,
+like(PCLCore::strip_loc($ainc), qr/\(p-let \(\(\$i :scalar \(p-\+ 0 \$n\)\)\) \(p-post\+\+ \(p-aref-box \@a \$i\)\)\)/,
      'array-incdec: $a[$i]++ leaves the INDEX a raw slot');
 
 my $cat = cl_of('my %h; for my $n (1..3) { my $k = "k" . $n; $h{$k} .= "x"; }');
-like($cat, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-\.= \(p-gethash %h \$k\) "x"\)\)/,
+like(PCLCore::strip_loc($cat), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-\.= \(p-gethash %h \$k\) "x"\)\)/,
      'hash-concat: a compound assign to an element reads the key');
 
 my $asn = cl_of('my %h; for my $n (1..3) { my $k = "k" . $n; $h{$k} = 1; }');
-like($asn, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(setf \(p-gethash %h \$k\) 1\)\)/,
+like(PCLCore::strip_loc($asn), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(setf \(p-gethash %h \$k\) 1\)\)/,
      'hash-assign: the `=` arm keeps the rule it always had');
 
 my $sub = cl_of('my %h; for my $n (1..3) { my $k = "k" . $n; $h{$k} =~ s/a/b/; }');
-like($sub, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-=~ \(p-gethash-box %h \$k\)/,
+like(PCLCore::strip_loc($sub), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-=~ \(p-gethash-box %h \$k\)/,
      'hash-subst: a substitution TARGET is an element write, the key a read');
 
 my $chp = cl_of('my %h; for my $n (1..3) { my $k = "k" . $n; chomp $h{$k}; }');
-like($chp, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-chomp \(p-gethash-box %h \$k\)\)\)/,
+like(PCLCore::strip_loc($chp), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-chomp \(p-gethash-box %h \$k\)\)\)/,
      'hash-chomp: a mutating builtin writes the element, not the key');
 
 my $nst = cl_of('my %h; for my $n (1..3) { my $k = "k".$n; my $j = "j".$n; $h{$k}{$j}++; }');
-like($nst, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-let \(\(\$j :scalar \(p-\. "j" \$n\)\)\)/,
+like(PCLCore::strip_loc($nst), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-let \(\(\$j :scalar \(p-\. "j" \$n\)\)\)/,
      'nested: $h{$k}{$j}++ over a plain %h root writes NO scalar');
 unlike($nst, qr/\(\$[kj] :box \(make-p-box nil\)\)/,
        'nested: neither key is boxed');
 
 my $slc = cl_of('my %h; for my $n (1..3) { my $k = "k" . $n; @h{$k} = (1); }');
-like($slc, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-setf \(p-hslice %h \$k\)/,
+like(PCLCore::strip_loc($slc), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-setf \(p-hslice %h \$k\)/,
      'slice: a hash-slice LHS reads its keys');
 
 my $rte = cl_of('my %h; my @o; for my $n (1..3) { my $k = "k".$n; push @o, \$h{$k}; }');
-like($rte, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-push \@o \(p-backslash \(p-gethash-box %h \$k\)\)\)\)/,
+like(PCLCore::strip_loc($rte), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-push \@o \(p-backslash \(p-gethash-box %h \$k\)\)\)\)/,
      'ref-to-elem: \\$h{$k} refs the ELEMENT — the key stays raw');
 
 my $wrt = cl_of('sub bump { $_[0] .= "+" } my %h;'
               . ' for my $n (1..3) { my $k = "k" . $n; bump($h{$k}); }');
-like($wrt, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-void-ctx \(pl-bump \(p-gethash-argbox %h \$k\)\)\)\)/,
+like(PCLCore::strip_loc($wrt), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-void-ctx \(pl-bump \(p-gethash-argbox %h \$k\)\)\)\)/,
      'writer-arg: an element passed to an @_-writing sub reads the key');
 
 # --- a box IS right ------------------------------------------------------
@@ -123,7 +123,7 @@ like($wrt, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-void-ctx \(pl-bum
 my $der = cl_of('my $r; for my $n (1..3) { my $k = "k" . $n; $r->{$k}++; }');
 like($der, qr/\(p-let \(\(\$r :box \(make-p-box nil\)\)\)/,
      'deref-root: the SCALAR root of a deref chain stays boxed (autoviv writes back)');
-like($der, qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-post\+\+ \(p-gethash-deref-box \$r \$k\)\)\)/,
+like(PCLCore::strip_loc($der), qr/\(p-let \(\(\$k :scalar \(p-\. "k" \$n\)\)\) \(p-post\+\+ \(p-gethash-deref-box \$r \$k\)\)\)/,
      'deref-root: … and its key is still only read');
 
 my $emb = cl_of('my $z; for my $n (1..3) { my $x = 0 + $n; $z = ++($x = 5); }');

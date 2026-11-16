@@ -109,11 +109,11 @@ unlike($no_buf, qr/%pcl-str-append/,          '-str-buffer: no buffer append');
 like($no_buf,   qr/\(p-\.=-raw \$s "x"\)/,    '-str-buffer: the raw slot keeps a plain raw append');
 
 my $no_range = transpile_with('-foreach-range');
-like($no_range, qr/\(p-foreach \(\$i \(p-\.\. 1 10\)\) :my t \(p-incf-raw \$n \$i\)\)/,
+like(PCLCore::strip_loc($no_range), qr/\(p-foreach \(\$i \(p-\.\. 1 10\)\) :my t \(p-incf-raw \$n \$i\)\)/,
      '-foreach-range: general loop over a materialized range, slot still raw');
 
 my $no_fe = transpile_with('-foreach-raw');
-like($no_fe,   qr/\(p-foreach \(\$x \@a\) :my t \(p-incf-raw \$t \$x\)\)/,
+like(PCLCore::strip_loc($no_fe),   qr/\(p-foreach \(\$x \@a\) :my t \(p-incf-raw \$t \$x\)\)/,
      '-foreach-raw: the aliasing loop is back, the accumulator slot still raw');
 like($no_fe,   qr/p-foreach-range-raw/,       '-foreach-raw: other transforms untouched');
 

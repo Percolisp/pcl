@@ -34,7 +34,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 # while continue → :continue (progn …) key, AFTER the body.
 my $wc = Pl::Parser2->parse_code(
   q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }});
-like($wc, qr/\(p-while .*\(p-print \$i\).*:continue \(progn/s,
+like(PCLCore::strip_loc($wc), qr/\(p-while .*\(p-print \$i\).*:continue\s+\(progn/s,
      'while continue: :continue key follows the body');
 
 # foreach continue → :continue key too.
@@ -42,7 +42,7 @@ my $fc = Pl::Parser2->parse_code(
   q{my @a = (1,2); foreach my $y (@a) { print $y; } continue { print "-"; }});
 # Either foreach arm (`print $y` is a pure read → #862 ARM A's raw arm);
 # this row's subject is the :continue key, not the loop-variable binding.
-like($fc, qr/\(p-foreach(?:-raw)? .*:continue \(progn/s, 'foreach continue: :continue key');
+like(PCLCore::strip_loc($fc), qr/\(p-foreach(?:-raw)? .*:continue\s+\(progn/s, 'foreach continue: :continue key');
 
 # `my $aa, $bb, $cc;` — Perl declares only $aa (a lexical); $bb/$cc are package
 # vars.  Lower as a boxed `my $aa` let + the comma expression discarded.
@@ -239,7 +239,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     sub catch2 (&;@) { my ($b, @rest) = @_; return ($b, @rest); }
     try2 { die "boom\n" } catch2 { print "caught" };
   };
-  my $ok = eval { Pl::Parser2->parse_code($src_ok) };
+  my $ok = eval { PCLCore::strip_loc(Pl::Parser2->parse_code($src_ok)) };
   ok(defined $ok && $ok !~ /--anon-block-/ && $ok =~ /\(p-sub-frame \(block nil \(p-print "caught"\)\)\)/,
      'non-capturing block-form arg lowers to the same in-place lambda') or diag($@);
 
@@ -599,7 +599,7 @@ EOF
 {
   my $mp = Pl::Parser2->parse_code(
     q{my @a = (1,2,3); my @b = map { $_ + 1 } @a;});
-  like($mp, qr/\(p-map \(lambda \(\$_\) \(p-\+ \$_ 1\)\) \@a\)/,
+  like(PCLCore::strip_loc($mp), qr/\(p-map \(lambda \(\$_\) \(p-\+ \$_ 1\)\) \@a\)/,
        '#78: map block emits one structured (lambda ($_) …) form');
   unlike($mp, qr/\(lambda \(\$_\)\n/,
          '#78: no v1 multiline lambda layout for a native block');
@@ -617,12 +617,12 @@ EOF
     q{my @a = (3,1); my @s = map { $_ } sort { $a <=> $b } @a;});
   # (\s+ between subforms: since the E2.final root flip the structural printer
   # may break long forms across lines — layout is free, the shape is pinned.)
-  like($st,
+  like(PCLCore::strip_loc($st),
        qr/\(p-sort\s+\(p-sort-cmp \(\$a \$b\)\s+\(p-scalar-ctx \(p-<=> \$a \$b\)\)\)\s+\@a\)/,
        '#78: sort block is ONE p-sort-cmp over the pair, scalar-context body');
 
   my $ev = Pl::Parser2->parse_code(q{my $e = eval { 42 };});
-  like($ev, qr/\(p-eval-block 42\)/, '#78: eval block body is structural');
+  like(PCLCore::strip_loc($ev), qr/\(p-eval-block 42\)/, '#78: eval block body is structural');
 
   # local inside the block: since s533c (C2 kind 1) a `local` statement is
   # lowered as a TREE, so the block stays structural -- the binding open wraps
@@ -630,7 +630,7 @@ EOF
   # row asserted the decline to the v1 text body: the local was raw text.)
   my $lc = Pl::Parser2->parse_code(
     q{my @a = (1); my @q = map { local $_ = 5; $_ } @a;});
-  like($lc, qr/\(lambda \(\$_\) \(let \(\(\$_ \(p-box-for-local 5\)\)\) \$_\)\)/,
+  like(PCLCore::strip_loc($lc), qr/\(lambda \(\$_\) \(let \(\(\$_ \(p-box-for-local 5\)\)\) \$_\)\)/,
        '#78/s533c: local-in-block lowers structurally (the let wraps the rest)');
   unlike($lc, qr/;; local/, '#78/s533c: no v1 source echo of the local statement');
 
@@ -647,11 +647,11 @@ EOF
 
   # -- step 2: do{} / anonymous sub raw_lambda re-host --
   my $do = Pl::Parser2->parse_code(q{my $d = do { my $y = 5; $y + 1 };});
-  like($do, qr/\(funcall \(lambda \(\) \(progn \(p-let \(\(\$y :scalar 5\)\) \(p-\+ \$y 1\)\)\)\)\)/,
+  like(PCLCore::strip_loc($do), qr/\(funcall \(lambda \(\) \(progn \(p-let \(\(\$y :scalar 5\)\) \(p-\+ \$y 1\)\)\)\)\)/,
        '#78: do{} body is structural — (funcall (lambda () (progn …)))');
 
   my $hc = Pl::Parser2->parse_code(q{my @h = map { { k => $_ } } (1);});
-  like($hc, qr/\(p-map \(lambda \(\$_\) \(make-p-box \(p-hash "k" \$_\)\)\)/,
+  like(PCLCore::strip_loc($hc), qr/\(p-map \(lambda \(\$_\) \(make-p-box \(p-hash "k" \$_\)\)\)/,
        '#78: hash-constructor map block body is structural');
 
   # The wrapper's THIRD binding is the anon sub's home package (task #515):
@@ -666,7 +666,7 @@ EOF
   # this site drifted back (task #964; Pl/t/return-copy-01.t owns the
   # behaviour, this row owns the spelling).
   my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
-  like($an,
+  like(PCLCore::strip_loc($an),
        qr/\(lambda \(&rest %_args\)\s+\(let\s+\(\(\@_ \(p-flatten-args %_args\)\)\s+\(\*pcl-current-package\* "main"\)\s+\(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(p-sub-frame \(block nil 42\)\)\)\)/,
        '#78: anon sub emits v1 wrapper shape as one structured form');
   # Layout is no longer the v1-vs-native discriminator (the structural printer
@@ -966,7 +966,7 @@ like($ch // '', qr/p-let/, '#3404: the chained my is actually emitted');
 # the chain declares (perl: `my @a = my @b = (@a, 3)` reads the OUTER @a).
 my $cq = eval { Pl::Parser2->parse_code(q{my @c = my @d = (3, my $q = 4); print "@c|@d|$q\n";}) };
 is($@, '', '#3452: a my at the chain initializer\'s own level lowers');
-like($cq // '', qr/\(p-let \(\(\$q :box [^\n]*\n\s*\(p-let\s+\(\(\@c /,
+like(PCLCore::strip_loc($cq // ''), qr/\(p-let \(\(\$q :box [^\n]*\n\s*\(p-let\s+\(\(\@c /,
      '#3452: its name is bound by the embedded-my let (#3431) around the chain\'s own let');
 eval { Pl::Parser2->parse_code(q{our @a = (1, 2); { my @a = my @b = (@a, 3); print "@a|@b\n"; }}) };
 like($@, qr/Parser2 TODO: self-referential init/,

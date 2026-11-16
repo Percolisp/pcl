@@ -459,7 +459,7 @@ PERL
     like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@w \@v\)/, 'foreach-arrays NEGATIVE: an array WRITTEN in the body (#1140)');
     like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@p \@q\)/, 'foreach-arrays NEGATIVE: a WRITTEN loop variable declines the raw arm outright');
     like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@c %h\)/,  'foreach-arrays NEGATIVE: a HASH in the list');
-    like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@a \@b\)\)\)\s+:my\s+t\s+\(p-if\s+\(p-< \@a 5\)/,
+    like(PCLCore::strip_loc($fa_def), qr/\(p-foreach \(\$x \(p-flatten-args \(list \@a \@b\)\)\)\s+:my\s+t\s+\(p-if\s+\(p-< \@a 5\)/,
          'foreach-arrays NEGATIVE: a push into a source array (#1140 written_in) — and the BOXED foreach, since the write also revokes the read-only arm');
     # NEGATIVE — the switch.
     my $fa_off = transpile_with($fa, '-foreach-arrays');

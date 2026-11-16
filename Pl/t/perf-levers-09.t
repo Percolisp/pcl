@@ -80,7 +80,7 @@ like(lisp_out(q{(print (list (not (null (fboundp (quote %p-print-arg-plain-p))))
 {
     my $file = src_file('my $n = 3; my @a; unshift @a, $_ for 1 .. $n; print "@a\n";');
     my $cl = PCLCore::transpile(qq{$pl2cl $file});
-    like($cl, qr/\(p-foreach-range-raw \(\$_ 1 \$n\) \(p-unshift \@a \$_\)\)/,
+    like(PCLCore::strip_loc($cl), qr/\(p-foreach-range-raw \(\$_ 1 \$n\) \(p-unshift \@a \$_\)\)/,
          '#2773: `unshift @a, $_ for 1..$n` binds $_ raw (p-foreach-range-raw), as push does');
 }
 answers(<<'END_SRC', <<'END_EXP', '#2770 answers: .=, ., join, interpolation, lc.uc.ucfirst, :strbuf appends, overloaded .');

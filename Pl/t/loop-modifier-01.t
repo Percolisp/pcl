@@ -68,7 +68,7 @@ sub run_pl {
 # THE SHAPES
 # ─────────────────────────────────────────────────────────────────────────────
 my $e1 = emitted(q{sub f { my $s = ""; $s .= "ab" for 1 .. $_[0]; length $s } print f(3), "\n";});
-like($e1, qr/\(p-foreach-range-raw \(\$_ 1 \(p-aref \@_ 0\)\) \(%pcl-str-append \$s "ab"\)\)/,
+like(PCLCore::strip_loc($e1), qr/\(p-foreach-range-raw \(\$_ 1 \(p-aref \@_ 0\)\) \(%pcl-str-append \$s "ab"\)\)/,
      'a `.=` under a for MODIFIER is the in-place str-buffer append, in the counted range loop');
 like($e1, qr/\(\$s :str-buffer/, '... and its accumulator is a str-buffer slot');
 
@@ -98,7 +98,7 @@ like($e6, qr/\(p-incf-raw \$t \$_\)/, 'a numeric accumulator under a for MODIFIE
 # #2465 (s499i): an EMPTY modifier list is the empty foreach — the block
 # spelling `for () {…}` is a perl syntax error, so the desugar writes `(())`.
 my $e9 = emitted(q{sub f { my $n = 0; $n++ for (); $n } print f(), "\n";});
-like($e9, qr/\(p-foreach \(\$_ \(vector\)\) \(p-incf-raw \$n :numeric\)\)/,
+like(PCLCore::strip_loc($e9), qr/\(p-foreach \(\$_ \(vector\)\) \(p-incf-raw \$n :numeric\)\)/,
      '`EXPR for ();` lowers as the native foreach over an empty list (#2465)');
 
 my $e8 = emitted(q{for (1, 2) { eval 'print $_' }});

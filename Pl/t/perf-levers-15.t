@@ -87,11 +87,11 @@ say {$fh} $_ for 4..5;
 printf {$fh} "%d,", $_ for 6..8;
 print STDOUT $_ for 1..2;
 END_PL
-    like($cl, qr/\(p-foreach-range-raw \(\$_ 1 3\) \(p-print :fh \$fh \$_\)\)/,
+    like(PCLCore::strip_loc($cl), qr/\(p-foreach-range-raw \(\$_ 1 3\) \(p-print :fh \$fh \$_\)\)/,
          '#3221 print {$fh} $_ for A..B binds $_ raw');
-    like($cl, qr/\(p-foreach-range-raw \(\$_ 4 5\) \(p-say :fh \$fh \$_\)\)/,
+    like(PCLCore::strip_loc($cl), qr/\(p-foreach-range-raw \(\$_ 4 5\) \(p-say :fh \$fh \$_\)\)/,
          '#3221 say {$fh} $_ for A..B binds $_ raw');
-    like($cl, qr/\(p-foreach-range-raw \(\$_ 6 8\) \(p-printf :fh \$fh/,
+    like(PCLCore::strip_loc($cl), qr/\(p-foreach-range-raw \(\$_ 6 8\) \(p-printf :fh \$fh/,
          '#3221 printf {$fh} FMT, $_ for A..B binds $_ raw');
     like($cl, qr/\(p-foreach-range \(\$_ 1 2\)/,
          '#3221 a bareword handle (STDOUT) keeps the boxed loop');

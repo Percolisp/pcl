@@ -15,13 +15,14 @@
 #     set_subname when it was renamed (every build);
 #   * `# line N "FILE"' moves __LINE__ / __FILE__ / a die's location (every
 #     build);
-#   * the FILE and LINE of a frame's call site are perl's under
-#     PCL_OPT=line-track -- the location registers are written only there
-#     (the default build answers `-' line 0, docs/not-supported.md
-#     ns-caller-fidelity) -- and Carp's messages built from them;
-#   * the emission rows: the default build writes no register, and only an
-#     anonymous sub that reads a frame carries :frame (its cost, +3.5 ns per
-#     call, is in p-anon-sub's docstring).
+#   * the FILE and LINE of a frame's call site are perl's in the DEFAULT build
+#     (s543a: `line-track' is on by default, and `PCL_OPT=none' keeps it) --
+#     and Carp's messages built from them; `PCL_OPT=-line-track', the A/B
+#     switch, still answers the placeholder `-' line 0 (one row each);
+#   * the emission rows: the default build and `none' write the location
+#     registers, `-line-track' writes none, and only an anonymous sub that
+#     reads a frame carries :frame (its cost, +3.5 ns per call, is in
+#     p-anon-sub's docstring).
 #
 # Every expectation is the live `perl' 5.40.3 answer (probed s539d); a
 # program that needs its own file name compares against $0.
@@ -43,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 sub write_pl {
     my ($code) = @_;
@@ -56,10 +57,11 @@ sub write_pl {
 sub transpile { my ($code, $env) = @_; PCLCore::transpile(($env // '') . "$pl2cl " . write_pl($code)) }
 
 # PCL_OPT reaches the RUN as well as the transpile (a module the run loads is
-# transpiled by a child pl2cl).  lt => 1 is the line-track build.
+# transpiled by a child pl2cl).  opt => SETTING is that PCL_OPT (the default
+# build when absent).
 sub run_cl {
     my ($code, %opt) = @_;
-    my $env = $opt{lt} ? 'PCL_OPT=line-track ' : '';
+    my $env = defined $opt{opt} ? "PCL_OPT=$opt{opt} " : '';
     my $cl_code = transpile($code, $env);
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
@@ -145,7 +147,7 @@ f y at bar.pl line 7.
 g w at bar.pl line 8.
 OUT
 
-# -- 4. File and line of the call site, line-track build. ---------------------
+# -- 4. File and line of the call site, default build (s543a). ----------------
 my $where = <<'PL';
 sub fl { my ($f, $l) = @_; ($f eq $0 ? "F" : $f) . " $l" }
 sub f0 { my @c = caller; print "a ", fl(@c[1,2]), "\n" }
@@ -161,7 +163,7 @@ f4();
 # line 40 "foo.pl"
 f0();
 PL
-is(run_cl($where, lt => 1), <<'OUT', 'line-track: caller FILE and LINE are the call site, through goto &sub, a string eval, an anon sub, a # line');
+is(run_cl($where), <<'OUT', 'default build: caller FILE and LINE are the call site, through goto &sub, a string eval, an anon sub, a # line');
 a F 3
 b F 5 main::f2
 b F 6 main::f2
@@ -171,9 +173,10 @@ d F 11 main::f4
 a foo.pl 40
 OUT
 
-# ... and the default build answers the registers as they stand: no location
-# was recorded, so `-' line 0 -- `(eval N)' from a string eval's code.
-is(run_cl($where), <<'OUT', 'default build: no location recorded -- `-` line 0, `(eval N)` from a string eval');
+# ... and the OFF switch answers the registers as they stand: no location was
+# recorded, so `-' line 0 -- `(eval N)' from a string eval's code.  (What
+# every PCL before s543a answered by default.)
+is(run_cl($where, opt => '-line-track'), <<'OUT', 'PCL_OPT=-line-track: no location recorded -- `-` line 0, `(eval N)` from a string eval');
 a - 0
 b - 0 main::f2
 b - 0 main::f2
@@ -183,7 +186,7 @@ d - 0 main::f4
 a - 0
 OUT
 
-# -- 5. Carp builds perl's messages from caller (#1361), line-track build. ---
+# -- 5. Carp builds perl's messages from caller (#1361), default build. ------
 my $carp = <<'PL';
 use Carp qw(croak carp confess);
 package M; use Carp;
@@ -213,7 +216,7 @@ local $SIG{__WARN__} = sub { print "9: ", fix($_[0]) };
 M::warnit();
 eval { local $Carp::CarpLevel = 1; P::deep1() }; print "10: ", fix($@);
 PL
-is(run_cl($carp, lt => 1), <<'OUT', 'line-track: croak / carp / confess report the first caller outside the package (@ISA, @CARP_NOT, CarpLevel)');
+my $carp_out = <<'OUT';
 1: bad arg at F line 17.
 2: nl
  at F line 18.
@@ -226,13 +229,19 @@ is(run_cl($carp, lt => 1), <<'OUT', 'line-track: croak / carp / confess report t
 9: careful at F line 26.
 10: bad arg at F line 27.
 OUT
+is(run_cl($carp), $carp_out, 'default build: croak / carp / confess report the first caller outside the package (@ISA, @CARP_NOT, CarpLevel)');
 
-# ... and in the default build every message still has perl's SHAPE, the
-# ` at FILE line N.' tail a test matches (IO-Compress's `\s+at').
+# `PCL_OPT=none' is the general-form compiler, and line tracking is part of
+# the general form (Pl/Passes.pm %NOT_OFF_BY_NONE): the same text.
+is(run_cl($carp, opt => 'none'), $carp_out, 'PCL_OPT=none still tracks: croak / carp / confess name the same caller line');
+
+# ... and with the OFF switch every message still has perl's SHAPE, the
+# ` at FILE line N.' tail a test matches (IO-Compress's `\s+at'), with the
+# placeholder location `- line 0'.
 {
-    my @rows = split /\n/, run_cl($carp);
-    my @shaped = grep { /^\d+: (?:bad arg|inner|conf|careful) at \S+ line \d+\.$/ } @rows;
-    is(scalar(@shaped), 8, 'default build: croak / carp / confess messages end in ` at FILE line N.`')
+    my @rows = split /\n/, run_cl($carp, opt => '-line-track');
+    my @shaped = grep { /^\d+: (?:bad arg|inner|conf|careful) at - line 0\.$/ } @rows;
+    is(scalar(@shaped), 8, 'PCL_OPT=-line-track: croak / carp / confess messages end in ` at - line 0.`')
         or diag(join "\n", @rows);
 }
 
@@ -242,7 +251,9 @@ OUT
     my @anon = $cl =~ /\(p-anon-sub "main"(\s+:frame)?/g;
     is_deeply([map { defined $_ ? 'frame' : 'plain' } @anon], ['plain', 'frame'],
               'only the anonymous sub that reads caller carries :frame');
-    unlike($cl, qr/\(p-(?:line|file) /, 'the default build writes no location register');
+    like($cl, qr/\(p-file "[^"]+"\).*\(p-line 1\)/s, 'the default build writes the location registers');
+    my $off = transpile('my $f = sub { $_[0] + 1 }; print $f->(1), "\n";', 'PCL_OPT=-line-track ');
+    unlike($off, qr/\(p-(?:line|file) /, 'PCL_OPT=-line-track writes no location register');
     like(transpile("# line 9 \"x.pl\"\nmy \$z = __LINE__ . __FILE__;\n"), qr/9 "x\.pl"|"x\.pl"/,
          '__FILE__ / __LINE__ after a directive are its constants');
 }

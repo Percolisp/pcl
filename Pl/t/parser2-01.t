@@ -60,7 +60,7 @@ like($cl, qr/\(p-let \(\(\$c :scalar \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/
 # for suppressing every per-statement bind (SBCL heap blowup on large subs).
 my $void_wraps = () = $cl =~ /\(p-void-ctx\b/g;
 is($void_wraps, 1, 'exactly one :void bind: the hoisted sub-body regime');
-like($cl, qr/\(p-void-ctx\s+\(p-let\s+\(\(\$a__excl__\d+ :\w[\w-]*\s/s,
+like(PCLCore::strip_loc($cl), qr/\(p-void-ctx\s+\(p-let\s+\(\(\$a__excl__\d+ :\w[\w-]*\s/s,
      'the :void regime wraps the body once, directly above the first decl');
 # #1035 step 2: and that first decl says which perl variable it is -- `$a` is
 # an exception-set name, renamed before any of this analysis runs, and the
@@ -171,7 +171,7 @@ like($cfor2, qr/\(\(p-incf-raw \$j(?: :numeric)?\)\)/, 'C-for ++ step lowered vi
 my $cfor3 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 6; $j++) { $j++; print "$j\n"; }');
 like($cfor3, qr/\(p-let \(\(\$j :scalar 0\)\)/, 'C-for with body ++ also unboxes (A-num)');
-like($cfor3, qr/\(p-incf-raw \$j(?: :numeric)?\)\s*\(p-print/s, 'body ++ lowered via the -raw twin');
+like(PCLCore::strip_loc($cfor3), qr/\(p-incf-raw \$j(?: :numeric)?\)\s*\(p-print/s, 'body ++ lowered via the -raw twin');
 # … but a STR-family write forces the box: perl magically increments a
 # non-numeric string ("aa" -> "ab"), which the numeric twin cannot do.
 my $cfor4 = Pl::Parser2->parse_code(
@@ -548,7 +548,7 @@ is(paren_balance($loclen), 0, 'local $#a (no scope opened) stays balanced');
 # Until s494p it went through the per-statement v1 fallback and every var it
 # wrote stayed boxed, which these two rows asserted; perl prints 6 either way.
 my $fe = Pl::Parser2->parse_code(q{my $t = 0; $t = $t + $_ foreach 1..3; print "$t\n";});
-like($fe, qr/\(p-foreach-range-raw \(\$_ 1 3\) \(setf \$t \(p-\+ \$t \$_\)\)\)/, 'foreach modifier lowers as the native block loop');
+like(PCLCore::strip_loc($fe), qr/\(p-foreach-range-raw \(\$_ 1 3\) \(setf \$t \(p-\+ \$t \$_\)\)\)/, 'foreach modifier lowers as the native block loop');
 like($fe, qr/\(p-let \(\(\$t :scalar 0\)\)/, 'modifier-written var takes the raw slot, like the block spelling');
 my $dw = Pl::Parser2->parse_code(q{my $x = 5; do { $x--; } while ($x > 3); print "$x\n";});
 like($dw, qr/p-do-while/, 'do-while via per-statement fallback');
@@ -572,7 +572,7 @@ like($rl2, qr/\(p-defined \$l\)/, 'while (my $l = <FH>) cond terminates on undef
 # loop key, placed AFTER the body (parse-loop-keys finds it by position).
 my $cont = Pl::Parser2->parse_code(
   q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }});
-like($cont, qr/\(p-while .*:continue \(progn/s, 'while continue block → :continue key');
+like(PCLCore::strip_loc($cont), qr/\(p-while .*:continue\s+\(progn/s, 'while continue block → :continue key');
 # …and a BARE-block continue (LABEL: { … } continue { … }) lowers natively
 # too since s287 — v1's shape, run after the tagbody (see the s287 block
 # near the end of this file for the placement guards).
@@ -811,11 +811,11 @@ EOF
 # `redo` re-runs the body only.
 {
   my $ul = Pl::Parser2->parse_code(q[{ print "x"; } continue { print "c"; } print "t";]);
-  like($ul, qr/\(block nil \(tagbody :redo.*:next\)\s*\(progn\s*\(p-print "c"\)\)\)/s,
+  like(PCLCore::strip_loc($ul), qr/\(block nil \(tagbody :redo.*:next\)\s*\(progn\s*\(p-print "c"\)\)\)/s,
        'unlabeled bare-block continue placed after the tagbody');
   like($ul, qr/\(p-print "t"\)/, 'statement glommed into the orphan continue is lowered');
   my $lb = Pl::Parser2->parse_code(q[L: { print "x"; } continue { print "c"; }]);
-  like($lb, qr/\(catch \(pcl::%pcl-loop-tag "NEXT" 'L\).*\(progn\s*\(p-print "c"\)\)\)/s,
+  like(PCLCore::strip_loc($lb), qr/\(catch \(pcl::%pcl-loop-tag "NEXT" 'L\).*\(progn\s*\(p-print "c"\)\)\)/s,
        'labeled bare-block continue sits after the NEXT catch, inside LAST');
 }
 
@@ -829,9 +829,9 @@ EOF
   like($g, qr/\(tagbody :again/, 'standalone label opens a tagbody');
   like($g, qr/\(go :again\)/, 'goto LABEL lowers to (go :label)');
   my $f = Pl::Parser2->parse_code(q[goto fwd; print 1; fwd: print 2;]);
-  like($f, qr/\(catch :pcl-goto-fwd \(throw :pcl-goto-fwd nil\) \(p-print 1\)\)/,
+  like(PCLCore::strip_loc($f), qr/\(catch :pcl-goto-fwd \(throw :pcl-goto-fwd nil\) \(p-print 1\)\)/,
        'forward goto: prefix catch-wrapped, goto lowers to throw');
-  like($f, qr/\(tagbody :fwd \(p-print 2\)\)/,
+  like(PCLCore::strip_loc($f), qr/\(tagbody :fwd \(p-print 2\)\)/,
        'forward goto: label opens the tagbody after the catch');
 }
 

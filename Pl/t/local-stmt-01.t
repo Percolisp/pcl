@@ -116,7 +116,7 @@ sub f { local $x = 5; local $h{k} = 3; local ($x, $h{j}) = (1, 2); g() }
 close $sfh;
 my $cl = PCLCore::transpile("$pl2cl $shape_file");
 unlike($cl, qr/;; local/, 'no v1 source echo of a local statement');
-like($cl, qr/\(p-local-cell \$x \(p-box-for-local 5\)\n\s+\(p-local-hash-elem-init %h "k" 3\n/,
+like(PCLCore::strip_loc($cl), qr/\(p-local-cell \$x \(p-box-for-local 5\)\n\s+\(p-local-hash-elem-init %h "k" 3\n/,
      'the opens nest, each header on its head line');
 like($cl, qr/\(p-list-= \(vector \$x \(p-gethash %h "j"\)\) pcl-local-rhs-\d+\)/,
      'a list local assigns through the targets\' places');

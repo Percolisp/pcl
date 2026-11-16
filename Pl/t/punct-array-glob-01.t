@@ -241,6 +241,9 @@ sub emitted_no_argv0 {
     # parser's prototype questions, which the two spellings ask differently.
     $cl =~ s/\(pcl::p-eval-always \(pcl::p-detect-table(?<b>(?:[^()"]++|"(?:[^"\\]|\\.)*+"|\((?&b)\))*)\)\)\n?//s;
     $cl =~ s/^\(pcl::p-eval-always \(pcl::p-detect-end "[^"]*"\)\)\n//m;   # it names the temp file
+    # ... and the file register's write (line-track, on by default since
+    # s543a): `(p-file "…")' names the temp file too.
+    $cl =~ s/\(p-file "[^"]*"\)//g;
     return $cl;
 }
 is(emitted_no_argv0(q{while (<<>>) { print }}),

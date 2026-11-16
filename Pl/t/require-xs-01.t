@@ -126,7 +126,12 @@ print "D ", (exists $INC{'Opt/XS.pm'} ? "present" : "absent"), "\n";
 
 my $ok2 = eval { require Opt::XS; 1 };
 my $e2  = first_line($@);
-print "E ", ($e2 eq $e ? "same" : "differs [$e2]"), "\n";
+# The memo's claim is the MESSAGE; its ` at FILE line N.' tail is each require
+# statement's own location (real since s543a turned line tracking on, as in
+# perl), so the tails differ and are compared apart: the second must name THIS
+# program's line.
+my ($m1, $m2) = map { (my $m = $_) =~ s/ at \S+ line \d+\.\z//; $m } $e, $e2;
+print "E ", ($m2 eq $m1 && $e2 =~ / at \S*prog\.pl line \d+\.\z/ ? "same" : "differs [$e2]"), "\n";
 
 require XSLoader;
 eval { XSLoader::load('Zzz::Direct', '0.01'); 1 };

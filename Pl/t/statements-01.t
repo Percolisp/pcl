@@ -13,6 +13,9 @@ use strict;
 use warnings;
 
 use lib ".";
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore ();
 
 use Test::More tests => 41;
 BEGIN { use_ok('Pl::Parser2') };
@@ -31,7 +34,9 @@ sub output_contains {
     my $expected = shift;
     my $desc     = shift // "contains: $expected";
 
-    my $result = parse_code($code);
+    # The shape is asserted around the location-register forms (s543a: they
+    # head every statement and block body; PCLCore::strip_loc says why).
+    my $result = PCLCore::strip_loc(parse_code($code));
     like($result, qr/\Q$expected\E/, $desc);
 }
 
