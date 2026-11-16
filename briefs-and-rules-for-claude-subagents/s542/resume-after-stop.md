@@ -3,7 +3,7 @@
 Read this FIRST at the next session start; then `s542/PAUSE-s542.md` bottom-up for the detail.  **ASK THE USER whether new subtasks may be started** before launching anything: the word "do not start more subtasks" (01:3x) was not lifted.
 
 ## Main
-**MAIN-READY-98 `a3d00a12` + the round's baselines + s541a's measurement + records** (CODE sha `c5f618f2`, generation **v2-15000**).  Pushed; CI green on MAIN-READY-98 (`9e0702b6`); read CI for the last push.
+**MAIN-READY-98 `a3d00a12` + the round's baselines + s541a's measurement + records** (CODE sha `c5f618f2`, generation **v2-15000**).  Pushed; CI GREEN on the final push `063e1437`.
 * Gate **379 files / 12,303 rows PASS**; sweep **18,803**, GATE clean; EVERYDAY **115 of 122**; ir-conform 328 / 0; ir-host-leak 31; corpus-diff population 111.
 * CPAN board, **round of s542 on MAIN-READY-95**: 661 PASS / 144 PARTIAL / 24 FAIL / 67 SKIP of 896 files, 109,714 ok / 1,225 not ok.  The companion snapshot is current as of MAIN-READY-95 (the full run: 0 NEW / 0 FIXED / 0 LOST).  The three code merges after -95 (s540e, s539c, s539b) are the next round's.
 * PPI `pcl` = `66e690d2` on the fork AND in `vendor/PPI`; upstream pull request #459 refreshed (133 commits, 53 groups, 459 cases).
