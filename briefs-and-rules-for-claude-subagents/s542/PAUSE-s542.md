@@ -100,3 +100,10 @@ Read bottom-up after a cut.  The stop state this session started from is `s541/r
 * CI for `4e7c1d8c` to be read at the next check.
 * RUNNING (nothing new is launched, the USER's word): s542r, s539b, s541a.
 * 02:3x: **CI GREEN on `4e7c1d8c`** (MAIN-READY-97 + records) and on the notes commit after it.  s539b has its records for the binder port half written and four legs queued (its own companion leg waits behind its own bounded leg); s541a is building its run-phase measurement into `board-timing`; the round is at board chunk c (IO-Compress).  Load 4, 10 GB available.
+
+## 03:3x .. 03:5x -- **s539b MERGED = MAIN-READY-98 `a3d00a12`** (code sha `c5f618f2`, generation v2-15000 on main)
+* MERGE-READY `a3d00a12` at 03:3x, on main's head: ff 11 commits, verified by its own exit status.
+* REVIEW: its three probes (`pr/b1 r1 s3`) perl -> main -> tree: tree = perl, main wrong on each.  My rename battery (`scratchpad/p539b/e1-renames.pl`, 30 lines): tree = main; = perl except ONE line wrong on both -> **#4796 FILED** (a string eval's `my $x = $x + 1` over a captured lexical reads the new variable: 1 where perl says 8; three of five reduced lines wrong; the discriminating look is in the task).
+* MERGED-MAIN check: 12 guard + records files / 376 rows PASS; its probes = perl on main.  No second full gate (main IS its gated tree: 379 / 12,303; the SWEEP, the gate for a rename change, was clean on it).
+* TASKS CLOSED: #4921 #4923 #4822.  Kept open: #4922 (blockers the binder made unnecessary, none fires in the gate-SET populations), #3694 (the parser program; notes).  Records: CLAUDE.md numbers paragraph replaced, STATUS, DECIDED (+ the USER's no-more-subtasks word), session-log.
+* RUNNING: s542r (the round), s541a.  Two slots stay EMPTY by the USER's word.

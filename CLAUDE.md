@@ -396,21 +396,23 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s542, 2026-11-16: main = MAIN-READY-97 `62677d00` (code `c1fe4930`,
-generation v2-14900; five batches merged in this session: s540c, s539a,
-s540d, s540e, s539c).**  Gate **378 files / 12,283 rows `Result: PASS`**
-(measured on merged main, on a cold module cache); full sweep **TOTAL
-passing 18,803**, GATE clean; corpus-diff population 111 files; ir-conform
-328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN board
-(round of s539, on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL / 67 SKIP
-of 896 files, 109,797 ok / 1,740 not ok -- THE ROUND IS RUNNING (batch
-s542r, on MAIN-READY-95; the companion snapshot dates from MAIN-READY-63);
-PPI `pcl` = `66e690d2`; CI green on MAIN-READY-96.  Known default-build
-limits flagged to the USER: `caller` file/line and `croak` location only
-under `PCL_OPT=line-track`; `DESTROY` runs at program exit only; a
-filehandle that leaves its opening block is written out before the next
-child process, at a `flock` / descriptor trigger or at exit, never at the
-drop (`docs/not-supported.md` ns-escaping-filehandle).
+**s542, 2026-11-16: main = MAIN-READY-98 `a3d00a12` (code `c5f618f2`,
+generation v2-15000; six batches merged in this session: s540c, s539a,
+s540d, s540e, s539c, s539b).**  Gate **379 files / 12,303 rows
+`Result: PASS`** (s539b's gate on merged main's code; MAIN-READY-97 measured
+378 / 12,283 on main itself, also on a cold module cache); full sweep
+**TOTAL passing 18,803**, GATE clean; corpus-diff population 111 files;
+ir-conform 328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN
+board (round of s539, on MAIN-READY-85): 641 PASS / 161 PARTIAL / 27 FAIL /
+67 SKIP of 896 files, 109,797 ok / 1,740 not ok -- THE ROUND IS RUNNING
+(batch s542r, on MAIN-READY-95; the companion snapshot dates from
+MAIN-READY-63); PPI `pcl` = `66e690d2`; CI green on MAIN-READY-97.  Known
+default-build limits flagged to the USER: `caller` file/line and `croak`
+location only under `PCL_OPT=line-track`; `DESTROY` runs at program exit
+only; a filehandle that leaves its opening block is written out before the
+next child process, at a `flock` / descriptor trigger or at exit, never at
+the drop (`docs/not-supported.md` ns-escaping-filehandle).
+
 
 
 
