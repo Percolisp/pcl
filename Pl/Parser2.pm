@@ -14671,9 +14671,12 @@ sub _lower_local {
       my @head = @{ $rec->{parts} }[1 .. $#{ $rec->{parts} }];
       my ($eq) = grep { ref($head[$_]) eq 'PPI::Token::Operator' && $head[$_]->content eq '=' } 0 .. $#head;
       splice(@head, $eq) if defined $eq;
-      $form = ['if', ['eq', '*wantarray*', 't'],
-               $self->_lower_expr([@head, $rec->{tail_op}, @tail], $stmt, 1),
-               $self->_lower_expr(\@tail, $stmt)];
+      # A SUB's tail under the body's :void regime reads the CALLER's
+      # context, as every implicit-return leaf does (_restore_caller_wa).
+      ($form) = $self->_restore_caller_wa($tail_ctx,
+               ['if', ['eq', '*wantarray*', 't'],
+                $self->_lower_expr([@head, $rec->{tail_op}, @tail], $stmt, 1),
+                $self->_lower_expr(\@tail, $stmt)]);
     } else {
       $form = $self->_lower_expr(\@tail, $stmt);
     }

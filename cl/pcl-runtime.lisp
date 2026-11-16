@@ -26600,11 +26600,10 @@ would consume, so it dies naming the stream (rule 12)."
                            (return-from p-chdir nil))))))
              ;; Argument provided: check for filehandle/dirhandle
              (let ((raw (if (p-box-p dir) (p-box-value dir) dir)))
-               (if (or (streamp raw)
-                       (and (consp raw) (integerp (car raw))) ; dirhandle stored as (idx . entries)
-                       (and (p-box-p dir)                     ; dirhandle box via opendir
-                            (let ((v (p-box-value dir)))
-                              (and (consp v) (integerp (car v))))))
+               ;; A DIRHANDLE is its p-dirhandle record, open or closed (task
+               ;; #5082 -- this site read the old `(index . names)' cons and
+               ;; took the record for a PATH: chdir.t row 22).
+               (if (or (streamp raw) (p-dirhandle-p raw))
                    ;; It's a filehandle or dirhandle: fchdir not implemented
                    (p-die (format nil "The fchdir function is unimplemented at pcl line 0.~%"))
                    (to-string dir))))))

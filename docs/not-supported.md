@@ -2495,8 +2495,8 @@ stays different from perl, measured s540c / s541:
   child starts), exit (after the `END` blocks).  A file written through a
   dropped handle and read back by the same program before any of those is
   SHORTER, and an `END` block sees it short too (Path-Tiny
-  `input_output*.t`'s 8 `openw`/`opena` -> `openr` rows, which also fail
-  on task #5005; a `{ my $fh = $f->openw; print $fh ...; }` block followed
+  `input_output*.t`'s 8 `openw`/`opena` -> `openr` rows -- their task #5005
+  half is fixed since s543b; a `{ my $fh = $f->openw; print $fh ...; }` block followed
   by a read).  Close it explicitly when another step reads the file.  No
   byte of an output-only handle is lost.  Where the program SAYS it is done
   -- `undef $fh;`, `undef($fh);` or `$fh = undef;` on a lexical holding the

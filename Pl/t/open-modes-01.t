@@ -358,6 +358,9 @@ PERL
 # row 131).  The record is now a handle type of its own: `ref $d` is GLOB and
 # `ref \$d` REF (was ARRAY / SCALAR), "$d" is GLOB(0x...) (was the whole
 # listing), `$$d` the glob, a closed one is EBADF for stat and reads nothing.
+# And `chdir $d` agrees with $Config{d_fchdir} (PCL's is undef: "The fchdir
+# function is unimplemented"); p-chdir kept reading the old cons and took the
+# record for a PATH -- perl-tests/chdir.t row 22, found by the batch's sweep.
 {
     my $code = <<'PERL';
 my $d0 = "/tmp/pcl-reopendir-$$"; mkdir $d0; my $f = "$d0/in.txt";
@@ -377,6 +380,9 @@ sub names { my $h = shift; join ",", sort grep { !/^\./ } readdir $h }
   closedir $d; my @n = readdir $d; my @st = stat $d;
   print "closed: ", scalar(@n), " ", scalar(@st), " ", ($!{EBADF} ? "EBADF" : 0+$!), " ", ref($d), "\n"; }
 { my $d = [1]; my $r = eval { opendir $d, $d0; 1 }; print "aref: ", ($r ? "opened" : $@ =~ /^(.*?) at /s ? $1 : $@), "\n"; }
+{ use Config; opendir my $d, $d0 or die; my $ok = eval { chdir($d) or die "chdir: $!\n"; 1 }; my $why = $@; chdir "/tmp";
+  my $fch = ($Config{d_fchdir} // "") eq "define";
+  print "fchdir: ", (($fch ? $ok : $why =~ /^The fchdir function is unimplemented at/) ? "agrees with Config" : "DISAGREES: $why"), "\n"; }
 unlink $f; rmdir $d0;
 PERL
     my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);

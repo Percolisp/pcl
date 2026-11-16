@@ -113,7 +113,9 @@ line_is(16, '5 3 9 2 4 x0', '#4443: a block whose last statement is a local take
 # file (the readline was DROPPED: undef); the tail runs inside the new scope
 # and is the statement's value by context; a parenthesised list, an
 # initializer that is a list operator's (`join ",", @a`), a slice `(1, 2)[1]`
-# and `local $x, local $y` keep their readings.  The oracle is perl itself.
+# and `local $x, local $y` keep their readings; a SUB's tail under the body's
+# :void regime reads the CALLER's context (rows 17 18, s543b resumed: it read
+# the ambient :void and returned the tail alone).  The oracle is perl itself.
 # INVERSE: main c5f618f2 differs on rows 1 2 3 6 7 11 13 (and drops row 16's
 # statement at compile time).
 {
@@ -136,6 +138,8 @@ sub show { join " ", map { defined $_ ? $_ : "u" } @_ }
 { @a = (1, 2, 3); sub f14 { local $x = join ",", @a; $x } print "14 ", f14(), "\n"; }
 { sub f15 { local $x, local $y; $x = 3; $y = 4; } ($x, $y) = (1, 2); f15(); print "15 ", show($x, $y), "\n"; }
 { my @log; sub lg { push @log, @_; scalar @log } sub f16 { local $x, lg("t") } f16(); print "16 [@log]\n"; }
+{ sub f17 { if ($_[0]) { local $x, "a", "b" } else { local $x = 1, "c" } } my @r = f17(1); my $s = f17(1); my @r0 = f17(0); print "17 ", scalar(@r), " $s ", scalar(@r0), " [", show(@r0[1 .. $#r0]), "]\n"; }
+{ open my $h0, "<", $f or die; sub f18 { my $hh = shift; my $n = 1; local $/, <$hh> } my @r = f18($h0); print "18 ", scalar(@r), " [", join(",", map { defined $_ ? s/\n/|/gr : "u" } @r), "]\n"; }
 unlink $f;
 PL
   my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
