@@ -120,3 +120,10 @@ Read bottom-up after a cut.  The stop state this session started from is `s541/r
   3. #5081 -- `select NAME` / `open(NAME, ...)` through a symbolic name creates no glob that `defined *{NAME}` sees.
 * Runner gaps it reported (not patched): `cpan-board.sh` cannot pass `--refresh-oracle`; `heavy.sh`'s exclusive-waiting marker misses an exclusive leg that has not got slot 1 yet; a batch's back-to-back benches starve waiting bounded legs (s541a: ~30 minutes).
 * RUNNING: s541a only.
+
+## 04:5x -- **s541a MERGED** (a measurement: tools + docs + one .tsv; main's code stays `c5f618f2`) -- and NOTHING RUNS
+* MERGE-READY `7aafd153` on main's head: ff 13 commits.  Its bar files PASS on merged main (6 files / 81 rows); its own gate 379 / 12,303 PASS.
+* THE ANSWER to the USER's s540 question (#4791, CLOSED): with everything compiled and loaded before the clock starts **PCL runs the board 4.2x slower than perl** (137.7 s against 32.4 s of CPU, 659 files, on `c1fe4930`); 40.5 s of it is compiling at run time (string evals 32.5 s, run-time requires 8.0 s); 3.2x without that.  The ranked list is in `docs/cpan-runtime-comparison-s541.md` section 4 and filed (#5061-#5068 new).
+* Records: CLAUDE.md (the Speed index line, `tools/board-timing.pl --run` in Quick Reference), DECIDED, session-log; memory STATE; **`s542/resume-after-stop.md` WRITTEN** (the eight merges, the next brief's candidates in order, the box, the open USER questions).
+* THE BOX: no leg, no agent; `heavy.sh` put back to the three-slot script (`heavy.sh.four-slot-s542` kept beside it).
+* SESSION TOTAL: six code merges (MAIN-READY-93 .. -98), the round and the run-phase timing merged; tasks closed by me at the merges: 38; filed by my reviews: #4792-#4796.

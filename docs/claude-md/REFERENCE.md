@@ -226,6 +226,8 @@ echo 'my $x = 1 + 2;' | ./pl2cl
 # general-form compiler: its emission must RUN identically (Pl/t/passes-01.t;
 # the gate under it differs only in transpile-SHAPE rows).
 PCL_OPT=none ./pl2cl < prog.pl               # everything off
+tools/board-timing.pl --run [--fasl]            # the CPAN board RUN phase, perl vs PCL per file, compile / load / transpile taken out
+                                             #  (s541a, docs/cpan-runtime-comparison-s541.md; its control: prove tools/t/board-timing.t)
 PCL_OPT=-const-fold ./pl2cl < prog.pl        # ONE name off: a literal `use constant` stays a call (#4982, s540d: by default a bare use
                                              #  of a literal `use constant` of this unit, in its package, IS the literal -- ir-spec, the fold rule)
 PCL_OPT=-raw-numeric,-str-buffer ./runpcl x.pl   # named ones off (PCL_NO_RAW_VERDICT=1 = -raw-numeric)

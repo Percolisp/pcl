@@ -207,6 +207,7 @@ tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # rebuild a verd
 tools/corpus-diff.pl               # emission A/B over the corpus; READ its SILENT-DROP line
 tools/emission-ab.pl --ref <base> --list lib/**/*.pm
 tools/everyday-smoke.pl            # the steering number: `EVERYDAY: N of M identical to perl`
+tools/board-timing.pl --run        # the board's RUN phase, perl vs PCL (docs/cpan-runtime-comparison-s541.md)
 tools/run-perl-suite.pl --all --quick --jobs 4   # perl's own t/ (the companion), default form
 tools/run-perl-suite.pl --jobs 1 FILE            # one companion file
 tools/run-dist-t.pl --rows DIST t/FILE           # one CPAN-board file
@@ -398,7 +399,8 @@ from the review rounds".
 
 **s542, 2026-11-16: main = MAIN-READY-98 `a3d00a12` (code `c5f618f2`,
 generation v2-15000; six batches merged in this session: s540c, s539a,
-s540d, s540e, s539c, s539b; and the round s542r, baselines only).**  Gate **379 files / 12,303 rows
+s540d, s540e, s539c, s539b; the round s542r and the timing s541a without
+code).**  Gate **379 files / 12,303 rows
 `Result: PASS`** (s539b's gate on merged main's code; MAIN-READY-97 measured
 378 / 12,283 on main itself, also on a cold module cache); full sweep
 **TOTAL passing 18,803**, GATE clean; corpus-diff population 111 files;
@@ -500,7 +502,8 @@ of every entry (what it found, what it ruled) is in
 
 **Speed** (read before proposing a perf round or quoting a speed number)
 - `speed-low-hanging-review-s540.md`, `cpan-speed-comparison-s540.md`,
-  `speed-review-s509.md`, `where-the-time-goes.md`,
+  `cpan-runtime-comparison-s541.md` (the board's RUN phase alone: 4.2x
+  perl; 29 % of it is compiling at run time), `speed-review-s509.md`, `where-the-time-goes.md`,
   `faster-codegen-suggestions.md`.
 
 **Tests, triage, baselines**
