@@ -904,6 +904,10 @@ sub run_rows {
       $r{pr_cpu} = num($b->{pr_cpu});
       $r{pr_spread} = $r{pr_cpu} > 0 ? (num($s[-1]{pr_cpu}) - $r{pr_cpu}) / $r{pr_cpu} : 0;
       $r{$_} = $b->{$_} for qw(pr_wall r_cpu r_lw_cpu r_late_cpu r_late_n r_rcomp r_rcomp_n r_eval_cpu r_xsrv r_build r_sub r_gc r_mb run_how c_ok);
+      # the pl2cl transpile server (a string eval's) is a reaped child too: its CPU, already in the
+      # run by its WALL (evalx + xserver), is taken out of the SUBPROCESS column
+      my $srv = num($b->{evalx}) + num($b->{xserver});
+      $r{r_sub} = num($r{r_sub}) > $srv ? num($r{r_sub}) - $srv : 0;
     }
     push @rows, \%r;
   }
