@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub run_cl {
     my ($code) = @_;
@@ -104,3 +104,31 @@ test_cl('/s leaves pass-through duplicates intact',
 test_cl(q{#1493: a count-only tr on a reference leaves the reference},
     q{my $x = \"foo"; my $n = ($x =~ tr/A/A/); my $y = [1]; $y =~ tr/a-zA-Z//; print "$n ", ref($x), " ", ref($y), "\n";},
     "2 SCALAR ARRAY\n");
+
+# #5021 (s543b): perl's range operator in a tr/// list is an UNESCAPED `-` of
+# the source -- `\-`, `\x2d`, `\055` are a literal dash (a leading `\-` too),
+# and an unknown escape `\.` is the character alone, never a backslash; an
+# escaped character can still END or START a range (`a-\z`, `\x41-\x43`,
+# `\--0`, `\\-c`).  PCL read `a\-c` as the range a..c (`\-` was dropped
+# before a range scan that knew no escapes) and `\.` as backslash + dot.
+# Expected text is perl 5.40.3's.  INVERSE: main c5f618f2 printed
+# "3:Z-Z-Z 1:Ybc- 3:Z-Z-Z 3:Z-Z-Z 5:ZZZ-ZZ 1:a-b-cZ 3:xxxDE 1:-./Xa 2:xXyXz 3:AAA 3:-- 0:X-Z-Z".
+test_cl(q{#5021: an escaped dash is a literal in a tr list; escaped range ends still work},
+    <<'PERL',
+sub c { my ($n, $s) = @_; "$n:$s" }
+my @o;
+{ my $t = "a-b-c"; push @o, c(($t =~ tr/a\-c/Z/), $t); }
+{ my $t = "abc-"; push @o, c(($t =~ tr/\-a/XY/), $t); }
+{ my $t = "a-b-c"; push @o, c(($t =~ tr/a\x2dc/Z/), $t); }
+{ my $t = "a-b-c"; push @o, c(($t =~ tr/a\055c/Z/), $t); }
+{ my $t = "a\\b-c]"; push @o, c(($t =~ tr/a\\-c/Z/), $t); }
+{ my $t = "a-b-cz"; push @o, c(($t =~ tr/a-\z/Z/), $t); }
+{ my $t = "ABCDE"; push @o, c(($t =~ tr/\x41-\x43/x/), $t); }
+{ my $t = "-./0a"; push @o, c(($t =~ tr/\--0/X/), $t); }
+{ my $t = "x\\y.z"; push @o, c(($t =~ tr/\./X/), $t); }
+{ my $t = "abc"; push @o, c(($t =~ tr/abc/A\-C/), $t); }
+{ my $t = "a-b-c"; push @o, c(($t =~ tr/a\-c//d), $t); }
+{ my $t = "a-b-c"; push @o, c(0, ($t =~ tr/a\-c/XYZ/r)); }
+print join(" ", @o), "\n";
+PERL
+    "4:ZZbZZ 2:YbcX 4:ZZbZZ 4:ZZbZZ 5:ZZZ-ZZ 4:Z-Z-ZZ 3:xxxDE 4:XXXXa 1:x\\yXz 3:A-C 4:b 0:XYbYZ\n");

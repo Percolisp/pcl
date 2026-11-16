@@ -6798,12 +6798,28 @@ sub gen_transliteration_form {
 }
 
 # Process tr/// string escape sequences (no interpolation, but \xHH etc. apply)
+# into the RUNTIME's list text (expand-tr-chars), where `-` between two
+# characters is a RANGE and a backslash makes the next character LITERAL.
+# perl's range operator is an UNESCAPED `-` of the source (toke.c scan_const):
+# `\-`, `\x2d`, `\055`, `\N{U+2D}` are a literal dash, and `\\` is a literal
+# backslash that can still end or start a range (`tr/a\\-c//` = a, \..c) --
+# so a decoded `-` or `\` is written back ESCAPED, and an escape this table
+# does not decode (`\-`, `\.`, `\]`: perl's "unknown \X is X") reaches the
+# runtime as `\X` unchanged, which it reads as the literal X (#5021).
 sub _expand_tr_escapes {
   my $str = shift;
   $str =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{U\+[0-9A-Fa-f]+\}|[0-7]{1,3}|c.|[ntraefbd"\\/])!
-    _process_tr_escape($1)
+    _tr_list_char(_process_tr_escape($1))
   !ge;
   return $str;
+}
+
+# A DECODED escape as runtime list text: the two characters the list syntax
+# gives a meaning (`-` range, `\` escape) are escaped, so they stay literal.
+sub _tr_list_char {
+  my $c = shift;
+  $c =~ s/([\\-])/\\$1/g;
+  return $c;
 }
 
 # tr/// escapes are the dq table WITHOUT the case markers (`\U` in tr is a

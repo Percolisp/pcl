@@ -28362,7 +28362,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-15100"
+(defparameter *pcl-cache-generation* "v2-15200"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -43092,25 +43092,36 @@ would consume, so it dies naming the stream (rule 12)."
             ;; perl's answer is the empty string.
             (if (plusp count) count ""))))))
 
+(defun %tr-list-item (str i len)
+  "The list character at I of a tr/// list text STR and the index after it: a
+   backslash makes the next character LITERAL (`\\-` a dash, `\\\\` a
+   backslash), anything else is itself.  A trailing lone backslash is itself."
+  (if (and (char= (char str i) #\\) (< (1+ i) len))
+      (values (char str (1+ i)) (+ i 2))
+      (values (char str i) (1+ i))))
+
 (defun expand-tr-chars (str)
-  "Expand character ranges in tr/// like 'a-z' to 'abcdefghijklmnopqrstuvwxyz'"
+  "Expand a tr/// list text STR -- the compiler's spelling (ExprToCL
+   `_expand_tr_escapes`): escapes already decoded, a backslash marking the
+   next character LITERAL -- into the list of characters.  A RANGE is two
+   list characters around an UNESCAPED `-` (perl's toke.c: the range operator
+   is the source's own `-`; `\\-`, `\\x2d`, `\\055` are a literal dash, task
+   #5021); either end may be escaped (`\\x41-\\x43`, `a-\\z`, `\\\\-c`).  A
+   `-` first or last in the list is literal."
   (with-output-to-string (out)
     (let ((i 0)
           (len (length str)))
       (loop while (< i len)
-            do (cond
-                 ;; Range like a-z
-                 ((and (< (+ i 2) len)
-                       (char= (char str (1+ i)) #\-))
-                  (let ((start (char str i))
-                        (end (char str (+ i 2))))
-                    (loop for c from (char-code start) to (char-code end)
-                          do (write-char (code-char c) out))
-                    (incf i 3)))
-                 ;; Single character
-                 (t
-                  (write-char (char str i) out)
-                  (incf i)))))))
+            do (multiple-value-bind (start j) (%tr-list-item str i len)
+                 (if (and (< (1+ j) len) (char= (char str j) #\-))
+                     ;; START - END
+                     (multiple-value-bind (end k) (%tr-list-item str (1+ j) len)
+                       (loop for c from (char-code start) to (char-code end)
+                             do (write-char (code-char c) out))
+                       (setf i k))
+                     (progn
+                       (write-char start out)
+                       (setf i j))))))))
 
 ;;; tr/// EXPANDED ONCE PER OP (task #4981).  A literal tr's op is built once per
 ;;; SITE (%p-op-once) and never changes, so everything that depends only on the
