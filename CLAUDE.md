@@ -518,6 +518,8 @@ of every entry (what it found, what it ruled) is in
   counted; rows leave by edit.
 
 **Product, scope, plans**
+- `supported-subset.md` — THE FROZEN TARGET (USER s543; a draft): what PCL promises, IN / OUT, the exit
+  criteria, the triage rule.  A brief names IN tasks only; read it before writing one.
 - `not-supported.md` — deliberate non-support (stable `ns-` ids).
 - `production-readiness-review-s513.md` — before quoting a production date.
 - `todo-features.md`, `v2-endgame-plan.md`, `MOO_MOOSE_DESIGN.md`,

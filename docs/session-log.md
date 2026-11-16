@@ -2,6 +2,16 @@
 
 Append new entries at the top. One section per session.
 
+## Session 543 (reviewing session, 2026-11-16) -- the USER decides the SUPPORTED-SUBSET FREEZE; the UTF-8 flag goes last, line tracking goes on by default; two batches launched (s543a the line-track flip, s543b seven filed silent wrongs)
+
+- **Start:** main `cbf9c350` clean, CI green, nothing running.  The session opened with three questions from the USER.  (1) The PPI move: 66 registry rows, 64 fixed on the vendored `pcl` branch, one upstream (1.291), §11 open; `docs/ppi-bug-report.t` on the vendored lib 453 ok / 6 not ok (all §11); four open PPI-shaped tasks re-probed and still failing (#483 #1680 #3922 #2774), three that pass their headline shape on one probe each (#458 #651 #2541: to be checked before closing).  (2) CPAN and perl`s suite, from the blessed baselines: the board`s 1,342 failing rows = 353 not-supported, 262 the UTF-8 flag (#1389), 388 one file (#3670), 78 perl`s own skips / failures, about 258 rows over ~45 other bugs.  (3) What production use needs.
+- **The finding behind the decision:** the open tasks marked silent wrong were 105 on 2026-10-10 (the production review) and 105 today, while the board went from 14 to 30 dists and the open count from 770 to 917.  A widening target finds bugs as fast as they close.
+- **DECIDED by the USER:** the supported-subset freeze until it is seen to work (`docs/supported-subset.md`, a DRAFT: the claim, IN, OUT, five exit criteria, the triage rule); the UTF-8 flag LAST, the content rule rejected as wrong (perl flags a decoded pure-ASCII string); line tracking ON by default; subtasks may start again, two at a time.
+- **Two corrections of my own statements, made in the session:** `Sys::Hostname` WORKS (the stderr line is the module`s own `warn` after its XSLoader attempt; I had read the first output line only); and the cost of line tracking WAS measured (s473c, s539d: `Pl/Passes.pm`, `docs/caller-implementation.md`) when I said it was not.  Re-timed today on three small programs, best of 3: +1.0 % / -3.1 % / +0.7 % (noise); emitted text +17 % on a large file.
+- **Memory index compacted** (a hook asked: 22.8 KB -> 16.9 KB): the s542 STATE line, the s516 rulings, the ultra-review clones, the standing subjob / perf-cadence rulings and fifteen compiler / measurement rules moved VERBATIM into two topic files.
+- **LAUNCHED:** s543a (`s543/s543a-prompt.md`, v2-15100, IDs 5100-5119) and s543b (`s543/s543b-prompt.md`, v2-15200, IDs 5120-5139), Opus 5.5 / xhigh, a new isolated worktree each.  Notes: `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`.
+- **Bars:** docs + briefs + memory only; the gate on the commit (quoted in the notes).
+
 ## Session 542 (reviewing session, 2026-11-15 18:5x ..) -- the three batches stopped at the s541 end resumed; six code merges (s540c, s539a, s540d, s540e, s539c, s539b = MAIN-READY-93 .. -98), the round s542r (the board + the companion on -95) and the run-phase timing s541a (the board runs 4.2x perl)
 
 - **Start:** the box had been rebooted; main `6a8ab355` clean, CI green.  s540d, s540c, s539a relaunched in their worktrees (Opus 5.5 / xhigh) with `s542/resume-s542.md`: the exclusive-leg ORDER (s540d's timing legs first on the quiet box; the others' bounded legs meanwhile).  That part worked: no queueing in the first 50 minutes.

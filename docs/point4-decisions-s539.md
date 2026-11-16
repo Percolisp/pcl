@@ -13,6 +13,8 @@ Nothing here is decided or built.
 2. **`caller`: made better where that is cheap in execution time and code size.**  Tier 1 below becomes a batch in which each item ships only if it is measured free (brief `briefs-and-rules-for-claude-subagents/s539/s539d-prompt.md`); tier 2 is not scheduled.
 3. **Scope-exit `DESTROY`: stays parked**, as recommended; the returned-handle case is a small member of a later batch.
 
+**s543 (2026-11-16), the USER on section 1: the content rule -- options (b) and (c) below -- is REJECTED.** perl marks a string as UTF-8 whatever its characters are (a decoded pure-ASCII string is flagged), so a rule that reads the content is wrong. The flag is the LAST item of the subset freeze and is built as a real flag when its turn comes (`docs/supported-subset.md` 6a). The measurement below stays as the record of what the always-1 answer costs.
+
 The CPAN board's blessed baseline holds 1,909 failing rows (`baselines/cpan-board14-fails.tsv`,
 main `d1e98177`).  The three questions hold 740 of them:
 

@@ -11,6 +11,14 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s543 (2026-11-16, the reviewing session) -- the supported-subset FREEZE
+
+- **THE USER (s543): PCL works on a FROZEN SUPPORTED SUBSET until it is seen to work** -- the queue is triaged IN / OUT against `docs/supported-subset.md`, briefs name IN tasks only (silent wrongs first), board widening and new steering populations pause; exit criteria in its section 5.  Reason, measured: open silent-wrong tasks 105 on 2026-10-10 and 105 on 2026-11-16 while the board went 14 -> 30 dists.  The statement is a DRAFT: its section 6 (the UTF-8 flag, line-track by default, scope-exit DESTROY, Moo, the module lists) is the USER's to settle -> `docs/supported-subset.md`.
+- **THE UTF-8 FLAG IS DONE LAST, AND THE CONTENT RULE IS REJECTED (the USER, s543)**: perl marks a string as UTF-8 whatever its characters are -- a decoded pure-ASCII string is flagged -- so "1 only when a character is above 0xFF" is WRONG, not a cheap approximation; do not propose it again.  When its turn comes it is a real flag with its own design; until then the #1389 rows are OUT of the subset -> `docs/supported-subset.md` 6a, `docs/point4-decisions-s539.md` section 1 (its recommendation (b) is withdrawn).
+- **LINE TRACKING GOES ON BY DEFAULT (the USER, s543; batch s543a)**: `caller` file / line and Carp locations are perl`s in the default build; the measured cost (0.25 ns a statement, +4..6 % on counting-loop micro rows, +17 % emitted text) is accepted and flagged, per the s536 rule -> `briefs-and-rules-for-claude-subagents/s543/s543a-prompt.md`.
+- **Subtasks may be started again (the USER, s543)**: the s542 word "do not start more subtasks" is lifted for the freeze`s work; the default of TWO at a time stands.
+- **`Sys::Hostname` WORKS under PCL** (probed perl vs PCL, a file and `-e`): the one stderr line `Can't locate loadable object ...` is the module's own `warn $@` after its XSLoader attempt, and `hostname()` then answers through the pure-Perl fallback.  Not loading on this tree: `Unicode::Normalize`, `Time::Piece` (XS, no shim).
+
 ## s542 (2026-11-15, the reviewing session) -- the three stopped batches resumed; merges MAIN-READY-93 ..
 
 - **s540c MERGED = MAIN-READY-93 `0df490cf`** (code `75904a35`, v2-14500): a dropped ESCAPING filehandle is recorded by the collector, written out before the next child process, closed at a flock / descriptor trigger or at exit (#2006 part 2); `local` is not a declarator (#4866) -> its own section `## s540c`, ir-spec 6.5b, not-supported ns-escaping-filehandle.  Cost kept and flagged: `fhopen` +4.0 %, `fhread` +5.1 % (the USER's s536 rule).
