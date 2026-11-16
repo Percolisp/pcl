@@ -18,6 +18,7 @@
 # (the file-level reason covers it wholesale, as before #185).  It must be
 # hand-placed and justified by a MEASUREMENT that the row set is
 # nondeterministic; --bless-rows never invents it and never overwrites it.
+# s542r (2026-11-16, Opus; THE ROUND on main code cc36604b = MAIN-READY-95) -- ELEVEN STALE rows LEFT BY HAND (row by row, not a --bless-rows: the round edits baselines, it never re-blesses them from a run): cmd/for.t "[perl #78194] Lone C-style for in a block" + op/signatures.t "class / defer / try does not swallow trailing comma" = s537a (MAIN-READY-88; MR-87 -> MR-88 one-file runs); op/signatures.t "($a) interpreted as protoype when not enabled" (between MAIN-READY-63 and -85); run/fresh_perl.t "package X;" x4 + "{" x2 = s538b (MAIN-READY-89, DESTROY at program exit; MR-88 63/28 -> MR-89 69/22).  Each passes in the companion --all --quick (round/comp-quick-all.log) and in the one-file runs.
 class/accessor.t	$o->a accessor
 class/accessor.t	$o->a accessor in scalar context
 class/accessor.t	$o->h accessor
@@ -57,7 +58,6 @@ class/phasers.t	both ADJUST blocks run in order
 class/phasers.t	value of __CLASS__ in ADJUST block
 class/threads.t	*no-log*
 class/utf8.t	*summary*
-cmd/for.t	[perl #78194] Lone C-style for in a block
 cmd/for.t	double destroy, x=1
 cmd/for.t	freed value in iteration
 comp/hints.t	#15
@@ -831,7 +831,6 @@ op/numify.t	numifying '0b101' trigger a warning
 op/numify.t	numifying '0x123' trigger a warning
 op/numify.t	numifying '1x123' trigger a warning
 op/numify.t	numifying 'abc' trigger a warning
-op/signatures.t	($a) interpreted as protoype when not enabled
 op/signatures.t	($a) not signature when not enabled
 op/signatures.t	ADJUST does not swallow trailing comma
 op/signatures.t	AUTOLOAD does not swallow trailing comma
@@ -942,7 +941,6 @@ op/signatures.t	chop does not swallow trailing comma
 op/signatures.t	chown does not swallow trailing comma
 op/signatures.t	chr does not swallow trailing comma
 op/signatures.t	chroot does not swallow trailing comma
-op/signatures.t	class does not swallow trailing comma
 op/signatures.t	close does not swallow trailing comma
 op/signatures.t	closedir does not swallow trailing comma
 op/signatures.t	connect does not swallow trailing comma
@@ -952,7 +950,6 @@ op/signatures.t	crypt does not swallow trailing comma
 op/signatures.t	dbmclose does not swallow trailing comma
 op/signatures.t	dbmopen does not swallow trailing comma
 op/signatures.t	default does not swallow trailing comma
-op/signatures.t	defer does not swallow trailing comma
 op/signatures.t	defined does not swallow trailing comma
 op/signatures.t	delete does not swallow trailing comma
 op/signatures.t	die does not swallow trailing comma
@@ -1138,7 +1135,6 @@ op/signatures.t	tied does not swallow trailing comma
 op/signatures.t	time does not swallow trailing comma
 op/signatures.t	times does not swallow trailing comma
 op/signatures.t	truncate does not swallow trailing comma
-op/signatures.t	try does not swallow trailing comma
 op/signatures.t	uc does not swallow trailing comma
 op/signatures.t	ucfirst does not swallow trailing comma
 op/signatures.t	umask does not swallow trailing comma
@@ -2328,12 +2324,6 @@ run/fresh_perl.t	my $foo = Bar->new();
 run/fresh_perl.t	package FOO;sub new {bless {FOO => BAR}};
 run/fresh_perl.t	package X;
 run/fresh_perl.t	package X;
-run/fresh_perl.t	package X;
-run/fresh_perl.t	package X;
-run/fresh_perl.t	package X;
-run/fresh_perl.t	package X;
 run/fresh_perl.t	sub testme { my $a = "test"; { local $a = "new tes...
-run/fresh_perl.t	{
-run/fresh_perl.t	{
 uni/goto.t	But does NOT find the softref sub when it's lacking the UTF-8 flag
 uni/goto.t	goto undefined sub gets the right error message
