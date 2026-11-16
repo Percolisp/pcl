@@ -99,3 +99,4 @@ Read bottom-up after a cut.  The stop state this session started from is `s541/r
 * Upstream pull request Perl-Critic/PPI #459 REFRESHED (`gh api -X PATCH`): title "53 groups ... (133 commits)", the counts paragraph (133 commits, 53 groups, 459 cases; the CR case's TODO tests are now answered by group BA), table rows AY AZ BA; the API answers head `66e690d2`, 133 commits, open.
 * CI for `4e7c1d8c` to be read at the next check.
 * RUNNING (nothing new is launched, the USER's word): s542r, s539b, s541a.
+* 02:3x: **CI GREEN on `4e7c1d8c`** (MAIN-READY-97 + records) and on the notes commit after it.  s539b has its records for the binder port half written and four legs queued (its own companion leg waits behind its own bounded leg); s541a is building its run-phase measurement into `board-timing`; the round is at board chunk c (IO-Compress).  Load 4, 10 GB available.
