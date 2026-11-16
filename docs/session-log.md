@@ -96,7 +96,7 @@ The USER's s540 question (paraphrased): the first measurement found the board's 
 
 **Not done**: the in-process N-fold repetition of a file's run (a test file's state makes a second run a different program; every rep is a fresh process); perl's string-eval compile cannot be hooked (inside perl's run).  Box: the coarse pass ran at load 2-18 (ranking only); a calibration leg on the pre-s539c sha was killed and voided.
 
-**Bars:** `git diff --stat main...HEAD` = docs, `tools/board-timing.pl`, `tools/t/board-timing.t`, `baselines/board-runtime-s541.tsv`, records (nothing under `Pl/`, `cl/`, `lib/`); `prove tools/t/board-timing.t Pl/t/license-tag-01.t Pl/t/no-hardcoded-paths-01.t Pl/t/core-deps-01.t` 64 rows PASS; the gate GATE_FILL.
+**Bars:** `git diff --stat main...HEAD` = docs, `tools/board-timing.pl`, `tools/t/board-timing.t`, `baselines/board-runtime-s541.tsv`, records (nothing under `Pl/`, `cl/`, `lib/`); `prove tools/t/board-timing.t Pl/t/license-tag-01.t Pl/t/no-hardcoded-paths-01.t Pl/t/core-deps-01.t` 64 rows PASS; the full gate ONCE on the final tree (11df14f0, a bounded leg, `scratch/s541a/legs/gate.log`): **379 files / 12,303 rows `Result: PASS`**.
 
 ## Session s542r (Opus agent, 2026-11-15 .. 11-16) -- THE ROUND on merged main (MAIN-READY-95, code `cc36604b`, v2-14850): the CPAN board with a refreshed perl oracle and its `--diff`, the companion `--all --quick`, every baseline brought back in line row by row; #5081 #5082 #5083 filed
 
