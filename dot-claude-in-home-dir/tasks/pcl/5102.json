@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s543a (Opus, 2026-11-16), found by the line-track flip's probe 2 (scratch/s543a/probes/p2-die.pl row 9a in the s543a worktree).\n\nperl 5.40.3 gives an `elsif` CONDITION its own statement location (a nextstate before the condition), so a runtime die raised while evaluating it names the elsif's line.  PCL writes one `(p-line N)` per statement, and an if/elsif/else chain is ONE statement whose line is the `if`'s.\n\nPROBE:\n   33 eval {\n   34     if ($z > 5) {\n   35         1;\n   36     } elsif (1 / $z) {\n   37         2;\n   38     }\n   39 }; print $@;\n  perl: Illegal division by zero at F line 36.\n  PCL : Illegal division by zero at F line 34.\n\nA multi-line `if` CONDITION reports the if's first line in both (perl 41 = PCL 41, row 9b), and a `while` condition the while line (row 10) -- only elsif differs.  Fix shape (not built): the elsif arm's condition lowered as `(progn (p-line M) COND)` when M differs from the chain's line (Parser2 `_lower_compound`'s if arm).  Cost: one store per elsif condition evaluated.  Also check `unless ... elsif`, and `caller` from a sub called in the elsif condition (the same register).\n",
+   "id" : "5102",
+   "status" : "pending",
+   "subject" : "An elsif CONDITION's runtime die names the if's line; perl 5.40 names the elsif's (one (p-line) per statement, and the if/elsif chain is one statement)"
+}

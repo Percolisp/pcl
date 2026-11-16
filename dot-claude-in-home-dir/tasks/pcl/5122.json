@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s543b (Opus 5.5, 2026-11-16) while probing #5082's openers.  PRE-EXISTING (base c5f618f2 = the same).  SILENT WRONG in the safe direction (PCL lives where perl dies).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    open my $d, \"<\", \"/etc/passwd\" or die; opendir $d, \"/tmp\" or die \"o2\"; print \"opened\\n\";\n    # perl dies: Cannot open $d as a dirhandle: it is already open as a filehandle at - line 1.\n    # PCL: opened\n    opendir my $e, \"/tmp\" or die; open $e, \"<\", \"/etc/passwd\" or die \"o2\"; print \"opened\\n\";\n    # perl dies: Cannot open $e as a filehandle: it is already open as a dirhandle at - line 1.\n    # PCL: opened\n(fatal since perl 5.28; a CLOSED handle of the other kind is fine in both.)\n\nWHERE: the openers' install slot (%p-fh-install-arg -> %p-fh-place-check) does not know WHICH opener it serves; the check needs the opener kind (dir vs file) and the openness of the old value (an open stream / an open P-DIRHANDLE record, task #5082's struct).  Low priority: no ordinary program relies on the death.\n",
+   "id" : "5122",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (safe direction): `opendir` on a variable holding an OPEN filehandle (and `open` on an open dirhandle) succeeds -- perl dies \"Cannot open $d as a dirhandle: it is already open as a filehandle\""
+}

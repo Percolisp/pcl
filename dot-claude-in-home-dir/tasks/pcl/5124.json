@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s543b (Opus 5.5, 2026-11-16) while fixing #4795.  PRE-EXISTING (base c5f618f2 = the same).  LOUD: PCL dies where perl prints (non-strict code only -- under strict perl refuses the bareword at compile time).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    no strict;\n    package Bar; sub QQ { \"barsub\" } sub low { \"barlow\" }\n    package main;\n    my $v = QQ; my $w = low; print \"$v $w\\n\";\n    # perl: QQ low      PCL: dies \"Undefined subroutine &main::QQ called\"\nEMISSION: `(p-scalar-ctx (pl-QQ))` / `(pl-low)` in package main.\n\nCAUSE: PExpr::_bareword_callable_here's declared-subs scan is PACKAGE-BLIND for an unqualified call site: a `sub QQ` of ANOTHER package declared ABOVE answers 'yes' (callable), so the bare word becomes a call that resolves in the CURRENT package, where nothing is defined.  perl resolves an unqualified name in the current package (or through an import into it), never in a sibling package.  s543b (#4795) made the scan package-aware ONLY when the current package records the name itself (its own constant / sub / import), which is the silent-wrong half; this is the other half.\n\nDIRECTION: skip another package's declaration for an unqualified site always; then a non-ALL-CAPS name answers 'no' (the string, perl's answer); an ALL-CAPS one still meets `_all_caps_guess_here` (a call) and needs the same thought.  This widens the classifier for every multi-package file: gate-SET scan over both populations + the full sweep, as #4795.\n",
+   "id" : "5124",
+   "status" : "pending",
+   "subject" : "LOUD: a bare word naming a sub of ANOTHER package declared above is CALLED in the current package (`package Bar; sub QQ {...} package main; my $v = QQ`) -- dies \"Undefined subroutine &main::QQ\"; perl (no strict): the string \"QQ\" (#266 classifier package-blind)"
+}

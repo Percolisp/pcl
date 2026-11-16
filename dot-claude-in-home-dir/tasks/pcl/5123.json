@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s543b (Opus 5.5, 2026-11-16) while probing #5082.  PRE-EXISTING (base c5f618f2 = the same).  SILENT WRONG (rare).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    opendir my $d, \"/tmp\" or die; my $f = fileno $d; print defined $f ? \"fd\\n\" : \"undef\\n\";\n    # perl: fd (the dirfd, Linux)     PCL: undef\nWHY: PCL reads the whole listing at opendir and closes the opendir(3) stream (%p-opendir-impl), so there is no dirfd to answer with -- the same fact `-d DIR` / `stat DIR` work around with the remembered PATH (task #1048).  Either keep the DIR* open for the handle's life (the descriptor cost of an open dirhandle, as perl), or say it in docs/not-supported.md beside the stat-through-path divergence.\n",
+   "id" : "5123",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `fileno $dirhandle` is undef (perl: the dirfd) -- PCL closes the opendir(3) stream after reading the listing"
+}

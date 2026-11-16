@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-16",
+   "description" : "FILED s543a (Opus, 2026-11-16), found while probing the warm-cache question (scratch/s543a/probes/g.pl in the s543a worktree).  Not a location issue; a SILENT WRONG, pre-existing.\n\n`grep BLOCK %INC` (the special hash in list context as grep's list) returns the EMPTY list in PCL; `keys %INC` works, and a plain `%h` works.\n\nPROBE:\n    my %h = (am => 1, b => 2);\n    print join(\",\", grep { /a/ } %h), \"\\n\";\n    require Carp;\n    print join(\",\", grep { /Carp/ } %INC), \"\\n\";\n    print scalar(grep { /Carp/ } keys %INC), \"\\n\";\n  perl: am / Carp.pm,/home/.../lib/5.40.3/Carp.pm / 1\n  PCL : am / (empty line) / 1\n\nMEASURED (g2.pl): `my @x = %INC` and `map { $_ } %INC` flatten fine in PCL; `grep { /PATH/ } %ENV` is empty too (perl: the PATH pair).  So it is GREP over a runtime-backed special hash (%INC, %ENV), not the flatten in general: read p-grep's argument path for a hash operand (a plain `my %h` works).\n",
+   "id" : "5105",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: grep BLOCK over a runtime-backed special hash (%INC, %ENV) returns the empty list; a plain %h, keys %INC and map over %INC work"
+}
