@@ -20682,10 +20682,27 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (ignore-errors (finish-output *standard-output*))
   (ignore-errors (finish-output *error-output*))
   (%p-flush-open-streams)
+  (%p-stdin-give-back)
   ;; A dropped handle the collector has already found writes its bytes NOW
   ;; (task #2006 PART 2), or they reach the file after a child's -- or in both
   ;; processes after a fork.  Its descriptor stays open: see %p-reap-dead-stream.
   (when (%p-dead-handle-work-p) (%p-run-dead-handle-finalizers nil :write)))
+
+(defun %p-stdin-give-back ()
+  "The READ half of perl's PerlIO_flush(NULL) (PerlIOBuf_flush): a buffered
+   input handle over a SEEKABLE descriptor gives back what it read ahead --
+   the descriptor is moved to the handle's logical position and the buffer is
+   dropped -- so a child that inherits descriptor 0, or the next reader of the
+   file after the program exits, continues where the program stopped
+   (`<STDIN>; system(\"cat\")` with STDIN a file: the child prints the rest,
+   probed 5.40.3; task #2555).  Only descriptor 0 is shared with children (every
+   other descriptor PCL opens is close-on-exec).  A pipe or a terminal cannot
+   seek: what was read ahead from one is lost to the child, in perl too (how
+   much depends on how much the pipe held at the read -- not deterministic)."
+  (let ((s sb-sys:*stdin*))
+    (when (and (typep s 'sb-sys:fd-stream) (open-stream-p s))
+      (let ((pos (ignore-errors (file-position s))))
+        (when pos (ignore-errors (file-position s pos)))))))
 
 
 (defconstant +p-fd-cloexec+ 1
@@ -28066,20 +28083,39 @@ would consume, so it dies naming the stream (rule 12)."
    %p-process-wait-status, which qx and the pipe close already use.  A Perl
    $SIG{CHLD} handler is held back until the child's status is read (perl
    blocks SIGCHLD around system for the same reason)."
+  ;; THE CHILD INHERITS DESCRIPTOR 0 (task #2555): perl's system is fork+exec,
+  ;; so the child reads the program's STDIN -- whatever descriptor 0 is NOW
+  ;; (a re-opened STDIN was dup2'd onto it, %p-rebind-std).  `:input nil` gave
+  ;; every child /dev/null: `echo hi | prog` with `system("cat")` printed
+  ;; nothing.
   (%p-with-chld-deferred
-   (let ((proc (if (not shell-p)
-                   (sb-ext:run-program cmd prog-args
-                                       :search t
-                                       :input nil
-                                       :output *standard-output*
-                                       :error *error-output*
-                                       :wait t)
-                   (sb-ext:run-program "/bin/sh" (list "-c" cmd)
-                                       :input nil
-                                       :output *standard-output*
-                                       :error *error-output*
-                                       :wait t))))
+   (let* ((out (%p-child-stdio *standard-output*))
+          (err (%p-child-stdio *error-output*))
+          (proc (if (not shell-p)
+                    (sb-ext:run-program cmd prog-args
+                                        :search t
+                                        :input t
+                                        :output out
+                                        :error err
+                                        :wait t)
+                    (sb-ext:run-program "/bin/sh" (list "-c" cmd)
+                                        :input t
+                                        :output out
+                                        :error err
+                                        :wait t))))
      (%p-process-wait-status proc))))
+
+(defun %p-child-stdio (stream)
+  "What a system child gets as descriptor 1 / 2: the program's STDOUT /
+   STDERR STREAM (SBCL hands the child that stream's descriptor, or copies
+   into an in-memory one), or -- when the program CLOSED the handle -- T, the
+   descriptor as it is (closed).  Handing SBCL the closed stream made the
+   spawn itself fail, so `close STDERR; system(...)` answered -1 and never
+   ran the command (task #2555's neighbour; perl runs it)."
+  (let ((s (if (typep stream 'synonym-stream)
+               (symbol-value (synonym-stream-symbol stream))
+               stream)))
+    (if (and (streamp s) (open-stream-p s)) stream t)))
 
 (defun p-system (&rest args)
   "Perl system - execute a shell command.
@@ -28345,12 +28381,17 @@ would consume, so it dies naming the stream (rule 12)."
   ;; ONLY THE START is guarded (#2062): a perl death raised while the child
   ;; runs — a $SIG{ALRM} handler that dies during the read — must unwind the
   ;; caller's eval, so the read and the wait sit OUTSIDE the guard.
+  ;; The child inherits the program's STDIN and STDERR DESCRIPTORS (task
+  ;; #2555): perl's my_popen redirects only descriptor 1, so `qx(cat)` reads
+  ;; the program's input and a command's error text reaches descriptor 2 --
+  ;; a file when STDERR was re-opened (%p-rebind-std dup2s it there), nowhere
+  ;; when it was closed.  It used to get /dev/null for both.
   (let ((proc (%p-child-host-error nil
                                    (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
-                                                       :input nil
+                                                       :input t
                                                        :output :stream
                                                        :external-format :latin-1
-                                                       :error nil
+                                                       :error t
                                                        :wait nil))))
     (if (null proc)
         ;; The shell could not be started: perl's `-1` with $! set (#1920's rule).

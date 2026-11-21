@@ -54,7 +54,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 47;
+plan tests => 50;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -412,3 +412,38 @@ $? = 42; $r = waitpid($pid, 0); print "6 ", ($r == $pid ? "pid" : $r), " st=", $
 $? = 42; $r = waitpid($pid, 0); print "7 r=$r st=$?\n";}),
    "1 r=-1 st=-1 err=10\n2 r=-1 st=-1\n3 r=-1 st=-1\n4 r=-1 st=-1\n5 r=0 st=-1\n6 pid st=3\n7 r=-1 st=-1\n",
    '#4224: wait / waitpid set $? = -1 when no child was reaped (no child, a WNOHANG poll)';
+
+# #2555 (s543e): a system / qx child INHERITS the program's STDIN (and a qx
+# child its STDERR) -- `:input nil` gave every child /dev/null and qx threw the
+# command's error text away.  Each row FEEDS ITS OWN STDIN from a file (never
+# the gate's), and compares PCL with perl run on the same program and input.
+# A STDIN that is a FILE gives back what the program read ahead before a child
+# runs (perl's PerlIOBuf_flush seeks descriptor 0 to the logical position).
+sub stdin_agree {
+    my ($code, $input, $desc) = @_;
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code; close $pfh;
+    my ($ifh, $in_file) = tempfile(SUFFIX => '.in', UNLINK => 1);
+    print $ifh $input; close $ifh;
+    my ($ofh, $other) = tempfile(SUFFIX => '.other', UNLINK => 1);
+    print $ofh "other\n"; close $ofh;
+    my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code; close $cl_fh;
+    local $ENV{T_OTHER} = $other;
+    my $perl = `perl $pl_file < $in_file 2>&1`;
+    my $pcl  = `sbcl @sbcl_rt --load $cl_file < $in_file 2>&1`;
+    for ($perl, $pcl) { s/^;.*\n//gm; s/^PCL Runtime loaded\n//gm; s/^\s*\n//gm; }
+    is($pcl, $perl, "$desc (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
+}
+stdin_agree(q{$| = 1; system("cat"); print "1 rc=$?\n"; system("cat", "-"); print "2 rc=$?\n";},
+            "hi\nthere\n", '#2555: system("cat") reads the program\'s STDIN; a second child sees its end');
+stdin_agree(q{$| = 1; my $l = <STDIN>; print "1 [$l]"; my $x = qx(cat); print "2 qx=[$x] rc=$?\n";
+my @y = qx(cat); print "3 n=", scalar(@y), "\n"; open STDIN, "<", $ENV{T_OTHER} or die; system("cat | tr a-z A-Z"); print "4 rc=$?\n";},
+            "hi\nthere\nyou\n", '#2555: qx(cat) gets what the program did not read (a FILE stdin); a re-opened STDIN is the child\'s');
+stdin_agree(q{$| = 1; my $x = qx(sh -c 'echo to-stderr 1>&2; echo out'); print "1 qx=[$x]";
+my ($f) = $ENV{T_OTHER} . ".err"; open STDERR, ">", $f or die; my $y = qx(sh -c 'echo to-file 1>&2; echo o2');
+close STDERR; open my $e, "<", $f or die; my $c = <$e>; close $e; unlink $f; print "2 qx=[$y] file=[", ($c // ''), "]\n";
+my $z = qx(sh -c 'echo e 1>&2; echo o' 2>&1); print "3 [", join("|", split /\n/, $z), "]\n";
+system("sh -c 'echo o4; echo e4 1>&2' 2>&1"); print "4 rc=$?\n";},
+            "", '#2555: a qx child writes its STDERR to the program\'s STDERR (a re-opened one: the file); system runs after close STDERR');
