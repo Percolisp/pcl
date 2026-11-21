@@ -94,3 +94,9 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * Tasks at the merge: #5082 #1428 #5021 #4792 #4795 #5005 #4796 CLOSED (no row keyed on any of them: the Path-Tiny rows are keyed `NS:ns-escaping-filehandle`); #4794 NARROWED to its residue (`delete $h{fh}`, `undef $obj`), kept open; triage written for #398 #1291 #5120-#5128 -- `tools/task-triage.pl` reads 0 untriaged.
 * Records: CLAUDE.md "Test Status" (MAIN-READY-99's paragraph to HISTORY.md), the everyday row's #5127 clause in CLAUDE.md + REFERENCE.md, `docs/STATUS.md` 12,336.
 * OWED: the ROUND (the board tree half + the companion `--all --quick` on merged main) -- after s543c's gate, the box to itself; s543c gets "main is now <sha>".
+
+## 16:3x -- main = `34648f2e` (records over MAIN-READY-100 `64353611`, pushed); TWO subtasks run: s543c + s543r
+* Gate on merged main: 379 files / 12,336 rows PASS (`~/pcl-agent-scratch/s543/review/gate-64353611.log`).
+* s543c told "main is now `f5d89567`" (rebase; re-run the LIVE / NARROWED verdicts in s543b's seven areas) and that the round runs beside it.
+* **s543r LAUNCHED** (Opus 5.5 / xhigh, MODEL.txt checked `claude-opus-5-5`; worktree `.claude/worktrees/agent-a26a98dbcc0bff1ae`, brief `s543/s543r-prompt.md`): THE ROUND on `64353611` -- the board in six chunks with a refreshed oracle + `--diff`, the companion `--all --quick`, the full companion with stamps; method = s542r's; IDs 5170-5189.
+* For the USER (answered today): the PPI changes are on the fork's branch `pcl` (`66e690d2`, 133 commits over `master`) and in upstream pull request #459 (open); the fork's front page shows `master`, the default branch -- a repository setting.  PPI work is NOT finished: registry section 11 still repaired in `Pl/`, ten `_repair_*` / `_fix_ppi_*` passes not audited for deletion, ~20 open tasks naming a mis-lex.  A PPI slot was offered as the next batch; no answer yet.
