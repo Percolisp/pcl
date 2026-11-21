@@ -217,7 +217,7 @@ my %FAMILY;
                     p-kv-hslice p-kv-aslice p-exists p-exists-array p-delete
                     p-delete-array p-ensure-hashref p-ensure-arrayref
                     p-viv-container p-viv-array-container p-viv-slice
-                    p-list-scalar p-slice-result)],
+                    p-list-scalar p-slice-result p-lslice-1)],
   'slice-delete' => [qw(p-delete-hash-slice p-delete-kv-hash-slice
                         p-delete-array-slice p-delete-kv-array-slice)],
   'aggregate-builtin' => [qw(p-hash p-array-init p-array-last-index
