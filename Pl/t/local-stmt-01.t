@@ -151,6 +151,11 @@ PL
   print $cl_fh $cl_code;
   close $cl_fh;
   my $o = `sbcl @sbcl_rt --load $cl_file 2>&1`;
+  # SBCL's compiler diagnostic block (here the style-warning for f18's unused
+  # `my $n`, on the base too) opens with an EMPTY line before its `;' lines:
+  # the block is not program output, so both go (the full gate of s543b's
+  # second resume failed on that one blank line).
+  $o =~ s/^\n(?=;)//gm;
   $o =~ s/^;.*\n//gm;
   $o =~ s/^PCL Runtime loaded\n//gm;
   is($o, $want, '#5005: `local` takes ONE term; the comma tail runs in the new scope and is the value by context');
