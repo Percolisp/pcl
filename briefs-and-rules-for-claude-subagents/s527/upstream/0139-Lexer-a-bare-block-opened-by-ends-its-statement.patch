@@ -1,0 +1,62 @@
+From 842e6bbdc61d9c86ab01b76826b78a94bcd83ba3 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 18:18:18 +0200
+Subject: [PATCH 139/139] Lexer: a bare block opened by { ; ends its statement
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+_curly makes the statement that a bare block starts a
+PPI::Statement::Compound when its look-ahead finds nothing, so the
+block's } ends it.  When the look-ahead itself answers Block -- the {;
+that perlref names the way to say "block" -- the class was returned at
+once and the statement stayed a plain PPI::Statement, which runs on
+past the } and swallows the next statement.  Both answers are now the
+same bare block (toke.c yyl_leftcurly under XSTATE: the brace is a
+block, and the block is a statement of its own), so {;} print 1; is two
+statements, as for perl.  The anonymous hash the look-ahead finds
+({ 'a', 1 }, { a => 1 }, {}) stays inside its statement, as before.
+
+Fixes PCL §70.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm | 6 ++++--
+ t/ppi_bugs_pcl.t | 3 +--
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 5aafe148..96696f25 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1511,9 +1511,11 @@ sub _curly {
+ 		return $self->_curly_lookahead || 'PPI::Structure::Block';
+ 	}
+ 
+-	# We need to scan ahead.
++	# We need to scan ahead.  An anonymous hash stays in its statement; a
++	# block -- the look-ahead's {; or its fall-through -- is a bare block,
++	# a statement of its own ({;} print 1; is two statements).
+ 	my $class = $self->_curly_lookahead;
+-	return $class if $class;
++	return $class if $class and $class ne 'PPI::Structure::Block';
+ 
+ 	# Hit the end of the document, or bailed out, go with block
+ 	if ( ref $Parent eq 'PPI::Statement' ) {
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 0a5f45b6..c06c8f4a 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2323,8 +2323,7 @@ for my $code ( qq{print <<EOT;\nx\nEOT\n}, qq{print <<"EOT";\nx\nEOT\n}, qq{prin
+ # for perl itself (toke.c: a } right after the {, comments skipped, is
+ # HASHBRACK; `perl -e '{} print 1'` is a syntax error), so PPI's
+ # Constructor there is right (controls).
+-TODO: {
+-    local $TODO = q(PCL §70: a bare block opened by { ; does not end its statement);
++{
+     for my $case ( [ q{{;} print 1;}, [ 'Statement::Compound: {;}', 'Statement: print 1;' ] ],
+                    [ q{{ ; } print 1;}, [ 'Statement::Compound: { ; }', 'Statement: print 1;' ] ],
+                    [ qq{{;\n# c\n}\nprint 1;}, [ 'Statement::Compound: {; # c }', 'Statement: print 1;' ] ],
+-- 
+2.53.0
+

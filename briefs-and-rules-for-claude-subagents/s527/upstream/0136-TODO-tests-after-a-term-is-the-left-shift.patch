@@ -1,0 +1,93 @@
+From 71e4467280a7829f3b7d2651a5a268fe371fa31a Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 18:12:21 +0200
+Subject: [PATCH 136/139] TODO tests: << after a term is the left shift
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl starts a here-doc at << only where it expects a term (toke.c
+yyl_leftpointy: under XOPERATOR << is SHop(OP_LEFT_SHIFT), scan_heredoc
+runs otherwise), so after a complete term <<NAME is a left shift by a
+call of NAME:
+
+    perl -e 'my $n = (1<<index("ab","b")); print "$n\n"'    # 2
+
+Core Devel::Peek's debug_flags has the shape:
+
+    $num |=  (1<<index($D_flags, $_)) for split //, $on;
+
+PPI::Token::Operator makes a here-doc of every << followed by a word, a
+quote or \word, so 1<<index(...) is Number HereDoc<<<index> and the
+here-doc body swallows the following lines up to one that reads index.
+(1<<2 was right: a digit cannot name a here-doc.)
+
+Fifteen rows inside a new PCL §69 TODO block -- after a number, a
+variable, a ), a ], a subscript's }, a method name, a postfix ++, a
+string, time, and print $fh<<EOT with no space before the << (perl reads
+the shift there) -- and fourteen controls (the here-doc after print,
+push, =, print $fh with a space, print STDOUT, return, sort, a ., two
+here-docs in one call; 1<<2, <<=, << $y).  Plan 477 -> 506.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 39 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 5b0080fe..eb180573 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 477 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 506 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2265,3 +2265,40 @@ for my $case ( [ q{print time-1;}, q{Operator=-} ], [ q{print __LINE__ - 1;}, q{
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+ }
++
++# §69 -- << after a TERM is the left shift: a here-doc starts only where
++# perl expects a term (toke.c yyl_leftpointy: under XOPERATOR << is
++# SHop(OP_LEFT_SHIFT); scan_heredoc runs otherwise), so after a number,
++# a variable, a ), a ], the } of a subscript, a method name, a postfix
++# ++ or a string, <<NAME is a shift by a call of NAME:
++# `my $n = (1<<index("ab","b")); print $n;` prints 2.  (In the
++# filehandle slot of print $fh <<EOT the here-doc stays, as for perl.)
++TODO: {
++    local $TODO = q{PCL §69: << after a term is lexed as a here-doc when a word or a quote follows};
++    for my $code ( q{my $n = (1<<index("ab","a"));}, q{my $n = 1<<length("ab");},
++                   q{my $n = $x<<f();}, q{my $n = 1 <<f();}, q{my $n = 1<<f;},
++                   q{$num |= (1<<index($D_flags, $_)) for split //, $on;},
++                   q{my $n = $a[0]<<f();}, q{my $n = $h{a}<<f();}, q{my $n = f()<<g();},
++                   q{my $n = $i++<<f();}, q{my $n = $o->m<<f();}, q{my $n = "1"<<f();},
++                   q{my $n = time<<f();}, q{print $fh<<EOT;}, q{my $n = 1 << "EOT";} ) {
++        my @t = map { short_class($_) } toks($code);
++        ok( !grep( /^HereDoc=/, @t ) && grep( $_ eq q{Operator=<<}, @t ), "$code: the left shift, not a here-doc" )
++            or diag "got: @t";
++    }
++}
++for my $code ( qq{print <<EOT;\nx\nEOT\n}, qq{print <<"EOT";\nx\nEOT\n}, qq{print <<~EOT;\n  x\n  EOT\n},
++               qq{push \@a, <<EOT;\nx\nEOT\n}, qq{my \$x = <<EOT . "tail";\nx\nEOT\n},
++               qq{print \$fh <<EOT;\nx\nEOT\n}, qq{print STDOUT <<EOT;\nx\nEOT\n},
++               qq{return <<EOT;\nx\nEOT\n}, qq{my \@s = sort <<EOT;\nx\nEOT\n},
++               qq{my \$s = "a" . <<EOT;\nx\nEOT\n} ) {
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( /^HereDoc=/, @t ), squash($code) . ": a here-doc (control)" ) or diag "got: @t";
++}
++{
++    my @t = map { short_class($_) } toks(qq{f(<<A, <<B);\na\nA\nb\nB\n});
++    is( scalar( grep { /^HereDoc=/ } @t ), 2, 'f(<<A, <<B): two here-docs (control)' ) or diag "got: @t";
++    for my $code ( q{my $n = 1<<2;}, q{$x <<= 2;}, q{my $n = $x << $y;} ) {
++        my @t = map { short_class($_) } toks($code);
++        ok( !grep( /^HereDoc=/, @t ), "$code: no here-doc (control)" ) or diag "got: @t";
++    }
++}
+-- 
+2.53.0
+

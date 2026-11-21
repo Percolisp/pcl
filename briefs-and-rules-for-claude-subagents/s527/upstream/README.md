@@ -175,3 +175,17 @@ hash, `[ { \1, "abc" } ]` (`PR-AZ.md`); **BA** §65 the OPT-IN
 `keep_line_endings => 1` tokenizes the source as it is -- the default
 normalisation is unchanged, PPI's own t/06_round_trip.t asserts it
 (`PR-BA.md`).  t/ppi_bugs_pcl.t: 411 -> 459 rows.
+
+## s543d (2026-11-21): the branch is now 139 commits, head 842e6bbd
+
+`0001-*.patch` .. `0139-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); pushed fast-forward to
+the BARE repo only (`66e690d2` -> `842e6bbd`) -- the fork's `pcl` is moved by the
+reviewing session.  Three groups, each "TODO tests, then the fix"; PPI's suite
+green after every commit, plain and AUTHOR_TESTING=1: **BB** §68 `__FILE__`
+`__LINE__` `__PACKAGE__` `__SUB__` `__CLASS__` end a term, so `__LINE__-1`
+subtracts and `__FILE__.1` concatenates (`PR-BB.md`); **BC** §69 `<<NAME` after
+a term is the left shift, `1<<index($s, $c)` -- core Devel::Peek's shape; a
+quoted terminator after a term keeps the here-doc for the fuzzed fixtures 45 /
+47 (`PR-BC.md`); **BD** §70 a bare block opened by `{;` ends its statement
+(`PR-BD.md`).  t/ppi_bugs_pcl.t: 459 -> 522 rows.

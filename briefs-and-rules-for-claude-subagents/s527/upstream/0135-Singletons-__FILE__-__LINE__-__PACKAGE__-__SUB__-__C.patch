@@ -1,0 +1,64 @@
+From b341df79cdc9dc17b952a8c5182e3796902d32a8 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 18:09:57 +0200
+Subject: [PATCH 135/139] Singletons: __FILE__, __LINE__, __PACKAGE__, __SUB__,
+ __CLASS__ end a term
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl's lexer returns each of these words as a whole term and expects an
+operator after it (toke.c: FUN0OP for __FILE__ __LINE__ __PACKAGE__
+__SUB__, FUN0 for __CLASS__, both setting PL_expect = XOPERATOR) -- the
+rule it applies after time or wantarray.  They join %NO_OPERAND, the
+table _ends_term_at reads, so every decision that asks "does a term end
+here" -- the sign of a number (_opcontext), .digit, the % and * arms,
+~~, x -- now reads __LINE__-1 as a subtraction, __FILE__.1 as a
+concatenation and __LINE__ %h as a modulo.  The upstream list in
+%X_CAN_FOLLOW_WORD already counted __SUB__ as a word that takes no
+operand.
+
+Fixes PCL §68.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Singletons.pm | 3 +++
+ t/ppi_bugs_pcl.t      | 3 +--
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/lib/PPI/Singletons.pm b/lib/PPI/Singletons.pm
+index 00e7ace5..e58ed5d1 100644
+--- a/lib/PPI/Singletons.pm
++++ b/lib/PPI/Singletons.pm
+@@ -51,11 +51,14 @@ our %MAGIC = map { $_ => 1 } qw{
+ 
+ # Builtins that take no operand: each is a whole term, so after one of them
+ # an operator follows (time ~~ @a is a smart match, time.2 a concatenation).
++# __FILE__, __LINE__, __PACKAGE__, __SUB__ and __CLASS__ are such terms too
++# (toke.c FUN0OP / FUN0): __LINE__-1 subtracts, __FILE__.1 concatenates.
+ our %NO_OPERAND = map { $_ => 1 } qw(
+ 	time times wait wantarray fork getppid getlogin
+ 	getgrent gethostent getnetent getprotoent getpwent getservent
+ 	endgrent endhostent endnetent endprotoent endpwent endservent
+ 	setgrent setpwent
++	__FILE__ __LINE__ __PACKAGE__ __SUB__ __CLASS__
+ );
+ 
+ our %LAYER = ( 1 => [], 2 => [] );    # Registered function store
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index b6cf5bc1..5b0080fe 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2245,8 +2245,7 @@ for my $case ( [ 'my $r = [ { "abc", 1 } ];', 'PPI::Structure::Constructor' ], [
+ # digit subtracts, a . before a digit concatenates, a % or a * is the
+ # arithmetic operator:
+ # `print __LINE__-1, " ", __FILE__.1, "\n";` prints `0 -e1` under -e.
+-TODO: {
+-    local $TODO = q{PCL §68: after __FILE__ / __LINE__ / __PACKAGE__ / __SUB__ / __CLASS__ a sign or a dot is read as part of a number};
++{
+     for my $case ( [ q{print __LINE__-1;}, q{Operator=-} ], [ q{my $l = __LINE__ -1;}, q{Operator=-} ],
+                    [ q{is( $@, sprintf("%d", __LINE__ -1) );}, q{Operator=-} ],
+                    [ q{my $n = __PACKAGE__-1;}, q{Operator=-} ], [ q{my $n = __SUB__-1;}, q{Operator=-} ],
+-- 
+2.53.0
+

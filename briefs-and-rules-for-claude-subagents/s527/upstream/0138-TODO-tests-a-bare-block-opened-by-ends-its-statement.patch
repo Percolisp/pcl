@@ -1,0 +1,96 @@
+From 59e66c8a00e944fca839447033b4d48ea363f79c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 18:16:17 +0200
+Subject: [PATCH 138/139] TODO tests: a bare block opened by { ; ends its
+ statement
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads a { that starts a statement as a block unless its look-ahead
+finds an anonymous hash, and a ; right after the { is perlref's way of
+saying "block" (toke.c yyl_leftcurly under XSTATE); the block is a
+statement of its own:
+
+    perl -e '{;} print "after\n"'       # after
+    perl -e '{; a => 1 } print 2'       # 2
+
+PPI's _curly takes the Block class from _curly_lookahead for `{;` but
+leaves the statement a plain PPI::Statement (only the look-ahead's
+fall-through makes it a Compound), so the } does not end it and the
+next statement is swallowed: `{;} print 1;` is ONE statement.
+
+Seven rows inside a new PCL §70 TODO block (with a comment, with a
+statement, a pair, two semicolons, inside a sub body) and nine
+controls: a block with content, a labelled block, do {;}, map {; ... },
+and the EMPTY {} / { # comment } at a statement start, which perl
+itself reads as an anonymous hash (a } right after the {, comments
+skipped, is HASHBRACK: `perl -e '{} print 1'` is a syntax error), so
+PPI's Constructor there is right.  Plan 506 -> 522.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 43 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index a91d0007..0a5f45b6 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 506 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 522 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2313,3 +2313,44 @@ for my $code ( qq{print <<EOT;\nx\nEOT\n}, qq{print <<"EOT";\nx\nEOT\n}, qq{prin
+         ok( !grep( /^HereDoc=/, @t ), "$code: no here-doc (control)" ) or diag "got: @t";
+     }
+ }
++
++# §70 -- a { that starts a statement and is followed by ; is a BLOCK
++# (perlref: `{;` is the disambiguator), and a bare block is a statement
++# of its own: perl reads `{;} print 1;` as an empty block and then the
++# print (toke.c yyl_leftcurly under XSTATE: the brace is a block unless
++# its look-ahead finds a hash; the block's } ends the statement).  An
++# EMPTY {} or { # comment } that starts a statement is an anonymous hash
++# for perl itself (toke.c: a } right after the {, comments skipped, is
++# HASHBRACK; `perl -e '{} print 1'` is a syntax error), so PPI's
++# Constructor there is right (controls).
++TODO: {
++    local $TODO = q(PCL §70: a bare block opened by { ; does not end its statement);
++    for my $case ( [ q{{;} print 1;}, [ 'Statement::Compound: {;}', 'Statement: print 1;' ] ],
++                   [ q{{ ; } print 1;}, [ 'Statement::Compound: { ; }', 'Statement: print 1;' ] ],
++                   [ qq{{;\n# c\n}\nprint 1;}, [ 'Statement::Compound: {; # c }', 'Statement: print 1;' ] ],
++                   [ q{{ ; my $x = 1; } print 1;}, [ 'Statement::Compound: { ; my $x = 1; }', 'Statement: print 1;' ] ],
++                   [ q{{; a => 1 } print 1;}, [ 'Statement::Compound: {; a => 1 }', 'Statement: print 1;' ] ],
++                   [ q{{ ;; } f();}, [ 'Statement::Compound: { ;; }', 'Statement: f();' ] ] ) {
++        my ( $code, $want ) = @$case;
++        is_deeply( [ stmts($code) ], $want, squash($code) . ': the block ends its statement' );
++    }
++    my $doc = PPI::Document->new( \'sub f { {;} 1 }' );
++    my ($blk) = $doc ? @{ $doc->find('PPI::Structure::Block') || [] } : ();
++    my @got = $blk ? map { my $s = squash($_->content); $s =~ s/^ //; short_class(ref $_) . ": $s" } $blk->schildren : ();
++    is_deeply( \@got,
++               [ 'Statement::Compound: {;}', 'Statement: 1' ], 'sub f { {;} 1 }: the inner block ends its statement' );
++}
++for my $case ( [ q{{ 1 } print 1;}, [ 'Statement::Compound: { 1 }', 'Statement: print 1;' ] ],
++               [ q{L: {;} print 1;}, [ 'Statement::Compound: L: {;}', 'Statement: print 1;' ] ],
++               [ q{do {;}; print 1;}, [ 'Statement: do {;};', 'Statement: print 1;' ] ],
++               [ q{{ }; print 1;}, [ 'Statement: { };', 'Statement: print 1;' ] ],
++               [ q{{ "a", 1 }; print 1;}, [ 'Statement: { "a", 1 };', 'Statement: print 1;' ] ] ) {
++    my ( $code, $want ) = @$case;
++    is_deeply( [ stmts($code) ], $want, "$code: as perl reads it (control)" );
++}
++for my $case ( [ q{{} print 1;}, 'PPI::Structure::Constructor' ], [ qq{{ # c\n} print 1;}, 'PPI::Structure::Constructor' ],
++               [ q{my @l = map {; "$_" => 1 } @x;}, 'PPI::Structure::Block' ], [ q{my $h = {};}, 'PPI::Structure::Constructor' ] ) {
++    my ( $code, $want ) = @$case;
++    my @c = bracket_classes( $code, '{' );
++    is( $c[0], $want, squash($code) . ": $want (control)" );
++}
+-- 
+2.53.0
+

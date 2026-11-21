@@ -1,0 +1,89 @@
+From eebdaacc76937e03bbc5489e2b164da263149063 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 18:15:06 +0200
+Subject: [PATCH 137/139] Operator: << NAME after a term is the left shift
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl starts a here-doc only where it expects a term (toke.c
+yyl_leftpointy: under XOPERATOR << is SHop(OP_LEFT_SHIFT)).  The <<
+arm of PPI::Token::Operator now asks _after_term -- the term-end rule
+the %, *, .digit and ~~ decisions use -- before it makes a here-doc of
+<< and a word: after a number, a variable, a ), a ], a subscript's },
+a method name, a postfix ++, a string or a builtin that takes no
+operand, 1<<index($s, $c) and $x<<CONST are shifts by a call.  In the
+filehandle slot of print $fh <<EOT (whitespace before the <<, none
+after) the here-doc stays, as for perl; print $fh<<EOT is a shift, as
+for perl.
+
+A quoted terminator after a term (1 << "EOT" -- a shift by a string for
+perl, which no real program writes) keeps the here-doc reading: the
+fuzzed fixtures 45 and 47 of t/data/08_regression exercise the
+here-doc terminator scanner on exactly that shape, and reading them as
+shifts would leave the scanner untested.  Its row stays TODO.
+
+Fixes PCL §69 (fourteen of its fifteen rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Operator.pm |  9 +++++++--
+ t/ppi_bugs_pcl.t          | 17 ++++++++++++++---
+ 2 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index be84e510..178cc928 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -83,8 +83,13 @@ sub __TOKENIZER__on_char {
+ 		}
+ 	}
+ 
+-	# Handle the special case if we might be a here-doc
+-	if ( $content eq '<<' ) {
++	# Handle the special case if we might be a here-doc.  A here-doc
++	# starts only where a term is expected: after a term, <<NAME is the
++	# left shift by a call of NAME (1<<index($s, $c), $x<<CONST; toke.c
++	# yyl_leftpointy: under XOPERATOR << is SHop).  _after_term keeps
++	# print $fh <<EOT a here-doc.  A quoted terminator after a term
++	# (1 << "EOT", which no real program writes) keeps the here-doc.
++	if ( $content eq '<<' and !( $char =~ /\A(?!\d)\w\z/ and $t->_after_term ) ) {
+ 		pos $t->{line} = $t->{line_cursor};
+ 		# Either <<FOO  or << 'FOO'  or <<\FOO  or
+ 		#        <<~FOO or <<~ 'FOO' or <<~\FOO
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index eb180573..a91d0007 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2273,14 +2273,25 @@ for my $case ( [ q{print time-1;}, q{Operator=-} ], [ q{print __LINE__ - 1;}, q{
+ # ++ or a string, <<NAME is a shift by a call of NAME:
+ # `my $n = (1<<index("ab","b")); print $n;` prints 2.  (In the
+ # filehandle slot of print $fh <<EOT the here-doc stays, as for perl.)
+-TODO: {
+-    local $TODO = q{PCL §69: << after a term is lexed as a here-doc when a word or a quote follows};
++{
+     for my $code ( q{my $n = (1<<index("ab","a"));}, q{my $n = 1<<length("ab");},
+                    q{my $n = $x<<f();}, q{my $n = 1 <<f();}, q{my $n = 1<<f;},
+                    q{$num |= (1<<index($D_flags, $_)) for split //, $on;},
+                    q{my $n = $a[0]<<f();}, q{my $n = $h{a}<<f();}, q{my $n = f()<<g();},
+                    q{my $n = $i++<<f();}, q{my $n = $o->m<<f();}, q{my $n = "1"<<f();},
+-                   q{my $n = time<<f();}, q{print $fh<<EOT;}, q{my $n = 1 << "EOT";} ) {
++                   q{my $n = time<<f();}, q{print $fh<<EOT;} ) {
++        my @t = map { short_class($_) } toks($code);
++        ok( !grep( /^HereDoc=/, @t ) && grep( $_ eq q{Operator=<<}, @t ), "$code: the left shift, not a here-doc" )
++            or diag "got: @t";
++    }
++}
++# A quoted terminator after a term is a shift by a string for perl; PPI
++# keeps the here-doc there (no real program writes it, and the fuzzed
++# fixtures 45 and 47 of t/data/08_regression test the here-doc scanner
++# on that shape).
++TODO: {
++    local $TODO = q{PCL §69: << and a quoted terminator after a term is lexed as a here-doc};
++    for my $code ( q{my $n = 1 << "EOT";} ) {
+         my @t = map { short_class($_) } toks($code);
+         ok( !grep( /^HereDoc=/, @t ) && grep( $_ eq q{Operator=<<}, @t ), "$code: the left shift, not a here-doc" )
+             or diag "got: @t";
+-- 
+2.53.0
+
