@@ -127,7 +127,9 @@ PL
 
 # ---- eval, construction, references: #1943 a string eval's last expression
 #      takes the eval's context; #2540 `[ { g(@l) } ]` is ONE anon hash;
-#      #3827 a ref-to-ref chain `$$$a` unwraps to the right level -------------
+#      #3827 a ref-to-ref chain `$$$a` unwraps to the right level (the task
+#      itself stays OPEN, narrowed to Data::Dumper's Purity rows, which still
+#      differ; this row guards the half that agrees) -------------------------
 both_agree(<<'PL', '#1943 scalar eval "%h{...}"; #2540 [ { g(@l) } ]; #3827 $$$a of a ref chain');
 my %h = map { $_ => uc $_ } 'a'..'z';
 print "1 ", scalar(eval "%h{'c','d','e'}"), " ", scalar(eval "\@h{'c','d','e'}"), "\n";
