@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 my $DIR = tempdir(CLEANUP => 1);
 
@@ -207,4 +207,27 @@ for (@ENV{qw(T11R)}) { $_ = "slice" } st('T11R', 18);
 $ENV{T11S} = undef; $ENV{T11S} //= "dflt"; st('T11S', 19);
 print "20 grep=", scalar(grep { $_ eq 'T11S' } %ENV), "\n";
 undef %ENV; print "21 undef %ENV keys=", scalar(keys %ENV), " T11S=[", ($ENV{T11S} // 'U'), "]\n";
+PL
+
+# ---- #1039 an @array / %hash VALUE reaching a STRING operator is its COUNT
+#      (string context is scalar context: %p-str-operand) -- a reference, a
+#      blessed one, an overloaded one, an element holding one, "@a", join and
+#      print @a are untouched ------------------------------------------------------
+both_agree(<<'PL', '#1039 "count: " . @a is 3; lc / length / eq / x / .= of an array; refs still ARRAY(0x...)');
+no warnings;
+my @a = (7,8,9); our @p = (4,5); my $r = \@a; my %h = (a => 1, b => 2, c => 3); my $hr = {x => 1};
+sub isref { $_[0] =~ /^(?:\w+=)?(ARRAY|HASH)\(0x[0-9a-f]+\)$/ ? "R$1" : "[$_[0]]" }
+sub f { @a } sub g { return @a } sub h { my $x = 1; @a } sub t { $_[0] ? @a : @p } sub d { do { @a } }
+print "1 ", @a . "", " ", "count: " . @a, " ", "n=" . @p, " ", "d=" . @$r, " ", "x=" . @{[1,2,3,4]}, " ", "r=" . $r->@*, "\n";
+print "2 ", f() . "", " ", g() . "", " ", h() . "", " ", t(1) . "", " ", t(0) . "", " ", d() . "", "\n";
+print "3 ", lc(f()), " ", length(f()), " ", (f() eq '3' ? "EQ" : "NE"), " ", length(@a), " ", uc @p, " ", quotemeta(@a), " ", ord(@a), " ", index(@a, "3"), " ", substr(@a, 0), "\n";
+print "4 ", (@a eq '3' ? "EQ" : "NE"), " ", (@a lt '4' ? "LT" : "GE"), " ", (@a cmp '3'), " ", ('3' cmp @a), " ", (@a . @p), "\n";
+my $s = "s"; $s .= @a; my @e = ("x"); $e[0] .= @a; my %k = (k => "y"); $k{k} .= @a; my $er = ["z"]; $er->[0] .= @a;
+my $buf = ""; for (1..3) { $buf .= @a; $buf .= "-" } print "5 $s $e[0] $k{k} $er->[0] $buf ", @a x 2, " ", "-" x @a, "\n";
+print "6 ", %h . "", " ", "h=" . %h, " ", "k=" . keys(%h), " ", "g=" . grep({ $_ > 7 } @a), " ", "m=" . map({ $_ } @a), " ", "x" . (1 ? @a : 0), "\n";
+my @emp; print "7 [", @emp . "", "] ", (@a == 3 ? "num" : "bad"), " ", @a + 0, "\n";
+my $o = bless [5,6], 'Obj'; { package OvS; use overload '""' => sub { "S" . scalar(@{$_[0]}) }, fallback => 1; } my $ov = bless [1,2,3], 'OvS';
+my @aa = ([1,2], [3]); { package TA; sub TIEARRAY { bless [], shift } sub FETCHSIZE { 5 } sub FETCH { 1 } } tie my @t, 'TA';
+print "8 ", isref("$r"), " ", isref($r . ""), " ", isref($r x 1), " ", isref($hr . ""), " ", isref($o . ""), " ", $ov . "", " ", lc($ov), " ", isref($aa[0] . ""), " ", @t . "", "\n";
+print "9 ", @a, " ", "@a", " ", "$#a", " ", join("-", @a), " ", ($r eq $r ? "EQ" : "NE"), "\n";
 PL
