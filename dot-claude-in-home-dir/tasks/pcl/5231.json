@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543f (Opus 5.5, 2026-11-21), PPI batch 11 member 1 (§11 / §71).\n\n    $_ = \"x\"; print STDOUT /x/, \"\\n\";\n      perl: 1            PCL: statement dropped (\"Handle single node of unknown type\")\n\nAfter PCL's PPI group BE (§71) a `/` after a BUILTIN that takes an operand is a match on the branch, but a bareword FILEHANDLE after print is a user's word to PPI (`STDOUT` is not a keyword), so the `/` stays an Operator -- the user half of §11, which `Pl::Parser2::_repair_word_match` owns.  The repair declines because it asks `_word_is_term`, whose ALL-CAPS guess reads `STDOUT` as a constant.  `_repair_word_x_call` already has the fix shape for the sibling `print STDOUT x()`: it asks `_word_is_declared_term` (no ALL-CAPS guess), because after a print-family keyword an undeclared ALL-CAPS word is a handle, not an operand.  The same predicate split applies here, keyed on the word after print / printf / say (not every ALL-CAPS word: `FOO / 2` with an imported constant must keep dividing).\n\nSame on main ffc7eb72 (base drops too).  Probe: scratch/s543f/p1/s28.pl in the s543f worktree.\nBAR: `print STDOUT /x/`, `print STDERR /x/ ? 1 : 0`, `printf STDOUT /x/ ? \"y\" : \"n\"` vs perl; controls `use constant FOO => 4; print FOO / 2`, `print STDOUT 4 / 2`; corpus-diff + the wide A/B; a guard row beside #872's.\n",
+   "id" : "5231",
+   "status" : "pending",
+   "subject" : "LOUD: print STDOUT /x/ drops the statement -- the user half of PPI section 11 (_repair_word_match's ALL-CAPS guess reads the handle as a constant)",
+   "triage" : "in",
+   "triage_reason" : "a whole-statement drop of print to a bareword handle with a match operand (IN: print, regex)"
+}

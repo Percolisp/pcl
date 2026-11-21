@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543f (Opus 5.5, 2026-11-21), found beside member 2 (#1680, PPI §72).\n\nA digit-named ARRAY followed directly by word characters is lexed as ONE token:\n\n    no strict; @1 = (5); print @1x 2, \"\\n\";\n      perl: 11            (perl's scan_ident reads a digit run: `@1 x 2`, the array in scalar context repeated)\n      PCL : Transpile failed: PCL binder: unknown variable token shape `@1x` (canon `@1x`)\n\nPPI 1.291 and PCL's branch (`72d2bd9e`) both give `Magic<@1x>` (and `Symbol<@12x>`-like shapes for longer runs); `$1x` is right (`Magic<$1> Operator<x>`, Token/Magic.pm grabs only the digits of a capture variable).  The HASH spelling was fixed in s543f's group BF: `%12x 2` is `Symbol<%12> Operator<x>` -- the `%` arm takes the digit run and ends the token.  The `@` arm of Token/Unknown.pm sends a digit to its `[\\w:]` Symbol test, which accumulates word characters.  PPI branch item (the same rule as BF: a digit-named container ends at its last digit), exotic: no file of the four populations spells it (the s543f wide A/B saw no such shape).\n\nBAR: `@1x 2`, `@12x3` (perl: `@12 x 3`), `\"@1x\"` in a string (interpolation: measure), controls `@1`, `@119797`, `@a1x`; registry row + catalogue section + twins (rule 13); the binder's canon stays strict.\n",
+   "id" : "5233",
+   "status" : "pending",
+   "subject" : "LOUD (exotic): PPI lexes a digit-named array followed by word characters as ONE token -- @1x 2 is Magic<@1x> (perl: @1 x 2, prints 11) and PCL's binder refuses the transpile; the hash twin %12x was fixed in s543f group BF",
+   "triage" : "in",
+   "triage_reason" : "a loud transpile failure on a core spelling (a digit-named array before an operator); a PPI branch item"
+}

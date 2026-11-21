@@ -399,24 +399,27 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-21: main = MAIN-READY-103 `a5a60b62` (generation v2-15300;
-five batches merged in this session: s543a, line tracking ON by default
+**s543, 2026-11-21: main = MAIN-READY-104 `8959afae` (generation v2-15400;
+six batches merged in this session: s543a, line tracking ON by default
 (MAIN-READY-99 `78202d0a`); s543b, seven filed silent wrongs (-100
 `64353611`); s543c, the verification batch (-101); s543r, the round (-102);
-s543d, PPI batch 10 (-103)).**  Gate **380 files / 12,372 rows `Result:
-PASS`** (measured on merged main); full sweep **TOTAL passing 18,808**, GATE
-clean; corpus-diff population 111 files; ir-conform 335 / 0; ir-host-leak 31;
-**EVERYDAY 116 of 122 (95.1 %)**; **86 live IN silent wrongs** (s543c ran
-every task's own reproducer; `tools/task-triage.pl` prints 92 until #5162);
-CPAN board (round of s543, on MAIN-READY-100, the oracle refreshed): **668
-PASS / 137 PARTIAL / 24 FAIL / 67 SKIP of 896 files, 109,191 ok / 1,190 not
-ok** (the ok total is lower than the s542 round's 109,714 only by the
-IO-Compress `105oneshot` heap flap, #4643: 1,004 rows); the companion in the
-same round: `--all --quick` 128 OK / 103 XDIFF / 239 DIFF of 528, the full
-run 0 NEW / 0 FIXED / 0 LOST against the edited baselines; PPI `pcl` =
-`842e6bbd` (139 commits over upstream, 67 catalogued mis-lexes fixed at the
-source; batches 11 and 12 are planned in `docs/ppi-fix-at-source-s527.md`
-§10); CI green on MAIN-READY-102.  Line tracking costs a median +0.8 % on the
+s543d, PPI batch 10 (-103 `a5a60b62`); s543e, seven live silent wrongs
+(-104)).**  Gate **380 files / 12,380 rows `Result: PASS`** (measured on
+merged main); full sweep **TOTAL passing 18,807**, GATE clean (one TODO row
+of magic.t that passed on a bug left by edit); corpus-diff population 111
+files; ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of 122 (95.1 %)**;
+**82 live IN silent wrongs** (s543c's verified 86, minus the 8 s543e closed,
+plus 4 filed since: #5165 #5210 #5230 #5232; `tools/task-triage.pl` prints 87
+until #5162); CPAN board (round
+of s543, on MAIN-READY-100, the oracle refreshed): **668 PASS / 137 PARTIAL /
+24 FAIL / 67 SKIP of 896 files, 109,191 ok / 1,190 not ok** (the ok total is
+lower than the s542 round's 109,714 only by the IO-Compress `105oneshot` heap
+flap, #4643: 1,004 rows); the companion in the same round: `--all --quick`
+128 OK / 103 XDIFF / 239 DIFF of 528, the full run 0 NEW / 0 FIXED / 0 LOST
+against the edited baselines; PPI `pcl` = `842e6bbd` (139 commits over
+upstream, 67 catalogued mis-lexes fixed at the source; batch 11 = s543f is
+STOPPED at a checkpoint, batch 12 planned in `docs/ppi-fix-at-source-s527.md`
+§10); CI green on MAIN-READY-103.  Line tracking costs a median +0.8 % on the
 bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that

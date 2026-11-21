@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543e (Opus 5.5, 2026-11-21) from the #1039 probe file (scratch/s543e/p3/arrstr.pl row 7).  PRE-EXISTING (the base extraction prints it too).  LOUD (stderr only; stdout and the exit status are perl's).\n\nREPRODUCER (scratch/s543e/p3/spf.pl):\n    no warnings; my @a = (1,2); my $s = sprintf(\"%s\", @a); print \"$s\\n\";\n\n  perl 5.40.3:  1                         (nothing on stderr: the warning category is off)\n  PCL:          1  + on STDERR: \"Redundant argument in sprintf at unknown line 0.\"\n\nTwo faults in one line: (1) the \"redundant\" warning ignores `no warnings` (perl: category `redundant`, default-off unless `use warnings`); (2) its location reads `unknown line 0` although line tracking is on by default since MAIN-READY-99.\n\nFIX SHAPE (untried): find where p-sprintf warns (grep \"Redundant argument\" cl/pcl-runtime.lisp) and route it through the warnings-category test the other runtime warnings use (lib/warnings.pm's `redundant` bit), and through the ONE location reader (`p-line` / `p-file` state) the die/warn messages use.  Probe `use warnings; sprintf(\"%s\", 1, 2)` (perl warns with `at FILE line N.`) and `use warnings; no warnings 'redundant'`.\n",
+   "id" : "5211",
+   "status" : "pending",
+   "subject" : "LOUD: sprintf's \"Redundant argument\" warning ignores `no warnings` and names \"unknown line 0\" -- `no warnings; sprintf(\"%s\", @a)` writes it to STDERR where perl writes nothing",
+   "triage" : "in",
+   "triage_reason" : "sprintf redundant-argument warning under no warnings"
+}

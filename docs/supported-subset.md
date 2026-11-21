@@ -191,6 +191,12 @@ ones in ordinary code, most likely first, are the next fix brief: #1039
 #1190 #3415 #1339), #691, string-eval name resolution (#2091 #2557 #2630
 #4821).
 
+**s543e (2026-11-21, MAIN-READY-104) fixed the first seven of that list**
+(#1039 #1955 #750 #2555 #3100 #2766 #1030) and #5105 with them, and filed
+#5210 (`local %ENV` does not reach a child process); the review filed #5165,
+and the stopped PPI batch s543f #5230 and #5232.  The verified count is **82**.  Next: #691 with the nested-element `local`
+family, then string-eval name resolution.
+
 What pauses: widening the board, new steering populations, perl's own suite
 rows that no IN program reaches. What does not pause: the round instruments,
 the PPI branch when the expect-state checker reports a new mis-lex in an IN

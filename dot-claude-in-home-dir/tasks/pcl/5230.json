@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543f (Opus 5.5, 2026-11-21), found by member 1's probe table (PPI batch 11, a `/x/` after `and` / `or` / `not` in a list -- the tokens are right; the lowering is not).\n\nA low-precedence `and` / `or` whose operand is a COMMA LIST, inside a list:\n\n    my $x = (1 and 2, 0); print \"$x\\n\";\n      perl: 0            PCL: ARRAY(0x1)\n    my @r = ((1 and 2, 0) or (3, 4)); print \"@r\\n\";\n      perl: 3 4          PCL: 2 0\n    $_ = \"x\"; my @r = (1 and /x/, 0 or /x/, not /y/); print \"@r\\n\";\n      perl: 1 1          PCL: 1 0\n\nperl: `and` / `or` bind looser than the comma, so `1 and 2, 0` is `1 and (2, 0)`; the LEFT operand of `or` is evaluated in BOOLEAN (scalar) context -- `(2, 0)` there is the comma operator, 0 -- and the result of `and` in scalar context is its right operand's scalar value (0).  PCL evaluates the comma list in list context (an array object stringifies as ARRAY(0x1); `or` sees a true list).  Same on main ffc7eb72 (tree = base).\n\nProbe file: scratch/s543f/andor.pl in the s543f worktree (agent-a64e9ad186336c772).\nBAR: the three rows vs perl, plus `(0 or 3, 4)` (perl 3 4, right today) and `my $y = (0 or 3, 4)` as controls; corpus-diff; a guard row.\n\nNOTE (s543f, same day): the `ARRAY(0x1)` face may share its cause with #1039 (an array in STRING context is `ARRAY(0x1)`), which s543e (IDs 5210-5229) is fixing -- re-run the three rows on main after s543e merges before working on this.\n",
+   "id" : "5230",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a low-precedence and / or whose operand is a comma list evaluates the list in LIST context -- my $x = (1 and 2, 0) gives ARRAY(0x1) (perl 0), ((1 and 2, 0) or (3, 4)) gives 2 0 (perl 3 4)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong in the lowering of low-precedence and/or, core operators (IN)"
+}

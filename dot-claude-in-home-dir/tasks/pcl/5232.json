@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543f (Opus 5.5, 2026-11-21), PPI batch 11 member 4 (§74, the punctuation hash `%^`).\n\nAn element of the punctuation hash `%^` interpolated in a string is left as TEXT:\n\n    no strict; %^ = (a => 1); for my $k (keys %^) { print \"$k=$^{$k}\\n\" }\n      perl: a=1          PCL: a=$^{a}\n\nIn code `$^{k}` is right (`print $^{k}` and `${^}{k}` print 2 in the s543f probe h08), and `exists $^{z}` too; only the STRING spelling is not interpolated -- `Pl/InterpScan.pm` does not read `$^` + `{...}` as an element of `%^` (perl does: `$^` is a punctuation variable and the `{` after it subscripts %^).  Same on main ffc7eb72.\n\nExotic (the hash of the format-top name); a filler.  Probe: scratch/s543f/p4/h15.pl in the s543f worktree.\nBAR: the row above vs perl, plus `\"$^{a}\"`, `\"@^{a}\"` (a slice), and the controls `\"$^\"` (the scalar, `STDOUT_TOP`) and `\"$^W\"`; interp-scan-01.t row.\n",
+   "id" : "5232",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (exotic): an element of the punctuation hash %^ interpolated in a string stays TEXT -- \"$^{$k}\" prints $^{a} (perl: the value)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong in string interpolation (IN), on an exotic punctuation hash"
+}

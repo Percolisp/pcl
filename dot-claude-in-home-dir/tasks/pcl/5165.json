@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543 (the reviewing session, 2026-11-21) from a review probe of s543e; PRE-EXISTING (main e8dd2cdd and the s543e tree agree with each other, not with perl).\n\nREPRODUCER:\n    my $b = bless [1,2], \"Pl\";\n    print +(sort { $b <=> $a } 3,1,2)[0], \"\\n\";\n  perl 5.40.3: 2, with the compile-time warning `\"my $b\" used in sort comparison`; PCL: 3 (the answer the programmer meant).\n\nperl resolves `$b` in the block to the lexical in scope (a constant for the whole sort), so the comparator is inconsistent and the order is whatever the sort makes of it; PCL binds its comparator parameters over the name.  Nobody writes this on purpose -- it is the classic `my $a` / `my $b` trap -- and perl`s result is implementation-defined order.  Filed because it is a silent divergence; the honest fix may be an ANNOUNCEMENT at compile time (perl`s own warning text) rather than reproducing perl`s order.  Check `my $a` too.",
+   "id" : "5165",
+   "status" : "pending",
+   "subject" : "LOW, SILENT WRONG (rare; perl warns): a sort comparator that names `$a` / `$b` while a LEXICAL `my $b` is in scope sorts by the package variables in PCL -- perl uses the lexical, so `(sort { $b <=> $a } 3,1,2)[0]` is 2 there and 3 in PCL",
+   "triage" : "in",
+   "triage_reason" : "rare: a lexical `my $b` in scope of a sort comparator (perl warns and uses the lexical)"
+}
