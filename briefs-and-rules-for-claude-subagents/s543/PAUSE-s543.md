@@ -135,3 +135,7 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * REVIEW: a 24-line probe of the three fixes and their controls (here-docs, `{;}` in six positions, the number spellings) perl -> main -> tree: tree = perl on every line, main dropped two statements.  The FULL gate on merged main: 380 files / 12,372 rows PASS (`~/pcl-agent-scratch/s543/review/gate-a5a60b62.log`).
 * At the merge: #2095 #483 #937 #2541 CLOSED; #5190 filed by the batch (perl-tests/sprintf2.t carries PCL's own old edit, invalid perl); **the fork pushed** (`pcl` = `842e6bbd`) and **pull request #459 refreshed** (56 groups, 139 commits, 522 cases; `gh api -X PATCH` -- `gh` IS authenticated here, the old memory note was wrong); CLAUDE.md "Test Status", STATUS.md 12,372.
 * **PPI batch 11 = `s543/s543f-prompt.md`** (the builtin half of §11 + #2774's builtin row, #1680, #3922, `%^`, the seven closes; IDs 5230-5249; v2-15500) takes the freed slot.  s543e gets "main is now <sha>".
+
+## 20:01 -- s543f LAUNCHED (PPI batch 11) in the slot s543d freed; two subtasks run: s543e + s543f
+* s543f: Opus 5.5 / xhigh, MODEL.txt checked `claude-opus-5-5`; worktree `.claude/worktrees/agent-a64e9ad186336c772`; brief `s543/s543f-prompt.md`; IDs 5230-5249; generation v2-15500; a clone branch `pcl-s543f` of the bare PPI mirror (`842e6bbd`).
+* s543e told main moved in CODE (`e8dd2cdd`): it rebases before its end-of-batch bars, keeps v2-15400.
