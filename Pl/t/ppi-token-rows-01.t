@@ -203,9 +203,10 @@ both_agree(qq{sub f { 2 } my \$D = "psl"; my \$num = 0; \$num |= (1<<index(\$D, 
 both_agree(q{{;} print "a"; { ; } print "b"; {; my $x = 1; print "c$x" } {; local $_ = "d"; print } my $h = {}; print ref($h), "\n";},
            '§70: {;} / { ; } / {; ... } are bare blocks; the statement after each is its own');
 # ... and a `{; PAIR }` bare block that is a sub's value stays a block when a later pass reparses
-# the document (here the n-at-a-time foreach): _normalize_null_statements keeps its `;` as `();`
-# for a Compound statement too (with only the PPI fix it became an anonymous hash: `1 HASH`).
-both_agree(q{sub f { {; a => 1 } } my @r = f(); print scalar(@r), " ", ref($r[0]), "|"; for my ($p, $q) (1, 2) { print "$p$q\n" }},
+# the document (here the word-match repair's reparse; no perl-5.40-only syntax: CI runs 5.38):
+# _normalize_null_statements keeps its `;` as `();` for a Compound statement too (with only the PPI
+# fix it became an anonymous hash: `1 HASH`).
+both_agree(q{sub f { {; a => 1 } } my @r = f(); print scalar(@r), " ", ref($r[0]), "|"; sub ok { print $_[0] ? "m" : "n", "\n" } $_ = "x"; ok /x/, 1;},
            '§70: sub f { {; a => 1 } } returns the pair, after a reparse too');
 
 done_testing();
