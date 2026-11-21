@@ -142,6 +142,15 @@ sub r46 { my $r = []; %{$r->[0]} = (x => 1); print "r46 ", join(",", %{$r->[0]})
 sub r47 { my $n = {}; %{$n->{a}{b}} = (y => 2); print "r47 ", join(",", %{$n->{a}{b}}), "\n" }
 sub r48 { my $q = {}; my $c = %{$q->{z}}; print "r48 ", (exists $q->{z} ? "viv" : "noviv"), "\n" }
 sub r49 { my $o = {}; my $x = {n => 1}; for (1 .. 3) { %$x = %{$o->{K}} if $o->{K}; $x->{n}++; %{$o->{K}} = %$x } print "r49 $o->{K}{n}\n" }
+# s543c (verified on 64353611; the tasks closed with these rows): #1350's
+# single-level reads `$r->{b}` / `$$r{b}` / `exists $r->{b}` (r04 / r38 / r39
+# are its other spellings), #1352's single-key hash slice of an undef root,
+# and #1349's own shape -- the name in two SIBLING blocks, which boxed it.
+sub r50 { my $r; my $v = $r->{b}; print "r50 ", ref($r), "\n" }
+sub r51 { my $r; my $v = $$r{b}; print "r51 ", ref($r), "\n" }
+sub r52 { my $r; my $e = exists $r->{b}; print "r52 ", ref($r), "\n" }
+sub r53 { my $r; my @z; my @v = @$r{"a"}; print "r53 ", ref($r), "\n" }
+sub r54 { { my $r; print "r54 [", ref($r), "]"; } { my $r; print "[", ref($r), "] ", (defined $r ? 1 : 0), "\n"; } }
 sub b01 { my $n = 0; $n++ for 1 .. 10; print "b01 $n\n" }
 sub b02f { my $s = shift; $s->{x} }
 sub b02 { print "b02 ", b02f({x => 5}), "\n" }
@@ -150,7 +159,8 @@ sub b04 { my @l = qw(a b c); my $acc = ""; $acc .= $_ for @l; print "b04 $acc\n"
 for my $r (qw(r01 r02 r03 r04 r05 r06 r07 r08 r09 r10 r11 r12 r13 r14 r15 r16
               r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r30 r33 r34
               r35 r36 r37 r38 r39 r40 r41 r42
-              r43 r44 r45 r46 r47 r48 r49 b01 b02 b03 b04)) {
+              r43 r44 r45 r46 r47 r48 r49 r50 r51 r52 r53 r54
+              b01 b02 b03 b04)) {
   eval { no strict 'refs'; &$r(); 1 } or print "$r DIED\n";
 }
 PERL
@@ -204,6 +214,11 @@ r46 x,1
 r47 y,2
 r48 noviv
 r49 4
+r50 HASH
+r51 HASH
+r52 HASH
+r53 HASH
+r54 [][] 0
 b01 10
 b02 5
 b03 0

@@ -279,9 +279,9 @@ sub d { my $v = shift; return !defined $v ? "undef" : $v eq "" ? "EMPTY" : "$v" 
   my $l1 = readline($a); my $l2 = readline($b);
   printf "21 shared-position=%d\n", (($l1//"") ne ($l2//"") ? 1 : 0); close($a); }
 
-# The dup source is PRE-DECLARED here on purpose: the inline-`my` spelling
-# `open(my $d, "<&", $a)` loses its SOURCE argument in PCL (task #1420,
-# pre-existing name-resolution bug, unrelated to the handle representation).
+# The dup source is PRE-DECLARED here: the inline-`my` spelling
+# `open(my $d, "<&", $a)` used to lose its SOURCE argument (task #1420, a
+# name-resolution bug, closed s543c; its row is in Pl/t/fileio-02.t).
 { open(my $a, "<", $F) or die; my $dup;
   my $ok = open($dup, "<&", $a) ? 1 : 0;
   printf "22 dup=%d ref=%s distinct=%d\n", $ok, d(ref($dup)),

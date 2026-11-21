@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 49;
+plan tests => 50;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -882,6 +882,21 @@ print "2 fileno=", (defined fileno(F) ? "def" : "undef"), " read=", (defined(sca
 my $keep; open($keep, "<", $f) or die; open($keep, "<&NOSUCH");
 print "3 fileno=", (defined fileno($keep) ? "def" : "undef"), "\n";
 unlink $f;
+PERL
+
+# #1420 (closed s543c; fixed by an unknown earlier change, verified on
+# 64353611): the INLINE-`my` spelling of a dup open -- `open(my $d, "<&", $a)`
+# -- read an unrenamed `$a` (the package variable), so the dup failed and
+# `"<&="` died.  Pl/t/handle-place-01.t pre-declares its dup target on purpose.
+test_io('#1420: an inline-my dup open keeps its SOURCE (<&, <& fileno, <&=)', <<'PERL');
+my $f = "/tmp/pcl-t-dup1420-$$";
+open(my $o, ">", $f) or die; print $o "one\ntwo\n"; close $o;
+open(my $a, "<", $f) or die;
+my $ok = open(my $d2, "<&", $a); print "1 ", ($ok ? "ok" : "fail"), "\n";
+my $ok3 = eval { open(my $d3, "<&", fileno($a)) }; print "2 ", ($ok3 ? "ok" : "fail"), "\n";
+my $ok4 = eval { open(my $d4, "<&=", $a) }; print "3 ", ($ok4 ? "ok" : "fail"), "\n";
+my $l = <$d2>; print "4 ", (defined $l ? $l : "undef\n");
+close $a; unlink $f;
 PERL
 
 test_io('#2006(a) negatives: a dup SOURCE stays open; a loop of opens is unaffected', <<'PERL');

@@ -67,7 +67,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 9;
+plan tests => 10;
 
 # ── scalar: local ${aa} / ${"aa"} / ${$x} / $$x all localize $aa ──
 {
@@ -166,8 +166,8 @@ print $@ =~ /Can't localize through a reference/ ? "ok2\n" : "no2\n";
 # family in one program; every line is perl 5.40.3, probed s473a
 # (scratch/s473a/probes/m3guard.pl), and q1-q9 + q13 all differ on the
 # 41ca2496 extraction.  The SUBSCRIPTED spelling `local ${main::gh}{a} = 7`
-# is NOT covered and is still wrong twice over (it localizes the scalar
-# $main::gh and drops the init) — task #1341.
+# was wrong twice over (it localized the scalar $main::gh and dropped the
+# init) — task #1341, right since an earlier change: its row is below.
 {
     my $out = run_pl(q{
 $g = 1; @ga = (1,2,3); %gh = (a=>1); $c = 1; $evals = 0;
@@ -206,4 +206,24 @@ sub nm { $evals++; return 'main::g' }
                   'q13=3 evals=1', 'r13=1 evals=1',  # the NAME runs once
                   'q14=undef', 'r14=1'),    # bare: no init, still restored
        'a symbolic local ASSIGNS its initializer, on every sigil (#1260)');
+}
+
+# #1341 (closed s543c; fixed by an unknown earlier change, verified on
+# 64353611): the SUBSCRIPTED symbolic deref as a `local` target -- an element
+# of the deref'd hash / array, a slice, both modifiers, the stale-read RHS and
+# the bare spelling, each restored after its scope.  Expected text probed
+# against perl 5.40.3.
+{
+    my $out = run_pl(q{
+%gh = (a=>1); @ga = (1,2,3);
+sub s5 { local ${'main::gh'}{a} = 7; return "in=$gh{a}" } print s5(), " after=$gh{a}\n";
+sub s6 { local ${'main::ga'}[1] = 7; return "in=$ga[1]" } print s6(), " after=$ga[1]\n";
+sub s7 { local @{'main::ga'}[0,1] = (8,9); return "in=@ga" } print s7(), " after=@ga\n";
+sub s8 { local ${'main::gh'}{a} = 5 if 1; return "in=$gh{a}" } print s8(), "\n";
+sub s9 { local ${'main::gh'}{a} = 5 if 0; return "in=$gh{a}" } print s9(), "\n";
+sub s10 { local ${'main::gh'}{a} = ${'main::gh'}{a}; return "in=$gh{a}" } print s10(), "\n";
+sub s11 { local ${'main::gh'}{a}; return "in=" . ($gh{a} // 'u') } print s11(), " after=$gh{a}\n";
+});
+    is($out, "in=7 after=1\nin=7 after=2\nin=8 9 3 after=1 2 3\nin=5\nin=1\nin=1\nin=u after=1\n",
+       '#1341: a SUBSCRIPTED symbolic deref is an element / slice local target');
 }

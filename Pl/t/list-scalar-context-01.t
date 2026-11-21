@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 32;
 
 sub run_cl {
     my ($code) = @_;
@@ -182,6 +182,19 @@ test_cl('scalar readline inside list-context sub reads ONE line',
       sub f { open my $fh,'<','/tmp/pcl_wal.dat'; my $a=<$fh>; my $b=<$fh>; close $fh; return "$a$b"; }
       my @r=(f()); print $r[0]; unlink '/tmp/pcl_wal.dat';},
     "L1\nL2\n");
+
+# #1419 (closed s543c; fixed by an unknown earlier change, verified on
+# 64353611): the FUNCTION spellings in an ARGUMENT slot -- `scalar
+# readline($fh)` / `scalar glob($p)` ran in list context and answered the
+# COUNT (`[1]`).  Expected text probed against perl 5.40.3.
+test_cl('#1419: scalar readline($fh) / scalar glob($p) as an argument is the value, not the count',
+    q{open my $w,'>','/tmp/pcl_1419_s543c.dat'; print $w "L1\nL2\nL3\n"; close $w;
+      sub id { my $v = shift; defined $v ? "[$v]" : "undef" }
+      open(my $c, "<", '/tmp/pcl_1419_s543c.dat') or die;
+      print id(scalar readline($c)), "|", id(scalar glob('/tmp/pcl_1419_s543c.dat')), "\n";
+      my @l = (scalar readline($c)); print scalar(@l), " $l[0]";
+      close $c; unlink '/tmp/pcl_1419_s543c.dat';},
+    "[L1\n]|[/tmp/pcl_1419_s543c.dat]\n1 L2\n");
 
 test_cl('scalar reverse inside list-context sub = reversed string',
     q{sub f { my $s = reverse("abc"); return "$s"; } my @r=(f()); print "$r[0]\n";},
