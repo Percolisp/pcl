@@ -12344,9 +12344,9 @@ sub _lower_foreach_stmt {
   unless (defined $to_form) {
     # A list whose every DEPTH-0 element is a single SCALAR operand has a
     # statically known length, so it must not go through the run-time
-    # flattener: at runtime a box wrapping a vector is indistinguishable
-    # from an @array box, so %p-flatten-for-list spread the referent
-    # (`for ($r)` ran once per element of @$r).  The sigil is compile-time
+    # flattener: until s543e (#1955) %p-flatten-for-list took a box wrapping
+    # a vector for an @array box and spread the referent (`for ($r)` ran
+    # once per element of @$r; a box is now ONE element).  The sigil is compile-time
     # knowledge — emit the `(vector …)` shape instead, which keeps each
     # box as one element (so `for ($x) { $_ = 1 }` writes through).  Same
     # rule at k=1 and k>1; resolver + rationale:

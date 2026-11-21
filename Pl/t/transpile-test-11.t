@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 my $DIR = tempdir(CLEANUP => 1);
 
@@ -259,4 +259,27 @@ sub ar { my @q = @_; return @q[0, 1] } my $s5 = ar(7, 8, 9); my %hh = (a => 1, b
 print "4 $s1 [@l1] $s2 $s3 [@l3] $s7 $s8 $s9 $s10 $s11 $s5 $s6 ", scalar(g(1, 2, 3)), " ", g(1, 2, 3) + 0, " ", (g(0, 0) ? "T" : "F"), " ", g(4, 5, 6), "\n";
 sub ee { (@_)[0, 1] } my $s12 = ee(); my @l12 = ee(); sub oo { (@_)[3] } my $s13 = oo(1); my @l13 = oo(1);
 print "5 ", (defined $s12 ? "def" : "undef"), " ", scalar(@l12), " ", (defined $s13 ? "def" : "undef"), " ", scalar(@l13), "\n";
+PL
+
+# ---- #1955 a foreach list whose value is ONE reference -- a sub / method /
+#      code-ref call, scalar(...), a do block, a ternary arm -- runs ONCE with
+#      the reference (a BOX is one element); bare arrays, lists, explicit
+#      derefs and several values are unchanged -----------------------------------
+both_agree(<<'PL', '#1955 for (mk()) with sub mk { [1,2] } runs once with $_ the ARRAY ref');
+no warnings;
+sub mk { return [1,2] } sub mk2 { [3,4] } sub hr { {a=>1} } sub cr { sub { 1 } } sub lst { (1,2,3) } sub none { () }
+sub wa { wantarray ? (5,6) : [7] } sub many { return ([1],[2]) } sub arr { my @q = (1,2); return @q }
+{ package Obj; sub new { bless { items => [1,2,3] }, shift } sub items { @{$_[0]{items}} } sub list { $_[0]{items} } }
+my $o = Obj->new; my $c = \&mk; my @a = (8,9); my $ar = [1,2,3]; my %h = (k => [1,2]);
+my @r; sub out { print "$_[0] @r\n"; @r = () }
+for (mk()) { push @r, ref($_) } out(1); for (mk(), mk()) { push @r, ref($_) } out(2); for (mk(), 1) { push @r, ref($_) || $_ } out(3);
+for my $x (mk()) { push @r, ref($x) } out(4); for (@{ mk() }) { push @r, $_ } out(5); for ($o->items) { push @r, $_ } out(6);
+for ($o->list) { push @r, ref($_) } out(7); for (Obj->new->list) { push @r, ref($_) } out(8); for (lst()) { push @r, $_ } out(9);
+for (none()) { push @r, "x" } out(10); for (hr()) { push @r, ref($_) } out(11); for (cr()) { push @r, ref($_) } out(12);
+for (wa()) { push @r, ref($_) || $_ } out(13); for (&$c()) { push @r, ref($_) } out(14); for ($c->()) { push @r, ref($_) } out(15);
+for (\@a) { push @r, ref($_) } out(16); for (scalar(mk())) { push @r, ref($_) } out(17); push @r, ref($_) for mk(); out(18);
+for (@a) { push @r, $_ } for (@a, @a) { push @r, $_ } out(19); for ($ar) { push @r, ref($_) } out(20);
+for (many()) { push @r, ref($_) } for (arr()) { push @r, $_ } out(21); for (do { [5,6] }) { push @r, ref($_) } out(22);
+for (1 ? mk() : ()) { push @r, ref($_) } out(23); for ($h{k}) { push @r, ref($_) } out(24);
+print "25 ", join(",", map { ref($_) } mk()), " ", scalar(grep { ref } mk()), "\n";
 PL

@@ -6778,7 +6778,10 @@ sub _foreach_bare_arrays {
 # (rejected by measurement, ruled s335).  So `%p-flatten-for-list` spread the
 # REFERENT: `for ($r) {…}` ran once per element of @$r (probed s361 against
 # perl: 3 iterations instead of 1, and the loop var was an element, not the
-# ref — a silent wrong for a common idiom).
+# ref — a silent wrong for a common idiom).  Since s543e (#1955) the runtime
+# takes a BOX as one element (an aggregate VALUE is never boxed), which also
+# fixes the shapes no sigil can see (`for (mk())`); this rule stays as the
+# statically-sized emission.
 #
 # The EMITTER knows the sigil, so the decision belongs here — and the fix is
 # to route the single scalar through the SAME `(vector …)` shape a

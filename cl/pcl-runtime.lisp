@@ -17998,20 +17998,31 @@ container.  Do not widen this arm without asking that question again."
 
 (defun %p-flatten-for-list (raw)
   "Flatten a value for use as a foreach list.
-   - p-box wrapping a vector (@array passed directly) -> iterate over elements
+   - a BOX -> ONE element (a reference, a tied / magic scalar)
    - Raw CL vector from codegen (vector ...) -> p-flatten-markers are spread,
      everything else (p-box scalars/refs, raw scalars) kept as-is
    - Scalar -> single-element vector"
-  (let ((val (%p-tie-view-of (unbox raw))))  ; a tied container: its view (#155)
+  ;; A BOX IS ONE SCALAR (task #1955, s543e).  The list form is evaluated in
+  ;; LIST context, and every aggregate VALUE it can produce is RAW -- an array
+  ;; variable is a raw adjustable vector and is never boxed (p-scalar's
+  ;; invariant), a list is a raw vector, a %hash a raw table -- so a box
+  ;; holding a vector or a table is a REFERENCE: `for (mk())' with `sub mk {
+  ;; [1,2] }' runs ONCE with $_ the reference, as perl does.  This arm used to
+  ;; iterate the referent ("an @array box passed directly"), the shape of an
+  ;; older representation: measured s543e, no list form in the gate's foreach
+  ;; files reached it, while every call / method call / `scalar(...)' returning
+  ;; one reference did -- and a hash ref spread into its pairs.  Tested FIRST,
+  ;; before the unbox, so a tied scalar is not FETCHed to build the list (the
+  ;; loop variable aliases it and reads it, as perl's $_ does).
+  (when (p-box-p raw)
+    (return-from %p-flatten-for-list (vector raw)))
+  (let ((val (%p-tie-view-of raw)))  ; a tied container: its view (#155)
     (cond
       ((hash-table-p val)
        ;; %hash as a foreach list flattens to its key/value pairs (same as %p-flatten-list)
        (coerce (%p-hash-keyval-list val) 'vector))
       ((not (and (vectorp val) (not (stringp val))))
        (vector raw))
-      ((p-box-p raw)
-       ;; @array box passed as a single list expression — iterate its elements directly
-       val)
       ((and (adjustable-array-p val) (array-has-fill-pointer-p val))
        ;; Bare lexical @array (raw adjustable vector, not a codegen (vector ...)
        ;; literal — those are simple vectors, same discrimination box-set uses).
