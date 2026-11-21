@@ -3213,14 +3213,19 @@ neighbour PPI did not know either: a CAST takes a term, so `\%12`, `\*1` (the gl
 **Impact on PCL**: `%12 = (a => 1)` was a whole-statement DROP (#1680, the hash twin of #1650's
 `@119797`); `keys %12`, `\%12`, `scalar(%12)`, `print %12`, `f(%12)` the same.
 
-**FIXED on PCL's PPI branch** (s543f: group BF, commit `0f8b59b4` on branch `pcl-s543f`, vendored as
+**FIXED on PCL's PPI branch** (s543f: group BF, commit `911e43a3` on branch `pcl-s543f`, vendored as
 vendor/PPI -- the digit test asks `_term_expected`, the rule of the `<` `x` `~~` `/` arms: where a term
-is expected `%12` falls through to the arm's Symbol test as `%h` does; after a term, after `time`, after
-a user's word (a constant, for all PPI knows: `K %12`) and in `print $fh %12` it stays the modulus.
-`_opcontext` reads a Cast as an operand context, and `_ends_term_at` reads only the operator entries of
-its class table); upstream PR: pending (`PR-BF.md`).  PCL needed no change (it lowers the Symbol as
-any package hash).  Guard: the registry row §72, the twins' §72 rows, `Pl/t/transpile-test-09.t`'s
-#1680 row beside #1650's.
+is expected `%12` is one Symbol whose name is the digit run (it ends at the last digit, as `scan_ident`
+reads it: `%12x 2` is `%12 x 2`); after a term, after `time`, after a user's word (a constant, for all
+PPI knows: `K %12`) and in `print $fh %12` it stays the modulus.  `_opcontext` reads a Cast as an
+operand context, and `_ends_term_at` reads only the operator entries of its class table); upstream
+PR: pending (`PR-BF.md`).  PCL needed no change (it lowers the Symbol as any package hash).  The first
+cut let the Symbol run on over word characters, and the wide A/B found it: the binder reads a quote's
+text as code for string-eval captures, and `sprintf "%02x"` in t/op/taint.t became one Symbol `%02x`,
+a variable shape it rightly refuses (the transpile died) -- with the digit run it is `%02` `x`.  NOT
+changed: `@1x` is one Magic on 1.291 and the branch (perl: `@1 x`), an array spelling PCL meets
+nowhere.  Guard: the registry row §72, the twins' §72 rows, `Pl/t/transpile-test-09.t`'s #1680 row
+beside #1650's.
 
 ---
 
@@ -3239,18 +3244,21 @@ stat filehandle only as the operand of a filetest, `stat` and `lstat` (op.c `ck_
 lone `_` Magic everywhere but after `sub` (§31, group H), so the gettext idiom `_("text")` is a
 filehandle followed by a list.
 
-**Impact on PCL**: `_()` was a whole-statement DROP (#3922), `sort _ @l` too; `my $v = _;`,
-`@h{_, "a"}` and a key read as `$h{_}` after `(_ => 1)` were SILENT WRONGS -- each `_` read the stat
+**Impact on PCL**: `_()` was a whole-statement DROP (#3922), `sort _ @l` too; `my $v = _;` (with a
+`sub _`), `@h{_, "a"}` and a key read as `$h{_}` after `(_ => 1)` were SILENT WRONGS -- each `_` read the stat
 cache's name `%pcl-stat-cache` (a program that wrote AND read `_ =>` / `$h{_}` was right only because
 both sides were wrong the same way).
 
-**FIXED on PCL's PPI branch** (s543f: group BG, commit `e0f5c8cc` on branch `pcl-s543f`, vendored as
+**FIXED on PCL's PPI branch** (s543f: group BG, commit `f8630d3e` on branch `pcl-s543f`, vendored as
 vendor/PPI -- `Token/Word.pm`'s `__underscore_class` makes `_` Magic only after a filetest operator
 (`-e _`, `-f -w _`) and after `stat` / `lstat` with or without a `(` between, and a Word everywhere
 else; the fuzzed fixture `t/data/08_regression/45_heredoc_w_paren_in_terminator` opens with `_+`, perl's
 bareword (`perl -MO=Deparse -e '_+1;'` prints `'_' + 1;`), and its one changed dump line is that token);
 upstream PR: pending (`PR-BG.md`).  PCL needed no change: it lowers the Word as any bareword or call,
-and it already forces a `sub _` into `main` as perl does.  Guard: the registry row §73 (its `got` is
+and it already forces a `sub _` into `main` as perl does.  A bare `_` VALUE with no `sub _` and no
+strict (`my $v = _;`, perl `_`) now meets PCL's general bareword policy -- an unknown bareword in value
+position is a call, a LOUD "Undefined subroutine &main::_" exactly as `my $v = foo;` -- where it was a
+silent `%pcl-stat-cache`.  Guard: the registry row §73 (its `got` is
 1.291's, which also lexed the `_` after `sub` as Magic, §31), the twins' §73 rows, `Pl/t/ppi-token-rows-01.t`
 (§73 rows, end to end).
 
@@ -3275,7 +3283,7 @@ the hash of the caret variable `$^W`.  `Token/Magic.pm` kept `%^` only when the 
 to `%{^}`, which PCL lowers; 0 fires over the 2,053-file list (s543d), so the shape is absent from the
 populations.  `%^W` was a whole-statement DROP.
 
-**FIXED on PCL's PPI branch** (s543f: group BH, commit `3189f730` on branch `pcl-s543f`, vendored as
+**FIXED on PCL's PPI branch** (s543f: group BH, commit `72d2bd9e` on branch `pcl-s543f`, vendored as
 vendor/PPI -- the `%` arm of `Token/Unknown.pm` starts a Magic `%^` only where no term has ended, and
 there `Token/Magic.pm` keeps `%^` + a caret name's character as one token and `%^` alone otherwise);
 upstream PR: pending (`PR-BH.md`).  PCL half: the caret arm of `Pl::Parser2::_repair_punct_hash_name`

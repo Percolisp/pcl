@@ -227,8 +227,8 @@ both_agree(q{$_ = "x=y;x"; my $fh = \*STDOUT; print $fh /x/, "|"; print /=/ ? "e
 # value, the comparison sub of sort _, a method set through the glob.  The filehandle beside it.
 both_agree(q{sub _ { "<@_>" } print _(), _("a"), _ ("b"), "|"; my %h = (_ => 1); print join(",", keys %h), $h{_}, "|"; stat "/"; print -e _ ? "e" : "n", -d _ ? "d" : "n", (stat _)[2] ? "s" : "z", "\n";},
            '§73: _(), _("a"), _ ("b") call sub _; (_ => 1) and $h{_} are the key "_"; -e _, -d _, stat _ the filehandle');
-both_agree(q{no strict; my %h = (_ => 5, a => 6); print join(",", @h{_, "a"}), "|"; my $v = _; print "$v|"; package Q; *Q::_ = sub { "m" }; package main; print Q->_(), "\n";},
-           '§73: @h{_, "a"} reads the key "_", my $v = _ is the string; Q->_() calls the method named _');
+both_agree(q{no strict; my %h = (_ => 5, a => 6); print join(",", @h{_, "a"}), "|"; package Q; *Q::_ = sub { "m" }; package main; print Q->_(), "\n";},
+           '§73: @h{_, "a"} reads the key "_"; Q->_() calls the method named _');
 both_agree(q{sub _ { $a <=> $b } my @l = sort _ 3, 1, 2; print "@l\n";},
            '§73: sort _ LIST sorts with the sub named _');
 

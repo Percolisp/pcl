@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 613;
+use Test::More tests => 614;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2397,14 +2397,16 @@ for my $case ( [ q{my $t = time / 2;}, q{Operator=/} ], [ q{my $n = wantarray / 
 # `no strict; %12 = (a => 1); print keys %12;` prints a.  After a term, and
 # after a word that may be a user's constant, it is the modulus.  A cast
 # takes a term too: \%12 is a reference to that hash, \*1 to the glob *1,
-# \<STDIN> to a readline's value.
+# \<STDIN> to a readline's value.  The name ends at its last digit (%12x 2
+# is %12 x 2), as perl's scan_ident reads a digit run.
 {
     for my $case ( [ q{%12 = (a => 1);}, q{Symbol=%12} ], [ q{print keys %12;}, q{Symbol=%12} ],
                    [ q{print %12;}, q{Symbol=%12} ], [ q{my $n = %12 ? 1 : 0;}, q{Symbol=%12} ],
                    [ q{my @l = (%12);}, q{Symbol=%12} ], [ q{my $n = scalar(%12);}, q{Symbol=%12} ],
                    [ q{f(%12);}, q{Symbol=%12} ], [ q{my $r = \%12;}, q{Symbol=%12} ],
                    [ q{%0 = ();}, q{Symbol=%0} ], [ q{my $r = \*1;}, q{Symbol=*1} ],
-                   [ q{my $r = \<STDIN>;}, q{QuoteLike::Readline=<STDIN>} ] ) {
+                   [ q{my $r = \<STDIN>;}, q{QuoteLike::Readline=<STDIN>} ],
+                   [ q{my @l = (%12x 2);}, q{Symbol=%12} ] ) {
         my ( $code, $want ) = @$case;
         my @t = map { short_class($_) } toks($code);
         ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
