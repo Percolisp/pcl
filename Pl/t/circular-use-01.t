@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 sub run_cl {
     my ($code) = @_;
@@ -151,3 +151,37 @@ PM
 test_cl('the import LIST reaches a circular import',
     qq{use lib "$DIR";\nuse ArgA qw(p q);\nprint ArgB::what(), "|", args(), "\\n";\n},
     "x,y|p,q\n");
+
+# #2105 (closed s543c; fixed by an unknown earlier change, verified on
+# 64353611): modules that set up Exporter INSIDE a BEGIN block -- the
+# spelling that makes a circular import work in perl, because @EXPORT is
+# ready before the other module's `use` runs -- used to die at load with a
+# CL read error.  Expected text probed against perl 5.40.3.  This row runs
+# the program through `runpcl` (the product's driver, = `pcl`): the bare
+# `pl2cl FILE` + `sbcl --load` path the helpers above use still loses the
+# circular import here ("Undefined subroutine &BegB::a_fn"), measured s543c
+# and recorded in #2105.
+write_mod($DIR, 'BegA', <<'PM');
+package BegA;
+BEGIN { require Exporter; our @ISA = ("Exporter"); our @EXPORT = ("a_fn"); }
+use BegB;
+sub a_fn { "a" }
+sub a_calls_b { b_fn() }
+1;
+PM
+write_mod($DIR, 'BegB', <<'PM');
+package BegB;
+BEGIN { require Exporter; our @ISA = ("Exporter"); our @EXPORT = ("b_fn"); }
+use BegA;
+sub b_fn { "b" }
+sub b_calls_a { a_fn() }
+1;
+PM
+
+{
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh qq{use lib "$DIR";\nuse BegA;\nprint a_fn(), " ", BegA::a_calls_b(), " ", BegB::b_calls_a(), "\\n";\n};
+    close $fh;
+    is(scalar `$project_root/runpcl $pl_file 2>&1`, "a b a\n",
+       '#2105 Exporter set up in BEGIN, used circularly: both imports arrive (runpcl)');
+}
