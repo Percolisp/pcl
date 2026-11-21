@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 my $DIR = tempdir(CLEANUP => 1);
 
@@ -282,4 +282,30 @@ for (@a) { push @r, $_ } for (@a, @a) { push @r, $_ } out(19); for ($ar) { push 
 for (many()) { push @r, ref($_) } for (arr()) { push @r, $_ } out(21); for (do { [5,6] }) { push @r, ref($_) } out(22);
 for (1 ? mk() : ()) { push @r, ref($_) } out(23); for ($h{k}) { push @r, ref($_) } out(24);
 print "25 ", join(",", map { ref($_) } mk()), " ", scalar(grep { ref } mk()), "\n";
+PL
+
+# ---- #750 a DEREFERENCED array / hash on a list-assignment LHS is GREEDY
+#      (`@$r`, `@{EXPR}`, `$r->@*`, `%$h`, `%{EXPR}`, `$h->%*`): it absorbs
+#      the rest and starves what follows; a scalar deref / an element stays one
+#      slot; the odd trailing key of `%$h = LIST` is undef ----------------------
+both_agree(<<'PL', '#750 ($x, @$r) = (1,2,3) fills @$r; deref hashes, starving, vivify, tie, list value');
+no warnings;
+sub hs { my $h = shift; join(",", map { "$_=" . ($h->{$_} // 'U') } sort keys %$h) }
+my $r = []; my $x; my $hr = {}; my $y; my $z;
+($x, @$r) = (1,2,3); print "1 x=$x r=[@$r] n=", scalar(@$r), "\n";
+($y, %$hr) = (9, a=>1, b=>2); my @l = ((@{[]}) = (1,2)); print "2 y=$y h=[", hs($hr), "] ", scalar(@l), "\n";
+$r = []; ($x, @$r, $z) = (1,2,3); print "3 x=$x r=[@$r] z=", ($z // 'U'), "\n";
+$r = []; ($x, $r->@*) = (4,5,6); $hr = {}; ($y, $hr->%*) = (8, c => 3); print "4 [@$r] [", hs($hr), "]\n";
+$r = [7]; (@$r) = (); my $s = [1]; my $q = [2]; (@$q, @$s) = (1,2); print "5 n=", scalar(@$r), " q=[@$q] s=[@$s]\n";
+$hr = {}; (%$hr) = (a=>1, b=>2, 'c'); my $h2 = {}; %$h2 = (d => 1, 'e'); print "6 [", hs($hr), "] [", hs($h2), "]\n";
+my $o = {}; sub f { (5,6,7) } ($x, @{$o->{list}}) = f(); $r = []; (undef, @$r) = (1,2,3); print "7 x=$x list=[@{$o->{list}}] [@$r]\n";
+$r = [1,2,3]; my $n = (($x, @$r) = (4,5)); $q = []; my @v = (($x, @$q) = (4,5,6)); print "8 n=$n r=[@$r] v=[@v]\n";
+my $u; ($x, @$u) = (1,2); my $uh; ($x, %$uh) = (1, k => 'v'); print "9 ", ref($u), " [@$u] ", ref($uh), " [", hs($uh), "]\n";
+$r = [1,2,3]; ($x, @$r) = @$r; my $sc = \my $t; ($x, $$sc) = (1,2,3); my $e = [0]; ($x, $e->[0]) = (1,2,3); print "10 x=$x r=[@$r] t=$t [@$e]\n";
+{ package TA; sub TIEARRAY { bless { a => [] }, shift } sub FETCHSIZE { scalar @{$_[0]{a}} } sub FETCH { $_[0]{a}[$_[1]] }
+  sub STORE { push @main::log, "S$_[1]"; $_[0]{a}[$_[1]] = $_[2] } sub CLEAR { push @main::log, "C"; @{$_[0]{a}} = () } sub EXTEND { push @main::log, "E$_[1]" }
+  sub STORESIZE { push @main::log, "Z$_[1]" } }
+our @log; tie my @ta, 'TA'; my $tr = \@ta; ($x, @$tr) = (1, 2, 3); print "11 [@ta] log=@log\n";
+$r = []; for (($x, @$r) = (7,8)) { $_ .= "!" } my $cnt = () = (($x, @$q) = (1,2,3)); $r = [9]; $hr = {q => 1}; (@$r, %$hr) = (1,2);
+print "12 $x $cnt [@$r] [", hs($hr), "]\n";
 PL

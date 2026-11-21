@@ -11314,6 +11314,34 @@ per element."
              h)
     (nreverse result)))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-aggregate-collect-form (kind c result-var)
+    "The list-context COLLECT of an aggregate list-assignment target C (a named
+     array / hash symbol, or the bound container of a deref one, #750): perl
+     yields the LHS containers' elements as LVALUES -- an array's slots
+     (a raw slot promotes, a hole is undef; design E4), a hash's keys and value
+     slots; a tied one its view.  ONE spelling for both kinds of target."
+    (ecase kind
+      (:array
+       (let ((j (gensym "J")))
+         `(unless (%p-collect-tied-lhs ,c ,result-var)
+            (dotimes (,j (length ,c))
+              (vector-push-extend
+               (if (aref ,c ,j) (%p-elem-cell ,c ,j) (p-undef))
+               ,result-var)))))
+      (:hash
+       `(unless (%p-collect-tied-lhs ,c ,result-var)
+          (if (%p-hash-marker-p ,c)
+              (loop for kv across (%p-marker-pairs ,c)
+                    do (vector-push-extend kv ,result-var))
+              (maphash (lambda (k v)
+                         (declare (ignore v))
+                         (vector-push-extend (make-p-box k) ,result-var)
+                         ;; the VALUE half is an LVALUE (design E4)
+                         (vector-push-extend (%p-hash-elem-cell ,c k)
+                                             ,result-var))
+                       ,c)))))))
+
 (defmacro p-list-= (place value)
   "List destructuring assignment: (p-list-= (vector $a $b) expr).
    Each LHS element gets assigned from corresponding RHS position.
@@ -11364,6 +11392,31 @@ per element."
                    (and (listp v)
                         (symbolp (car v))
                         (string= (symbol-name (car v)) "P-UNDEF")))))
+           (agg-kind (v)
+             ;; THE ONE READING of "is this LHS element an AGGREGATE" (#750,
+             ;; s543e): :array / :hash for a NAMED `@a' / `%h' and for a
+             ;; DEREFERENCED one -- `@$r', `@{EXPR}', `$r->@*' (all lowered to
+             ;; `(p-cast-@ X)'), `%$h', `%{EXPR}', `$h->%*' (`(p-cast-% X)').
+             ;; An aggregate absorbs the REST of the right side and starves
+             ;; every target after it; the deref spellings used to fall to the
+             ;; one-slot arm, so `($x, @$r) = (1,2,3)' left @$r empty.  A
+             ;; SCALAR deref `$$r' and an element `$r->[0]' stay one slot.
+             (cond ((and (symbolp v) (plusp (length (symbol-name v))))
+                    (case (char (symbol-name v) 0) (#\@ :array) (#\% :hash) (t nil)))
+                   ((and (consp v) (eq (car v) 'p-cast-@)) :array)
+                   ((and (consp v) (eq (car v) 'p-cast-%)) :hash)
+                   (t nil)))
+           (agg-container (v)
+             ;; The container an aggregate target is written through: a named
+             ;; one is its own symbol; a deref is evaluated ONCE, after the
+             ;; right side (perl evaluates the RHS first), vivifying an undef
+             ;; reference as `@$r = LIST' does, and bound for the store and
+             ;; the list-context collect.
+             (if (symbolp v)
+                 v
+                 (let ((g (gensym "AGG")))
+                   (push `(,g ,v) extra-lets)
+                   g)))
            (cur-idx ()
              ;; The current index as a CL literal or form.
              ;; When dynamic skips exist: (+ static-idx dyn1 dyn2 ...)
@@ -11406,6 +11459,17 @@ per element."
         (dolist (var vars)
           (cond
             ;; Already consumed by greedy (array/hash) — subsequent vars get cleared/undef
+            ;; A DEREFERENCED aggregate after the greedy one (#750): CLEARED
+            ;; through its container, as `@$r = ()' does; the list-context
+            ;; collect reads the same bound container (empty now).
+            ((and greedy-done (agg-kind var) (not (symbolp var)))
+             (let ((kind (agg-kind var))
+                   (g (agg-container var)))
+               (push (if (eq kind :array)
+                         `(p-array-deref-= ,g (vector))
+                         `(p-hash-deref-= ,g (vector)))
+                     forms)
+               (push (%p-aggregate-collect-form kind g result-var) collect-forms)))
             (greedy-done
              ;; Arrays and hashes must be CLEARED (box-set is a no-op on them).
              ;; Scalars: auto-declare and set to undef via box-set.
@@ -11528,39 +11592,32 @@ per element."
              (push (collect-src (cur-idx)) collect-forms)
              (incf static-idx 1))
 
-            ;; Array variable (@arr) - absorbs remaining elements
-            ((and (symbolp var)
-                  (char= (char (symbol-name var) 0) #\@))
-             (let ((idx (cur-idx)))
-               (push `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms)
-               ;; Collect: push array elements as LVALUES — perl yields the
-               ;; LHS containers themselves, so a raw slot promotes (design E4)
-               (let ((j (gensym "J")))
-                 (push `(unless (%p-collect-tied-lhs ,var ,result-var)
-                          (dotimes (,j (length ,var))
-                            (vector-push-extend
-                             (if (aref ,var ,j) (%p-elem-cell ,var ,j) (p-undef))
-                             ,result-var)))
-                       collect-forms)))
+            ;; An ARRAY -- named `@arr' or dereferenced `@$r' / `@{EXPR}' /
+            ;; `$r->@*' (agg-kind, #750) -- absorbs remaining elements.  A
+            ;; named one is stored by p-array-=, a deref through its bound
+            ;; container by p-array-deref-= (the `@$r = LIST' store).
+            ((eq (agg-kind var) :array)
+             (let ((idx (cur-idx))
+                   (c (agg-container var)))
+               (push (if (symbolp var)
+                         `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec))))
+                         `(p-array-deref-= ,c (subseq ,src-vec (min ,idx (length ,src-vec)))))
+                     forms)
+               (push (%p-aggregate-collect-form :array c result-var) collect-forms))
              (setf greedy-done t))
 
-            ;; Hash variable (%hash) - absorbs remaining elements in pairs
-            ((and (symbolp var)
-                  (char= (char (symbol-name var) 0) #\%))
-             (let ((idx (cur-idx)))
+            ;; A HASH -- named `%hash' or dereferenced `%$h' / `%{EXPR}' /
+            ;; `$h->%*' -- absorbs remaining elements in pairs.
+            ((eq (agg-kind var) :hash)
+             (let ((idx (cur-idx))
+                   (c (agg-container var)))
                ;; Suppress p-hash-='s list-ctx return since we collect separately
-               (push `(let ((*wantarray* :void))
-                        (p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec))))) forms)
-               ;; Collect: push hash k-v pairs (deduplicated by the hash itself)
-               (push `(unless (%p-collect-tied-lhs ,var ,result-var)
-                        (maphash (lambda (k v)
-                                   (declare (ignore v))
-                                   (vector-push-extend (make-p-box k) ,result-var)
-                                   ;; the VALUE half is an LVALUE (design E4)
-                                   (vector-push-extend (%p-hash-elem-cell ,var k)
-                                                       ,result-var))
-                                 ,var))
-                     collect-forms))
+               (push (if (symbolp var)
+                         `(let ((*wantarray* :void))
+                            (p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))))
+                         `(p-hash-deref-= ,c (subseq ,src-vec (min ,idx (length ,src-vec)))))
+                     forms)
+               (push (%p-aggregate-collect-form :hash c result-var) collect-forms))
              (setf greedy-done t))
 
             ;; Scalar variable - auto-declare and assign
@@ -34242,12 +34299,16 @@ would consume, so it dies naming the stream (rule 12)."
                        (return-from p-hash-deref-= h))
     ;; The RHS list is read BEFORE the hash is cleared: `%$r = (%$r, k => v)`
     ;; names the target on the right (perl copies the list first; task #3853).
+    ;; An ODD trailing key gets an undef value, as p-hash-fill's (`%$h =
+    ;; (a => 1, "b")` has key b, probed 5.40.3); it was dropped (s543e, #750's
+    ;; probe: the deref list-assignment target reaches here).
     (let ((flat (%p-flatten-list value)))
       (clrhash h)
       (loop for i from 0 below (length flat) by 2
-            when (< (1+ i) (length flat))
             do (setf (gethash (%p-hash-key (aref flat i)) h)
-                     (%p-make-hash-entry (aref flat (1+ i))))))
+                     (%p-make-hash-entry (if (< (1+ i) (length flat))
+                                             (aref flat (1+ i))
+                                             *p-undef*)))))
     h))
 
 (defun p-array-deref-= (array-ref value)
