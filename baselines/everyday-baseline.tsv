@@ -28,5 +28,5 @@ idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
-programs/carp-attribution	DIFF	1	not-supported.md#ns-caller-fidelity -- confess's backtrace has no `eval {...} called at` line (PCL has no eval frames; #233 / #4790): "no-trace frame:" -- the croak location itself is perl's since s543a (line tracking on by default)
+programs/carp-attribution	DIFF	4	not-supported.md#ns-caller-fidelity -- confess's backtrace has no `eval {...} called at` line (PCL has no eval frames; #233 / #4790): "no-trace frame:" -- the croak location itself is perl's since s543a (line tracking on by default)
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
