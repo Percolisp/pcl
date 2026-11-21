@@ -2505,8 +2505,9 @@ stays different from perl, measured s540c / s541:
   second holder still writes through it, its bytes merely reach the file
   sooner than perl's (perl keeps them buffered while another reference
   lives), and the descriptor and a `flock` held through it stay until a
-  trigger or exit.  A handle dropped by `delete $h{fh}` or inside an object
-  that goes is not covered;
+  trigger or exit.  A handle dropped by `delete $h{fh}`, inside an object
+  that goes, or by `undef $g;` inside a sub on a file-level lexical the sub
+  captures (#5128) is not covered;
 * a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
   until one of the triggers or exit; only a blocking `flock` on the same file
   and running out of descriptors are triggers;

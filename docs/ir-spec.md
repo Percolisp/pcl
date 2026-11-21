@@ -4116,8 +4116,12 @@ descriptor stream above fd 2, its buffer is written now -- the program has said
 it is done with the handle.  Never a close (PCL cannot know the variable held
 the LAST reference; a flush is invisible to any other holder), so the
 descriptor, a `flock` held through it and a pipe's child stay as §6.5b says;
-`$!` is untouched; a non-handle value costs one type test.  Not covered: a
-handle dropped through an element, `delete`, or an object holding it.
+`$!` is untouched; a non-handle value costs one type test.  The statement
+composes with the location forms: the flush follows the statement's
+`(p-line N)`.  Not covered: a handle dropped through an element, `delete`, or
+an object holding it; and a lexical the unit lowering the statement does not
+declare -- a file-level `my $g` that a sub CAPTURES and drops with `undef $g;`
+inside its body (#5128: the licence asks the unit's own VarAnnotator table).
 Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5
 (was 0) -- `(p-flush-dropped-handle $fh) (p-undef $fh)`.
 
