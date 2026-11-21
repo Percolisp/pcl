@@ -123,3 +123,7 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * Review: the diff is baselines + docs only (9 files); `verdict-register-01.t` + the four `tools/t` baseline tests PASS on merged main.  #2006 NOT closed (four companion rows keyed on it; the entry's owner) -> re-triaged `out`.  Filed #5163 (266 companion rows keyed on 16 closed tasks: reported, not gated) and #5164 (`cpan-board.sh` cannot pass `--refresh-oracle`; the exclusive-queue check).
 * CI green on `7f9434fe` (MAIN-READY-101's record commit).
 * **The next FIX brief is written: `s543/s543e-prompt.md`** -- seven live silent wrongs from s543c's ranked list (#1030 #2555 #1039 #3100 #2766 #1955 #750; IDs 5210-5229; generation v2-15400).  It takes the slot the round freed, beside s543d.  After it: #691 with the nested-element `local` family (#540 #1190 #3415 #1339), then string-eval names (#2091 #2557 #2630 #4821).
+
+## 20:5x -- s543e LAUNCHED in the slot the round freed; two subtasks run: s543d (PPI batch 10) + s543e
+* s543e: Opus 5.5 / xhigh, MODEL.txt checked `claude-opus-5-5`; worktree `.claude/worktrees/agent-acfb59c7cdbd085a3`; brief `s543/s543e-prompt.md`; IDs 5210-5229; generation v2-15400.
+* s543d told main moved in records only (`ac53cfd5`), that the round is done, and who its new neighbour is; it merges first.
