@@ -130,7 +130,7 @@ services adds: scope-exit `DESTROY` decided (6c) and a macOS leg in CI.
   batch s543a.** `caller`, `croak` and a runtime die name perl's file and
   line in the default build; the cost, measured on the full bench and the
   emitted text, is in `docs/caller-implementation.md` ("What it costs"):
-  COST_SENTENCE_PLACEHOLDER
+  the median bench row is +0.8 % slower (geomean +1.1 %, base against base +0.6 %), a loop body of a few nanoseconds up to +17 % (feread; the narrowing is sized in #5103), the emitted text +11 % and a fasl +4 %, a cold first run inside its spread -- and an empty `DESTROY` now opens the global-destruction gate (#5107).
 * **6c. Scope-exit `DESTROY`.** Parked twice. Not needed for the batch claim;
   needed before the service claim.
 * **6d. Moo.** IN or OUT changes the weight of the string-eval compile cost

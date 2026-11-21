@@ -113,9 +113,75 @@ and line are perl's — the call site, through `goto &sub`, a string eval
 
 ### What it costs (measured s543a, base c5f618f2 vs the s543a tree)
 
-COST_TABLE_PLACEHOLDER
+**Time.**  The full bench (`tools/bench-exec.pl`, 77 rows, best of 5,
+interleaved; each side transpiles with its own `pl2cl` and runs its own
+runtime, `BENCH_EMIT_B=1`), base against the tree, after the same bench base
+against base for the noise band; each run one exclusive leg on a quiet box
+(2026-11-21, load 0.7-1.8; a desktop browser at ~13 % CPU in both runs).
+Logs: `scratch/s543a/bench-noise.log`, `bench-tree.log` in the s543a
+worktree; `scratch/s543a/bench-cmp.pl` reads them.
 
-The flip defeated one optimisation, found by stripping the location forms
+* The noise band (base against base): rows under 0.1 s -6.8 .. +9.6 %, rows
+  of 0.1 s and more -3.8 .. +4.9 %.  All 77 rows: median +0.8 %, geomean
+  +1.1 % (the noise run's geomean +0.6 %).
+* The counting loops are slower in every row, but inside the short rows'
+  band: intloop+= +6.4 %, intloop= +4.9 %, cfor +4.1 %, arith +3.1 % (s539d
+  expected +4..6 %).
+* Every row OUTSIDE the band:
+
+| row | base s | tree s | cost | what it is |
+|---|---|---|---|---|
+| feread | 0.1047 | 0.1226 | +17.1 % | `for my $x (@a) { $s += $x }`: one `(p-line N)` per iteration of a ~3.5 ns body, ~0.6 ns a store (#5103's same-line case) |
+| feread2 | 0.1099 | 0.1272 | +15.7 % | the same over `(@a, @b)` |
+| feread3 | 0.1139 | 0.1319 | +15.8 % | the same over `(@a, @b, @c)` |
+| emptysub | 0.3687 | 0.3984 | +8.1 % | two calls an iteration: a `(p-file …)` in each callee, the caller's stores; ~15 ns an iteration, more than the stores account for: not attributed |
+| collatz | 0.3199 | 0.3428 | +7.2 % | two stores per iteration of the inner `while` |
+| methinh | 0.3288 | 0.3458 | +5.2 % | a method call an iteration: `(p-file …)` + `(p-line N)` in the callee; not attributed beyond that |
+| accumread | 0.0100 | 0.0086 | -14.0 % | FASTER, a 10 ms row: noise |
+| symref | 0.0159 | 0.0148 | -6.9 % | FASTER, a 16 ms row: noise |
+| blessnew | 0.4348 | 0.4104 | -5.6 % | FASTER with stores added: noise |
+| splitstrre | 0.1967 | 0.1876 | -4.6 % | FASTER: noise |
+| blessdes | 0.5445 | 0.5217 | -4.2 % | FASTER: noise |
+
+  The five faster rows have no emission cause (the flip only adds stores):
+  they say the long rows' real run-to-run spread is about ±6 %, wider than
+  the one-sample band.  So emptysub and methinh lie near the spread's edge;
+  feread* (+16..17 %) and collatz lie well outside it.
+
+**Size** (the s543a tree; `-line-track` gives the base's text exactly):
+
+| what | base | tree | |
+|---|---|---|---|
+| `./pl2cl --module lib/Math/BigInt/Calc.pm`, bytes | 217,379 | 256,971 | +18.2 % |
+| the same module's fasl, bytes | 1,222,379 | 1,271,879 | +4.05 % |
+| the saved runtime core, bytes | 63,642,632 | 63,675,416 | +0.05 % |
+| emitted text over the 2,053-file wide list | | | +11.1 % (corpus +14.1, everyday +7.5, lib +11.4, the board's 402 files +10.0, core lib +10.0, perl's t/ +12.6) |
+
+**First run** (transpile + compile + run, COLD: the cache's `modules/`,
+`scripts/`, `evals/`, `proto/` emptied before each run; the runtime core
+and the compiled extensions kept; base and tree interleaved, best of 3;
+`scratch/s543a/legs/firstrun.sh`, `firstrun.log`):
+
+| program | lines | base s | tree s | |
+|---|---|---|---|---|
+| `everyday/programs/real-log-parser.pl` | 40 | 0.462 | 0.471 | +1.9 % |
+| `perl-tests/hashassign.t` | 533 | 6.648 | 6.669 | +0.3 % |
+| `perl-tests/signatures.t` | 1,742 | 14.190 | 14.181 | -0.1 % (each side's runs spread 14.2-16.3) |
+
+The two test files exit 1 and 255 on both sides: their blessed failing
+rows, not a crash.  At these sizes the transpile and the compile dominate,
+and the extra text (+7.5 % on the everyday programs, +14.1 % on the
+corpus) does not show beyond the runs' spread.
+
+**One `cl/` shape match the flip defeated, NOT fixed here (#5107)**: `p-sub`
+recognises an empty `DESTROY` / `AUTOLOAD` by its exact body
+`(p-args-body (block nil (p-return-empty)))`; the leading `(p-file …)` hides
+it, so `sub DESTROY {}` opens the global-destruction gate (+28 ns every
+bless, the empty sub called once per live object at exit; output
+unchanged).  The strip comparison below proves the emitted TEXT; a macro
+that matches its argument's shape runs after it.
+
+In the emitted TEXT the flip defeated one optimisation, found by stripping the location forms
 from the default emission and comparing it with `PCL_OPT=-line-track` over
 2,053 files (35 differed): the classic-sort pass's comparator match
 (`(p-scalar-ctx (p-line N) (p-<=> $a $b))` is not the classic shape, so 26
