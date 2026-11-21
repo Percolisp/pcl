@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 # A per-program scratch directory, and a reporter for one eval's outcome.
 my $PRE = <<'PL';
@@ -177,6 +177,19 @@ my ($at, $mt) = (1000000000, 1000000000);
 print "utime ", utime($at, $mt, @f), " mtime ", (stat $f[0])[9], "\n";
 my ($u, $v);
 print "now ", utime($u, $v, @f), " recent ", ((stat $f[1])[9] > 1000000000 ? 1 : 0), "\n";
+PL
+
+# #780 (closed s543c as the twin of #2923, verified on 7ea827a6): `kill` of an
+# ARRAY of pids is the fourth member of that family -- signal 0 counts the
+# live pids, an empty array and a hash contribute their elements (none / k+v).
+both_agree(<<'PL', '#780: kill 0 over an array of pids; an empty array; chmod over a hash');
+my $pid = fork; if (!$pid) { sleep 5; CORE::exit(0) }
+my @p = ($pid); my @none;
+print "kill0 ", kill(0, @p), " empty ", kill(0, @none), "\n";
+kill 9, @p; waitpid $pid, 0;
+my %h = ("$T/k1" => "$T/k2");
+for (%h) { CORE::open(my $w, '>', $_); CORE::close($w) }
+print "hash ", chmod(0600, %h), " ", unlink(%h), "\n";
 PL
 
 # #4321 (s532d): utime's argument is ONE list -- the TIMES spread from an

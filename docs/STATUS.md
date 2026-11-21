@@ -108,11 +108,7 @@ is [`not-supported.md`](not-supported.md). The main items:
   not use it on a program whose side effects must happen only once.
 * **A statement PCL cannot translate dies when reached**, and is announced
   at compile time, so a program runs up to the first such statement. The
-  table above counts how many there are in the test populations. One known
-  case (checked 2026-09-27): under `use feature 'signatures'`, and so under
-  `use v5.36` and later, the output field separator `$,` is misread.
-  `$, = "+"` is dropped with a message, and `local $, = "-"` silently has no
-  effect.
+  table above counts how many there are in the test populations.
 * **The first run after an edit compiles.** A large program pays its
   compile once (about six seconds for 1,200 lines) and then starts from its
   cache entry in about 0.04 seconds. Modules (your own under `use lib`,

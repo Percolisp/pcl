@@ -56,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 sub run_cl {
     my ($code, %opt) = @_;
@@ -276,6 +276,30 @@ PL
     my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
     is(run_cl($prog), $perl,
        '#3402: a bare tail list spreads @_ / arrays / call values into the sub\'s list value, also when passed on as arguments (perl oracle)');
+}
+
+# #988 (closed s543c; fixed by #3402 above, verified on 7ea827a6): the
+# PARENTHESISED spellings of the same rule, consumed by join / sort / a user
+# sub's @_ -- a call, a named array, a `my` array and a HASH inside the returned
+# list, and Role::Tiny's `qw(x y), $_[0]->SUPER::steps`.  They printed
+# ARRAY(0x..) / HASH(0x..) / a raw flatten marker.  The perl oracle is live.
+{
+    my $prog = <<'PL';
+package B1; sub steps { qw(a b) }
+package D1; our @ISA = ('B1'); sub steps { qw(x y), $_[0]->SUPER::steps }
+package main;
+sub inner { (1,2) }  sub outer { (0, inner()) }
+my @a = (5,6);  sub outer2 { (4, @a) }
+sub inner3 { my @l=(7,8); @l }  sub outer3 { (6, inner3()) }
+sub h { my %hh=(k=>1); %hh }  sub outerh { ('p', h()) }
+sub deep { my @r = (1, inner()); @r }
+sub cnt { scalar(@_) }
+print join("|", D1->steps), " ", join("|", outer()), " ", join("|", outer2()), " ", join("|", outer3()), "\n";
+print join("|", sort(outerh())), " ", join("|", deep()), " ", cnt(outer(), outer2()), "\n";
+PL
+    my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
+    is(run_cl($prog), $perl,
+       '#988: a nested aggregate in a parenthesised returned list is flattened for join / sort / @_ (perl oracle)');
 }
 
 # #4281 (s537a): a while / until / C-style for loop that is a sub's LAST

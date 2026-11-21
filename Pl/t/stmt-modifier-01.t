@@ -79,7 +79,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 45;
+plan tests => 46;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -419,6 +419,24 @@ our @a; our %h;
 %h=(a=>1,b=>2); { local @h{'a','b'} = (5,6) if 1; print "hs1in:$h{a},$h{b}\n"; } print "hs1:$h{a},$h{b}\n";
 PL
    'SLICE targets: a range and a key list, conditional and not');
+
+# #690 (closed s543c; fixed by an unknown earlier change, verified on 7ea827a6):
+# the range slice WITH an initializer -- `local @a[1..2] = (7,8)` took the
+# single-element arm and wrote 8 to index 0.  The four spellings (range / list
+# x initializer or not) and their `if COND` twins; expected text probed
+# against perl 5.40.3.
+is(run_cl(<<'PL'), "in=1 7 8 4 out=1 2 3 4\nin2=1 7 8 4 out2=1 2 3 4\nin3=1,u,u,4 out3=1 2 3 4\nin4=1,u,u,4 out4=1 2 3 4\nin5=1 7 8 4 out5=1 2 3 4\nin6=1 7 8 4 out6=1 2 3 4\nin7=1,u,u,4 out7=1 2 3 4\nin8=1 2 3 4 out8=1 2 3 4\n",
+our @a; @a = (1,2,3,4); sub j { join(",", map { $_ // 'u' } @a) }
+{ local @a[1..2] = (7,8); print "in=@a"; } print " out=@a\n";
+{ local @a[1,2] = (7,8); print "in2=@a"; } print " out2=@a\n";
+{ local @a[1..2]; print "in3=", j(); } print " out3=@a\n";
+{ local @a[1,2]; print "in4=", j(); } print " out4=@a\n";
+{ local @a[1..2] = (7,8) if 1; print "in5=@a"; } print " out5=@a\n";
+{ local @a[1,2] = (7,8) if 1; print "in6=@a"; } print " out6=@a\n";
+{ local @a[1..2] if 1; print "in7=", j(); } print " out7=@a\n";
+{ local @a[1..2] = (7,8) if 0; print "in8=@a"; } print " out8=@a\n";
+PL
+   '#690: a RANGE slice with an initializer is a slice, with and without a modifier');
 
 # The emission promise this fix was measured against: the UNCONDITIONAL
 # spellings are byte-identical to what they always emitted (corpus-diff over

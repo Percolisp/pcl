@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 50;
+plan tests => 51;
 
 sub run_cl {
     my ($code) = @_;
@@ -1044,4 +1044,22 @@ PL
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want,
        '#135: use overload writes perl\'s stash entries; a role-style copy of them (code, then the method-name scalar through a glob ref) overloads the target; *y = $r aliases (perl oracle)');
+}
+
+# #1003 (closed s543c; fixed by an unknown earlier change, verified on
+# 7ea827a6): the SAME overloaded object interpolated twice ADJACENTLY gave one
+# copy ("$a$a" -> AB where perl gives ABAB); two distinct objects and a
+# separated pair were already right.
+{
+    my $prog = <<'PL';
+package S1; use overload q("") => sub { "AB" }; sub new { bless {}, shift }
+package main;
+my $a = S1->new; my $b = S1->new;
+print "$a$b|$a $a|$a$a|$a$a$a\n";
+my $s = "x"; my @l = (1); print "$s$s$s|$l[0]$l[0]\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want, '#1003: the same overloaded object interpolated twice adjacently stringifies twice (perl oracle)');
 }

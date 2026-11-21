@@ -340,6 +340,19 @@ sub subst_agrees_stdout {
     is($got, $exp, "$desc (perl: $exp)");
 }
 
+# #692 (closed s543c; fixed by an unknown earlier change, verified on 7ea827a6):
+# case shifts are a STACK -- `\E` pops one level -- also once an interpolated
+# variable splits the text (it ended ALL shifting: `xa y` for perl's `xA Y`),
+# in a dq string and in an s/// replacement; `\Q` nested in `\U` too.
+subst_agrees(<<'PL', '#692: a nested case shift around an interpolation pops back to the outer one');
+my $t = "A"; print "[\LX\U$t\E Y\E]\n";
+my $x = "mAn"; $x =~ s/(A)/[\LX\U$1\E Y\E]/; print "$x\n";
+print "[\LX\UaB\E cD\E] [\UX\Lab\E CD\E]\n";
+my $q = "a.b"; print "[\U\Q$q\E x\E]\n";
+my $y = "mAn"; $y =~ s/(A)/[\U\Q$1.\E x\E]/; print "$y\n";
+my $u = "b"; print "[\Ua\L$u\EC\E]\n";
+PL
+
 subst_agrees(<<'PL', 's/// replacement: the punctuation magics are live (#520)');
 my $a = "xAy";  $a =~ s/A/[$&]/;
 my $b = "xAy";  $b =~ s/A/[$`|$']/;

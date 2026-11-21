@@ -1,3 +1,4 @@
+# s543c (2026-11-21, Opus, EDITED BY HAND -- three rows RE-KEYED, none leave): bop.t "string overload can't use |", "correct error", "|= doesn't break string overload" #972 -> #960: #972 (closed s464aw) shipped the prerequisites; what the three rows still need is #960 half (a), the refusal.  One-file sweep s543c: all three still fail (now test numbers 464 / 465 / 467).
 # s543c (2026-11-21, Opus, EDITED BY HAND -- one row RE-KEYED, none leave): pos.t 20 "s///g setting pos through a defelem" #396 -> #1457: its first cause is pos() DURING an s///e replacement, undef on a plain scalar too (`$s =~ s{e}{pos($s)}e` perl 1, PCL undef), which is #1457; #396 (pos through an @_ alias of an element) stays the key of pos.t 21.  Probes scratch/s543c/t396/.
 # s543a (2026-11-16, Opus, EDITED BY HAND -- four rows LEAVE, one description changes): line tracking is ON by default (the USER, s543), so the location registers are written in every build.  LEAVE: caller.t 38 + 39 "[perl #115768] caller gets line numbers from nulled cops" (+ "(2)") and 44 "check large line numbers are preserved" (caller's LINE is the call site, after a `# line` directive); method.t 157 "no crash with undef method name on unblessed ref" (its runperl child's die reads `at - line 1.`, was `at (eval 0) line 0.`; the -line-track control on the same tree still fails it).  CHANGES: yadayada.t 34 -- the row still fails (#138 family), but its description carries $@ and that now names the eval text's line 2 (perl's line for the statement) instead of line 1.  Its sibling row 33 kept its text only because WIP 7 made p-eval start the line register at 0: before, a string eval that failed to COMPILE read `(eval N) line <the caller's line>`.  Full sweep scratch/s543a/sweep.log (TOTAL 18803 -> 18808), one-file runs scratch/s543a/onefile*.log (base c5f618f2 / tree / tree under PCL_OPT=-line-track).
 # s539d (2026-11-13, Opus, EDITED BY HAND -- two rows LEAVE): caller.t 14 "hasargs true with callf()" + 23 "hasargs true with deleted sub" -- caller(N) answers eleven fields with hasargs (#233 item 2; '' for a frame `&name;` made, recorded by p-amp-call); one-file run + the full sweep s539d sweep2 (GATE clean, TOTAL 18,803)
@@ -138,7 +139,7 @@ blocks.t	21	Prototypes on BEGIN blocks should warn	''	'Prototype on BEGIN block 
 blocks.t	15	UNITCHECK{die} should exit	'begin end Died at - line 1.'	\Abegin\nDied[^\n]*\.\nUNITCHECK failed[^\n]*\.\nunitcheck\ncheck\nend\z	#1449 (a die in a compile-phase block skips the remaining queued phases)
 bop.t	144		'0'	'1'	NS:`use bytes` - byte view of upgraded strings
 bop.t	158	    and turns off the UTF-8 flag			NS:`use bytes` - byte view of upgraded strings
-bop.t	463	correct error	''	no method found	#972 (DECIDED s463f: the three prerequisites of #960(a))
+bop.t	463	correct error	''	no method found	#960 half (a): the binary overload REFUSAL is not implemented (#972, the three prerequisites, shipped s464aw; re-run s543c on 7ea827a6: still failing)
 bop.t	227	no duplicate warnings	'0'	'10'	#221 (NS:Warnings-gated diagnostics are absent)
 bop.t	27	str var & const str	'0'	'# '	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)
 bop.t	28	str var & const str again	'0'	'# '	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)
@@ -146,7 +147,7 @@ bop.t	31	str var ^ const str	'0'	'RYt'	#1028 (bitwise ops numify a ref/glob/qr//
 bop.t	32	str var ^ const str again	'0'	'RYt'	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)
 bop.t	29	str var | const str	'0'	'{yt'	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)
 bop.t	30	str var | const str again	'0'	'{yt'	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)
-bop.t	462	string overload can't use |			#972 (DECIDED s463f: the three prerequisites of #960(a))
+bop.t	462	string overload can't use |			#960 half (a): the binary overload REFUSAL is not implemented (#972, the three prerequisites, shipped s464aw; re-run s543c on 7ea827a6: still failing)
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*	#1450 (@DB::args is never populated) + NS:`DESTROY` called by garbage collector
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*	#1450 (@DB::args is never populated) + NS:`DESTROY` called by garbage collector
 caller.t	62	BEGIN block sees correct caller filename	undef	'virtually/op/caller.t'	NS:`caller()` filename and line number [DEFERRED] + #233
@@ -520,7 +521,7 @@ sort.t	162	overload compare called once	'0'	'1'	#1021 (sort default comparator i
 sort.t	164	overload string called twice	'0'	'2'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
-bop.t	465	|= doesn't break string overload	'0'	'z'	#972 (DECIDED s463f: the three prerequisites of #960(a))
+bop.t	465	|= doesn't break string overload	'0'	'z'	#960 half (a): the binary overload REFUSAL is not implemented (#972, the three prerequisites, shipped s464aw; re-run s543c on 7ea827a6: still failing)
 reset.t	42	check $^W has been zeroed	'1'	'0'	NS:`reset()` for one-match `?pattern?` and named captures (s506f: exposed when $^W became assignable)
 readline.t	35	error after trying to readline file opened for write			#3531 (a failed readline does not set the handle error flag; reached since s521b #3326)
 readline.t	36	closing the file should fail			#3531 (same: close stays true; reached since s521b #3326)
