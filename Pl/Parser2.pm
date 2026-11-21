@@ -6057,13 +6057,16 @@ sub _normalize_null_statements {
     # or a grep keeps its `;` untouched: PCL's PPI applies perl's look-ahead
     # there (§50: `map { "$_" => 1 }` is an anon hash), so deleting the `;`
     # of `map {; "$_" => 1 }` would turn the block into a hash on the
-    # reparse; its lowering skips the Null statement.
+    # reparse; its lowering skips the Null statement.  The statement the
+    # brace begins is a plain one or (PCL's PPI since s543d, §70: the bare
+    # block `{;` ends its statement) a Compound -- the same bare block, the
+    # same hazard on a reparse; a compound's keyword block has a sibling
+    # before it and is not this shape.
     next if !$null->sprevious_sibling && $p->schildren
          && _brace_of_map_or_grep($p);
     if (!$null->sprevious_sibling && $p->schildren
         && !$p->sprevious_sibling && $p->parent
-        && $p->parent->isa('PPI::Statement')
-        && !$p->parent->isa('PPI::Statement::Compound')) {
+        && $p->parent->isa('PPI::Statement')) {
       my ($semi) = grep { $_->isa('PPI::Token::Structure') } $null->children;
       if ($semi) {
         $semi->set_content('();');

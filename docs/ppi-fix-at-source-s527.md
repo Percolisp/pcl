@@ -203,3 +203,64 @@ Left: §48 (the list slice, #3740: 311 checker rows, its own batch).  Instrument
 - **The deletion yield is 2 of 10 for now.**  PCL's repairs for §4 §12 §15/§34 §21 §24 §25 §28 cover shapes the PPI fixes do not: a method name after `->` (`$o->w*w()`), a postfix `++`/`--` (`$i++*f()`) and a subscript's `}` (`$h{a}*f()`, `$h{a}%-1`) all END A TERM in perl, and PPI's `_opcontext` does not know it.  Teaching PPI that (one rule, three cases; the subscript case needs `_cast_or_op`'s back-scan or a brace kind stack) is the first item of the s527b brief; until then those repairs stay and are inert on the shapes PPI now gets right.
 - The registry's `want` for §24 is `Magic=@?`, not `Symbol=@?`: PPI classes the punctuation arrays `@-` and `@+` as Magic, and `@?` follows them.
 - The vendored lib is kept OUT of the generated program's `@INC` (`PCLPaths::program_inc`), so the emission is byte-identical to main -- better than §5's expectation of one changed line.
+
+## 10. The repair-pass audit (s543d, 2026-11-21) -- the plan of PPI batches 11 and 12
+
+The ten PPI repair passes still in the compiler, plus #357's ternary-label workaround, each measured on the tree of
+s543d (vendor/PPI = `pcl-s543d` `842e6bbd`, groups BB BC BD included).  FIRES = a counter in a scratch copy of the
+tree (`PCL_REPAIR_COUNT=1`, never committed: `scratch/s543d/instrument.pl`), one line each time the pass rewrites
+something, over the 2,053-file wide A/B list (perl-tests, perl's own t/ and core lib, the CPAN board's dists,
+lib/, the shapes) -- files / fires, and the first files it fires in (PERL = perl's source tree, CORE = its lib).
+
+| pass | catalogue § / registry row | row `fixed_in` | fires (files / fires; first files) | open task | verdict |
+|---|---|---|---|---|---|
+| `Parser2::_repair_alias_foreach` | §10 (registry §10 names its sibling) | `pcl` (the LEXER half, s527c group U) | 2 / 9: PERL t/op/const-optree.t, t/op/lvref.t | #327 (refaliasing; #1649 the USER's decision) | **LIVE-NOT-PPI**: PPI lexes `for \my %e (...)` since s527c; the pass is the re-spelling of the refaliasing foreach into `\my %e = $tmp` -- a LOWERING (a `_desugar_` of `_lower_foreach_stmt`), whose fate follows #1649 |
+| `Parser2::_repair_nary_foreach` | §10 | `pcl` (s527c U) | 1 / 46: PERL t/op/for-many.t | #329 | **LIVE-NOT-PPI**: the lowering of 5.36's `for my ($a, $b) (LIST)` into a `while` over element refs; belongs in the foreach lowering (rename, move; no PPI bug left) |
+| `Parser2::_repair_punct_hash_name` | §24 (`also_narrowed`) | `pcl` | 0 / 0 (both arms) | #550 | magic-split arm (`N %.5e1` after a declared constant): **LIVE-NOT-PPI** (the prototype table); the `%^` arm: **LIVE-FIXABLE** -- PPI still hands `%^` in term position over as `%` `^`; `Token/Unknown.pm`'s `%` arm: `%^` not followed by a caret name's letter is the punctuation hash (Magic, as `%-` `%+` are) |
+| `Parser2::_repair_word_match` (+ `_pass`) | §11 | **undef** (open) | 4 / 12: PERL t/op/switch.t (`when /.../` x2), t/re/pat_advanced.t (`ok`, `while`), t/re/pat_re_eval.t (`ok`), t/re/pat.t (`ok` x7) | #458 (its four probes = perl on main: FIXED by #872 / #940's close scan, closable), #2774 (LIVE), #351 #872 #931 #940 | **LIVE-FIXABLE, the builtin half**: `/` after a Word where a term is expected is a match (toke.c `yyl_slash`: under XTERM `scan_pat`) -- `Token/Whitespace.pm`'s `/` arm asks `%MATCHWORD` (return split if unless grep map ...), not `_term_expected` (the rule of AH's `<`, AY's `x`, E's `~~`): `when /x/`, `1 while /x/g`, `print /x/`, `sin /;/` are division on the branch today.  **LIVE-NOT-PPI, the user half**: `ok /.../` (an imported sub; the prototype table) stays, narrowed to non-keyword words |
+| `Parser2::_repair_term_initial_complement` | §21 | `pcl` (groups E, J) | 0 | #370 | **LIVE-NOT-PPI**: `sub f {...} print f ~~$y` -- only the prototype table knows f is a list operator (PPI still gives `Operator<~~>`, probed); guards in place |
+| `Parser2::_repair_readline_cascade` | §14 (§14b) | `pcl` (the block / operator / builtin halves, AH) | 0 | #479 | **LIVE-NOT-PPI**: the user-sub half of §14 (`foo <$f> // 1`); zero sites, as when it was written |
+| `Parser2::_repair_glob_pattern_cascade` (+ `_pass`) | §14c §14d | `pcl` (AH) | 0 | #563, #4100; #651 and #2384 FIXED (their reproducers = perl on main: `sort <./gd/[ab].t>` and `grep { } </tmp/a9m/*.txt>` are one Readline since AH, s527d / s527g) | **LIVE-NOT-PPI**: after a USER sub (`foo </tmp/x-1/y/*.pl>`) only a declaration says "list operator" |
+| `Parser2::_repair_word_x_call` | §19 | `pcl` (the builtin half, AY) | 0 | #361 | **LIVE-NOT-PPI**: `print STDOUT x()` / `foo x 3` after a bareword handle or a user word (PPI still gives `Operator<x>`); declared-sub knowledge |
+| `PExpr::_fix_ppi_negative_number_bug` | §15 §34 §68 | `pcl` (A, J, BB) | 9 / 58 -- `**` arm 5 / 46 (perl-tests/pow.t, perl-tests/time.t, lib/POSIX.pm); bareword arm 4 / 12, ALL after a list operator (CORE Net/Config.pm and Search/Dict.pm `return -1`, PERL t/op/taint.t `chown -1`, t/op/64bitint.t `cmp_ok -0x...`), never after a constant | #2095 #2541 (both FIXED, s543d) | **LIVE-NOT-PPI**: the `**` arm reads PPI's negative literal (`Number<-3> ** 2`; perl has no negative literal, `-3**2` is `-(3**2)`) -- a precedence rule that belongs in PExpr's unary-minus reading, not a PPI bug; the bareword arm is the prototype table's (`K -1` after `use constant`); its 12 fires split a `-N` after a list operator, a no-op for the lowering -- it can be narrowed to `_word_is_declared_term` (probe `return -1`, `chown -1, -1, $f`, `cmp_ok -1, ...`, `K -1`, `abs -1`) |
+| `PExpr::_fix_ppi_glob_after_block` | §14 | `pcl` (AH) | 4 / 19: PERL t/op/coreamp.t (`is <$fh>`, `like <*>`, `like <file>`; the `*>` arm 2), t/op/filehandle.t (`is <$fh>` x5), t/op/glob.t (`ok <~>`), Pl/t/shapes/punct-arrays-glob.pl | #651 #2384 FIXED | **LIVE-NOT-PPI**: every fire follows an IMPORTED sub (is, like, ok): the prototype table's half of §14 |
+| (#357) `PExpr::_fix_ppi_ternary_label_bug` | §47 | `pcl` (Z, s527d) | -- (DELETED s527d) | #357 | **DONE**: nothing left in `Pl/`; the twin's §47 rows and the canary guard it; #357 closable |
+
+**What the table says.**  No pass is DEAD: every pass whose bug the branch fixed for the builtins keeps the half only a
+declaration decides (a user sub, a constant, an ALL-CAPS handle), and every fire of those halves in the population
+follows an IMPORTED name (`is`, `like`, `ok` from test.pl / Test::More) -- so teaching the branch "a sub declared
+earlier in this document" (toke.c consults the sub already compiled) would move nothing measured and is NOT proposed.
+Two halves are PPI's to fix (the `/` builtin half of §11, the `%^` hash); two passes are lowerings wearing a repair's
+name (the foreach pair); the negative-number pass is half PCL precedence, half prototype table.
+
+**Proposed batch 11 (PPI, the tokenizer; ~3 groups, cap ~60k tokens each):**
+1. **§11 builtin half + #2774's builtin row** -- `Token/Whitespace.pm`, the `/` arm: replace `%MATCHWORD` by
+   `$t->_term_expected` (after a keyword that takes an operand -- `when`, `while`, `print`, `sin`, `join`, ... -- `/`
+   starts a match; toke.c `yyl_slash` under XTERM).  A new catalogue § (or §11 split: §11 user half / §11b builtin
+   half).  PCL: `_repair_word_match` then fires only after a non-keyword Word -- probe the four population files
+   (switch.t `when`, pat_advanced.t `while`, pat.t / pat_re_eval.t `ok`) and #2774's rows (`sin / 25 ; # / ; die` must
+   become the match; `one /a;b # x/` and `args //, 2` stay the user half); beyond the corpus: `print /x/`, `return /x/`
+   (control), `split /,/` (control), `time / 2` and `wantarray / 2` (division: NO_OPERAND), `$o->print / 2` (a method
+   name: division), `print $fh /x/` (the filehandle slot).
+2. **#1680** -- `Token/Unknown.pm`'s `%` arm: in term position `%` + digits is a hash name (`%12`, as `@119797` is
+   already one Symbol); controls `7%12`, `$x %12`, `time %12`.  PCL: probe `%12 = (a=>1); keys %12` (DROP on main).
+3. **#3922** -- `Token/Magic.pm` / `Unknown.pm`: `_` followed by `(` is a Word (a call of sub `_`); the stat filehandle
+   `_` stays after a filetest / `stat` / `lstat` (`-e _`, `stat _`).  PCL: `sub _ { "x" } print _(), "y"` (DROP on main).
+4. (rides on 2) **§24's `%^`** -- the punctuation hash `%^` in term position is ONE Magic; then
+   `_repair_punct_hash_name`'s caret arm is DELETED (0 fires; probe `my $n = %^ ? 1 : 0`, `print %^`, `%^H` control).
+
+**Proposed batch 12 (no tokenizer rule left that the measurements ask for -- the lowering and tooling half):**
+1. **The foreach desugars out of the repair family** (not PPI): `_repair_nary_foreach` -> the foreach lowering
+   (`_desugar_nary_foreach`, same text, corpus-diff IDENTICAL); `_repair_alias_foreach` waits for the USER's #1649
+   ruling (refaliasing proposed OUT).
+2. **`_fix_ppi_negative_number_bug` split by its two causes**: the `**` precedence into PExpr's unary-minus reading
+   (a lowering rule, `-N ** M` is `-(N ** M)`), the bareword arm narrowed to `_word_is_declared_term` (its 12 fires are
+   no-ops after list operators).  Probes: the s543d p1 table (51 rows) + `-3**2`, `-1.5**2`, `-0x10**2`, `2**-1`.
+3. **#1876** (`use feature 'extra_paired_delimiters'`, 5.36) -- a FEATURE on the branch (the Unicode bracket pairs as
+   quote-like delimiters inside the feature's scope; PPI's feature tracking, as `defer` / `class`); larger, its own group.
+4. **The closes, with guard rows only** (no code): #458 (its four probes = perl), #651 and #2384 (one Readline since
+   AH), #2670 (§35, group N), #1666 (§42, group AQ), #357 (the workaround was deleted s527d), #3805 (PPI's `$#+` Magic
+   is its design: not a mis-lex -- close it as not a branch item).
+5. **Not PPI-branch items at all**: #1580 (the dereference foreach variable is a LOWERING), #4807 (PExpr's `&$_()`),
+   #4902 (awaits a ruling), #1053 (`format` is a documented refusal; its token half is §40, AU), #4903 (the checker's
+   refinements: `Pl/PPIExpect.pm`, PCL's side), #1649 (the USER's decision).
