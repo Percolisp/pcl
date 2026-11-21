@@ -96,8 +96,8 @@ Principles".
    parallelises across files, so the gate's wall time ≈ the slowest file
    (`test_transpile` = a perl oracle + an SBCL transpile+run; `run_cl` spawns
    SBCL).  Measure with `prove --timer Pl/t/<file>`; if a file is heading past
-   the current slowest, start the next `transpile-test-NN.t` (`-10` exists; the next
-   new one is **`-11`**).  Leave `transpile-test-01.t` and `-07.t` alone.  **A TIMED
+   the current slowest, start the next `transpile-test-NN.t` (`-11` exists; the next
+   new one is **`-12`**).  Leave `transpile-test-01.t` and `-07.t` alone.  **A TIMED
    row's bound is RELATIVE to perl's own time measured in the same run
    (`8 * perl + 0.5 s`), never absolute seconds** — CI is ~3x slower than
    this box.  The timed row bounds gross regressions; a lever's inverse guard
@@ -399,25 +399,29 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-21: main = MAIN-READY-100 `64353611` (generation v2-15200; two
-batches merged in this session: s543a, line tracking ON by default
-(MAIN-READY-99 `78202d0a`), and s543b, seven filed silent wrongs).**  Gate
-**379 files / 12,336 rows `Result: PASS`** (measured on merged main); full
-sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111 files;
-ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of 122 (95.1 %)**; CPAN
-board (round of s542, on MAIN-READY-95): 661 PASS / 144 PARTIAL / 24 FAIL / 67
-SKIP of 896 files, 109,714 ok / 1,225 not ok (one-file runs of the two batches
-took 28 rows out by edit; the round is OWED); the companion re-based in that
-round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of 528); PPI `pcl` =
-`66e690d2`; CI green on MAIN-READY-99.  Line tracking costs a median +0.8 % on
-the bench (the counting loops +16 %: #5103) and +11 % emitted text
-(`docs/caller-implementation.md` "What it costs").  Known default-build limits
-flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
-leaves its opening block is written out before the next child process, at a
-`flock` / descriptor trigger, at an explicit `undef $fh` of its own scope or
-at exit, never at the drop (`docs/not-supported.md` ns-escaping-filehandle;
-#5128 #5160); `caller`, `croak` and a runtime die name perl's file and line
-since s543a, except from a BEGIN / END / `use` body (#5101).
+**s543, 2026-11-21: main = MAIN-READY-101 `b4d401bd` (code `64353611`,
+generation v2-15200; three batches merged in this session: s543a, line
+tracking ON by default (MAIN-READY-99 `78202d0a`); s543b, seven filed silent
+wrongs (-100 `64353611`); s543c, the verification batch, no code).**  Gate
+**380 files / 12,364 rows `Result: PASS`** (s543c's gate on the tree that
+merged); full sweep **TOTAL passing 18,808**, GATE clean; corpus-diff
+population 111 files; ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of
+122 (95.1 %)**; **86 live IN silent wrongs** (s543c ran every task's own
+reproducer; `tools/task-triage.pl` prints 92 until #5162); CPAN board (round
+of s542, on MAIN-READY-95): 661 PASS / 144 PARTIAL / 24 FAIL / 67 SKIP of 896
+files, 109,714 ok / 1,225 not ok (one-file runs of the two batches took 28
+rows out by edit; THE ROUND s543r IS RUNNING on `64353611`); the companion
+re-based in the s542 round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of
+528); PPI `pcl` = `66e690d2`; CI green on MAIN-READY-100.  Line tracking costs
+a median +0.8 % on the bench (the counting loops +16 %: #5103) and +11 %
+emitted text (`docs/caller-implementation.md` "What it costs").  Known
+default-build limits flagged to the USER: `DESTROY` runs at program exit only;
+a filehandle that leaves its opening block is written out before the next
+child process, at a `flock` / descriptor trigger, at an explicit `undef $fh`
+of its own scope or at exit, never at the drop (`docs/not-supported.md`
+ns-escaping-filehandle; #5128 #5160); `caller`, `croak` and a runtime die name
+perl's file and line since s543a, except from a BEGIN / END / `use` body
+(#5101).
 
 
 

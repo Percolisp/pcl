@@ -2,9 +2,9 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-09-09",
-   "description" : "FILED s473f (Opus, 2026-09-09).  PRE-EXISTING (identical on 0ece3088).\n\n    open(my $fh, \">\", $F) or die;\n    my $r = print {$$fh} \"x\\n\";\n\n    perl : 1, and \"x\\n\" is written\n    PCL  : undef, nothing written\n\n`fileno($$fh)` and `binmode($$fh)` both reach the handle, so the deref itself\nresolves; the `:fh` slot of print is the divergent half.  Found while making\nlib/IO/Handle.pm's `binmode` stop dereferencing (#1074): core's IO::Handle\nwrites `$$fh` throughout because its objects are blessed glob REFS, so any\nfuture shim that keeps that spelling will hit this.\n\nProbe scratch/s473f/p5d-deref.pl row 05.\n",
+   "description" : "FILED s473f (Opus, 2026-09-09).  PRE-EXISTING (identical on 0ece3088).\n\n    open(my $fh, \">\", $F) or die;\n    my $r = print {$$fh} \"x\\n\";\n\n    perl : 1, and \"x\\n\" is written\n    PCL  : undef, nothing written\n\n`fileno($$fh)` and `binmode($$fh)` both reach the handle, so the deref itself\nresolves; the `:fh` slot of print is the divergent half.  Found while making\nlib/IO/Handle.pm's `binmode` stop dereferencing (#1074): core's IO::Handle\nwrites `$$fh` throughout because its objects are blessed glob REFS, so any\nfuture shim that keeps that spelling will hit this.\n\nProbe scratch/s473f/p5d-deref.pl row 05.\n\n=== s543c (Opus 5.5, 2026-11-21, CODE 64353611) ===\nVERDICT: FIXED -- `open(my $fh, \">\", $F); my $r = print {$$fh} \"x\\n\"` -> r=1 and the file holds \"x\\n\", = perl 5.40.3; `printf {$$g} \"%s\\n\", \"y\"`\n  the same.\nFIX: an unknown earlier change (no commit names #1425); verified on 64353611.\nGUARD: Pl/t/transpile-test-11.t row 1 ('#1425 print {$$fh} / printf {$$fh} write; ...', added s543c, a perl oracle).\nCLOSE-WITH-ROWS: no baseline / registry / doc row is keyed on #1425.\n",
    "id" : 1425,
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "SILENT WRONG: `print {$$fh} ...` writes nothing -- a dereferenced handle in the `:fh` slot",
    "triage" : "in",
    "triage_reason" : "did not reproduce on one shape -- verify"

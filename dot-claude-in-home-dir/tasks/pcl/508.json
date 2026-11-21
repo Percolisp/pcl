@@ -2,9 +2,9 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-08-23",
-   "description" : "FILED s440 from agent B's #464 report (pre-existing). The `$init_idx < 0` branch of the local lowering (no RHS) does not take the modifier; fixable with the same `$keep` machinery #464 added for `local(LIST)=RHS if C` but needs `(if COND <empty> <current>)` per binding. Bar: the repro (both branches), `local($a,$b) if/unless`, inside a sub, the inverse (`local $p;` plain, `local $p = 5 if 0` already right); a row in Pl/t/stmt-modifier-01.t.",
+   "description" : "FILED s440 from agent B's #464 report (pre-existing). The `$init_idx < 0` branch of the local lowering (no RHS) does not take the modifier; fixable with the same `$keep` machinery #464 added for `local(LIST)=RHS if C` but needs `(if COND <empty> <current>)` per binding. Bar: the repro (both branches), `local($a,$b) if/unless`, inside a sub, the inverse (`local $p;` plain, `local $p = 5 if 0` already right); a row in Pl/t/stmt-modifier-01.t.\n\n=== s543c (Opus 5.5, 2026-11-21, CODE 7ea827a6) ===\nVERDICT: FIXED -- every shape in the task and its BAR agrees with perl 5.40.3:\n  `our $p; $p=1; { local $p if 0; ... }` -> 1 ; `local $p if 1` -> U ; `local($a1,$b1) if 0` -> 12 ; `unless 1` -> 12 ;\n  `unless 0` -> U ; inside a sub -> 1 ; the inverse `local $p;` -> U and `local $p = 5 if 0` -> 1 ; restored after -> 1.\nFIX: s446i 0c8487e4 (\"`local` -- ONE modifier split, and a TARGET is a structured item (#508, #509, #510)\"); the task was never\n  closed.\nGUARD: Pl/t/stmt-modifier-01.t section 5 (rows 13-19 per the file header; '── 5. task #508 — a BARE `local` ... takes its modifier').\nCLOSE-WITH-ROWS: no row is keyed on #508 (the perl-suite-fails.tsv `#508` cell is re/alpha_assertions.t's TEST NUMBER; the\n  not-supported.md `local` bullet names #508-#510 only as #1190's family).\n",
    "id" : 508,
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "SILENT WRONG: a bare `local X if COND` (no assignment) IGNORES the modifier -- `our $p; $p=1; { local $p if 0; print defined($p)?$p:\"U\" }` perl 1, PCL U (localised anyway); same for `local($a,$b) if 0`",
    "triage" : "in",
    "triage_reason" : "the `local` family: a bare local under a modifier"

@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543 (the reviewing session, 2026-11-21) from s543c`s report.  `tools/task-triage.pl` prints the number exit criterion 1 of docs/supported-subset.md asks for (open, triage `in`, marked SILENT WRONG).  It matches the uppercase phrase anywhere in subject + description, so a task whose HISTORY says SILENT WRONG and whose newest verdict says LOUD (or whose residue is documented OUT) still counts.\n\nMEASURED 2026-11-21 on the live store after s543c: the tool prints 92; s543c`s table gives 86 = 78 live silent wrongs on its list + 8 filed or narrowed the same day (#4794 #5105 #5121 #5122 #5123 #5125 #5126 #5128).  The six extra: #314 #328 #415 #1580 #2006 #3260.\n\nFIX (sized, small): the counter reads (1) the SUBJECT, and (2) only when the task carries a dated verdict block (`=== sNNNx (` ... `) ===`), the newest block`s label line; a task with no verdict block is read as today.  s543c wrote its labels as a `LABEL:` line in each block -- read one block first and key on what is there.  `--list silent` should print the ids so the number can be audited.  Guard: tools/t/ (a fixture store of four tasks: silent in subject; silent only in history + newest block loud; no block; triage out).  Then docs/supported-subset.md section 7 and CLAUDE.md `Test Status` drop the \"prints 92\" clause.\n\nALSO from the same report, for whoever takes this: #2006 cannot close while Pod-Simple htmlbat.t rows are keyed on it -- re-run those rows one-file and, if they are the documented moment limit, re-key them `NS:ns-escaping-filehandle`.",
+   "id" : "5162",
+   "status" : "pending",
+   "subject" : "TOOLING: tools/task-triage.pl counts a task as silent wrong when the label appears ANYWHERE in its text -- after s543c it prints 92 where the verified count is 86 (six tasks are loud or OUT now: #314 #328 #415 #1580 #2006 #3260)",
+   "triage" : "tooling",
+   "triage_reason" : "the exit-criterion-1 counter reads a task`s whole history"
+}

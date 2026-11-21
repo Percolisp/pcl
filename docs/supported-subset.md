@@ -174,6 +174,23 @@ What the pass is and is not:
 * a silent wrong is counted only when its task SAYS so (subject or
   description): the label is part of filing one.
 
+**The verification pass is done (s543c, 2026-11-21, on code `64353611`)**:
+each of the 138 listed tasks -- the 117 marked silent wrong and the 38 whose
+triage reason said "verify" -- had ITS OWN reproducer run, perl against main,
+and carries a dated verdict.  Counted on the task store (a task on both
+lists once): 49 are FIXED and closed, each with a guard row
+(`Pl/t/transpile-test-11.t` and rows in fifteen existing files); 88 stay
+open -- 19 narrowed to their residue, 69 live as filed; 1 was merged into an
+older task; none could not be reproduced.  **The count criterion 1 asks for is 86
+live IN silent wrongs**: 78 from that list and 8 that the batches of the same
+day filed or narrowed.  `tools/task-triage.pl` prints 92 -- it matches the
+label anywhere in a task's text, its history included, so six tasks that are
+loud or OUT now still count (task #5162: read the newest verdict).  The live
+ones in ordinary code, most likely first, are the next fix brief: #1039
+#1955 #750 #2555 #3100 #2766 #1030, the nested-element `local` family (#540
+#1190 #3415 #1339), #691, string-eval name resolution (#2091 #2557 #2630
+#4821).
+
 What pauses: widening the board, new steering populations, perl's own suite
 rows that no IN program reaches. What does not pause: the round instruments,
 the PPI branch when the expect-state checker reports a new mis-lex in an IN

@@ -2,10 +2,10 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-08-24",
-   "description" : "FILED s444 from agent F (s443f); PRE-EXISTING, IMPROVED by #491 from load-abort to trappable.  STDOUT->autoflush(1) (io/iofile.t) now dies perl-shaped \"Can't locate object method autoflush via package STDOUT\" inside its own eval (before: unbound variable killed the whole file).  perl: works.  Needs the bareword-handle -> IO::Handle object bridge (method dispatch on a handle name/glob).  Sizeable; measure which suite rows sit behind it first.",
+   "description" : "FILED s444 from agent F (s443f); PRE-EXISTING, IMPROVED by #491 from load-abort to trappable.  STDOUT->autoflush(1) (io/iofile.t) now dies perl-shaped \"Can't locate object method autoflush via package STDOUT\" inside its own eval (before: unbound variable killed the whole file).  perl: works.  Needs the bareword-handle -> IO::Handle object bridge (method dispatch on a handle name/glob).  Sizeable; measure which suite rows sit behind it first.\n\n=== s543c (Opus 5.5, 2026-11-21, CODE 7ea827a6) ===\nVERDICT: FIXED -- `STDOUT->autoflush(1)` in a bare script (no `use IO::Handle`) runs and the program continues, = perl 5.40.3;\n  so do `STDERR->autoflush(1)`, `STDOUT->printflush`, `STDOUT->opened`, `STDOUT->fileno`, `*STDOUT->autoflush(0)`.\nFIX: #1074 (\"a filehandle is an object of its handle class, with no `use`\": the runtime gives a handle the class IO::Handle, the\n  methods stay perl in lib/).\nGUARD: Pl/t/handle-place-01.t, the #1074 program rows '01 STDOUT->autoflush' .. '06 STDOUT->opened'.\nCLOSE-WITH-ROWS: no baseline / registry / doc row is keyed on #531.  (The subject read \"pcl\"; replaced.)\n",
    "id" : 531,
-   "status" : "pending",
-   "subject" : "pcl",
+   "status" : "completed",
+   "subject" : "`STDOUT->autoflush(1)` (a method call on a bareword standard handle) -- FIXED by #1074 (s543c)",
    "triage" : "in",
    "triage_reason" : "`STDOUT->autoflush(1)` -- verify, probably long fixed"
 }

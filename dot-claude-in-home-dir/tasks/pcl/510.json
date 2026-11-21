@@ -2,9 +2,9 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-08-23",
-   "description" : "FILED s440 from agent B's #464 report (pre-existing; under the new modifier path it reads 2 instead of 0 -- still wrong). The errno magic's setter is not invoked by the LIST-assignment path. Bar: the repro + `local($!, $@) = (...)` + `$!` as a non-first slot + read-back as number and string vs perl; a guard row.",
+   "description" : "FILED s440 from agent B's #464 report (pre-existing; under the new modifier path it reads 2 instead of 0 -- still wrong). The errno magic's setter is not invoked by the LIST-assignment path. Bar: the repro + `local($!, $@) = (...)` + `$!` as a non-first slot + read-back as number and string vs perl; a guard row.\n\n=== s543c (Opus 5.5, 2026-11-21, CODE 7ea827a6) ===\nVERDICT: FIXED -- every shape in the task and its BAR agrees with perl 5.40.3:\n  `$!=2; { local($!,$p) = (3,4); print $!+0 }` -> 3, restored to 2 ; `$!` as the non-first slot `local($p,$!) = (4,5)` -> 5 ;\n  `local($!, $@) = (6, \"err\")` -> 6 [err] ; read back as a string -> non-empty ; `local $! = 3` -> 3.\nFIX: s446i 0c8487e4 (the list takes the errno PLACE, not its storage name).\nGUARD: Pl/t/stmt-modifier-01.t section 6, '$! in a local LIST is assigned in either slot, and restored (task #510)'.\nCLOSE-WITH-ROWS: no row is keyed on #510 (the perl-suite-fails.tsv `#510` cell is a TEST NUMBER).\n",
    "id" : 510,
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "SILENT WRONG: `$!` in a `local` LIST assignment is never assigned -- `our $p; $!=2; { local($!,$p) = (3,4); print(($!+0)) }` perl 3, PCL 0 (`local $! = 3` alone is right)",
    "triage" : "in",
    "triage_reason" : "the `local` family: `$!` in a local list"
