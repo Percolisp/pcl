@@ -280,7 +280,7 @@ times and reasons: `docs/claude-md/REFERENCE.md` "WHAT TO RUN WHEN".
 | harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick` PER BATCH** | baselines edited ROW BY ROW |
 | runners: `tools/sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file by file | same | `PCL_SHOW_SBCL=1` before/after diff |
 | `docs/**`, `tools/t/**`, memory | nothing beyond the gate | no | — |
-| any BATCH that changes `Pl/**`, `cl/**` or `lib/**` (once per batch) | — | — | `tools/everyday-smoke.pl`: quote `EVERYDAY: N of M` BEFORE → AFTER |
+| any BATCH that changes `Pl/**`, `cl/**` or `lib/**` (once per batch) | — | — | `tools/everyday-smoke.pl`: quote `EVERYDAY: N of M` BEFORE → AFTER (after a generation bump read the SECOND run: #5127) |
 
 - **Baselines are edited ROW BY ROW with the cause, never re-blessed from a
   run** (`baselines/fail-baseline.tsv`, the drop census
@@ -399,24 +399,25 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-21: main = MAIN-READY-99 `78202d0a` (generation v2-15100; one
-batch merged so far in this session: s543a, line tracking ON by default).**
-Gate **379 files / 12,313 rows `Result: PASS`** (measured on merged
-main); full sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population
-111 files; ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; CPAN board (round of s542, on MAIN-READY-95): 661 PASS / 144
-PARTIAL / 24 FAIL / 67 SKIP of 896 files, 109,714 ok / 1,225 not ok (s543a's
-one-file runs took 16 rows out by edit; the round is OWED); the companion
-re-based in that round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of 528);
-PPI `pcl` = `66e690d2`; CI green on MAIN-READY-97.  Line tracking costs a
-median +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted
-text (`docs/caller-implementation.md` "What it costs").  Known default-build
-limits flagged to the USER: `DESTROY` runs at program exit only; a filehandle
-that leaves its opening block is written out before the next child process,
-at a `flock` / descriptor trigger or at exit, never at the drop
-(`docs/not-supported.md` ns-escaping-filehandle); `caller`, `croak` and a
-runtime die name perl's file and line since s543a, except from a BEGIN / END
-/ `use` body (#5101).
+**s543, 2026-11-21: main = MAIN-READY-100 `64353611` (generation v2-15200; two
+batches merged in this session: s543a, line tracking ON by default
+(MAIN-READY-99 `78202d0a`), and s543b, seven filed silent wrongs).**  Gate
+**379 files / 12,336 rows `Result: PASS`** (measured on merged main); full
+sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111 files;
+ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of 122 (95.1 %)**; CPAN
+board (round of s542, on MAIN-READY-95): 661 PASS / 144 PARTIAL / 24 FAIL / 67
+SKIP of 896 files, 109,714 ok / 1,225 not ok (one-file runs of the two batches
+took 28 rows out by edit; the round is OWED); the companion re-based in that
+round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of 528); PPI `pcl` =
+`66e690d2`; CI green on MAIN-READY-99.  Line tracking costs a median +0.8 % on
+the bench (the counting loops +16 %: #5103) and +11 % emitted text
+(`docs/caller-implementation.md` "What it costs").  Known default-build limits
+flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
+leaves its opening block is written out before the next child process, at a
+`flock` / descriptor trigger, at an explicit `undef $fh` of its own scope or
+at exit, never at the drop (`docs/not-supported.md` ns-escaping-filehandle;
+#5128 #5160); `caller`, `croak` and a runtime die name perl's file and line
+since s543a, except from a BEGIN / END / `use` body (#5101).
 
 
 
