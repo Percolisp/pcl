@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 my $DIR = tempdir(CLEANUP => 1);
 
@@ -170,4 +170,41 @@ use File::Temp qw(tempdir tempfile);
 my $d = tempdir(CLEANUP => 1);
 print "dir=", (-d $d ? "ok" : "FAIL"), " abs=", ($d =~ m{^/} ? 1 : 0), "\n";
 my ($fh, $fn) = tempfile(DIR => $d); print "file=", (-f $fn ? "ok" : "FAIL"), "\n";
+PL
+
+# ==== s543e (2026-11-21): seven live silent wrongs, one guard group each ====
+
+# ---- #1030 the %ENV value layer: an undef store keeps the element UNDEF
+#      (defined 0, exists 1) while the child sees an empty variable; the
+#      element CELL makes undef / s/// / chop / ++ / substr / \$ENV{K} /
+#      foreach / @_ aliasing write the environment; a reference or a number
+#      is stringified on store; #5105 grep over %ENV sees its pairs ----------
+both_agree(<<'PL', '#1030 $ENV{K} = undef stays undef; lvalue uses of $ENV{K} write; #5105 grep %ENV');
+no warnings;
+sub st { my ($k, $t) = @_; my $v = $ENV{$k}; my $c = `printenv $k; echo "rc=\$?"`; $c =~ s/\n/|/g;
+  print "$t d=", (defined $v ? 1 : 0), " e=", (exists $ENV{$k} ? 1 : 0), " v=[", ($v // 'U'), "] c=[$c]\n" }
+$ENV{T11A} = undef; st('T11A', 1);
+$ENV{T11B} = "x"; undef $ENV{T11B}; st('T11B', 2);
+$ENV{T11C} = "o"; { local $ENV{T11C}; st('T11C', '3in') } st('T11C', '3out');
+{ local $ENV{T11D} = undef; st('T11D', '4in') } st('T11D', '4out');
+$ENV{T11E} = undef; delete $ENV{T11E}; st('T11E', 5);
+$ENV{T11F} = 0; st('T11F', '6a'); $ENV{T11F} = ""; st('T11F', '6b'); $ENV{T11F} = 3.5; st('T11F', '6c');
+my $ar = [1]; $ENV{T11G} = $ar; my $r = ($ENV{T11G} = $ar);
+print "6d ref=[", ref($ENV{T11G}), "] same=", ($ENV{T11G} eq "$ar" ? 1 : 0), " aval-ref=[", ref($r), "]\n";
+$ENV{T11H} = undef; my %c = %ENV; print "7 copy e=", (exists $c{T11H} ? 1 : 0), " d=", (defined $c{T11H} ? 1 : 0), "\n";
+@ENV{qw(T11I T11J)} = (undef, 1); st('T11I', '8a'); st('T11J', '8b');
+my $nu = grep { !defined } values %ENV; my $ne = 0; while (my ($k, $v) = each %ENV) { $ne++ if !defined $v }
+print "9 undef values=$nu each=$ne\n";
+my @k1 = keys %ENV; $ENV{T11J} = undef; my @k2 = keys %ENV; print "10 order kept=", ("@k1" eq "@k2" ? 1 : 0), "\n";
+%ENV = (%ENV, T11K => undef); st('T11K', 11);
+$ENV{T11L} = "abc"; $ENV{T11L} =~ s/b/B/; chop $ENV{T11L}; st('T11L', 12);
+$ENV{T11M} = 5; $ENV{T11M}++; $ENV{T11M} += 2; st('T11M', 13);
+$ENV{T11N} = "hello"; substr($ENV{T11N}, 0, 1) = "J"; st('T11N', 14);
+my $q = \$ENV{T11O}; $$q = "viaref"; st('T11O', 15);
+for my $e ($ENV{T11P}) { $e = "alias" } st('T11P', 16);
+sub w { $_[0] = "arg" } w($ENV{T11Q}); st('T11Q', 17);
+for (@ENV{qw(T11R)}) { $_ = "slice" } st('T11R', 18);
+$ENV{T11S} = undef; $ENV{T11S} //= "dflt"; st('T11S', 19);
+print "20 grep=", scalar(grep { $_ eq 'T11S' } %ENV), "\n";
+undef %ENV; print "21 undef %ENV keys=", scalar(keys %ENV), " T11S=[", ($ENV{T11S} // 'U'), "]\n";
 PL

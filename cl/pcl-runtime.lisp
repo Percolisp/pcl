@@ -6061,6 +6061,10 @@
        (clrhash val))
       ((p-box-p val)
        (box-set val *p-undef*))
+      ;; undef %ENV / %INC: the marker's own `%H = ()` arm empties the process
+      ;; environment / the loaded table, as perl's undef %ENV does (#1030)
+      ((%p-hash-marker-p val)
+       (p-hash-fill val (vector)))
       ;; undef *foo — clear all typeglob slots
       ((p-typeglob-p val)
        (p-glob-undef (p-typeglob-package val)
@@ -9485,6 +9489,71 @@
   (%p-runtime-env-synthetic-p +p-runtime-env-key+))
 
 ;;; ------------------------------------------------------------
+;;; THE %ENV VALUE LAYER (task #1030, s543e; docs/ir-spec.md §9).
+;;;
+;;; perl's %ENV is a real hash whose STORE magic exports each value to the
+;;; process environment (mg.c Perl_magic_setenv): a DEFINED value is
+;;; stringified IN PLACE and exported (so a stored reference reads back as
+;;; its string, `ref` ''), an UNDEF value is exported as "" while the element
+;;; itself stays undef (`defined` 0, `exists` 1, a child sees an empty
+;;; variable).  PCL's %ENV IS the process environment, and the one thing the
+;;; environment cannot carry is "this element is undef" -- so that is kept
+;;; beside it: *p-env-undef-keys* names the keys whose last store was undef.
+;;; A key is in it only while its exported value is "" (the reader checks
+;;; both, so a value exported by any other route reads as itself).
+;;;
+;;; ONE reader, ONE writer, ONE remover; every %ENV accessor goes through
+;;; them (rule 11): p-gethash / (setf p-gethash), p-values, p-delete, the
+;;; `%ENV = LIST` arm of p-hash-fill, the `local $ENV{K}` helpers, the
+;;; element CELL that p-gethash-box hands out (so `undef $ENV{K}`,
+;;; `$ENV{K} =~ s///`, `chop`, `++`, `\$ENV{K}` and an aliasing foreach
+;;; write the environment), p-env-get / p-env-set.
+(defvar *p-env-undef-keys* (make-hash-table :test 'equal)
+  "The %ENV keys whose element is UNDEF (exported to the environment as \"\").")
+
+(defun %p-env-read (k)
+  "$ENV{K} as perl reads it: the exported string, undef for an absent key or
+   for one stored undef (*p-env-undef-keys*), the synthetic
+   $ENV{_PCL_RUNTIME_} entry (task #1529)."
+  (let ((v (sb-posix:getenv k)))
+    (cond ((null v)
+           (if (%p-runtime-env-synthetic-p k) (%p-pcl-version) *p-undef*))
+          ((and (zerop (length v)) (gethash k *p-env-undef-keys*)) *p-undef*)
+          (t v))))
+
+(defun %p-env-store (k value)
+  "Store VALUE as $ENV{K}: export its string (an undef value exports \"\" and
+   is remembered as undef).  Returns what the element now reads -- the
+   STRING for a defined value, which is perl's in-place stringification."
+  (let ((v (if (p-box-p value) (unbox value) value)))
+    (if (or (null v) (eq v *p-undef*))
+        (progn (sb-posix:setenv k "" 1)
+               (setf (gethash k *p-env-undef-keys*) t)
+               *p-undef*)
+        ;; a plain atom stringifies as itself (one FETCH for a tied scalar);
+        ;; a reference stringifies through its BOX (class, overloading)
+        (let ((s (to-string (if (or (stringp v) (numberp v)) v value))))
+          (sb-posix:setenv k s 1)
+          (remhash k *p-env-undef-keys*)
+          s))))
+
+(defun %p-env-remove (k)
+  "Remove K from the environment (delete, a wholesale `%ENV = LIST`, the
+   restore of a `local` on an absent key)."
+  (remhash k *p-env-undef-keys*)
+  (sb-posix:unsetenv k))
+
+(defun %p-env-cell-box (k)
+  "The ELEMENT box of $ENV{K}: a magic cell that reads and writes the
+   environment through the layer above, the %SIG cell's shape
+   (%p-sig-cell-box).  Reading through it never creates the key; the first
+   write exports it."
+  (make-p-box (make-p-magic-cell
+               :getter (lambda () (%p-env-read k))
+               :setter (lambda (v) (%p-env-store k v))
+               :kind :env)))
+
+;;; ------------------------------------------------------------
 ;;; THE ELEMENT-STORAGE VECTOR (s458ak).
 ;;;
 ;;; Every Perl array PCL builds is `(make-array n :adjustable t
@@ -10867,13 +10936,12 @@ per element."
        (dolist (entry (sb-ext:posix-environ))
          (let ((eq-pos (position #\= entry)))
            (when eq-pos
-             (sb-posix:unsetenv (subseq entry 0 eq-pos)))))
+             (%p-env-remove (subseq entry 0 eq-pos)))))
+       ;; each pair through the value layer's writer (#1030): an undef value
+       ;; (or the missing last one of an odd list) is an undef element
        (loop for i from 0 below cnt by 2
-             do (sb-posix:setenv (to-string (aref flat i))
-                                 (if (< (1+ i) cnt)
-                                     (to-string (aref flat (1+ i)))
-                                     "")
-                                 1)))
+             do (%p-env-store (to-string (aref flat i))
+                              (if (< (1+ i) cnt) (aref flat (1+ i)) *p-undef*))))
       (t
        (clrhash place)
        (loop for i from 0 below cnt by 2
@@ -15008,11 +15076,13 @@ slot box (undef, %ENV/%INC markers, symbolic-ref strings).
 Spelled out rather than routed through p-gethash-argbox so that the hit path
 costs TWO hash lookups, not four — a hash slice pays this per element."
   (let ((h (unbox hash)))
-    (if (hash-table-p h)
-        (let ((k (to-string key)))
-          (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
-              (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))
-        (p-gethash hash key))))
+    (cond ((hash-table-p h)
+           (let ((k (to-string key)))
+             (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
+                 (%p-hash-elem-cell h k) (%p-hash-defelem-box h k))))
+          ;; %ENV: the element cell, so `for (@ENV{...}) { s/// }` writes (#1030)
+          ((eq h '%ENV-MARKER%) (%p-env-cell-box (to-string key)))
+          (t (p-gethash hash key)))))
 
 (defun p-gethash-argbox (hash key)
   "Hash element in USER-SUB ARGUMENT position (perl's @_ aliasing): the
@@ -15035,9 +15105,11 @@ create the key on a read-only call, which perl does not.
         ;; undef container / special markers / symbolic-ref strings:
         ;; keep plain value semantics, no aliasing.  A BLESSED hash is NOT in
         ;; this set — see the note on %p-alias-helem above (task #841).
-        (if (and (p-box-p h) (%p-tielem-box-p hash))
-            (p-gethash-argbox h key)
-            (make-p-box (p-gethash hash key)))
+        (cond ((and (p-box-p h) (%p-tielem-box-p hash)) (p-gethash-argbox h key))
+              ;; %ENV: the element cell -- lazy, a write through $_[N]
+              ;; exports the key (#1030)
+              ((eq h '%ENV-MARKER%) (%p-env-cell-box k))
+              (t (make-p-box (p-gethash hash key))))
         (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
             (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
 
@@ -15917,11 +15989,9 @@ which is one of #1140's escape spellings (probed)."
       (return-from p-gethash *p-undef*))
     ;; Check for special markers
     (cond
-      ((eq h '%ENV-MARKER%)
-       (or (sb-posix:getenv k)
-           ;; $ENV{_PCL_RUNTIME_}: the synthetic entry (task #1529).
-           (and (%p-runtime-env-synthetic-p k) (%p-pcl-version))
-           *p-undef*))
+      ;; the %ENV value layer (#1030): an undef store reads back undef, and
+      ;; $ENV{_PCL_RUNTIME_} is the synthetic entry (task #1529).
+      ((eq h '%ENV-MARKER%) (%p-env-read k))
       ((eq h '%INC-MARKER%)
        (multiple-value-bind (val found) (gethash k *p-inc-table*)
          (if found val *p-undef*)))
@@ -15989,9 +16059,9 @@ which is one of #1140's escape spellings (probed)."
   (let* ((h (unbox hash))
          (k (to-string key)))
     (cond
-      ((eq h '%ENV-MARKER%)
-       (sb-posix:setenv k (to-string value) 1)
-       value)
+      ;; the %ENV value layer (#1030): perl's store magic stringifies a
+      ;; defined value in place and keeps an undef one undef
+      ((eq h '%ENV-MARKER%) (%p-env-store k value))
       ((eq h '%INC-MARKER%)
        (setf (gethash k *p-inc-table*) value))
       ;; Symbolic reference: string used as hash name
@@ -16050,7 +16120,11 @@ which is one of #1140's escape spellings (probed)."
       (if (p-box-p hash)
           (setf h (p-ensure-hashref hash))
           (return-from p-gethash-box (make-p-box *p-undef*))))
-    ;; Special markers don't support boxing
+    ;; %ENV: the element CELL of the value layer (#1030), so an lvalue use --
+    ;; `undef $ENV{K}`, `=~ s///`, `chop`, `++`, `\$ENV{K}`, `substr(...) =` --
+    ;; writes the environment.  %INC keeps a detached box (no write-through).
+    (when (eq h '%ENV-MARKER%)
+      (return-from p-gethash-box (%p-env-cell-box k)))
     (when (%p-hash-marker-p h)
       (return-from p-gethash-box (make-p-box *p-undef*)))
     (%p-when-tied-hash (r h) (return-from p-gethash-box (%p-tie-elem-box r (%p-tie-key key))))
@@ -16890,7 +16964,8 @@ which is one of #1140's escape spellings (probed)."
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (dolist (entry (sb-ext:posix-environ))
          (let ((p (position #\= entry)))
-           (when p (vector-push-extend (subseq entry (1+ p)) result))))
+           ;; the value layer's ONE reading (#1030): a key stored undef is undef
+           (when p (vector-push-extend (%p-env-read (subseq entry 0 p)) result))))
        ;; The synthetic entry, in the SAME position p-keys puts its key —
        ;; both walks are `posix-environ` in order, then this (task #1529).
        (when (%p-runtime-env-in-keys-p)
@@ -17033,14 +17108,14 @@ which is one of #1140's escape spellings (probed)."
                        (return-from p-delete (%p-tie-value (%p-tie-call r "DELETE" (%p-tie-key key)))))
     (cond
       ((eq h '%ENV-MARKER%)
-       (let ((old (or (sb-posix:getenv k)
-                      ;; deleting the synthetic entry hides it for the rest of
-                      ;; the process, exactly as a deleted real key stays
-                      ;; deleted (task #1529)
-                      (and (%p-runtime-env-synthetic-p k) (%p-pcl-version)))))
+       ;; the old value through the layer's reader (#1030: an undef element
+       ;; deletes as undef); deleting the synthetic entry hides it for the
+       ;; rest of the process, exactly as a deleted real key stays deleted
+       ;; (task #1529)
+       (let ((old (%p-env-read k)))
          (when (string= k +p-runtime-env-key+) (setf *p-runtime-env-hidden* t))
-         (sb-posix:unsetenv k)
-         (or old *p-undef*)))
+         (%p-env-remove k)
+         old))
       ((eq h '%INC-MARKER%)
        (multiple-value-bind (v found) (gethash k *p-inc-table*)
          (remhash k *p-inc-table*)
@@ -28324,12 +28399,12 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; ============================================================
 
 (defun p-env-get (key)
-  "Get environment variable value."
-  (sb-posix:getenv (to-string key)))
+  "Get environment variable value (the %ENV value layer's reader, #1030)."
+  (%p-env-read (to-string key)))
 
 (defun p-env-set (key value)
-  "Set environment variable value."
-  (sb-posix:setenv (to-string key) (to-string value) 1)
+  "Set environment variable value (the %ENV value layer's writer, #1030)."
+  (%p-env-store (to-string key) value)
   value)
 
 ;; %ENV is a special hash backed by the actual environment
@@ -31806,6 +31881,11 @@ would consume, so it dies naming the stream (rule 12)."
         ;; Raw %hash (not a ref): spread to key/value pairs in list context.
         ((hash-table-p item)
          (dolist (kv (%p-hash-keyval-list item)) (vector-push-extend kv result)))
+        ;; %ENV / %INC: the marker IS the hash and spreads to its pairs
+        ;; through the ONE walk (%p-marker-pairs); without this arm
+        ;; `grep {...} %ENV` walked the marker symbol (#5105).
+        ((%p-hash-marker-p item)
+         (loop for kv across (%p-marker-pairs item) do (vector-push-extend kv result)))
         (t (vector-push-extend item result))))
     result))
 
@@ -36732,13 +36812,16 @@ would consume, so it dies naming the stream (rule 12)."
                 (return-from %p-lhe-save (vector :tie (%p-tie-local-save r kv nil nil) r)))
   (if (eq hv '%ENV-MARKER%)
       (let ((old (sb-posix:getenv kv))
+            (old-undef (gethash kv *p-env-undef-keys*))
             (syn *p-runtime-env-hidden*))
         ;; `local $ENV{_PCL_RUNTIME_}` must hide the SYNTHETIC entry too, or
         ;; the localised key would still read (task #1529); the flag is saved
         ;; and restored beside the real value.
         (when (string= kv +p-runtime-env-key+) (setf *p-runtime-env-hidden* t))
-        (sb-posix:unsetenv kv)
-        (vector :env old syn))
+        ;; perl's localised element is a NEW undef element: it exists, reads
+        ;; undef and is exported as "" (probed 5.40.3; #1030)
+        (%p-env-store kv *p-undef*)
+        (vector :env old syn old-undef))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
         (if (%p-signal-cell-box-p old-bx)
             ;; A %SIG signal slot keeps its MAGIC box (#2107): the VALUE is
@@ -36760,7 +36843,10 @@ would consume, so it dies naming the stream (rule 12)."
       (let ((old (aref saved 1)))
         (when (string= kv +p-runtime-env-key+)
           (setf *p-runtime-env-hidden* (aref saved 2)))
-        (if old (sb-posix:setenv kv old 1) (sb-posix:unsetenv kv)))
+        ;; the exported string AND the undef mark come back (#1030)
+        (if old
+            (%p-env-store kv (if (aref saved 3) *p-undef* old))
+            (%p-env-remove kv)))
       (let ((old-ex (aref saved 1)) (old-bx (aref saved 2)))
         (cond ((eq (aref saved 0) :magic) (box-set old-bx old-ex))
               (old-ex (setf (gethash kv hv) old-bx))
@@ -36775,15 +36861,16 @@ would consume, so it dies naming the stream (rule 12)."
   (%p-when-tied (r hv)
                 (return-from %p-lhe-init (vector :tie (%p-tie-local-save r kv t init-val) r)))
   (if (eq hv '%ENV-MARKER%)
-      (let* ((old (sb-posix:getenv kv))
-             (syn *p-runtime-env-hidden*)
-             (s (if (or (null init-val) (eq init-val *p-undef*))
-                    nil (to-string init-val))))
+      (let ((old (sb-posix:getenv kv))
+            (old-undef (gethash kv *p-env-undef-keys*))
+            (syn *p-runtime-env-hidden*))
         ;; See %p-lhe-save: the synthetic entry is hidden for the local's
         ;; extent (a REAL value assigned here wins over it anyway).
         (when (string= kv +p-runtime-env-key+) (setf *p-runtime-env-hidden* t))
-        (if s (sb-posix:setenv kv s 1) (sb-posix:unsetenv kv))
-        (vector :env old syn))
+        ;; through the value layer's writer: `local $ENV{K} = undef` is an
+        ;; undef element exported as "", as perl's (#1030)
+        (%p-env-store kv (if (null init-val) *p-undef* init-val))
+        (vector :env old syn old-undef))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
         (if (%p-signal-cell-box-p old-bx)
             ;; %SIG signal slot: see %p-lhe-save.
