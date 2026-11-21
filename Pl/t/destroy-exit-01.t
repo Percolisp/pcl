@@ -43,7 +43,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 34;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -154,4 +154,41 @@ for my $r (@rows) {
         'package R; our @keep; my $n = 0; sub new { bless {}, shift } sub DESTROY { $n++; print "DESTROY $n\n"; push @keep, $_[0] } package main; $| = 1; our $r = R->new; print "main\n";');
     my $count = () = $c->[0] =~ /^DESTROY \d/mg;
     is($count, 1, 'a resurrected object is destroyed once (perl: once, then its own fatal)');
+}
+
+# THE GATE ITSELF (task #5107, s543a).  Rows 08 and 26 compare OUTPUT, and an
+# empty DESTROY prints nothing whether the gate is open or not.  With line
+# tracking on by default (s543a) every sub body begins with `(p-file ...)`, so
+# p-sub's exact-shape test stopped recognising `sub DESTROY {}`: the gate
+# opened, every bless paid the registration, and no row saw it.  These rows
+# READ the gate -- pcl::*p-destroy-live* after the program, in the DEFAULT
+# build: NIL when the only DESTROY / AUTOLOAD is empty (in each spelling that
+# lowers to an empty body; `{ ; }` and `{ return }` also carry a (p-line N)),
+# T for a DESTROY with a statement, so the rows cannot pass on nothing.
+sub run_gate {
+    my ($tag, $body) = @_;
+    my $src = "$workdir/$tag.pl";
+    open(my $s, '>', $src) or die; print {$s} $body; close $s;
+    my $perl_out = `$^X $src 2>/dev/null`;
+    my $cl_code = `$pl2cl $src 2>/dev/null`;
+    my $cl_file = "$workdir/$tag.lisp";
+    open(my $c, '>', $cl_file) or die; print {$c} $cl_code; close $c;
+    my $pcl_out = `sbcl @sbcl_rt --load $cl_file --eval '(format t "~&GATE ~a~%" pcl::*p-destroy-live*)' 2>/dev/null`;
+    my $gate = $pcl_out =~ s/^GATE (\S+)\n//m ? uc $1 : 'NONE';
+    return ($perl_out, $pcl_out, $gate);
+}
+
+my @gate_rows = (
+  ['31-gate-empty-destroy',  'package P; sub new { bless {}, shift } sub DESTROY {} package main; our @o = map { P->new } 1 .. 3; print "main\n";', 'NIL'],
+  ['32-gate-empty-autoload', 'package Q; sub new { bless {}, shift } sub AUTOLOAD {} package main; our $q = Q->new; print "main\n";', 'NIL'],
+  ['33-gate-empty-located',  'package E2; sub new { bless {}, shift } sub DESTROY { ; }' . "\n"
+                           . 'package E3; sub new { bless {}, shift } sub DESTROY { return }' . "\n"
+                           . 'package E4; sub new { bless {}, shift }' . "\n" . 'sub DESTROY {' . "\n" . '}' . "\n"
+                           . 'package main; our @o = (E2->new, E3->new, E4->new); print join(",", map { ref } @o), "\n";', 'NIL'],
+  ['34-gate-live',           'package P; sub new { bless {}, shift } sub DESTROY { print "DESTROY\n" } package main; our $o = P->new; print "main\n";', 'T'],
+);
+for my $r (@gate_rows) {
+    my ($tag, $body, $want) = @$r;
+    my ($po, $co, $gate) = run_gate($tag, $body);
+    is("$co|gate=$gate", "$po|gate=$want", "the gate $tag: stdout is perl's and *p-destroy-live* is $want");
 }

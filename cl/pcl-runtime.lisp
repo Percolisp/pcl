@@ -1288,7 +1288,30 @@
      \"!\"; \"$x$y\" }' -- 'is not an array with a fill pointer')."
     (if (eq (second p) :str-buffer)
         `(%pcl-str-buffer ,value-form)
-        value-form)))
+        value-form))
+
+  ;; AN EMPTY SUB'S BODY (task #5107, s543a).  `sub DESTROY {}` lowers to
+  ;; (p-args-body (block nil (p-return-empty))); with line tracking on -- the
+  ;; default since s543a, ir-spec §6.3b -- the block HEADS with the location
+  ;; stores, (p-file PATH) and a (p-line N) where a statement wrote one, which
+  ;; change no value.  p-sub's empty DESTROY / AUTOLOAD test (#2371) reads the
+  ;; body through them, as classic-sort reads a comparator (Pl/ClassicSort.pm).
+  (defun %p-location-form-p (form)
+    "FORM is a location-register store: (p-file PATH) or (p-line N)."
+    (and (consp form) (member (car form) '(p-file p-line)) t))
+
+  (defun %p-empty-sub-body-p (body)
+    "BODY (p-sub's &body) is an EMPTY sub's: the one form (p-args-body
+     (block nil LOC... (p-return-empty))), LOC only leading location stores."
+    (and (consp body) (null (cdr body))
+         (let ((ab (first body)))
+           (and (consp ab) (eq (first ab) 'p-args-body)
+                (consp (cdr ab)) (null (cddr ab))
+                (let ((blk (second ab)))
+                  (and (consp blk) (eq (first blk) 'block)
+                       (consp (cdr blk)) (null (second blk))
+                       (equal (member-if-not #'%p-location-form-p (cddr blk))
+                              '((p-return-empty))))))))))
 
 ;;; THE SUB-NAME RECORD (task #3281, s518e).  perl's CV knows the glob it was
 ;;; DEFINED under (CvGV): `sub Foo::bar {}` is Foo::bar whatever globs later
@@ -1444,10 +1467,11 @@
                      `((%p-register-prototype (symbol-function local-sym) ,proto))))
          ;; An EMPTY DESTROY / AUTOLOAD (the AUTOLOAD-guard idiom) is marked
          ;; before the install note reads it: it opens no destruction gate (#2371).
+         ;; Its body is read through the leading location stores (#5107).
          (empty-destroy
           (when (and (member (symbol-name name) '("pl-DESTROY" "pl-AUTOLOAD")
                              :test #'string=)
-                     (equal body '((p-args-body (block nil (p-return-empty))))))
+                     (%p-empty-sub-body-p body))
             '((%p-mark-empty-destroy (symbol-function local-sym)))))
          (install
           `(let* ((local-sym (%p-reserve-sub-name ',name))
