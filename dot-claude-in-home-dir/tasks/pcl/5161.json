@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543 (the reviewing session, 2026-11-21), a review probe of s543b member 1 (#5082).  PRE-EXISTING for a file handle (base n=1, tree n=1); for a dirhandle s543b made it BETTER (base: `@$d` was the directory listing, n=22, because the handle was a bare cons; tree: n=1) but perl dies.\n\nREPRODUCER (perl: died / died; s543b tree: n=1 / n=1):\n    opendir(my $d, \".\") or die; my @x = eval { @$d }; print \"deref: \", ($@ ? \"died\" : \"n=\" . scalar(@x)), \"\\n\";\n    open(my $fh, \"<\", $0) or die; my @y = eval { @$fh }; print \"deref fh: \", ($@ ? \"died\" : \"n=\" . scalar(@y)), \"\\n\";\n\nNOTE: perl`s `@$globref` on a REAL glob ref is the glob`s ARRAY slot and legal; perl dies here under `use strict` -- check both strict and no-strict before choosing the die (rule 12: the array cast`s arm for a handle payload, %p-handle-payload-p, should not fall through to \"treat as a one-element list\").",
+   "id" : "5161",
+   "status" : "pending",
+   "subject" : "LOW: `@$fh` / `@$dh` on a handle does not die -- perl: `Not an ARRAY reference`; PCL reads a one-element list (base: a dirhandle read its whole listing)",
+   "triage" : "in",
+   "triage_reason" : "a missing die (errors fail in the same places); rare spelling, LOW"
+}

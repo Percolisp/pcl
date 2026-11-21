@@ -220,7 +220,8 @@ tools/tag-license FILE             # every new code file carries the license tag
 tools/install-pcl --prefix ~/.local   # installer; test: prove tools/t/install-pcl.t
 prove tools/t/install-container.t  # installer in a container (minutes; before a tag)
 tools/vendor-ppi <clone> pcl       # refresh vendor/PPI from the pcl branch
-PCL_OPT=none ./pl2cl < prog.pl     # all named optimizations off (Pl/Passes.pm registry)
+PCL_OPT=none ./pl2cl < prog.pl     # all named optimizations off (line-track and fh-scope-close stay: %NOT_OFF_BY_NONE)
+PCL_OPT=-line-track ./pl2cl < prog.pl   # no location registers: line tracking's A/B switch (on by default since s543a)
 PCL_OPT=-const-fold ./pl2cl < prog.pl   # ONE name off (here: a literal `use constant` stays a call, #4982)
 PCL_SHOW_SBCL=1 <any runner>       # print the exact SBCL command it spawns
 ```
@@ -398,23 +399,24 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s542, 2026-11-16: main = MAIN-READY-98 `a3d00a12` (code `c5f618f2`,
-generation v2-15000; six batches merged in this session: s540c, s539a,
-s540d, s540e, s539c, s539b; the round s542r and the timing s541a without
-code).**  Gate **379 files / 12,303 rows
-`Result: PASS`** (s539b's gate on merged main's code; MAIN-READY-97 measured
-378 / 12,283 on main itself, also on a cold module cache); full sweep
-**TOTAL passing 18,803**, GATE clean; corpus-diff population 111 files;
-ir-conform 328 / 0; ir-host-leak 31; **EVERYDAY 115 of 122 (94.3 %)**; CPAN
-board (round of s542, on MAIN-READY-95): 661 PASS / 144 PARTIAL / 24 FAIL /
-67 SKIP of 896 files, 109,714 ok / 1,225 not ok; the companion re-based in
-the same round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of 528; the
-full run 0 NEW / 0 FIXED / 0 LOST against the edited baselines); PPI `pcl` = `66e690d2`; CI green on MAIN-READY-97.  Known
-default-build limits flagged to the USER: `caller` file/line and `croak`
-location only under `PCL_OPT=line-track`; `DESTROY` runs at program exit
-only; a filehandle that leaves its opening block is written out before the
-next child process, at a `flock` / descriptor trigger or at exit, never at
-the drop (`docs/not-supported.md` ns-escaping-filehandle).
+**s543, 2026-11-21: main = MAIN-READY-99 `78202d0a` (generation v2-15100; one
+batch merged so far in this session: s543a, line tracking ON by default).**
+Gate **379 files / 12,313 rows `Result: PASS`** (measured on merged
+main); full sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population
+111 files; ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
+(95.1 %)**; CPAN board (round of s542, on MAIN-READY-95): 661 PASS / 144
+PARTIAL / 24 FAIL / 67 SKIP of 896 files, 109,714 ok / 1,225 not ok (s543a's
+one-file runs took 16 rows out by edit; the round is OWED); the companion
+re-based in that round (`--all --quick` 127 OK / 104 XDIFF / 240 DIFF of 528);
+PPI `pcl` = `66e690d2`; CI green on MAIN-READY-97.  Line tracking costs a
+median +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted
+text (`docs/caller-implementation.md` "What it costs").  Known default-build
+limits flagged to the USER: `DESTROY` runs at program exit only; a filehandle
+that leaves its opening block is written out before the next child process,
+at a `flock` / descriptor trigger or at exit, never at the drop
+(`docs/not-supported.md` ns-escaping-filehandle); `caller`, `croak` and a
+runtime die name perl's file and line since s543a, except from a BEGIN / END
+/ `use` body (#5101).
 
 
 
@@ -491,7 +493,8 @@ of every entry (what it found, what it ruled) is in
 - `runtime-review-s525.md` — `box-set`, `unbox`, `%p-bitwise-kind-of`,
   `p-setf`, `p-list-=`.
 - `tie-aggregates.md` — any tie path or an I/O builtin's entry.
-- `caller-implementation.md`, `point4-decisions-s539.md` — `caller`,
+- `caller-implementation.md`, `point4-decisions-s539.md` — `caller`
+  (file / line perl's by default since s543a; the cost table),
   `utf8::is_utf8`, the DESTROY design (three USER rulings).
 - `stable-booleans-design-s516.md` — `p-bool`, `p-!`, `p-defined`.
 - `method-lookup-eval-s534.md` — `p-method-call`, `p-find-overload`.

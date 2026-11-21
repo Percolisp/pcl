@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543 (the reviewing session, 2026-11-21), a review probe of s543b member 6 (#4794), perl -> BASE c5f618f2 -> the s543b tree.  PRE-EXISTING (base 0, tree 0); s543b fixed the `open(my $o, ...)`-returned-from-a-sub shapes (base 0 -> perl`s size) and did not claim this one.\n\nREPRODUCER (perl 3 / 4, base and s543b tree 0 / 0):\n    use IO::File; my $f = \"/tmp/x.$$\";\n    my $io = IO::File->new($f, \"w\"); print $io \"io\\n\"; undef $io; print \"size4: \", -s $f, \"\\n\";\n    $io = IO::File->new($f, \"w\"); $io->print(\"io2\\n\"); $io = undef; print \"size5: \", -s $f, \"\\n\";\n\nWHY (read, not yet measured in the runtime): `p-flush-dropped-handle` (cl/pcl-runtime.lisp, s543b) peeks the variable`s slot and flushes when the value is an `sb-sys:fd-stream`; an IO::File object is a blessed GLOB handle (docs/not-supported.md ns-escaping-filehandle: \"a GLOB handle (Symbol::gensym, IO::File->new, ...) is named in the handle table, so it stays open until exit\"), so the type test says no.  THE CHEAP DISCRIMINATING MEASUREMENT: print the type of `(p-box-value $io)` after `IO::File->new` -- if it is a typeglob / a box whose IO slot holds the fd-stream, the flush needs ONE more arm (the glob`s IO slot), still a flush and never a close.\n\nNOT this task: the scope-exit shapes (`{ my $in = IO::File->new(...); print $in ...; }` then `-s`, perl 7 / PCL 0; a sub that returns without closing) -- those are the documented MOMENT limit of ns-escaping-filehandle (#2006 / #2370).  This task is only the statement the program WRITES to say it is done with the handle.\n\nGUARD when fixed: Pl/t/fh-collect-01.t beside s543b`s row 7 (the IO::File spelling, both statements; inverse fails on the s543b tree).",
+   "id" : "5160",
+   "status" : "pending",
+   "subject" : "`undef $io` / `$io = undef` on an IO::File object (a GLOB handle) does not write its buffered bytes: #4794`s flush sees only a variable whose value IS the descriptor stream -- `my $io = IO::File->new($f, \"w\"); print $io \"io\\n\"; undef $io; print -s $f` is 0 (perl 3)",
+   "triage" : "in",
+   "triage_reason" : "silent wrong in ordinary code (IO::File + undef, then the file is read back); one more arm of #4794`s flush"
+}
