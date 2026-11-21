@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 18;
 
 sub write_pl {
     my ($code) = @_;
@@ -186,3 +186,14 @@ both_agree('package Foo; sub new { bless {}, shift }'
          . ' $o->length(); $o->length; $o->lc(); $o->shift(); $o->split(); $o->length(1, 2); Foo->length();'
          . ' print length(), " ", length("abcd"), "\n";',
            '#2083: $o->length() / ->lc() / ->shift() / ->split() get no builtin default or collapse');
+
+# s543c (task #333, closed; fixed by #481's `_word_is_method_name`, verified on
+# 7ea827a6): a CLASS-method name before `=>` -- `(Foo->x => 1)` -- is a call, as
+# the instance spelling above is; the plain and the qualified bareword are the
+# negatives (`x =>` autoquotes, `Foo::x =>` is a call in perl too).
+both_agree('package Foo; sub x { "X" } package main;'
+         . ' my %h = (Foo->x => 1); print join(",", %h), "|\n";'
+         . ' my @l = (Foo->x => 1); print "@l|\n";'
+         . ' my $o = bless {}, "Foo"; my @m = ($o->x => 2); print "@m|\n";'
+         . ' my @q = (x => 1); my @r = (Foo::x => 1); print "@q|@r|\n";',
+           '#333: `(Foo->x => 1)` calls the class method before a fat comma');

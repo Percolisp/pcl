@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 48;
+plan tests => 49;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -862,6 +862,25 @@ my $f = "/tmp/pcl-t-reopen2-$$";
 open(my $r, ">", $f) or die; print $r "gone";
 my $ok = open($r, "<", "/nonexistent-dir-xyz/file");
 print "1 ", ($ok ? "opened" : "failed"), " size=", (-s $f), "\n";
+unlink $f;
+PERL
+
+# #630 (closed s543c; fixed by the #2006(a) close-first rule above, verified on
+# 7ea827a6): the HANDLE after a failed re-open -- perl closed it first, so
+# fileno is undef and a read gets nothing; PCL used to keep the OLD stream
+# bound and readable.  Lexical and bareword, plus a dup that fails.
+test_io('#630: a FAILED re-open leaves the handle closed, not reading the old file', <<'PERL');
+my $f = "/tmp/pcl-t-reopen630-$$";
+open(my $o, ">", $f) or die; print $o "old line\n"; close $o;
+open(my $k, "<", $f) or die;
+my $r = open($k, "<", "/nonexistent-dir-xyz/file");
+my $l = <$k>;
+print "1 ret=", (defined $r ? $r : "undef"), " fileno=", (defined fileno($k) ? "def" : "undef"),
+      " read=", (defined $l ? "line" : "undef"), "\n";
+open(F, "<", $f) or die; open(F, "<", "/nonexistent-dir-xyz/file");
+print "2 fileno=", (defined fileno(F) ? "def" : "undef"), " read=", (defined(scalar <F>) ? "line" : "undef"), "\n";
+my $keep; open($keep, "<", $f) or die; open($keep, "<&NOSUCH");
+print "3 fileno=", (defined fileno($keep) ? "def" : "undef"), "\n";
 unlink $f;
 PERL
 

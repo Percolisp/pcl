@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -279,3 +279,10 @@ test_perl_oracle("#4682 a list slice past the end is read-only in an aliasing co
       my @e = (1,2,3); my $x; eval { for ((@e, $x)[9], (@e)[-9]) { $_ = 1 } 1 } or print "4 ", ro(), "\n"; print "4 ", scalar(@e), "\n";
       my @f = (1,2,3); eval { w((@f)[1], (@f)[-1]); 1 } or print "5 died\n"; print "5 @f\n";
       my @g = (1,2,3); for ((@g)[7]) { print "6 ", defined $_ ? "d" : "u", "\n" } print "6 ", scalar(@g), "\n";});
+# #336 (closed s543c; fixed by #4341's flat-list indexing, verified on 7ea827a6):
+# a qw() INSIDE a sliced parenthesised list contributes its WORDS -- `(qw(a b),
+# "c")[2]` was empty and `[0]` "ab" (the qw counted as one element).
+test_perl_oracle("#336 a qw() inside a sliced list is flattened",
+    q{print +(qw(a b), "c")[2], " ", +(qw(a b), "c")[0], " ", +((qw(a b)), "c")[2], "\n";
+      print +(qw(a b), {q=>7})[2]->{q}, " ", join(",", (qw(a b), "c", qw(d e))[1,3]), "\n";
+      my $x = (qw(a b), "c")[2]; my @l = (qw(a b), "c"); print "$x $l[2]\n";});

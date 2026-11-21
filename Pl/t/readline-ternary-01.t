@@ -256,7 +256,10 @@ PL
 # be ONE CONTIGUOUS WORD — the belt to `_ends_term`'s braces — so the spaced
 # spelling keeps dropping LOUDLY, as it did before this repair existed.  Task
 # #650 has it, with the `<a b>` sibling that is silently wrong on the
-# non-derailed path.
+# non-derailed path.  (s543c, measured on 7ea827a6: whether the spaced
+# spelling is loud depends on the `/`s LATER in the file -- after a `chdir`
+# into this directory it becomes `(p-readline)` and swallows the next two
+# statements with no drop announced, so it can be silent too.)
 
 agree_in_globdir(<<'PL', 'neighbour: after `=`, where PPI gets the Readline token right');
 my @f = sort(<./g-*.t>);

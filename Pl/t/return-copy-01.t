@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -387,4 +387,34 @@ dualvar=2/str
 empty=0
 undef=undef
 in-sub=2
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F — A HELD RESULT does not track a later write (task #72, closed s543c: the
+# #964 frame-exit copy fixed it; verified on 7ea827a6).  The value a call
+# returned is consumed AFTER a later statement in the same list writes the
+# variable: a live box handed out of the frame would print the new value twice.
+# Expected text probed against perl 5.40.3.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('#72: a returned value held in a list does not track a later write', <<'PL', <<'OUT');
+my $x=1; my $g=sub{ $x }; my @r=($g->(), do { $x=9; $g->() }); print "anon-tail=@r\n";
+my $y=1; my $f=sub{ ++$y }; print "pre-inc=", join(",", $f->(), $f->()), "\n";
+my $w=1; my $k=sub{ --$w }; print "pre-dec=", join(",", $k->(), $k->()), "\n";
+my @xs=(1,2); my $gl=sub{ @xs }; my @rl=($gl->(), do { @xs=(8,9); $gl->() }); print "list=@rl\n";
+package O; sub new { bless {v=>1}, shift } sub v { $_[0]{v} } package main;
+my $o=O->new; my @m=($o->v, do { $o->{v}=7; $o->v }); print "method=@m\n";
+my $q=3; sub inner { $q } sub outer { goto &inner } my @gg=(outer(), do { $q=4; outer() }); print "goto=@gg\n";
+my $p=1; sub ret { return $p } my @rr=(ret(), do { $p=2; ret() }); print "return=@rr\n";
+our $gv=1; sub glo { $gv } my @gr=(glo(), do { $gv=5; glo() }); print "our=@gr\n";
+my %hh=(a=>1); sub hv { $hh{a} } my @hr=(hv(), do { $hh{a}=6; hv() }); print "elem=@hr\n";
+PL
+anon-tail=1 9
+pre-inc=2,3
+pre-dec=0,-1
+list=1 2 8 9
+method=1 7
+goto=3 4
+return=1 2
+our=1 5
+elem=1 6
 OUT

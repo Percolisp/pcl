@@ -41,7 +41,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 my $PREAMBLE = "use feature 'lexical_subs', 'state';\nno warnings;\n";
 
@@ -188,4 +188,17 @@ test_lexsub('#3983: `my sub y :prototype() {...}` / state / our: the attribute i
     our sub w :prototype() { 7 }
     print w + 1, "\n";
 }
+PERL
+
+# #460 (closed s543c, verified on 7ea827a6): lexical subs named after the two
+# QUOTE-LIKE operator words, WITHOUT a prototype -- `print y, "\n"` printed 0
+# (PPI's `y` swallowed source as a transliteration) and a bare `x;` statement
+# dropped; the real `x` operator beside a lexical `x` is the inverse.
+test_lexsub('#460: `my sub y {8} print y` and a bare `x;` call; the `x` operator beside it', <<'PERL');
+use v5.26;
+{ my sub x { 7 } print x, "\n"; }
+{ my sub x { 7 } x; print "called\n"; }
+{ my sub y { 8 } print y, "\n"; }
+{ my sub x { 7 } print "a" x 3, "\n"; }
+{ my sub x { print "x()\n" } x(); }
 PERL

@@ -101,7 +101,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 46;
+plan tests => 47;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -286,6 +286,19 @@ is(run_bytes(encode_utf8(
    . "    \$out .= \"\$i\$j,\";\n"
    . "  }\n}\nprint \"\$out\\n\";\n")),
    "11,21,31,\n", 'LABEL: a fullwidth label and its ASCII twin are distinct (#418)');
+
+# #422 item 3 (closed s543c; the vendored PPI `pcl` branch fixed the lexer --
+# docs/ppi-upstream-bugs.md §23 addendum; verified on 7ea827a6): a non-ASCII
+# FOREACH loop variable made PPI's lexer fail the WHOLE document ("Illegal
+# state in 'foreach' compound statement"), so the file was lost.
+is(run_bytes(encode_utf8(
+     "use utf8;\nmy \@o;\n"
+   . "for my \$\x{ff29} (1,2) { push \@o, \$\x{ff29} }\n"
+   . "foreach my \$\x{ff29} (3) { push \@o, \$\x{ff29} }\n"
+   . "my \@a = (5,6); for my \$\x{ff29}(\@a) { push \@o, \$\x{ff29} }\n"
+   . "our \$\x{ff2a}; for \$\x{ff2a} (7) { push \@o, \$\x{ff2a} }\n"
+   . "print \"\@o\\n\";\n")),
+   "1 2 3 5 6 7\n", 'FOREACH: a fullwidth loop variable lexes and iterates (#422 item 3)');
 
 # THE INVERSE GUARD, in emission: an ASCII name must stay BARE.  Under :invert
 # a bare `$x` reads as the symbol `$X` while `|$x|` reads as `$x`, so quoting an

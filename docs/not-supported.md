@@ -1205,8 +1205,11 @@ What still COPIES (beyond the copy-back's reach):
   correct.  The cause is visible in the emission: the argument lowers to
   `(p-gethash-deref …)` / `(p-aref-deref …)`, which return VALUES, so the
   argbox/cell family is never reached.
-- `substr($_[0],…)` as an lvalue and 4-arg `substr` — the ARGUMENT arrives
-  boxed, but the callee lowers substr's target as a value (task #209).
+- a substr lvalue passed through `@_` under `scalar`:
+  `sub { $_[0] = "dea" }->(scalar substr $str, 3, 2)` leaves `$str`
+  unchanged (task #209, narrowed s543c).  `substr($_[0],…)` as an lvalue,
+  4-arg `substr` on `$_[0]` or an element, and a bare `substr(...)` argument
+  written through `$_[0]` all write through since #960.
 
 **Affected tests:** `perl-tests/args.t` rows touching coderef/method-dispatch
 argument aliasing.
