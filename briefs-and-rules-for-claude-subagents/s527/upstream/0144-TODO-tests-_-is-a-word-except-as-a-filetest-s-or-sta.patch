@@ -1,0 +1,84 @@
+From 96155372626134061d56dc0038026cf6e55a009f Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 21:15:58 +0200
+Subject: [PATCH 144/147] TODO tests: _ is a word except as a filetest's or
+ stat's operand
+
+perl reads _ as a plain word (toke.c); only as the operand of a
+filetest, stat or lstat does the bareword _ mean the stat filehandle
+(op.c ck_ftst).  A sub may be named _ -- the gettext idiom -- and the
+bareword is the string "_" elsewhere:
+
+    perl -e 'sub _ { "x" } print _(), "y\n"'           # xy
+    perl -e 'my %h = (_ => 1); print keys %h, "\n"'    # _
+    perl -MO=Deparse -e '_+1;'                         # '_' + 1;
+
+PPI::Token::Word makes a lone _ Magic everywhere but after sub, so
+_("text") is the stat filehandle followed by a list, (_ => 1) and
+$h{_} have a filehandle for their key, and __PACKAGE__->_() calls a
+filehandle.
+
+Ten rows inside a new PCL section 73 TODO block -- _() after sub _,
+_("text"), _ ("text") with a space, _ => 1, __PACKAGE__->_(), $o->_,
+sort _ @x, $h{_}, @h{_, "a"}, my $v = _ -- and nine controls: the
+filehandle after -e, after -e in an &&, after stat and lstat(), in
+(stat _)[7], before a /, after stacked filetests; sub _ names the sub,
+&_ is the code symbol.  Plan 583 -> 602.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 34 +++++++++++++++++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 5f511ee7..8504bbf7 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 583 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 602 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2440,3 +2440,35 @@ for my $case ( [ q{my $n = 7%12;}, q{Operator=%} ], [ q{my $n = $x %12;}, q{Oper
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+ }
++
++# §73 -- a lone _ is a WORD where perl reads a name: before a ( it calls
++# the sub named _ (`sub _ { "x" } print _(), "y\n";` prints xy -- the
++# gettext idiom), before a fat comma it is the string "_", after -> it is
++# a method's name, in a hash subscript {_} the key "_", and after sort the
++# comparison sub's.  It is the stat filehandle as the operand of a
++# filetest, stat and lstat (toke.c reads _ as a plain word; op.c's ck_ftst
++# gives the bareword _ its meaning there); elsewhere a bareword _ is the
++# string "_" (`my $v = _;`), or a call when a sub _ is declared.
++TODO: {
++    local $TODO = q{PCL §73: _ where perl reads a name is lexed as the stat filehandle};
++    for my $code ( q{sub _ { "x" } print _(), "y";}, q{print _("text");}, q{print _ ("text");},
++                   q{my %h = (_ => 1);}, q{my $v = __PACKAGE__->_();}, q{my $v = $o->_;},
++                   q{my @l = sort _ @x;}, q{my $v = $h{_};},
++                   q{my @v = @h{_, "a"};}, q{my $v = _;} ) {
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq q{Word=_}, @t ) && !grep( $_ eq q{Magic=_}, @t ), "$code: _ is a word" )
++            or diag "got: @t";
++    }
++}
++# The controls: the stat filehandle after a filetest, stacked filetests,
++# stat and lstat, with and without parens; sub _ names the sub; &_ is the
++# code symbol.
++for my $case ( [ q{print -e _ ? 1 : 0;}, q{Magic=_} ], [ q{print 1 if -e _ && 1;}, q{Magic=_} ],
++               [ q{my @s = stat _;}, q{Magic=_} ], [ q{my @s = lstat(_);}, q{Magic=_} ],
++               [ q{my $n = (stat _)[7];}, q{Magic=_} ], [ q{my $n = -s _ / 2;}, q{Magic=_} ],
++               [ q{print 1 if -f -w _;}, q{Magic=_} ], [ q{sub _ { 1 }}, q{Word=_} ],
++               [ q{print &_();}, q{Symbol=&_} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+

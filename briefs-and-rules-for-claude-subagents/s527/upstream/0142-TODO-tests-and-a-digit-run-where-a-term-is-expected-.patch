@@ -1,0 +1,89 @@
+From d920e6acf59a1c4d688c90085db0373c3e55d716 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 21:14:55 +0200
+Subject: [PATCH 142/147] TODO tests: % and a digit run where a term is
+ expected names a hash
+
+perl reads %12 where it expects a term as the hash named 12, as it
+reads @12 as the array (toke.c: under XTERM a % starts scan_ident, and
+a digit run is an identifier):
+
+    perl -e 'no strict; %12 = (a => 1); print keys %12, "\n"'    # a
+
+PPI::Token::Unknown's % arm makes an Operator of every % that a digit
+follows, so %12 = (a => 1) is Operator % Number 12 = (...) -- a modulus
+with no left operand -- while @12 is one Magic token.  A cast takes a
+term as well, and PPI does not know it: \%12, \*1 and \<STDIN> lex as
+a modulus, a multiplication and a less-than.
+
+Twelve rows inside a new PCL section 72 TODO block -- the assignment,
+keys, print, a ternary's condition, a list, scalar(), a call's
+argument, \%12, %0, \*1, \<STDIN> and %12x 2 -- and twelve controls: after a
+number, a variable, a subscript, a postfix ++, time and a user's word
+(a constant, for all PPI knows), and in print $fh %12 the % is the
+modulus; @12 and $#a were right; %{12} is a cast; \%h a hash.
+Plan 559 -> 583.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 40 +++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index d9724162..733575c8 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 559 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 583 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2403,3 +2403,41 @@ for my $case ( [ q{my $t = time / 2;}, q{Operator=/} ], [ q{my $n = wantarray /
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+ }
++
++# §72 -- % and a digit run where perl expects a term names a HASH: perl
++# reads %12 as the hash named 12 as it reads @12 as the array (toke.c:
++# under XTERM a % starts scan_ident, and a digit run is an identifier), so
++# `no strict; %12 = (a => 1); print keys %12;` prints a.  After a term, and
++# after a word that may be a user's constant, it is the modulus.  A cast
++# takes a term too: \%12 is a reference to that hash, \*1 to the glob *1,
++# \<STDIN> to a readline's value.  The name ends at its last digit (%12x 2
++# is %12 x 2), as perl's scan_ident reads a digit run.
++TODO: {
++    local $TODO = q{PCL §72: % and a digit run where a term is expected is lexed as the modulus};
++    for my $case ( [ q{%12 = (a => 1);}, q{Symbol=%12} ], [ q{print keys %12;}, q{Symbol=%12} ],
++                   [ q{print %12;}, q{Symbol=%12} ], [ q{my $n = %12 ? 1 : 0;}, q{Symbol=%12} ],
++                   [ q{my @l = (%12);}, q{Symbol=%12} ], [ q{my $n = scalar(%12);}, q{Symbol=%12} ],
++                   [ q{f(%12);}, q{Symbol=%12} ], [ q{my $r = \%12;}, q{Symbol=%12} ],
++                   [ q{%0 = ();}, q{Symbol=%0} ], [ q{my $r = \*1;}, q{Symbol=*1} ],
++                   [ q{my $r = \<STDIN>;}, q{QuoteLike::Readline=<STDIN>} ],
++                   [ q{my @l = (%12x 2);}, q{Symbol=%12} ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
++    }
++}
++# The controls: after a term (a number, a variable, a subscript, a postfix
++# ++), after a builtin that takes no operand and after a user's word -- a
++# constant for all PPI knows -- % before a digit is the modulus, also in
++# print $fh %12 (perl: a digit cannot start the list's first term there);
++# @12 and $#a were right; %{12} is a cast.
++for my $case ( [ q{my $n = 7%12;}, q{Operator=%} ], [ q{my $n = $x %12;}, q{Operator=%} ],
++               [ q{my $n = $x % 12;}, q{Operator=%} ], [ q{my $n = $h{a}%12;}, q{Operator=%} ],
++               [ q{my $n = $i++%12;}, q{Operator=%} ], [ q{my $n = time %12;}, q{Operator=%} ],
++               [ q{my $n = K %12;}, q{Operator=%} ], [ q{print $fh %12;}, q{Operator=%} ],
++               [ q{my @a = @12;}, q{Magic=@12} ], [ q{my $n = $#a;}, q{ArrayIndex=$#a} ],
++               [ q{my %h = %{12};}, q{Cast=%} ], [ q{my $r = \%h;}, q{Symbol=%h} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+

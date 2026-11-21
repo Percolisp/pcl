@@ -189,3 +189,19 @@ a term is the left shift, `1<<index($s, $c)` -- core Devel::Peek's shape; a
 quoted terminator after a term keeps the here-doc for the fuzzed fixtures 45 /
 47 (`PR-BC.md`); **BD** §70 a bare block opened by `{;` ends its statement
 (`PR-BD.md`).  t/ppi_bugs_pcl.t: 459 -> 522 rows.
+
+## s543f (2026-11-21): the branch is now 147 commits, head 72d2bd9e
+
+`0001-*.patch` .. `0147-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); to be pushed fast-forward
+to the BARE repo only (`842e6bbd` -> `72d2bd9e`) at MERGE-READY -- NOT pushed yet
+(s543f stopped at the s543 stop order); the fork's `pcl` is moved by the reviewing session.  Four groups, each "TODO tests, then the fix"; PPI's suite
+green after every commit, plain and AUTHOR_TESTING=1: **BE** §71 a `/` after a
+builtin that takes an operand starts a match (`print /x/`, `sin /;/`, the
+`when` / `while` modifiers; `//` stays the defined-or after `shift` and the
+other `UNIDOR` builtins; `PR-BE.md`); **BF** §72 `%12` where a term is expected
+is a hash, and a cast takes a term (`\%12`, `\*1`, `\<STDIN>`; `PR-BF.md`);
+**BG** §73 a lone `_` is the stat filehandle only as a filetest's or `stat`'s
+operand -- `_("text")`, `_ => 1`, `$h{_}` are words; fuzz fixture 45's first
+token updated (`PR-BG.md`); **BH** §74 `%^` (and `%^W`) is one Magic token
+(`PR-BH.md`).  t/ppi_bugs_pcl.t: 522 -> 614 rows.

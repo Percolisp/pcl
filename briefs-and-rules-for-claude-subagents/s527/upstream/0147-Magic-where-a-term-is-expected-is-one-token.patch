@@ -1,0 +1,68 @@
+From 72d2bd9e6e6dba7849220c7da43b62f834cd70f3 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 21:17:32 +0200
+Subject: [PATCH 147/147] Magic: %^ where a term is expected is one token
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The % arm of PPI::Token::Unknown starts a Magic %^ only where a term is
+expected (after a term % is the modulus), and there perl reads a hash:
+the caret variable's when a caret name's character follows (%^H, %^W,
+one token as $^W is), else the punctuation hash %^ itself, as %- and
+%+ are one token.  PPI::Token::Magic no longer backs the % off to an
+Operator when what follows %^ is not the one name it knew (%^H):
+%^ ? 1 : 0, print %^, keys %^, \%^ and print %^W lex as perl reads
+them.
+
+Fixes PCL §74 (its seven rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Magic.pm | 13 ++++++-------
+ t/ppi_bugs_pcl.t       |  3 +--
+ 2 files changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/lib/PPI/Token/Magic.pm b/lib/PPI/Token/Magic.pm
+index f7c66525..d9b4d457 100644
+--- a/lib/PPI/Token/Magic.pm
++++ b/lib/PPI/Token/Magic.pm
+@@ -139,15 +139,14 @@ sub __TOKENIZER__on_char {
+ 		}
+ 	} elsif ($c =~ /^%\^/) {
+ 		return 1 if $c eq '%^';
+-		# It's an escaped char magic... maybe ( like %^H )
+-		if ($MAGIC{$c}) {
++		# The % arm starts %^ only where a term is expected, and there it
++		# is a hash: of a caret variable when a caret name's character
++		# follows (%^H, %^W -- one token, as $^W is), else the punctuation
++		# hash %^ itself, as %- and %+ are one token (perl -e '%^ = (a,
++		# 1); print keys %^' prints a)
++		if ( $c =~ /^%\^[A-Z\[\]^_?\\]\z/ ) {
+ 			$t->{token}->{content} = $c;
+ 			$t->{line_cursor}++;
+-		} else {
+-			# Back off, treat '%' as an operator
+-			chop $t->{token}->{content};
+-			bless $t->{token}, $t->{class} = 'PPI::Token::Operator';
+-			$t->{line_cursor}--;
+ 		}
+ 	}
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 6a04cbf4..04919ead 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2477,8 +2477,7 @@ for my $case ( [ q{print -e _ ? 1 : 0;}, q{Magic=_} ], [ q{print 1 if -e _ && 1;
+ # follows -- the hash of that caret variable, %^H and %^W as $^H and $^W:
+ # `no strict; %^ = (a => 1); print keys %^;` prints a, and
+ # `no strict; %^W = (w => 1); print keys %^W;` prints w.
+-TODO: {
+-    local $TODO = q{PCL §74: %^ where a term is expected is lexed as % and ^};
++{
+     for my $case ( [ q{my $n = %^ ? 1 : 0;}, q{Magic=%^} ], [ q{print %^;}, q{Magic=%^} ],
+                    [ q{my @k = keys %^;}, q{Magic=%^} ], [ q{%^ = (a => 1);}, q{Magic=%^} ],
+                    [ q{my $r = \%^;}, q{Magic=%^} ], [ q{my @l = (%^);}, q{Magic=%^} ],
+-- 
+2.53.0
+

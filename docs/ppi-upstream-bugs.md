@@ -3186,7 +3186,7 @@ print-filehandle slot reads perl's whitespace rule; `_term_expected` learned tha
 an operator or a quote-like operator, `x` `lt` `s` `y`, is a user's sub); upstream PR: pending
 (`PR-BE.md`).  The two `while` rows of §11 pass with it.  PCL halves: `_repair_word_match` NARROWED
 (no code deleted: on the branch a builtin's pattern is one Regexp::Match, so the pass now fires only
-after a user word -- s543d's count 4 files / 12 fires, `when` `while` `ok`, -> FIRES-AFTER); PExpr's
+after a user word -- s543d's count 4 files / 12 fires, `when` `while` `ok`, -> 3 files / 9 fires, all `ok`: t/re/pat.t, pat_advanced.t, pat_re_eval.t); PExpr's
 term walker (`_term_extent`) takes a Regexp token as a primary, so a named unary's match operand
 followed by `,` or `?` lowers (`sin /;/, 9` and `lc /A/i ? …` died "term walker declined", also with
 `m/…/` on main).  Guard: the registry row §71 (inverse: fails on 1.291 and on main's vendored lib),
@@ -3224,7 +3224,7 @@ cut let the Symbol run on over word characters, and the wide A/B found it: the b
 text as code for string-eval captures, and `sprintf "%02x"` in t/op/taint.t became one Symbol `%02x`,
 a variable shape it rightly refuses (the transpile died) -- with the digit run it is `%02` `x`.  NOT
 changed: `@1x` is one Magic on 1.291 and the branch (perl: `@1 x`), an array spelling PCL meets
-nowhere.  Guard: the registry row §72, the twins' §72 rows, `Pl/t/transpile-test-09.t`'s #1680 row
+nowhere (#5233: the binder refuses `@1x 2`).  Guard: the registry row §72, the twins' §72 rows, `Pl/t/transpile-test-09.t`'s #1680 row
 beside #1650's.
 
 ---

@@ -1,7 +1,7 @@
 From e395a53487a980ebf35dc4f6d11d83616c9589d3 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 8 Nov 2026 20:36:06 +0200
-Subject: [PATCH 125/139] Word: __DATA__ and __END__ before a fat comma are
+Subject: [PATCH 125/147] Word: __DATA__ and __END__ before a fat comma are
  words
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

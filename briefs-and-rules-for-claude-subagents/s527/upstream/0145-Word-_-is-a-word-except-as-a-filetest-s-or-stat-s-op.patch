@@ -1,0 +1,106 @@
+From f8630d3edbc7c31dc9522ad998c42be81b3d3120 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 21:16:29 +0200
+Subject: [PATCH 145/147] Word: _ is a word except as a filetest's or stat's
+ operand
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads _ as a plain word, and the bareword _ is the stat filehandle
+only as the operand of a filetest, stat or lstat (op.c ck_ftst).  The
+helper that classes a lone _ (__underscore_class, which made it the
+sub's name after sub) now says Magic only there -- after a filetest
+operator (-e _, -f -w _), after stat or lstat, with or without a ( in
+between (stat _, lstat(_)) -- and Word everywhere else: a sub's name
+(sub _ { ... }, _("text"), _ ("text"), sort _ @x), a method's after
+->, a string (_ => 1, $h{_}, @h{_, "a"}, my $v = _).
+
+The fuzzed fixture t/data/08_regression/45_heredoc_w_paren_in_terminator
+opens with _+, which perl reads as the bareword (perl -MO=Deparse -e
+'_+1;' prints '_' + 1;): its dump stored the Magic reading, and its one
+changed line is that token -- nothing else in the fixture moves.  The
+comment of t/ppi_statement_sub.t's SUB_NAMED_UNDERSCORE block says
+where _ is the filehandle now.
+
+Fixes PCL §73 (its ten rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Word.pm                             | 15 ++++++++++-----
+ .../45_heredoc_w_paren_in_terminator.dump         |  2 +-
+ t/ppi_bugs_pcl.t                                  |  3 +--
+ t/ppi_statement_sub.t                             |  3 ++-
+ 4 files changed, 14 insertions(+), 9 deletions(-)
+
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 7b0261cb..790c41cc 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -385,13 +385,18 @@ sub __current_token_is_attribute {
+ 	);
+ }
+ 
+-# The class of a lone `_`: right after `sub` it names the sub
+-# (sub _ { ... }); anywhere else it is the stat filehandle.
++# The class of a lone `_`.  perl reads _ as a plain word (toke.c); the
++# bareword _ is the stat filehandle only as the operand of a filetest,
++# stat or lstat (op.c ck_ftst): -e _, -f -w _, stat _, lstat(_).
++# Anywhere else it is a Word -- a sub's name (sub _ { ... }, _("text"),
++# sort _ @l), a method's after ->, a string (_ => 1, $h{_}).
+ sub __underscore_class {
+ 	my ( $t ) = @_;
+-	my ( $prev ) = $t->_previous_significant_tokens(1);
+-	return 'Word' if $prev and $prev->isa('PPI::Token::Word') and $prev->content eq 'sub';
+-	return 'Magic';
++	my ( $prev, $prevprev ) = $t->_previous_significant_tokens(2);
++	( $prev ) = ( $prevprev ) if $prev and $prev->isa('PPI::Token::Structure') and $prev->content eq '(';
++	return 'Magic' if $prev and $prev->isa('PPI::Token::Operator') and $prev->content =~ /^-[a-zA-Z]\z/;
++	return 'Magic' if $prev and $prev->isa('PPI::Token::Word') and $prev->content =~ /^(?:CORE::)?l?stat\z/;
++	return 'Word';
+ }
+ 
+ 1;
+diff --git a/t/data/08_regression/45_heredoc_w_paren_in_terminator.dump b/t/data/08_regression/45_heredoc_w_paren_in_terminator.dump
+index 52ed5d03..aa4d1103 100644
+--- a/t/data/08_regression/45_heredoc_w_paren_in_terminator.dump
++++ b/t/data/08_regression/45_heredoc_w_paren_in_terminator.dump
+@@ -1,6 +1,6 @@
+ PPI::Document
+   PPI::Statement
+-    PPI::Token::Magic  	'_'
++    PPI::Token::Word  	'_'
+     PPI::Token::Operator  	'+'
+     PPI::Token::Comment  	'#8r\tt`-['
+     PPI::Token::Whitespace  	'\n'
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 8504bbf7..2946ad24 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2449,8 +2449,7 @@ for my $case ( [ q{my $n = 7%12;}, q{Operator=%} ], [ q{my $n = $x %12;}, q{Oper
+ # filetest, stat and lstat (toke.c reads _ as a plain word; op.c's ck_ftst
+ # gives the bareword _ its meaning there); elsewhere a bareword _ is the
+ # string "_" (`my $v = _;`), or a call when a sub _ is declared.
+-TODO: {
+-    local $TODO = q{PCL §73: _ where perl reads a name is lexed as the stat filehandle};
++{
+     for my $code ( q{sub _ { "x" } print _(), "y";}, q{print _("text");}, q{print _ ("text");},
+                    q{my %h = (_ => 1);}, q{my $v = __PACKAGE__->_();}, q{my $v = $o->_;},
+                    q{my @l = sort _ @x;}, q{my $v = $h{_};},
+diff --git a/t/ppi_statement_sub.t b/t/ppi_statement_sub.t
+index 9f379a03..d457a773 100644
+--- a/t/ppi_statement_sub.t
++++ b/t/ppi_statement_sub.t
+@@ -288,7 +288,8 @@ sub test_subs {
+ 
+ SUB_NAMED_UNDERSCORE: {
+ 	# `_` after `sub` is the sub's name: perl -e 'sub _ { "x" } print _()'
+-	# prints x.  Anywhere else a lone `_` is the stat filehandle.
++	# prints x.  As the operand of a filetest, stat or lstat a lone `_` is
++	# the stat filehandle.
+ 	for my $code ( 'sub _ { "x" } print 1;', 'sub _; print 1;', 'sub _ { "x" }' ) {
+ 		my $doc = safe_new \$code;
+ 		my ($sub) = $doc->schildren;
+-- 
+2.53.0
+

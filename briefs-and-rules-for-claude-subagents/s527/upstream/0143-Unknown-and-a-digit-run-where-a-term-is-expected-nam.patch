@@ -1,0 +1,101 @@
+From 911e43a383eea643d8c334920469ee9fbef4ec2c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 21:15:26 +0200
+Subject: [PATCH 143/147] Unknown: % and a digit run where a term is expected
+ names a hash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads %12 as the hash named 12 wherever it expects a term (toke.c:
+under XTERM a % starts scan_ident).  The digit test of the % arm of
+PPI::Token::Unknown now asks _term_expected -- the rule the <, x, ~~
+and / decisions use -- before it makes the modulus: where a term is
+expected (after an operator, an opening bracket, a ;, a builtin that
+takes an operand) %12 is a Symbol whose name is the digit run -- it
+ends at the last digit, as perl's scan_ident reads it, so %12x 2 is
+%12 x 2 and a format text read as code, "%02x", is %02 x; after a
+term, after time and after a user's word (a constant, for all PPI
+knows) it stays the modulus, and so in print $fh %12.
+
+A cast -- \ or a sigil before { or $ -- takes a term: _opcontext reads
+PPI::Token::Cast as an operand context, so \%12, \*1 (the glob, as *1
+was since the glob-name rule) and \<STDIN> (a readline) lex as perl
+reads them; _ends_term_at now reads only the operator entries of the
+class table (a cast does not end a term).
+
+Fixes PCL §72 (its twelve rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm | 15 ++++++++++++++-
+ lib/PPI/Tokenizer.pm     |  4 +++-
+ t/ppi_bugs_pcl.t         |  3 +--
+ 3 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 5dd156a8..4ee9f37b 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -246,8 +246,21 @@ sub __TOKENIZER__on_char {
+ 			}
+ 		}
+ 
+-		# Is it a number?
++		# Is it a number?  Where perl expects a term (%12 = (...),
++		# print %12, keys %12) a digit run names a hash, as @12 names
++		# an array (toke.c: under XTERM a % starts scan_ident, and a
++		# digit run is an identifier -- it ends at the last digit, so
++		# %02x is %02 then x); anywhere else it is the modulus (7%12,
++		# $x %12, time %12, K %12 after a user's constant).
+ 		if ( $char =~ /\d/ ) {
++			if ( $t->_term_expected ) {
++				pos $t->{line} = $t->{line_cursor};
++				$t->{line} =~ m/\G(\d+)/gc;
++				$t->{token}->{content} .= $1;
++				$t->{line_cursor} += length $1;
++				$t->{class} = $t->{token}->set_class( 'Symbol' );
++				return $t->_finalize_token->__TOKENIZER__on_char( $t );
++			}
+ 			# bitwise operator
+ 			$t->{class} = $t->{token}->set_class( 'Operator' );
+ 			return $t->_finalize_token->__TOKENIZER__on_char( $t );
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index f6be465b..e754f5a6 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -763,6 +763,8 @@ my %OBVIOUS_CLASS = (
+ 	'PPI::Token::Regexp::Substitute'  => 'operator',
+ 	'PPI::Token::Regexp::Transliterate' => 'operator',
+ 	'PPI::Token::HereDoc'             => 'operator',
++	# a cast -- \ or a sigil before a { or a $ -- takes a term (\%12)
++	'PPI::Token::Cast'                => 'operand',
+ );
+ 
+ my %OBVIOUS_CONTENT = (
+@@ -866,7 +868,7 @@ sub _ends_term_at {
+ 		my $kind = $self->_curly_kind($cursor);
+ 		return $kind && ( $kind eq 'subscript' or $kind eq 'deref' or $kind eq 'value' );
+ 	}
+-	return 1 if $OBVIOUS_CLASS{ ref $token } or $token->isa('PPI::Token::Number');
++	return 1 if ( $OBVIOUS_CLASS{ ref $token } || '' ) eq 'operator' or $token->isa('PPI::Token::Number');
+ 	return '';
+ }
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 733575c8..5f511ee7 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2412,8 +2412,7 @@ for my $case ( [ q{my $t = time / 2;}, q{Operator=/} ], [ q{my $n = wantarray /
+ # takes a term too: \%12 is a reference to that hash, \*1 to the glob *1,
+ # \<STDIN> to a readline's value.  The name ends at its last digit (%12x 2
+ # is %12 x 2), as perl's scan_ident reads a digit run.
+-TODO: {
+-    local $TODO = q{PCL §72: % and a digit run where a term is expected is lexed as the modulus};
++{
+     for my $case ( [ q{%12 = (a => 1);}, q{Symbol=%12} ], [ q{print keys %12;}, q{Symbol=%12} ],
+                    [ q{print %12;}, q{Symbol=%12} ], [ q{my $n = %12 ? 1 : 0;}, q{Symbol=%12} ],
+                    [ q{my @l = (%12);}, q{Symbol=%12} ], [ q{my $n = scalar(%12);}, q{Symbol=%12} ],
+-- 
+2.53.0
+

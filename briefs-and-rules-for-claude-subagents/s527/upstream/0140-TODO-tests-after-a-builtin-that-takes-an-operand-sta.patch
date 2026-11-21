@@ -1,0 +1,108 @@
+From 40b8703354e29146595058ecc00db88217771c73 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 20:14:47 +0200
+Subject: [PATCH 140/147] TODO tests: / after a builtin that takes an operand
+ starts a match
+
+perl expects a term after a builtin that takes an operand -- print,
+sin, length, join, lc, the when / while / until / for modifiers -- and
+there a / starts a match (toke.c yyl_slash: scan_pat unless PL_expect
+is XOPERATOR):
+
+    perl -e '$_ = "x"; print /x/, "\n"'                  # 1
+    perl -e '$_ = "a;b"; my @r = (sin /;/, 9); print "@r\n"'
+                                         # 0.841470984807897 9
+
+PPI::Token::Whitespace's / arm asks a short word list (return split if
+unless grep map) and reads every other builtin's / as a division, so
+the pattern is tokenized as code: `sin / 25 ; # / ; die "x";` ends its
+statement at the ; inside the pattern and comments out the die, and
+`1 while /(a+b?)x/g;` swallows the rest of the file.  After a method
+name the list also misreads: $o->split / 3 is a match today.
+
+Eighteen rows inside a new PCL section 71 TODO block (the builtin half
+of section 11) -- print, print/x/ without a space, when, while, until,
+for, sin, length, lc, join, /=/ and // after print, CORE::print, the
+filehandle slot of print $fh /x/ (perl reads a / with no space after it
+there as the list's first term), the statement count of the sin line,
+and two method names called split and map that divide -- and eighteen
+controls (time / 2, wantarray / 2, $o->print / 2, $h{a} / 2,
+print $fh / 2, /=, the defined-or after shift, pop, undef, pos and
+CORE::shift, split, grep, map, return, if, unless).  Plan 522 -> 558.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 53 +++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 52 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index c06c8f4a..09a4c6ee 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 522 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 558 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2353,3 +2353,54 @@ for my $case ( [ q{{} print 1;}, 'PPI::Structure::Constructor' ], [ qq{{ # c\n}
+     my @c = bracket_classes( $code, '{' );
+     is( $c[0], $want, squash($code) . ": $want (control)" );
+ }
++
++# §71 -- / after a BUILTIN that takes an operand starts a match (the builtin
++# half of §11): perl expects a term after print, sin, length, join, when,
++# while, until, for, ... (toke.c yyl_slash: scan_pat unless PL_expect is
++# XOPERATOR), so `$_ = "x"; print /x/, "\n";` prints 1, and
++# `sin / 25 ; # / ; die "x";` matches ` 25 ; # ` and then dies.  In the
++# filehandle slot of print $fh /x/ (whitespace before the /, none after)
++# the / starts the list too.  After a method name the / divides, also
++# when the method is called split or map.
++TODO: {
++    local $TODO = q{PCL §71: / after a builtin that takes an operand is lexed as division};
++    for my $case ( [ q{print /x/, 1;}, q{/x/} ], [ q{print/x/;}, q{/x/} ],
++                   [ q{print "m" when /x/;}, q{/x/} ], [ q{$n++ while /x/g;}, q{/x/g} ],
++                   [ q{$n++ until /x/;}, q{/x/} ], [ q{push @r, $_ for /(\w)/g;}, q{/(\w)/g} ],
++                   [ q{my @r = (sin /;/, 9);}, q{/;/} ], [ q{sin / 25 ; # / ; die "x";}, q{/ 25 ; # /} ],
++                   [ q{my $n = length /b/;}, q{/b/} ], [ q{print lc /A/i;}, q{/A/i} ],
++                   [ q{print join /,/, @a;}, q{/,/} ], [ q{print /=/ ? 1 : 0;}, q{/=/} ],
++                   [ q{print // ? 1 : 0;}, q{//} ], [ q{print CORE::print /x/;}, q{/x/} ],
++                   [ q{print $fh /x/, 1;}, q{/x/} ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq "Regexp::Match=$want", @t ), "$code: the match $want" ) or diag "got: @t";
++    }
++    is_deeply( [ stmts(qq{sin / 25 ; # / ; die "x";\nprint 1;\n}) ],
++               [ 'Statement: sin / 25 ; # / ;', 'Statement: die "x";', 'Statement: print 1;' ],
++               'sin / 25 ; # / ; die: the ; and the # are pattern text' );
++    for my $code ( q{my $n = P->new->split / 3;}, q{my $n = $o->map / 2;} ) {
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq q{Operator=/}, @t ) && !grep( /^Regexp::Match=/, @t ), "$code: a method's value divided" )
++            or diag "got: @t";
++    }
++}
++# The controls: a / after a builtin that takes no operand, after a method
++# name, a variable, a subscript or print $fh with a space after the / is a
++# division; a // after a builtin whose operand may be left out (shift, pop,
++# undef, pos: toke.c UNIDOR, XTERMORDORDOR) is the defined-or; split, grep,
++# map, return and the if / unless modifiers were right.
++for my $case ( [ q{my $t = time / 2;}, q{Operator=/} ], [ q{my $n = wantarray / 2;}, q{Operator=/} ],
++               [ q{my $n = $o->print / 2;}, q{Operator=/} ], [ q{my $n = $h{a} / 2;}, q{Operator=/} ],
++               [ q{print $fh / 2;}, q{Operator=/} ], [ q{$x /= 2;}, q{Operator=/=} ],
++               [ q{my $x = shift // 7;}, q{Operator=//} ], [ q{my $x = pop // 5;}, q{Operator=//} ],
++               [ q{my $x = undef // 1;}, q{Operator=//} ], [ q{my $p = pos // 0;}, q{Operator=//} ],
++               [ q{my $x = CORE::shift // 2;}, q{Operator=//} ],
++               [ q{my @c = split //, $s;}, q{Regexp::Match=//} ], [ q{my @c = split /,/, $s;}, q{Regexp::Match=/,/} ],
++               [ q{my @g = grep /x/, @a;}, q{Regexp::Match=/x/} ], [ q{my @m = map /(x)/, @a;}, q{Regexp::Match=/(x)/} ],
++               [ q{return /x/;}, q{Regexp::Match=/x/} ], [ q{print 1 if /x/;}, q{Regexp::Match=/x/} ],
++               [ q{print 1 unless /x/;}, q{Regexp::Match=/x/} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+

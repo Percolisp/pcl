@@ -1,0 +1,73 @@
+From ac6b15c2917dd830f3bd3c550a6825265cf44a98 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 21 Nov 2026 21:17:01 +0200
+Subject: [PATCH 146/147] TODO tests: %^ where a term is expected is one token
+
+perl reads %^ where it expects a term as the punctuation hash %^ (the
+hash of $^), as it reads %- and %+, and %^ followed by a caret name's
+character as that caret variable's hash, as $^W is one variable:
+
+    perl -e 'no strict; %^ = (a => 1); print keys %^, "\n"'      # a
+    perl -e 'no strict; %^W = (w => 1); print keys %^W, "\n"'    # w
+
+PPI::Token::Magic keeps %^ only when the known name %^H follows from it
+and otherwise backs the % off to an Operator, so %^ ? 1 : 0, print %^
+and keys %^ are a modulus and a bit-xor with no operands, and print %^W
+is % ^ W.
+
+Seven rows inside a new PCL section 74 TODO block -- a ternary's
+condition, print, keys, an assignment, \%^, a list, %^W -- and five
+controls (%^H twice, $^W, $^, and the modulus after a term).
+Plan 602 -> 614.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 2946ad24..6a04cbf4 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 602 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 614 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2471,3 +2471,29 @@ for my $case ( [ q{print -e _ ? 1 : 0;}, q{Magic=_} ], [ q{print 1 if -e _ && 1;
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+ }
++
++# §74 -- %^ where perl expects a term is ONE token: the punctuation hash %^
++# (the hash of $^), as %- and %+ are, or -- when a caret name's character
++# follows -- the hash of that caret variable, %^H and %^W as $^H and $^W:
++# `no strict; %^ = (a => 1); print keys %^;` prints a, and
++# `no strict; %^W = (w => 1); print keys %^W;` prints w.
++TODO: {
++    local $TODO = q{PCL §74: %^ where a term is expected is lexed as % and ^};
++    for my $case ( [ q{my $n = %^ ? 1 : 0;}, q{Magic=%^} ], [ q{print %^;}, q{Magic=%^} ],
++                   [ q{my @k = keys %^;}, q{Magic=%^} ], [ q{%^ = (a => 1);}, q{Magic=%^} ],
++                   [ q{my $r = \%^;}, q{Magic=%^} ], [ q{my @l = (%^);}, q{Magic=%^} ],
++                   [ q{print %^W;}, q{Magic=%^W} ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
++    }
++}
++# The controls: %^H was right; $^W and $^ are scalars; after a term the %
++# is the modulus.
++for my $case ( [ q{my %x = %^H;}, q{Magic=%^H} ], [ q{%^H = ();}, q{Magic=%^H} ],
++               [ q{my $w = $^W;}, q{Magic=$^W} ], [ q{my $t = $^;}, q{Magic=$^} ],
++               [ q{my $n = $x %2;}, q{Operator=%} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+
