@@ -209,4 +209,16 @@ both_agree(q{{;} print "a"; { ; } print "b"; {; my $x = 1; print "c$x" } {; loca
 both_agree(q{sub f { {; a => 1 } } my @r = f(); print scalar(@r), " ", ref($r[0]), "|"; sub ok { print $_[0] ? "m" : "n", "\n" } $_ = "x"; ok /x/, 1;},
            '§70: sub f { {; a => 1 } } returns the pair, after a reparse too');
 
+# §71 #2774 (s543f, group BE): a / after a builtin that takes an operand starts a match -- the ;
+# and the # inside `sin / 25 ; # /` are pattern text (the die runs; it was commented out, a silent
+# wrong), and PExpr's term walker takes the match as the named unary's operand (`sin /;/, 9`,
+# `lc /A;/i ? ...` were drops).  `no warnings`: perl's default "ambiguous" warning on stderr.
+both_agree(q{no warnings; $_ = "x 25 ; # y"; eval { my $r = sin / 25 ; # / ; die "regex\n" }; my $d = $@; $_ = "a;b"; my @r = (sin /;/, 9); print $d eq "regex\n" ? "died " : "ran ", "@r ", (lc /A;/i ? "y" : "n"), "\n";},
+           '§71: sin / 25 ; # / ; die runs the die; sin /;/, 9 and lc /A;/i ? are the matches');
+# ... in the filehandle slot of print $fh /x/ (no space after the /) the list starts; print/;/
+# without a space, /=/ after print, 1 while /x/g; the controls: shift // 7 is the defined-or, a
+# method called split divides, time / time divides.
+both_agree(q{$_ = "x=y;x"; my $fh = \*STDOUT; print $fh /x/, "|"; print /=/ ? "eq" : "no", "|"; print/;/; my $n = 0; $n++ while /x/g; print "|$n|", join("-", split //, "ab"), "|"; sub f { my $x = shift // 7; $x } print f(), f(3), "|"; package P; sub new { bless {}, shift } sub split { 6 } package main; print P->new->split / 3, " ", time / time, "\n";},
+           '§71: print $fh /x/, print /=/, print/;/, 1 while /x/g match; shift // 7, ->split / 3, time / time');
+
 done_testing();

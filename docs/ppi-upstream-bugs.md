@@ -518,6 +518,13 @@ for my ($q,$r) (@l) { BODY }  =>  my @L = map \$_, (@l); my $I = 0;
 
 ## 11. `/PATTERN/` after a paren-less WORD is tokenized as division  [CONFIRMED 1.291]
 
+**SPLIT (s543f).**  The half after a BUILTIN that takes an operand (`print /x/`, `when /x/`,
+`1 while /x/g`, `sin /;/`) is §71, FIXED on PCL's branch (group BE).  What stays here is the half
+after a USER'S word (`ok /x/`, `is`, `like`): perl reads a match there only when a sub of that name
+is declared before the line, so only a declaration decides -- PCL's `_repair_word_match` (the
+prototype table), registry row §11 (open), the twins' §11 rows 9 / 13 / 15 / 16 (TODO on the
+branch).
+
 **Perl:** after a bareword that is not a known unary operator, the tokenizer
 expects a TERM, so `/` starts a match against `$_`:
 
@@ -3133,6 +3140,57 @@ vendor/PPI -- a Block from the look-ahead is the same bare block as its fall-thr
 pending (`PR-BD.md`).  Guard: the registry row §70 (inverse: it fails on 1.291 and on main's
 vendored lib) and `Pl/t/ppi-token-rows-01.t` (§70 row, end to end; it passes on main too, because of
 the rewrite above); the checker's `statement-not-ended` after a bare block now names §70.
+
+---
+
+## 71. `/PATTERN/` after a BUILTIN that takes an operand is tokenized as division (§11's builtin half)  [CONFIRMED 1.291 and PCL's branch 842e6bbd]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `1`, then `died=yes`):
+
+```perl
+$_ = "a;b"; print /;/, "\n";
+$_ = "x 25 ; # y";
+eval { my $r = sin / 25 ; # / ; die "regex\n" }; print "died=", ($@ ? "yes" : "no"), "\n";
+```
+
+**PPI tokens** (1.291 and the branch before group BE): `Word(print) Operator(/) Structure(;)
+Regexp::Match(/, "\n";…)` -- the `;` inside the pattern ends the statement and the closing `/` opens
+a match that runs to the next `/`; on the `sin` line the `#` starts a Comment and the `die` is
+commented out.  **Expected**: `Word(print) Regexp::Match(/;/)`, `Word(sin) Regexp::Match(/ 25 ; # /)`.
+perl expects a TERM after a builtin that takes an operand (a list operator, a named unary, the
+`when` / `while` / `until` / `for` modifiers), and there a `/` starts a match (toke.c `yyl_slash`:
+`scan_pat` unless `PL_expect` is `XOPERATOR`).  PPI's `/` arm in `Token/Whitespace.pm` asked a word
+list of its own (`return split if unless grep map`) and read every other builtin's `/` as a division;
+the rule the `<` (§14, group AH), `x` (§66, AY) and `~~` (§21, E) arms already ask is
+`PPI::Tokenizer::_term_expected`.  Two neighbours of the same question, both perl's:
+
+* after a builtin whose operand may be left out -- `getc pop pos readline readlink readpipe shift
+  undef umask`, toke.c's `UNIDOR` (`XTERMORDORDOR`) -- a `//` is the defined-or
+  (`my $x = shift // 7`); after every other builtin a `//` is an empty match (`split //, $s`);
+* in the filehandle slot of `print $fh LIST` (whitespace before the `/`, none after it) a `/`
+  starts the list (toke.c, case `'$'`: "e.g. print $fh /.../"); `print $fh / 2` divides.
+
+After a method name (`P->new->split / 3`, a match on 1.291 because `split` was in the list), a builtin
+that takes no operand (`time / 2`) or a user's word the `/` divides -- the user word is §11.
+
+**Impact on PCL** (probe table `scratch/s543f/p1` of batch s543f, 42 rows perl -> main -> tree):
+`print /;/`, `print/x/` (the repair re-spelled it `printmmmm…/x/`), `print $fh /x/`, `sin /;/, 9`,
+`print /=/ ? …` and `print // ? …` were whole-statement DROPS on main; `sin / 25 ; # / ; die` was
+a SILENT WRONG (the die commented out, task #2774); `P->new->split / 3` dropped.  PCL's
+`_repair_word_match` (§11) re-lexed the `when` / `while` shapes of t/op/switch.t and
+t/re/pat_advanced.t and the rest of these shapes was out of its reach.
+
+**FIXED on PCL's PPI branch** (s543f: group BE, commit `d27d0c37` on branch `pcl-s543f`, vendored as
+vendor/PPI -- the `/` arm asks `_term_expected` after a Word, the `UNIDOR` words keep `//`, the
+print-filehandle slot reads perl's whitespace rule; `_term_expected` learned that a Word spelled like
+an operator or a quote-like operator, `x` `lt` `s` `y`, is a user's sub); upstream PR: pending
+(`PR-BE.md`).  The two `while` rows of §11 pass with it.  PCL halves: `_repair_word_match` NARROWED
+(no code deleted: on the branch a builtin's pattern is one Regexp::Match, so the pass now fires only
+after a user word -- s543d's count 4 files / 12 fires, `when` `while` `ok`, -> FIRES-AFTER); PExpr's
+term walker (`_term_extent`) takes a Regexp token as a primary, so a named unary's match operand
+followed by `,` or `?` lowers (`sin /;/, 9` and `lc /A/i ? …` died "term walker declined", also with
+`m/…/` on main).  Guard: the registry row §71 (inverse: fails on 1.291 and on main's vendored lib),
+the twins' §71 rows, `Pl/t/ppi-token-rows-01.t` (§71 rows, end to end; they fail on main).
 
 ---
 

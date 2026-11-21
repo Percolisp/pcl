@@ -2353,6 +2353,10 @@ sub _term_extent {
       || $r =~ /^PPI::Token::Number/
       || $r =~ /^PPI::Token::Quote::/
       || $r =~ /^PPI::Token::QuoteLike::/
+      # A match, a substitution or a transliteration is self-delimited like
+      # qr// (`sin /;/, 9`, `lc /A/i ? 1 : 0`: PCL's PPI reads the pattern
+      # after a builtin since group BE, docs/ppi-upstream-bugs.md §71).
+      || $r =~ /^PPI::Token::Regexp::/
       || $r eq 'PPI::Token::HereDoc'
       || $r eq 'PPI::Structure::Block'
       || $r eq 'PPI::Structure::Constructor'

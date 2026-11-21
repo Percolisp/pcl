@@ -131,15 +131,12 @@ my %CLASSMAP = (
 	32       => 'Whitespace',             # A normal space
 );
 
-# Words (functions and keywords) after which a following / is
-# almost certainly going to be a regex
-my %MATCHWORD = map { $_ => 1 } qw{
-  return
-  split
-  if
-  unless
-  grep
-  map
+# The builtins after which perl reads // as the defined-or although it
+# expects a term (toke.c UNIDOR: PL_expect = XTERMORDORDOR), so that
+# my $x = shift // 7 works.  After every other builtin that takes an
+# operand a // is an empty match (split //, $s).
+my %UNIDOR = map { $_ => 1 } qw{
+  getc pop pos readline readlink readpipe shift undef umask
 };
 
 sub __TOKENIZER__on_line_start {
@@ -384,8 +381,14 @@ sub __TOKENIZER__on_char {
 		return 'Operator' if $prev->isa('PPI::Token::Operator') and $t->_after_term;
 		return 'Regexp::Match' if $prev->isa('PPI::Token::Operator');
 
-		# After a symbol
-		return 'Operator' if $prev->isa('PPI::Token::Symbol');
+		# After a symbol a term has ended -- except in the filehandle slot
+		# of print $fh LIST, where a / with no space, = or / after it
+		# starts the list (toke.c, case '$': print $fh /.../)
+		if ( $prev->isa('PPI::Token::Symbol') ) {
+			return 'Operator' if !$t->_after_scalar_filehandle;
+			return substr( $t->{line}, $t->{line_cursor} + 1, 1 ) =~ m{\A[^\s=/]\z}
+				? 'Regexp::Match' : 'Operator';
+		}
 		if ( $prec eq ']' and $prev->isa('PPI::Token::Structure') ) {
 			return 'Operator';
 		}
@@ -414,12 +417,18 @@ sub __TOKENIZER__on_char {
 		# (BEGIN { } /x/, grep { } /x/), a term starts
 		return 'Regexp::Match' if $t->_after_statement_block;
 
-		# Functions and keywords
-		if (
-			$MATCHWORD{$prec}
-			and
-			$prev->isa('PPI::Token::Word')
-		) {
+		# After a builtin that takes an operand perl expects a term, and a
+		# / starts a match (toke.c yyl_slash: scan_pat where PL_expect is
+		# not XOPERATOR) -- print /x/, 1 while /x/g, sin /;/, split /,/.
+		# Except a // after a builtin whose operand may be left out:
+		# perl expects a term or the defined-or there (XTERMORDORDOR,
+		# toke.c UNIDOR), so my $x = shift // 7 is the defined-or.  After
+		# a method name, a builtin that takes no operand (time / 2) or a
+		# user's word _term_expected says no, and the / divides.
+		if ( $prev->isa('PPI::Token::Word') and $t->_term_expected ) {
+			( my $word = $prec ) =~ s/^CORE:://;
+			return 'Operator' if $UNIDOR{$word}
+				and substr( $t->{line}, $t->{line_cursor} + 1, 1 ) eq '/';
 			return 'Regexp::Match';
 		}
 

@@ -1,13 +1,13 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s543f
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: 842e6bbdc61d9c86ab01b76826b78a94bcd83ba3
-lib-tree: 460d3193e8163956a5eafde2e918a2a1611e626e
+branch: pcl-s543f
+branch-sha: d27d0c3721be641b990ea04f576ac3af24c3ffbe
+lib-tree: f7b484e16c1d293373692e86c24c0dffdcecc56c
 date: 2026-11-21
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -80,6 +80,7 @@ fix: BA §65 66e690d2 Document: keep_line_endings tokenizes the source as it is
 fix: BB §68 b341df79 Singletons: __FILE__, __LINE__, __PACKAGE__, __SUB__, __CLASS__ end a term
 fix: BC §69 eebdaacc Operator: << NAME after a term is the left shift
 fix: BD §70 842e6bbd Lexer: a bare block opened by { ; ends its statement
+fix: BE §71 d27d0c37 Whitespace: / after a builtin that takes an operand starts a match
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -219,3 +220,5 @@ commit: 71e44672 TODO tests: << after a term is the left shift
 commit: eebdaacc Operator: << NAME after a term is the left shift
 commit: 59e66c8a TODO tests: a bare block opened by { ; ends its statement
 commit: 842e6bbd Lexer: a bare block opened by { ; ends its statement
+commit: 40b87033 TODO tests: / after a builtin that takes an operand starts a match
+commit: d27d0c37 Whitespace: / after a builtin that takes an operand starts a match

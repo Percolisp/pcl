@@ -1027,6 +1027,19 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => [],
    tasks => [937] },
+ { id => 71, kind => 'token', dump => 'tokens',
+   title => '`/PATTERN/` after a BUILTIN that takes an operand (`print /x/`, `sin /;/`, `1 while /x/g`, `print "m" when /x/`) is tokenized as DIVISION -- the builtin half of §11, whose user-sub half (`ok /x/`) only a declaration decides',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'slash-as-division', shape => 'Operator / right after a Word that is a builtin taking an operand' },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_word_match', changed => 'NARROWED, no code deleted: the repair re-lexed the `/` after `when` and `while` (t/op/switch.t, t/re/pat_advanced.t); on the branch a builtin\'s pattern is one Regexp::Match, so the repair now fires only after a user word (ok, is, like -- the prototype table, §11); print /;/, sin /;/, print $fh /x/ and print/x/ were DROPPED (the repair spelled the last printmmmm/x/), and `sin / 25 ; # / ; die` was a SILENT WRONG (the die commented out, #2774)', commit => 'd27d0c37', group => 'BE', pr => undef },
+   repro => '$_ = "a;b"; print /;/, "\\n";',
+   perl => "1\n",
+   tokens => {
+     got  => ['Magic=$_', 'Operator==', 'Quote::Double="a;b"', 'Structure=;', 'Word=print', 'Operator=/', 'Structure=;', 'Regexp::Match=/, "\\n";'],
+     want => ['Magic=$_', 'Operator==', 'Quote::Double="a;b"', 'Structure=;', 'Word=print', 'Regexp::Match=/;/', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => ['t/op/switch.t', 't/re/pat_advanced.t'],
+   tasks => [2774, 351] },
 );
 
 # The one accessor.

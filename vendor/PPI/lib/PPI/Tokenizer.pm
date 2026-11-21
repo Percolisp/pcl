@@ -87,7 +87,7 @@ use PPI::Token      ();
 use PPI::Exception  ();
 use PPI::Exception::ParserRejection ();
 use PPI::Document ();
-use PPI::Singletons qw' %KEYWORDS %NO_OPERAND ';
+use PPI::Singletons qw' %KEYWORDS %NO_OPERAND %OPERATOR %QUOTELIKE ';
 
 our $VERSION = '1.292';
 
@@ -1186,6 +1186,10 @@ sub _term_expected {
 	return '' if $prevprev and $prevprev->isa('PPI::Token::Operator') and $prevprev->content eq '->';
 	my $word = $prev->content;
 	$word =~ s/^CORE:://;
+	# A word spelled like an operator or a quote-like operator -- x, lt,
+	# s, y -- is a user's sub where PPI makes it a Word (toke.c: in
+	# term position KEY_x goes to just_a_word)
+	return '' if $OPERATOR{$word} or $QUOTELIKE{$word};
 	return $KEYWORDS{$word} && !$NO_OPERAND{$word};
 }
 

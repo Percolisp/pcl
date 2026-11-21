@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 522;
+use Test::More tests => 559;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -184,6 +184,7 @@ sub toks {
 # because a `(…)` group inside the pattern puts PPI back in term position — so
 # the CLOSING delimiter starts a match of its own and swallows the rest of the
 # FILE into one token.
+# (The modifiers are builtins that take an operand: fixed with PCL §71.)
 {
     my $src = '1 while /(a+b?)x/g;' . "\n" . 'print "next\n";';
     my $doc = PPI::Document->new(\$src);
@@ -2337,4 +2338,55 @@ for my $case ( [ q{{} print 1;}, 'PPI::Structure::Constructor' ], [ qq{{ # c\n} 
     my ( $code, $want ) = @$case;
     my @c = bracket_classes( $code, '{' );
     is( $c[0], $want, squash($code) . ": $want (control)" );
+}
+
+# §71 -- / after a BUILTIN that takes an operand starts a match (the builtin
+# half of §11): perl expects a term after print, sin, length, join, when,
+# while, until, for, ... (toke.c yyl_slash: scan_pat unless PL_expect is
+# XOPERATOR), so `$_ = "x"; print /x/, "\n";` prints 1, and
+# `sin / 25 ; # / ; die "x";` matches ` 25 ; # ` and then dies.  In the
+# filehandle slot of print $fh /x/ (whitespace before the /, none after)
+# the / starts the list too.  After a method name the / divides, also
+# when the method is called split or map.
+{
+    for my $case ( [ q{print /x/, 1;}, q{/x/} ], [ q{print/x/;}, q{/x/} ],
+                   [ q{print "m" when /x/;}, q{/x/} ], [ q{$n++ while /x/g;}, q{/x/g} ],
+                   [ q{$n++ until /x/;}, q{/x/} ], [ q{push @r, $_ for /(\w)/g;}, q{/(\w)/g} ],
+                   [ q{my @r = (sin /;/, 9);}, q{/;/} ], [ q{sin / 25 ; # / ; die "x";}, q{/ 25 ; # /} ],
+                   [ q{my $n = length /b/;}, q{/b/} ], [ q{print lc /A/i;}, q{/A/i} ],
+                   [ q{print join /,/, @a;}, q{/,/} ], [ q{print /=/ ? 1 : 0;}, q{/=/} ],
+                   [ q{print // ? 1 : 0;}, q{//} ], [ q{print CORE::print /x/;}, q{/x/} ],
+                   [ q{print $fh /x/, 1;}, q{/x/} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq "Regexp::Match=$want", @t ), "$code: the match $want" ) or diag "got: @t";
+    }
+    is_deeply( [ stmts(qq{sin / 25 ; # / ; die "x";\nprint 1;\n}) ],
+               [ 'Statement: sin / 25 ; # / ;', 'Statement: die "x";', 'Statement: print 1;' ],
+               'sin / 25 ; # / ; die: the ; and the # are pattern text' );
+    for my $code ( q{my $n = P->new->split / 3;}, q{my $n = $o->map / 2;} ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq q{Operator=/}, @t ) && !grep( /^Regexp::Match=/, @t ), "$code: a method's value divided" )
+            or diag "got: @t";
+    }
+}
+# The controls: a / after a builtin that takes no operand, after a method
+# name, a variable, a subscript or print $fh with a space after the / is a
+# division; a // after a builtin whose operand may be left out (shift, pop,
+# undef, pos: toke.c UNIDOR, XTERMORDORDOR) is the defined-or; split, grep,
+# map, return and the if / unless modifiers were right; after a word spelled
+# like an operator -- x, a user's sub, here a constant -- the / divides.
+for my $case ( [ q{my $t = time / 2;}, q{Operator=/} ], [ q{my $n = wantarray / 2;}, q{Operator=/} ],
+               [ q{my $n = $o->print / 2;}, q{Operator=/} ], [ q{my $n = $h{a} / 2;}, q{Operator=/} ],
+               [ q{print $fh / 2;}, q{Operator=/} ], [ q{$x /= 2;}, q{Operator=/=} ],
+               [ q{my $x = shift // 7;}, q{Operator=//} ], [ q{my $x = pop // 5;}, q{Operator=//} ],
+               [ q{my $x = undef // 1;}, q{Operator=//} ], [ q{my $p = pos // 0;}, q{Operator=//} ],
+               [ q{my $x = CORE::shift // 2;}, q{Operator=//} ],
+               [ q{my @c = split //, $s;}, q{Regexp::Match=//} ], [ q{my @c = split /,/, $s;}, q{Regexp::Match=/,/} ],
+               [ q{my @g = grep /x/, @a;}, q{Regexp::Match=/x/} ], [ q{my @m = map /(x)/, @a;}, q{Regexp::Match=/(x)/} ],
+               [ q{return /x/;}, q{Regexp::Match=/x/} ], [ q{print 1 if /x/;}, q{Regexp::Match=/x/} ],
+               [ q{print 1 unless /x/;}, q{Regexp::Match=/x/} ], [ q{my $n = 2 * x / 2;}, q{Operator=/} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
 }

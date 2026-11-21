@@ -7440,9 +7440,14 @@ sub _repair_punct_hash_name {
 #     ok /foo/, "desc";   =>  Word(ok) Operator(/) Word(foo) Operator(/) …
 #
 # so the statement is dropped whole, and with a modifier letter (`ok /foo/x`)
-# it compiles to real division and dies at run time.  PPI gets it right after
-# `grep`, `return`, `(` and `=`, and wrong after every other Word — including
-# core list operators (`print /foo/`).
+# it compiles to real division and dies at run time.
+#
+# THE USER-WORD HALF ONLY (s543f).  After a BUILTIN that takes an operand --
+# `print /foo/`, `when /…/`, `1 while /…/g`, `sin /;/` -- PCL's PPI reads the
+# whole match itself since group BE (§71: the `/` arm asks `_term_expected`),
+# so this pass never sees one; it fires after a USER'S word (`ok`, `is`,
+# `like`, imported or declared), where only a declaration says the word takes
+# a list -- the prototype table's question, never PPI's.
 #
 # THE CONDITION IS PERL'S, and it is a NEGATIVE, which is what makes it safe:
 # perl reads `/` after a bareword as division only when the word is a TERM (a
@@ -7453,8 +7458,9 @@ sub _repair_punct_hash_name {
 # `use constant PI => 6` read it as division).  PCL assumes valid Perl input
 # (principle 9), so "not a term" is exactly the right test.
 #
-# Measured over both populations (657 files, 28 `WORD /` sites): the shapes are
-# `ok`, `while` and `when` — all repairs — plus one that must NOT be touched,
+# Measured over both populations (657 files, 28 `WORD /` sites): the shapes were
+# `ok`, `while` and `when` (the last two are §71's now) — all repairs — plus one
+# that must NOT be touched,
 # `map { … } <op/*>`, where PPI derails a GLOB into `< Word / * >`.  Hence the
 # `<` guard, which no amount of reading would have suggested.
 #
