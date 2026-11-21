@@ -4715,7 +4715,9 @@ named `DESTROY` or `AUTOLOAD` (the gate `*p-destroy-live*`, opened by
 `%p-note-sub-install`, the one place every named-sub install passes; it never
 closes).  An EMPTY `sub DESTROY {}` / `sub AUTOLOAD {}` (the AUTOLOAD-guard
 idiom; the p-sub macro recognises the body `(p-args-body (block nil
-(p-return-empty)))`) opens nothing.  The registry is WEAK: an object the
+LOC... (p-return-empty)))`, LOC only the LEADING location stores `(p-file
+...)` / `(p-line N)` that line tracking writes, §6.3b, #5107) opens
+nothing.  The registry is WEAK: an object the
 garbage collector has reclaimed is gone and gets no `DESTROY` (that includes
 an object whose only holder is a variable the program never reads again —
 SBCL keeps no dead variable's value alive).  At the hook's first step the

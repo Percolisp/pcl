@@ -173,13 +173,20 @@ rows, not a crash.  At these sizes the transpile and the compile dominate,
 and the extra text (+7.5 % on the everyday programs, +14.1 % on the
 corpus) does not show beyond the runs' spread.
 
-**One `cl/` shape match the flip defeated, NOT fixed here (#5107)**: `p-sub`
-recognises an empty `DESTROY` / `AUTOLOAD` by its exact body
-`(p-args-body (block nil (p-return-empty)))`; the leading `(p-file …)` hides
-it, so `sub DESTROY {}` opens the global-destruction gate (+28 ns every
+**One `cl/` shape match the flip defeated, FIXED in s543a (#5107)**: `p-sub`
+recognised an empty `DESTROY` / `AUTOLOAD` by its exact body
+`(p-args-body (block nil (p-return-empty)))`; the leading `(p-file …)` hid
+it, so `sub DESTROY {}` opened the global-destruction gate (+28 ns every
 bless, the empty sub called once per live object at exit; output
-unchanged).  The strip comparison below proves the emitted TEXT; a macro
-that matches its argument's shape runs after it.
+unchanged) until `%p-empty-sub-body-p` read the body through its leading
+location stores -- measured with a `*macroexpand-hook*`, the two other
+body-shape matches (`%p-let-presize`, `p-void-ctx`'s sole `eval {}`) fire as
+on the base.  The strip comparison below proves the emitted TEXT; a macro
+that matches its argument's shape runs after it.  Six of the bench rows
+re-run after the fix (`bench-fix.log`; none holds an empty `DESTROY`, so the
+fix cannot move them): emptysub +3.6 %, methinh +1.9 % -- inside the band,
+so their first numbers were the runs' spread -- and blessnew -5.2 %,
+blessdes -4.6 %, faster again (reproducible; cause not found).
 
 In the emitted TEXT the flip defeated one optimisation, found by stripping the location forms
 from the default emission and comparing it with `PCL_OPT=-line-track` over
