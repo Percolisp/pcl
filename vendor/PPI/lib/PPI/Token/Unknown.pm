@@ -246,8 +246,12 @@ sub __TOKENIZER__on_char {
 			}
 		}
 
-		# Is it a number?
-		if ( $char =~ /\d/ ) {
+		# Is it a number?  Where perl expects a term (%12 = (...),
+		# print %12, keys %12) a digit run names a hash, as @12 names
+		# an array (toke.c: under XTERM a % starts scan_ident, and a
+		# digit run is an identifier); anywhere else it is the modulus
+		# (7%12, $x %12, time %12, K %12 after a user's constant).
+		if ( $char =~ /\d/ and !$t->_term_expected ) {
 			# bitwise operator
 			$t->{class} = $t->{token}->set_class( 'Operator' );
 			return $t->_finalize_token->__TOKENIZER__on_char( $t );

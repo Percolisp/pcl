@@ -1152,6 +1152,21 @@ print "3 never-written=[", r(), "]\n";
 print "4 cap=$1\n";
 });
 
+# ── s543f #1680: the HASH twin.  `%12` where perl expects a term names the
+# package hash 12 (PCL's PPI lexed `%` + Number -- a modulus with no left
+# operand, a whole-statement DROP -- until group BF, docs/ppi-upstream-bugs.md
+# §72).  INVERSE GUARDS in the same snippet: `7%12`, `$x %12`, a constant's
+# `K %12` and `time %12` stay the modulus.
+test_transpile("all-digit HASH names are ordinary globals, %12 (#1680)", q{
+no strict; no warnings;
+%12 = (a => 1, b => 2);
+print "1 ", join(",", sort keys %12), " ", (%12 ? "t" : "f"), " ", scalar(@{[ %12 ]}), "\n";
+my $r = \%12; print "2 $r->{a} $12{b} ", join(",", sort keys %{12}), "\n";
+sub f { scalar @_ } print "3 ", f(%12), "\n";
+use constant K => 29; my $x = 17;
+print "4 ", 7%12, " ", $x %12, " ", K %12, " ", (time %12 < 12 ? "mod" : "?"), "\n";
+});
+
 # Task #2286 (s495f): List::Util::pairs builds objects BLESSED into
 # List::Util::_Pair (->key / ->value / ->TO_JSON) and, like every XS list
 # returner, answers the LAST element in scalar context -- the shim answered

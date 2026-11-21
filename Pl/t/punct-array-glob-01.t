@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 47;
+plan tests => 48;
 
 sub write_pl {
     my ($code) = @_;
@@ -802,8 +802,9 @@ PL
 
 # §24 FIXED IN PCL'S PPI (s527b, group D): every punctuation-named array and
 # hash is one Magic token, so PCL's array merge and the hash Cast arm are
-# deleted.  `%^` stays two tokens in PPI (caret names start there) and PCL's
-# _repair_punct_hash_name keeps it.
+# deleted.  `%^` was the one hash PPI left as two tokens (caret names start
+# there) until s543f's group BH (§74); _repair_punct_hash_name's caret arm that
+# re-spelled it `%{^}` is deleted, and the `%^` below is PPI's one Magic.
 {
     my $prog = <<'PL';
 no strict; no warnings;
@@ -834,6 +835,21 @@ print N %.5e1, " ", N %~$y, " ", g %.3e1, " ", (time %.1e1 < 10 ? "ok" : "no"), 
 PL
     is(run_cl($prog), run_perl($prog),
        '§24: % after a declared term word is modulo, not a punctuation hash (perl oracle)');
+}
+# §74 (s543f, group BH): `%^` where perl expects a term is ONE Magic token, in
+# every operand position -- a ternary's condition, a reference, a list, a
+# user sub's argument -- and `%^W` is the hash of the caret variable $^W (a
+# DROP before: PPI gave `% ^ W`).
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+sub foo { scalar @_ }
+%^ = (k => 1); my $n = %^ ? 1 : 0; my $r = \%^;
+print "$n ", join(",", keys %^), " $r->{k} ", scalar(@{[ %^ ]}), " ", foo(%^), "|";
+%^W = (w => 2); print join(",", keys %^W), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '§74: %^ is the punctuation hash in operand position, %^W a caret hash (perl oracle)');
 }
 
 # #3982 (s532a): `"$#{+}"` / `"$#{-}"` in a STRING -- the braced punctuation

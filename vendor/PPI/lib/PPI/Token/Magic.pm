@@ -139,15 +139,14 @@ sub __TOKENIZER__on_char {
 		}
 	} elsif ($c =~ /^%\^/) {
 		return 1 if $c eq '%^';
-		# It's an escaped char magic... maybe ( like %^H )
-		if ($MAGIC{$c}) {
+		# The % arm starts %^ only where a term is expected, and there it
+		# is a hash: of a caret variable when a caret name's character
+		# follows (%^H, %^W -- one token, as $^W is), else the punctuation
+		# hash %^ itself, as %- and %+ are one token (perl -e '%^ = (a,
+		# 1); print keys %^' prints a)
+		if ( $c =~ /^%\^[A-Z\[\]^_?\\]\z/ ) {
 			$t->{token}->{content} = $c;
 			$t->{line_cursor}++;
-		} else {
-			# Back off, treat '%' as an operator
-			chop $t->{token}->{content};
-			bless $t->{token}, $t->{class} = 'PPI::Token::Operator';
-			$t->{line_cursor}--;
 		}
 	}
 

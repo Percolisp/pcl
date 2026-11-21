@@ -385,13 +385,18 @@ sub __current_token_is_attribute {
 	);
 }
 
-# The class of a lone `_`: right after `sub` it names the sub
-# (sub _ { ... }); anywhere else it is the stat filehandle.
+# The class of a lone `_`.  perl reads _ as a plain word (toke.c); the
+# bareword _ is the stat filehandle only as the operand of a filetest,
+# stat or lstat (op.c ck_ftst): -e _, -f -w _, stat _, lstat(_).
+# Anywhere else it is a Word -- a sub's name (sub _ { ... }, _("text"),
+# sort _ @l), a method's after ->, a string (_ => 1, $h{_}).
 sub __underscore_class {
 	my ( $t ) = @_;
-	my ( $prev ) = $t->_previous_significant_tokens(1);
-	return 'Word' if $prev and $prev->isa('PPI::Token::Word') and $prev->content eq 'sub';
-	return 'Magic';
+	my ( $prev, $prevprev ) = $t->_previous_significant_tokens(2);
+	( $prev ) = ( $prevprev ) if $prev and $prev->isa('PPI::Token::Structure') and $prev->content eq '(';
+	return 'Magic' if $prev and $prev->isa('PPI::Token::Operator') and $prev->content =~ /^-[a-zA-Z]\z/;
+	return 'Magic' if $prev and $prev->isa('PPI::Token::Word') and $prev->content =~ /^(?:CORE::)?l?stat\z/;
+	return 'Word';
 }
 
 1;

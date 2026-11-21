@@ -221,4 +221,24 @@ both_agree(q{no warnings; $_ = "x 25 ; # y"; eval { my $r = sin / 25 ; # / ; die
 both_agree(q{$_ = "x=y;x"; my $fh = \*STDOUT; print $fh /x/, "|"; print /=/ ? "eq" : "no", "|"; print/;/; my $n = 0; $n++ while /x/g; print "|$n|", join("-", split //, "ab"), "|"; sub f { my $x = shift // 7; $x } print f(), f(3), "|"; package P; sub new { bless {}, shift } sub split { 6 } package main; print P->new->split / 3, " ", time / time, "\n";},
            '§71: print $fh /x/, print /=/, print/;/, 1 while /x/g match; shift // 7, ->split / 3, time / time');
 
+# §73 #3922 (s543f, group BG): a lone _ is the stat filehandle only as the operand of a filetest,
+# stat or lstat; elsewhere it is a word -- a call of the sub named _ (the gettext idiom, a DROP
+# before), a fat-comma key and $h{_} (the key read %pcl-stat-cache, a silent wrong), a bareword
+# value, the comparison sub of sort _, a method set through the glob.  The filehandle beside it.
+both_agree(q{sub _ { "<@_>" } print _(), _("a"), _ ("b"), "|"; my %h = (_ => 1); print join(",", keys %h), $h{_}, "|"; stat "/"; print -e _ ? "e" : "n", -d _ ? "d" : "n", (stat _)[2] ? "s" : "z", "\n";},
+           '§73: _(), _("a"), _ ("b") call sub _; (_ => 1) and $h{_} are the key "_"; -e _, -d _, stat _ the filehandle');
+both_agree(q{no strict; my %h = (_ => 5, a => 6); print join(",", @h{_, "a"}), "|"; my $v = _; print "$v|"; package Q; *Q::_ = sub { "m" }; package main; print Q->_(), "\n";},
+           '§73: @h{_, "a"} reads the key "_", my $v = _ is the string; Q->_() calls the method named _');
+both_agree(q{sub _ { $a <=> $b } my @l = sort _ 3, 1, 2; print "@l\n";},
+           '§73: sort _ LIST sorts with the sub named _');
+
+# The closes of s543f (member 5) -- reproducers that equal perl on main since an earlier PPI group:
+# #2670 (§35, group N): a filetest right after a BEGIN block on the same line is the filetest.
+both_agree(q{BEGIN { 1 } -e _; print "x\n";},
+           '#2670: BEGIN { 1 } -e _; is a filetest of the stat cache, not minus a call of e');
+# #3805: `$#+` / `$#-` are PPI's Magic tokens by design; PCL compiles them, and the braced
+# spellings, as the last index of @+ / @-.
+both_agree(q{"abc" =~ /(a)(b)(c)/; print "$#+ $#- $#{+} $#{-}\n";},
+           '#3805: $#+ $#- $#{+} $#{-} are the last indexes of @+ and @-');
+
 done_testing();

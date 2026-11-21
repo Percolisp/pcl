@@ -1170,6 +1170,23 @@ print "div=", gz / 2, "\n";
 print "done\n";
 ');
 
+# ── #458 (closed by s543f): the four quantifier spellings the repair once
+# DECLINED -- `ok /a*/`, `/a+/`, `/a?/` (the swallowed close) and pat.t:106's
+# `/a*b?c*/` with a `qq [...]` description -- each a separate statement before
+# a following one that must still run.  They equal perl since #872 / #940's
+# close scan; the row keeps them so.
+test_transpile('#458: the WORD-/ repair takes the quantified patterns /a*/ /a+/ /a?/ /a*b?c*/', '
+sub ok { print "ok:", ($_[0] ? 1 : 0), ":$_[1]\n" }
+$_ = "aaaccc";
+ok /a/,  "d1";
+ok /a*/, "d2";
+ok /a+/, "d3";
+ok /a?/, "d4";
+$_ = "aaabccc";
+ok /a*b?c*/, qq [x];
+print "AFTER\n";
+');
+
 # ── #940: the same derail, when the pattern STARTS WITH A QUOTE-LIKE LETTER ──
 # `myok /q*/, "four";` — once PPI has read the `/` as division it is in TERM
 # position and reads `q*…*` as a Quote::Literal running to the next `*` or to

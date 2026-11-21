@@ -1418,7 +1418,7 @@ row in `docs/ppi-bug-report.t`.
 
 ## 24. A PUNCTUATION-named array `@?` is split into Cast + Operator  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527a: group D, commit `6876d6eb` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-D.md`).
+**FIXED on PCL's PPI branch** (s527a: group D, commit `6876d6eb` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-D.md`).  The one punctuation hash the group left as two tokens, `%^`, is §74 (s543f, group BH).
 
 perl lets any punctuation character name a global, and real code uses it —
 `t/re/subst.t:346` is `ok( ! @?, 'parsing of split subst with comment' );`.
@@ -3191,6 +3191,97 @@ term walker (`_term_extent`) takes a Regexp token as a primary, so a named unary
 followed by `,` or `?` lowers (`sin /;/, 9` and `lc /A/i ? …` died "term walker declined", also with
 `m/…/` on main).  Guard: the registry row §71 (inverse: fails on 1.291 and on main's vendored lib),
 the twins' §71 rows, `Pl/t/ppi-token-rows-01.t` (§71 rows, end to end; they fail on main).
+
+---
+
+## 72. `%` and a digit run where perl expects a TERM is lexed as the MODULUS: the hash `%12` (task #1680)  [CONFIRMED 1.291 and PCL's branch 842e6bbd]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `a`):
+
+```perl
+no strict; %12 = (a => 1); print join(",", keys %12), "\n";
+```
+
+**PPI tokens**: `Operator(%) Number(12) Operator(=) …` and `Word(keys) Operator(%) Number(12)`.
+**Expected**: `Symbol(%12)` both times, as `@12` is one token.  perl names a package hash with a digit
+run as it names an array (`%12`, `@119797`; only `$12` is a capture variable): under `XTERM` a `%`
+starts `scan_ident` and a digit run is an identifier (toke.c `yyl_percent`); after a term it is the
+modulus.  PPI's `%` arm in `Token/Unknown.pm` made an Operator of every `%` that a digit follows.  The
+neighbour PPI did not know either: a CAST takes a term, so `\%12`, `\*1` (the glob) and `\<STDIN>`
+(a readline's value) lexed as a modulus, a multiplication and a less-than.
+
+**Impact on PCL**: `%12 = (a => 1)` was a whole-statement DROP (#1680, the hash twin of #1650's
+`@119797`); `keys %12`, `\%12`, `scalar(%12)`, `print %12`, `f(%12)` the same.
+
+**FIXED on PCL's PPI branch** (s543f: group BF, commit `0f8b59b4` on branch `pcl-s543f`, vendored as
+vendor/PPI -- the digit test asks `_term_expected`, the rule of the `<` `x` `~~` `/` arms: where a term
+is expected `%12` falls through to the arm's Symbol test as `%h` does; after a term, after `time`, after
+a user's word (a constant, for all PPI knows: `K %12`) and in `print $fh %12` it stays the modulus.
+`_opcontext` reads a Cast as an operand context, and `_ends_term_at` reads only the operator entries of
+its class table); upstream PR: pending (`PR-BF.md`).  PCL needed no change (it lowers the Symbol as
+any package hash).  Guard: the registry row §72, the twins' §72 rows, `Pl/t/transpile-test-09.t`'s
+#1680 row beside #1650's.
+
+---
+
+## 73. A lone `_` that is not a filetest's or `stat`'s operand is lexed as the stat filehandle: `_()`, `_ => 1`, `$h{_}`, `->_`, `sort _`, `my $v = _` (task #3922)  [CONFIRMED 1.291 and PCL's branch 842e6bbd]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `xy`, then `_`):
+
+```perl
+sub _ { "x" } print _(), "y\n";
+my %h = (_ => 1); print keys %h, "\n";
+```
+
+**PPI tokens**: `Word(print) Magic(_) Structure(() Structure())` and `Magic(_) Operator(=>)`.
+**Expected**: `Word(_)` both times.  perl reads `_` as a plain word (toke.c); the bareword `_` is the
+stat filehandle only as the operand of a filetest, `stat` and `lstat` (op.c `ck_ftst`).  PPI makes a
+lone `_` Magic everywhere but after `sub` (§31, group H), so the gettext idiom `_("text")` is a
+filehandle followed by a list.
+
+**Impact on PCL**: `_()` was a whole-statement DROP (#3922), `sort _ @l` too; `my $v = _;`,
+`@h{_, "a"}` and a key read as `$h{_}` after `(_ => 1)` were SILENT WRONGS -- each `_` read the stat
+cache's name `%pcl-stat-cache` (a program that wrote AND read `_ =>` / `$h{_}` was right only because
+both sides were wrong the same way).
+
+**FIXED on PCL's PPI branch** (s543f: group BG, commit `e0f5c8cc` on branch `pcl-s543f`, vendored as
+vendor/PPI -- `Token/Word.pm`'s `__underscore_class` makes `_` Magic only after a filetest operator
+(`-e _`, `-f -w _`) and after `stat` / `lstat` with or without a `(` between, and a Word everywhere
+else; the fuzzed fixture `t/data/08_regression/45_heredoc_w_paren_in_terminator` opens with `_+`, perl's
+bareword (`perl -MO=Deparse -e '_+1;'` prints `'_' + 1;`), and its one changed dump line is that token);
+upstream PR: pending (`PR-BG.md`).  PCL needed no change: it lowers the Word as any bareword or call,
+and it already forces a `sub _` into `main` as perl does.  Guard: the registry row §73 (its `got` is
+1.291's, which also lexed the `_` after `sub` as Magic, §31), the twins' §73 rows, `Pl/t/ppi-token-rows-01.t`
+(§73 rows, end to end).
+
+---
+
+## 74. `%^` where perl expects a TERM -- the punctuation hash -- is lexed as `%` `^`  [CONFIRMED 1.291 and PCL's branch 842e6bbd]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `a`, then `w`):
+
+```perl
+no strict; %^ = (a => 1); print keys %^; print "\n";
+no strict; %^W = (w => 1); print keys %^W; print "\n";
+```
+
+**PPI tokens**: `Operator(%) Operator(^) Operator(=) …`, `Word(keys) Operator(%) Operator(^)`, and
+`Operator(%) Operator(^) Word(W)`.  **Expected**: `Magic(%^)`, `Magic(%^W)`.  perl reads `%^` as the hash
+of `$^` (the format-top name), one punctuation variable like `%-` and `%+` (§24's family), and `%^W` as
+the hash of the caret variable `$^W`.  `Token/Magic.pm` kept `%^` only when the one caret hash it knew,
+`%^H`, followed, and otherwise backed the `%` off to an Operator.
+
+**Impact on PCL**: none measured -- `_repair_punct_hash_name`'s caret arm rewrote `% ^` in term position
+to `%{^}`, which PCL lowers; 0 fires over the 2,053-file list (s543d), so the shape is absent from the
+populations.  `%^W` was a whole-statement DROP.
+
+**FIXED on PCL's PPI branch** (s543f: group BH, commit `3189f730` on branch `pcl-s543f`, vendored as
+vendor/PPI -- the `%` arm of `Token/Unknown.pm` starts a Magic `%^` only where no term has ended, and
+there `Token/Magic.pm` keeps `%^` + a caret name's character as one token and `%^` alone otherwise);
+upstream PR: pending (`PR-BH.md`).  PCL half: the caret arm of `Pl::Parser2::_repair_punct_hash_name`
+DELETED; its magic-split arm (`N %.5e1` after a declared constant: the prototype table's) stays and now
+also splits a `%^` after a declared term.  Guard: the registry row §74, the twins' §74 rows,
+`Pl/t/punct-array-glob-01.t` (§74 rows, end to end).
 
 ---
 

@@ -7401,13 +7401,12 @@ sub _repair_nary_foreach {
 # prototype table knows N is a term -- the word-is-a-term family, which stays
 # PCL's (docs/ppi-fix-at-source-s527.md §5.6).  So the Magic is split back into
 # the operator and the character (`%.` -> `% .`), the same text rewrite in the
-# other direction; `%-` `%+` `%!` after such a word are the same shape.
+# other direction; `%-` `%+` `%!` and `%^` after such a word are the same shape.
 #
-# The one hash PPI leaves split is `%^`: a `%` before `^` starts the caret
-# names (`%^H`), so in term position PPI hands `%^` over as two operators.  A
-# `%` that is not after a term end or a declared term, followed directly by a
-# `^`, is the hash `%^` -- rewritten into the block spelling `%{^}`, which
-# PCL's lowering knows (probed under strict when this repair was written).
+# (A SECOND arm rewrote `% ^` in term position into the block spelling `%{^}`:
+# PPI handed the punctuation hash `%^` over as two operators.  PCL's PPI reads
+# it as ONE Magic since s543f, group BH (docs/ppi-upstream-bugs.md §74), and
+# the arm -- 0 fires over the 2,053-file wide A/B list (s543d) -- is DELETED.)
 sub _repair_punct_hash_name {
   my ($self, $doc) = @_;
   my $repaired = 0;
@@ -7417,18 +7416,6 @@ sub _repair_punct_hash_name {
     next unless $prev && $prev->isa('PPI::Token::Word')
              && $self->_word_is_declared_term($prev->content, $doc);
     $m->set_content("% $c");
-    $repaired = 1;
-  }
-  for my $op (@{ $doc->find('PPI::Token::Operator') || [] }) {
-    next unless $op->content eq '%';
-    my $caret = $op->next_sibling;          # adjacency: `% ^` is the operator
-    next unless $caret && $caret->isa('PPI::Token::Operator') && $caret->content eq '^';
-    my $prev = _prev_sig_token($op);
-    next if _ends_term($prev);
-    next if $prev && $prev->isa('PPI::Token::Word')
-                  && $self->_word_is_declared_term($prev->content, $doc);
-    $op->set_content('%{^}');
-    $caret->delete;
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;

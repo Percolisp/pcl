@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 559;
+use Test::More tests => 613;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2386,6 +2386,97 @@ for my $case ( [ q{my $t = time / 2;}, q{Operator=/} ], [ q{my $n = wantarray / 
                [ q{my @g = grep /x/, @a;}, q{Regexp::Match=/x/} ], [ q{my @m = map /(x)/, @a;}, q{Regexp::Match=/(x)/} ],
                [ q{return /x/;}, q{Regexp::Match=/x/} ], [ q{print 1 if /x/;}, q{Regexp::Match=/x/} ],
                [ q{print 1 unless /x/;}, q{Regexp::Match=/x/} ], [ q{my $n = 2 * x / 2;}, q{Operator=/} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+
+# §72 -- % and a digit run where perl expects a term names a HASH: perl
+# reads %12 as the hash named 12 as it reads @12 as the array (toke.c:
+# under XTERM a % starts scan_ident, and a digit run is an identifier), so
+# `no strict; %12 = (a => 1); print keys %12;` prints a.  After a term, and
+# after a word that may be a user's constant, it is the modulus.  A cast
+# takes a term too: \%12 is a reference to that hash, \*1 to the glob *1,
+# \<STDIN> to a readline's value.
+{
+    for my $case ( [ q{%12 = (a => 1);}, q{Symbol=%12} ], [ q{print keys %12;}, q{Symbol=%12} ],
+                   [ q{print %12;}, q{Symbol=%12} ], [ q{my $n = %12 ? 1 : 0;}, q{Symbol=%12} ],
+                   [ q{my @l = (%12);}, q{Symbol=%12} ], [ q{my $n = scalar(%12);}, q{Symbol=%12} ],
+                   [ q{f(%12);}, q{Symbol=%12} ], [ q{my $r = \%12;}, q{Symbol=%12} ],
+                   [ q{%0 = ();}, q{Symbol=%0} ], [ q{my $r = \*1;}, q{Symbol=*1} ],
+                   [ q{my $r = \<STDIN>;}, q{QuoteLike::Readline=<STDIN>} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: after a term (a number, a variable, a subscript, a postfix
+# ++), after a builtin that takes no operand and after a user's word -- a
+# constant for all PPI knows -- % before a digit is the modulus, also in
+# print $fh %12 (perl: a digit cannot start the list's first term there);
+# @12 and $#a were right; %{12} is a cast.
+for my $case ( [ q{my $n = 7%12;}, q{Operator=%} ], [ q{my $n = $x %12;}, q{Operator=%} ],
+               [ q{my $n = $x % 12;}, q{Operator=%} ], [ q{my $n = $h{a}%12;}, q{Operator=%} ],
+               [ q{my $n = $i++%12;}, q{Operator=%} ], [ q{my $n = time %12;}, q{Operator=%} ],
+               [ q{my $n = K %12;}, q{Operator=%} ], [ q{print $fh %12;}, q{Operator=%} ],
+               [ q{my @a = @12;}, q{Magic=@12} ], [ q{my $n = $#a;}, q{ArrayIndex=$#a} ],
+               [ q{my %h = %{12};}, q{Cast=%} ], [ q{my $r = \%h;}, q{Symbol=%h} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+
+# §73 -- a lone _ is a WORD where perl reads a name: before a ( it calls
+# the sub named _ (`sub _ { "x" } print _(), "y\n";` prints xy -- the
+# gettext idiom), before a fat comma it is the string "_", after -> it is
+# a method's name, in a hash subscript {_} the key "_", and after sort the
+# comparison sub's.  It is the stat filehandle as the operand of a
+# filetest, stat and lstat (toke.c reads _ as a plain word; op.c's ck_ftst
+# gives the bareword _ its meaning there); elsewhere a bareword _ is the
+# string "_" (`my $v = _;`), or a call when a sub _ is declared.
+{
+    for my $code ( q{sub _ { "x" } print _(), "y";}, q{print _("text");}, q{print _ ("text");},
+                   q{my %h = (_ => 1);}, q{my $v = __PACKAGE__->_();}, q{my $v = $o->_;},
+                   q{my @l = sort _ @x;}, q{my $v = $h{_};},
+                   q{my @v = @h{_, "a"};}, q{my $v = _;} ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq q{Word=_}, @t ) && !grep( $_ eq q{Magic=_}, @t ), "$code: _ is a word" )
+            or diag "got: @t";
+    }
+}
+# The controls: the stat filehandle after a filetest, stacked filetests,
+# stat and lstat, with and without parens; sub _ names the sub; &_ is the
+# code symbol.
+for my $case ( [ q{print -e _ ? 1 : 0;}, q{Magic=_} ], [ q{print 1 if -e _ && 1;}, q{Magic=_} ],
+               [ q{my @s = stat _;}, q{Magic=_} ], [ q{my @s = lstat(_);}, q{Magic=_} ],
+               [ q{my $n = (stat _)[7];}, q{Magic=_} ], [ q{my $n = -s _ / 2;}, q{Magic=_} ],
+               [ q{print 1 if -f -w _;}, q{Magic=_} ], [ q{sub _ { 1 }}, q{Word=_} ],
+               [ q{print &_();}, q{Symbol=&_} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+
+# §74 -- %^ where perl expects a term is ONE token: the punctuation hash %^
+# (the hash of $^), as %- and %+ are, or -- when a caret name's character
+# follows -- the hash of that caret variable, %^H and %^W as $^H and $^W:
+# `no strict; %^ = (a => 1); print keys %^;` prints a, and
+# `no strict; %^W = (w => 1); print keys %^W;` prints w.
+{
+    for my $case ( [ q{my $n = %^ ? 1 : 0;}, q{Magic=%^} ], [ q{print %^;}, q{Magic=%^} ],
+                   [ q{my @k = keys %^;}, q{Magic=%^} ], [ q{%^ = (a => 1);}, q{Magic=%^} ],
+                   [ q{my $r = \%^;}, q{Magic=%^} ], [ q{my @l = (%^);}, q{Magic=%^} ],
+                   [ q{print %^W;}, q{Magic=%^W} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: %^H was right; $^W and $^ are scalars; after a term the %
+# is the modulus.
+for my $case ( [ q{my %x = %^H;}, q{Magic=%^H} ], [ q{%^H = ();}, q{Magic=%^H} ],
+               [ q{my $w = $^W;}, q{Magic=$^W} ], [ q{my $t = $^;}, q{Magic=$^} ],
+               [ q{my $n = $x %2;}, q{Operator=%} ] ) {
     my ( $code, $want ) = @$case;
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";

@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s543f
-branch-sha: d27d0c3721be641b990ea04f576ac3af24c3ffbe
-lib-tree: f7b484e16c1d293373692e86c24c0dffdcecc56c
+branch-sha: 3189f730286d41889fa777b64a171d505960b43f
+lib-tree: 8194d5d8b9d3e46012457f0dfaeadc839407090c
 date: 2026-11-21
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -81,6 +81,9 @@ fix: BB §68 b341df79 Singletons: __FILE__, __LINE__, __PACKAGE__, __SUB__, __CL
 fix: BC §69 eebdaacc Operator: << NAME after a term is the left shift
 fix: BD §70 842e6bbd Lexer: a bare block opened by { ; ends its statement
 fix: BE §71 d27d0c37 Whitespace: / after a builtin that takes an operand starts a match
+fix: BF §72 0f8b59b4 Unknown: % and a digit run where a term is expected names a hash
+fix: BG §73 e0f5c8cc Word: _ is a word except as a filetest's or stat's operand
+fix: BH §74 3189f730 Magic: %^ where a term is expected is one token
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -222,3 +225,9 @@ commit: 59e66c8a TODO tests: a bare block opened by { ; ends its statement
 commit: 842e6bbd Lexer: a bare block opened by { ; ends its statement
 commit: 40b87033 TODO tests: / after a builtin that takes an operand starts a match
 commit: d27d0c37 Whitespace: / after a builtin that takes an operand starts a match
+commit: 7a31eac7 TODO tests: % and a digit run where a term is expected names a hash
+commit: 0f8b59b4 Unknown: % and a digit run where a term is expected names a hash
+commit: 220053f3 TODO tests: _ is a word except as a filetest's or stat's operand
+commit: e0f5c8cc Word: _ is a word except as a filetest's or stat's operand
+commit: 026ed9ee TODO tests: %^ where a term is expected is one token
+commit: 3189f730 Magic: %^ where a term is expected is one token

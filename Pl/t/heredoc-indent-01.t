@@ -46,7 +46,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -161,4 +161,35 @@ for my $s (@shapes) {
     my ($hd) = @{ $doc->find('PPI::Token::HereDoc') || [] };
     is(join('', $hd->heredoc), "some data\n",
        "FIXED ON PCL'S PPI BRANCH: PPI strips the body of <<~' EOF' (§30)");
+}
+
+# #1666 (closed by s543f): a here-doc OPENED inside an s///e replacement whose
+# body follows the statement -- the task's file-mode reproducer and t/op/
+# heredoc.t's whole "Eval'd Indented here-doc" cluster (every delimiter
+# spelling x the `~` / `~ ` modifier x both script ends, 44 programs, run as
+# one).  Equal to perl since PCL's PPI group AQ (s531e, §42).
+{
+    my $prog = qq{\$_ = "";\ns//<<~EOF.""/e; print\n    some data\n    EOF\n;\nprint "|\\n";\n};
+    my %delimiters = (
+        q{EOF} => "EOF", q{'EOF'} => "EOF", q{"EOF"} => "EOF", q{\EOF} => "EOF",
+        q{' EOF'} => " EOF", q{'EOF '} => "EOF ", q{' EOF '} => " EOF ",
+        q{" EOF"} => " EOF", q{"EOF "} => "EOF ", q{" EOF "} => " EOF ",
+        q{''} => "", q{""} => "",
+    );
+    my $n = 0;
+    for my $start_delim (sort keys %delimiters) {
+        my $end_delim = $delimiters{$start_delim};
+        for my $modifier ("~", "~ ") {
+            next if $modifier =~ /\s/ && $start_delim !~ /('|")/;
+            for my $script_end ("", "\n") {
+                my $safe_start_delim = $start_delim =~ s/'/\\'/gr;
+                $prog .= "\$_ = ''; eval 's//<<$modifier$safe_start_delim.\"\"/e; print\n"
+                       . "    some data\n    $end_delim$script_end' or die \$\@; print \"|\\n\";\n";
+                $n++;
+            }
+        }
+    }
+    is($n, 44, '#1666: the 44 eval\'d indented here-doc programs of t/op/heredoc.t');
+    is(run_cl($prog), run_perl($prog),
+       "#1666: a here-doc opened in an s///e replacement, file mode and t/op/heredoc.t's 44 eval'd spellings");
 }

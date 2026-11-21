@@ -63,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 29;
+plan tests => 30;
 
 sub write_pl {
     my ($code) = @_;
@@ -208,6 +208,19 @@ PL
 agree_in_globdir(<<'PL', 'the task repro: the pattern matches nothing');
 my @f = sort <./nope-*-xyz>;
 print "n=", scalar(@f), "\n";
+PL
+
+# #651 (closed by s543f): a pattern whose only metacharacter is a BRACKET CLASS,
+# and #2384 (closed by s543f): a pattern after a grep BLOCK whose directory name
+# holds a digit then a quote-like letter (`a9m`) -- both one Readline since
+# PCL's PPI group AH (s527d / s527g, §14 §14d); Pl/t/glob-01.t's grep rows 29-30
+# used a random File::Temp name of that kind and flaked.
+agree_in_globdir(<<'PL', '#651 / #2384: <./g-[ab].t> after sort, and <./a9m/*.txt> after a grep block');
+mkdir "a9m"; for my $f ("a9m/x.txt", "a9m/y.txt") { open my $h, ">", $f or die; close $h }
+my @f = sort <./g-[ab].t>;
+my @g = grep { /x/ } <./a9m/*.txt>;
+my @s = sort { $a cmp $b } <a9m/*.txt>;
+print "[@f] [@g] [@s]\n";
 PL
 
 agree_in_globdir(<<'PL', 'as a list-operator argument: print <./g-*.t>');

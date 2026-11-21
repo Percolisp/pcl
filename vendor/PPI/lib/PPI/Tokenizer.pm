@@ -763,6 +763,8 @@ my %OBVIOUS_CLASS = (
 	'PPI::Token::Regexp::Substitute'  => 'operator',
 	'PPI::Token::Regexp::Transliterate' => 'operator',
 	'PPI::Token::HereDoc'             => 'operator',
+	# a cast -- \ or a sigil before a { or a $ -- takes a term (\%12)
+	'PPI::Token::Cast'                => 'operand',
 );
 
 my %OBVIOUS_CONTENT = (
@@ -866,7 +868,7 @@ sub _ends_term_at {
 		my $kind = $self->_curly_kind($cursor);
 		return $kind && ( $kind eq 'subscript' or $kind eq 'deref' or $kind eq 'value' );
 	}
-	return 1 if $OBVIOUS_CLASS{ ref $token } or $token->isa('PPI::Token::Number');
+	return 1 if ( $OBVIOUS_CLASS{ ref $token } || '' ) eq 'operator' or $token->isa('PPI::Token::Number');
 	return '';
 }
 
