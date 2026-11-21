@@ -185,6 +185,11 @@ both_agree(qq{my \$a = q{a\r\nb}; my \$b = "c\rd"; print length(\$a), length(\$b
 both_agree(q{my $c = "q{a\r\nb}"; my $h = "my \$v = <<T;\r\nx\r\ny\rz\r\nT\r\n\$v"; my $s = "\"a\r\n\r\nb\" =~ s/(\r\n){2,}/X/r"; print length(eval $c), " ", unpack("H*", eval $h), " ", eval($s), "\n";},
            '§65: eval mode -- a literal keeps its CR LF, a here-doc body reads CR LF and a lone CR as LF');
 
+# §34 #2095 / §48 #2541 (verified s543d): after a float of any spelling and after a list slice's ] the
+# minus is the operator -- perlfaq4's first example and the slice shape.
+both_agree(q{my $x = 2; print 0.5-1, " ", $x*0.5-1, " ", int(0.6/0.2-2), " ", .5-1, " ", 1e3-1, " ", +(1)[0]-1, " ", +(1)[0]-0.5, " ", -3**2, "\n";},
+           '§34 / #2541: 0.5-1, $x*0.5-1, int(0.6/0.2-2), +(1)[0]-1 subtract; -3**2 is -(3**2)');
+
 # §68 (s543d): __FILE__ / __LINE__ / __PACKAGE__ end a term -- a - or a . before a digit after them is the operator.
 both_agree(q{my $l = __LINE__-1; my $m = __LINE__ -1; my $f = (__FILE__.1 eq __FILE__ . "1") ? "cat" : "no"; print "$l $m $f ", __LINE__.5, " ", __PACKAGE__.1, " ", __LINE__ % 2, "\n";},
            '§68: __LINE__-1 subtracts, __FILE__.1 / __LINE__.5 / __PACKAGE__.1 concatenate');
