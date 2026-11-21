@@ -223,7 +223,7 @@
    #:p-viv-container #:p-viv-array-container
    ;; the aliasing-slice marker (task #1010) — emitted on a user sub's slice argument
    #:p-viv-slice
-   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
+   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result #:p-lslice-1
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    ;; the local-push fast path (task #996 A3) — emitted, so exported
@@ -10558,6 +10558,10 @@ per element."
       ((and (consp form) (= (length form) 3) (eq (car form) 'p-aref-deref)
             (%p-list-slice-base-form-p (second form)))
        (cons '%p-lslice-aliases (cdr form)))
+      ;; the one-index list slice's LIST-context spelling (#3100) is the same
+      ;; slice: a scalar IDX is a one-index slice to %p-lslice-aliases too
+      ((and (consp form) (eq (car form) 'p-lslice-1) (<= 3 (length form) 4))
+       (list '%p-lslice-aliases (second form) (third form)))
       ((%p-element-read-form-p form)
        (list 'vector (cons (%p-elem-box-head (car form)) (cdr form))))
       ;; A MAGIC-LVALUE CALL -- substr (at most three arguments), pos, vec --
@@ -14886,6 +14890,27 @@ per element."
       ((and (eq site :strict) (or (null arr) (eq arr *p-undef*)))
        (%p-deref-undef "ARRAY" site))
       (t (p-aref arr idx)))))
+
+(defun p-lslice-1 (list idx &optional site)
+  "A ONE-INDEX LIST SLICE `(LIST)[IDX]' in LIST context (task #3100; the
+   emitter's form, docs/ir-spec.md §3.2e2): the selected element -- ONE value,
+   undef past the end of a NON-empty list (`(1)[5]') -- or the EMPTY LIST when
+   LIST is empty (`my @x = (stat $missing)[7]' has no element, perlop Slices).
+   The multi-index form already answers () through p-aref-deref's #2953 arm;
+   this is the same rule for one index, on ONE emptiness test: the non-empty
+   path is p-aref-deref's own hot path, with no index vector and no result
+   vector built.  An IDX that is itself a list at run time (`(LIST)[f()]')
+   takes p-aref-deref's slice arm, which decides emptiness the same way."
+  (if (and (vectorp idx) (not (stringp idx)))
+      (p-aref-deref list idx site)
+      (let ((arr (%p-listslice-array (unbox list))))
+        (cond ((null arr) (make-array 0 :adjustable t :fill-pointer 0))
+              ((and (vectorp arr) (not (stringp arr)))
+               ;; %p-array-count: a TIED @a's size is its FETCHSIZE
+               (if (zerop (%p-array-count arr))
+                   (make-array 0 :adjustable t :fill-pointer 0)
+                   (p-aref arr idx)))
+              (t (p-aref-deref list idx site))))))
 
 (defun p-array-last-index (arr)
   "Perl $#arr - last index. Accepts raw vectors (@arr) or boxed array refs ($aref).
@@ -28552,7 +28577,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-15300"
+(defparameter *pcl-cache-generation* "v2-15400"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 my $DIR = tempdir(CLEANUP => 1);
 
@@ -230,4 +230,33 @@ my $o = bless [5,6], 'Obj'; { package OvS; use overload '""' => sub { "S" . scal
 my @aa = ([1,2], [3]); { package TA; sub TIEARRAY { bless [], shift } sub FETCHSIZE { 5 } sub FETCH { 1 } } tie my @t, 'TA';
 print "8 ", isref("$r"), " ", isref($r . ""), " ", isref($r x 1), " ", isref($hr . ""), " ", isref($o . ""), " ", $ov . "", " ", lc($ov), " ", isref($aa[0] . ""), " ", @t . "", "\n";
 print "9 ", @a, " ", "@a", " ", "$#a", " ", join("-", @a), " ", ($r eq $r ? "EQ" : "NE"), "\n";
+PL
+
+# ---- #3100 a ONE-index list slice of an EMPTY list is the empty list in list
+#      context (one value for a non-empty one, undef past its end); #2766 a
+#      list slice as a sub's tail / `return` value is its LAST element in
+#      scalar context, never its count (one lowering: the slice context rule) --
+both_agree(<<'PL', '#3100 my @x = (stat $missing)[7] is empty; #2766 sub g { (@_)[0,1] } in scalar context is 8');
+no warnings;
+my @e; my $f = "/nonexistent/t11-3100"; my @a = (5,6,7); sub empty { () } sub three { (1,2,3) } sub n { scalar @_ }
+my @x = (@e)[-1]; my @y = (@e)[0]; my @z = ()[0]; my @w = (empty())[0]; my @v = (stat $f)[7];
+my ($size) = (stat $f)[7]; my @o = (1)[1]; my @o2 = (1,2)[5]; my @m = (@e)[0,1];
+print "1 ", join(" ", map { scalar @$_ } \@x, \@y, \@z, \@w, \@v, \@o, \@o2, \@m), " ", (defined $size ? "def" : "undef"), " ", ((stat $f)[7] ? "T" : "F"), "\n";
+my %h = (a => (@e)[0], b => 2); my @p; push @p, (@e)[0]; push @p, (@a)[1]; push @p, (@a)[0, 2]; my @l = ((@e)[0], 1, (@a)[0]);
+my $cnt = () = (@e)[0]; my $c = scalar((@e)[0]);
+print "2 ", join(",", map { "$_=" . ($h{$_} // 'U') } sort keys %h), " [@p] [@l] $cnt ", (defined $c ? "def" : "undef"), " ", n((empty())[0]), " [", (@e)[0], "]\n";
+sub r { return (@e)[0] } sub t { (@e)[0] } my @rl = r(); my $rs = r(); my @tl = t(); my $tsv = t();
+for ((@a)[1]) { $_ .= "!" } my @mm = map { (@e)[0] } 1..3; my @tr = (three())[1]; my @sl = (@a)[1..2];
+{ package TA; sub TIEARRAY { bless [], shift } sub FETCHSIZE { 0 } sub FETCH { "f" } } tie my @ta, 'TA'; my @tt = (@ta)[0];
+print "3 ", scalar(@rl), " ", (defined $rs ? "def" : "undef"), " ", scalar(@tl), " ", (defined $tsv ? "def" : "undef"), " [@a] ", scalar(@mm), " [@tr] [@sl] ", scalar(@tt), "\n";
+sub g  { (@_)[0, 1] }            my $s1 = g(7, 8, 9);  my @l1 = g(7, 8, 9);
+sub h2 { return (@_)[1, 2] }     my $s2 = h2(7, 8, 9);
+sub st { return (localtime(0))[5, 4] } my $s3 = st(); my @l3 = st();
+sub f3 { (7, 8, 9) } sub fs { return (f3())[1, 0] } my $s7 = fs();
+sub d1 { do { (@_)[0, 1] } } my $s8 = d1(4, 5, 6); sub i1 { if ($_[0]) { (@_)[1, 2] } else { () } } my $s9 = i1(1, 5, 6);
+sub tn { return $_[0] ? (@_)[0, 1] : () } my $s10 = tn(3, 4, 5); sub ml { my $x = shift; (@_)[0, 1] } my $s11 = ml(0, 4, 5);
+sub ar { my @q = @_; return @q[0, 1] } my $s5 = ar(7, 8, 9); my %hh = (a => 1, b => 2); sub hs { return @hh{qw(a b)} } my $s6 = hs();
+print "4 $s1 [@l1] $s2 $s3 [@l3] $s7 $s8 $s9 $s10 $s11 $s5 $s6 ", scalar(g(1, 2, 3)), " ", g(1, 2, 3) + 0, " ", (g(0, 0) ? "T" : "F"), " ", g(4, 5, 6), "\n";
+sub ee { (@_)[0, 1] } my $s12 = ee(); my @l12 = ee(); sub oo { (@_)[3] } my $s13 = oo(1); my @l13 = oo(1);
+print "5 ", (defined $s12 ? "def" : "undef"), " ", scalar(@l12), " ", (defined $s13 ? "def" : "undef"), " ", scalar(@l13), "\n";
 PL

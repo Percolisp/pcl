@@ -3837,6 +3837,10 @@ sub _push_item_is_scalar {
   my $kids = $self->expr_o->get_node_children($id) || [];
   if ($self->expr_o->is_internal_node_type($n)) {
     my $t = $n->{type} // '';
+    # A LIST SLICE `(LIST)[I]' shares the a_ref_acc node type but is a LIST:
+    # nothing for an empty LIST (#3100), several values for several indexes.
+    return 0 if $t eq 'a_ref_acc'
+             && $self->expr_o->node_tree->get_metadata($id, 'list_ctx_subscript');
     # an interpolated string; an anon container/sub constructor (ONE ref); a
     # single element of an array/hash, through a name or a reference
     return 1 if $t eq 'string_concat' || $t eq 'arr_init' || $t eq 'hash_init'
@@ -5290,11 +5294,35 @@ sub gen_array_ref_access_form {
   # be said explicitly — before #2004 this row passed by accident, on a
   # `(progn 0 2 4)` that evaluated to the last INDEX.  p-list-scalar is
   # identity on a non-vector, so a single-index slice is untouched.
-  return ['p-list-scalar', $form]
-    if $is_list_subscript
-    && !$self->lvalue_context
-    && defined $node_id
-    && $self->expr_o->get_node_context($node_id) == SCALAR_CTX;
+  return $self->_list_slice_in_context_form($form, $node_id)
+    if $is_list_subscript && !$self->lvalue_context && defined $node_id;
+  return $form;
+}
+
+# THE VALUE OF A LIST SLICE IN ITS CONTEXT -- the slice context rule
+# (_slice_in_context_form's, which every array / hash slice asks) for the
+# `(LIST)[I]` spelling, plus its one-index list rule.  ir-spec §3.2e / 3.2e2.
+#   SCALAR   -> (p-list-scalar F): the LAST selected element (perl's comma
+#               rule), never the count.
+#   INHERIT  -> (p-slice-result F): a sub's tail / `return` value decides at
+#               run time, as the array slice `@x[0,1]` already did -- the
+#               list slice there handed its VECTOR to the caller's scalar
+#               context, which counted it (#2766: `sub g { (@_)[0,1] }` gave 2).
+#   LIST     -> F.
+# ONE INDEX (a scalar subscript, not a `(vector ...)` index list) in a list
+# or inherited context is (p-lslice-1 LIST I): an EMPTY list selects nothing
+# (#3100: `my @x = (stat $missing)[7]` is empty), a non-empty one ONE value,
+# on one emptiness test and no per-call vector (the multi-index form's empty
+# arm is #2953's, in p-aref-deref).  Scalar context keeps the element read.
+sub _list_slice_in_context_form {
+  my ($self, $form, $node_id) = @_;
+  my $ctx = $self->expr_o->get_node_context($node_id);
+  return ['p-list-scalar', $form] if $ctx == SCALAR_CTX;
+  my $idx = $form->[2];
+  my $one_index = !(ref $idx eq 'ARRAY' && ($idx->[0] // '') eq 'vector');
+  $form = ['p-lslice-1', @$form[1 .. $#$form]]
+    if $one_index && $form->[0] eq 'p-aref-deref';
+  return ['p-slice-result', $form] if $ctx == INHERIT_CTX;
   return $form;
 }
 
