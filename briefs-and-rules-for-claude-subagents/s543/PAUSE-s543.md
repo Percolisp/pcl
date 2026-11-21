@@ -63,3 +63,9 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * s543a `bd8c819d` (13 commits, clean): every bounded bar met; owed the three exclusive timing legs, the cost numbers, everyday `--record`, MERGE-READY.
 * s543b `f99be16c` (14 commits, clean): seven members + two own regressions fixed, sweep / ir-conform / gate-set scan / A-B taken on the final code; owed artifacts re-run, companion before/after, everyday, inverse, the full gate, MERGE-READY.
 * Gate on main 379 / 12,303 PASS (22:54); the record commits pushed.  s543c written, not launched.  Nothing runs.
+
+## 2026-11-21 14:4x -- the session continues; s543a + s543b RESUMED a third time (`s543/resume-1121.md`)
+* The box was shut down in order after the 16th and booted today: no cache file but the `.lock` files is empty, the newest is from 23:30 on the 16th; `/tmp` empty; `HEAVY.holder` empty.  Main `ef0e30e6` = `origin/main`, records only over `05e9867f`.
+* Both resumed as new Opus 5.5 / xhigh agents in the SAME worktrees; each rebases onto `ef0e30e6` first (records only, voids no log), then finishes its STOP.md list.  s543a's three exclusive timing legs go first on the box.
+* s543c (the verification batch) waits for the first MERGE-READY (two subtasks at a time).
+* Owed by the reviewing session, unchanged: review + merge both, the batch-owned triage rows, the ROUND, the 36 `decision` tasks for the USER.
