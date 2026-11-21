@@ -7038,10 +7038,12 @@
 (defun %p-str-operand (v)
   "V as a string consumer reads it: an @array / %hash VALUE is its count
    (%pcl-scalar-collapse, the ONE collapse); everything else -- a string, a
-   number, a reference box -- as is, on one inline type test."
-  (if (or (and (vectorp v) (not (stringp v))) (hash-table-p v))
-      (%pcl-scalar-collapse v)
-      v))
+   number, a reference box -- as is.  The common operands are tested FIRST,
+   so a string pays one type test (measured: the vector test first cost the
+   `strcat' / `ucshort' bench rows ~+5 %)."
+  (if (or (stringp v) (p-box-p v) (numberp v))
+      v
+      (%pcl-scalar-collapse v)))
 
 (defun %p-.-slow (a b)
   "Perl string concatenation slow path with use overload '.' dispatch."
