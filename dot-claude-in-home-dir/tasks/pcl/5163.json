@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543 (the reviewing session, 2026-11-21) from the round s543r`s report: `PCL_VERDICT_STRICT=1 prove Pl/t/verdict-register-01.t` passes (the CPAN board side is gated), but the companion side shows 266 rows keyed on 16 tasks whose status is `completed`; none came from that round (s543c closed 49 tasks the same day and its closes were checked against the board and sweep baselines, not this file`s 9,400 rows).\n\nWORK: print the 16 tasks with their row counts (the register`s own report names them); per task re-run the files one-file (`tools/run-perl-suite.pl --jobs 1 FILE`): a row that passes leaves by edit citing the closing batch; a row that still fails is re-keyed to the task or `NS:` id that explains it NOW (the closed task`s last verdict block usually names the residue), or the task is re-opened with that row as its subject.  Then decide (with the reviewing session) whether the companion side joins the strict gate.  No compiler change.",
+   "id" : "5163",
+   "status" : "pending",
+   "subject" : "TOOLING: 266 rows of baselines/perl-suite-fails.tsv are keyed on 16 CLOSED tasks -- the companion side of the verdict register is reported, not gated, so CLOSE-WITH-ROWS does not hold there",
+   "triage" : "tooling",
+   "triage_reason" : "companion baseline rows keyed on closed tasks (reported, not gated)"
+}

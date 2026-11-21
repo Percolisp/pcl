@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-21",
+   "description" : "FILED s543 (the reviewing session, 2026-11-21) from the rounds s542r and s543r.\n(1) `tools/cpan-board.sh` has no way to hand `--refresh-oracle` to the scoreboard, and the round must refresh the perl oracle: both rounds ran a copy, `~/pcl-agent-scratch/s54{2,3}/round/cpan-board-refresh.sh`.  Fix: an option or an environment switch in the tool, with a tools/t row.\n(2) The round`s `excl-busy.sh` (copied from s542r) treated `heavy.sh` itself as an exclusive job and so waited whenever ANY leg ran; s543r fixed its own copy.  If a check of that kind is wanted by every round, it belongs beside `heavy.sh` (one script, documented in COMMON.md HEAVY SLOTS), not copied per round.",
+   "id" : "5164",
+   "status" : "pending",
+   "subject" : "TOOLING: tools/cpan-board.sh cannot pass --refresh-oracle (two rounds ran a one-line copy), and the round`s exclusive-queue check counted heavy.sh itself as an exclusive job",
+   "triage" : "tooling",
+   "triage_reason" : "two round-runner papercuts worked around twice"
+}
