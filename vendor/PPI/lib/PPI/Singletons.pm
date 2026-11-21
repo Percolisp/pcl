@@ -51,11 +51,14 @@ our %MAGIC = map { $_ => 1 } qw{
 
 # Builtins that take no operand: each is a whole term, so after one of them
 # an operator follows (time ~~ @a is a smart match, time.2 a concatenation).
+# __FILE__, __LINE__, __PACKAGE__, __SUB__ and __CLASS__ are such terms too
+# (toke.c FUN0OP / FUN0): __LINE__-1 subtracts, __FILE__.1 concatenates.
 our %NO_OPERAND = map { $_ => 1 } qw(
 	time times wait wantarray fork getppid getlogin
 	getgrent gethostent getnetent getprotoent getpwent getservent
 	endgrent endhostent endnetent endprotoent endpwent endservent
 	setgrent setpwent
+	__FILE__ __LINE__ __PACKAGE__ __SUB__ __CLASS__
 );
 
 our %LAYER = ( 1 => [], 2 => [] );    # Registered function store

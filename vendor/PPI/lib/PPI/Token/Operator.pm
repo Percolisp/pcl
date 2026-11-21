@@ -83,8 +83,13 @@ sub __TOKENIZER__on_char {
 		}
 	}
 
-	# Handle the special case if we might be a here-doc
-	if ( $content eq '<<' ) {
+	# Handle the special case if we might be a here-doc.  A here-doc
+	# starts only where a term is expected: after a term, <<NAME is the
+	# left shift by a call of NAME (1<<index($s, $c), $x<<CONST; toke.c
+	# yyl_leftpointy: under XOPERATOR << is SHop).  _after_term keeps
+	# print $fh <<EOT a here-doc.  A quoted terminator after a term
+	# (1 << "EOT", which no real program writes) keeps the here-doc.
+	if ( $content eq '<<' and !( $char =~ /\A(?!\d)\w\z/ and $t->_after_term ) ) {
 		pos $t->{line} = $t->{line_cursor};
 		# Either <<FOO  or << 'FOO'  or <<\FOO  or
 		#        <<~FOO or <<~ 'FOO' or <<~\FOO

@@ -185,4 +185,17 @@ both_agree(qq{my \$a = q{a\r\nb}; my \$b = "c\rd"; print length(\$a), length(\$b
 both_agree(q{my $c = "q{a\r\nb}"; my $h = "my \$v = <<T;\r\nx\r\ny\rz\r\nT\r\n\$v"; my $s = "\"a\r\n\r\nb\" =~ s/(\r\n){2,}/X/r"; print length(eval $c), " ", unpack("H*", eval $h), " ", eval($s), "\n";},
            '§65: eval mode -- a literal keeps its CR LF, a here-doc body reads CR LF and a lone CR as LF');
 
+# §68 (s543d): __FILE__ / __LINE__ / __PACKAGE__ end a term -- a - or a . before a digit after them is the operator.
+both_agree(q{my $l = __LINE__-1; my $m = __LINE__ -1; my $f = (__FILE__.1 eq __FILE__ . "1") ? "cat" : "no"; print "$l $m $f ", __LINE__.5, " ", __PACKAGE__.1, " ", __LINE__ % 2, "\n";},
+           '§68: __LINE__-1 subtracts, __FILE__.1 / __LINE__.5 / __PACKAGE__.1 concatenate');
+
+# §69 #483 (s543d): << and a word after a term is the left shift by a call; a here-doc where a term is expected.
+both_agree(qq{sub f { 2 } my \$D = "psl"; my \$num = 0; \$num |= (1<<index(\$D, \$_)) for split //, "sl"; my \$x = 1; my \@a = (1); my %h = (a => 1); print 1<<index("ab","b"), " ", \$x<<f(), " ", \$a[0]<<f(), " ", \$h{a}<<f(), " \$num ", <<EOT;\nbody\nEOT\nprint STDOUT <<EOT;\ntwo\nEOT\n},
+           '§69: 1<<index(...), $x<<f(), $a[0]<<f(), $h{a}<<f() shift (Devel::Peek debug_flags); print <<EOT is a here-doc');
+
+# §70 #937 (s543d): a bare block opened by {; ends its statement (PCL's _normalize_null_statements
+# reads the same shapes; the PPI half is the registry canary's).
+both_agree(q{{;} print "a"; { ; } print "b"; {; my $x = 1; print "c$x" } {; local $_ = "d"; print } my $h = {}; print ref($h), "\n";},
+           '§70: {;} / { ; } / {; ... } are bare blocks; the statement after each is its own');
+
 done_testing();

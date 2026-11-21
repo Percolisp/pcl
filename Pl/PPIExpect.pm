@@ -337,7 +337,7 @@ our @CONTRADICTIONS = (
  [ 'Quote',     '',                  'OP',    '',                     'term-after-term',            'an operator',               '', 'yyl_sglquote 6919 no_op("String")' ],
  [ 'QuoteLike', '',                  'OP',    '',                     'term-after-term',            'an operator',               '', 'no_op' ],
  [ 'Regexp',    '',                  'OP',    '',                     'term-after-term',            'an operator',               '', 'no_op' ],
- [ 'HereDoc',   '',                  'OP',    '',                     'term-after-term',            'Operator(<<)',              '', 'yyl_leftpointy 6855: XOPERATOR => SHop(OP_LEFT_SHIFT)' ],
+ [ 'HereDoc',   '',                  'OP',    '',                     'term-after-term',            'Operator(<<)',              69, 'yyl_leftpointy 6855: XOPERATOR => SHop(OP_LEFT_SHIFT)' ],
  [ 'Cast',      '',                  'OP',    '',                     'cast-for-binop',             'a binary operator',         '', 'yyl_star 6044 / yyl_percent 6067 / yyl_ampersand 6578: XOPERATOR => the binary operator' ],
  [ 'Operator',  qr/^(?:!|~|\\)$/,    'OP',    '',                     'prefix-after-term',          'a binary operator',         '', 'perly: a prefix operator after a term' ],
  [ 'Label',     '',                  'OP',    '',                     'label-after-term',           'an operator',               '', 'a label only under XSTATE' ],
@@ -948,7 +948,8 @@ sub _pending_statement_end {
   return if $t->isa('PPI::Token::Structure') && $t->content =~ /^[;})]$/;
   my $sec = $kw eq 'finally' ? 18 : $kw =~ /^(?:try|catch)$/ ? 20
           : ($kw eq 'sub' && $e->{owner_name_magic}) ? 31 
-          : $kw eq 'defer' ? 52 : $kw =~ /^(?:class|method|ADJUST)$/ ? 53 : '';
+          : $kw eq 'defer' ? 52 : $kw =~ /^(?:class|method|ADJUST)$/ ? 53
+          : $kw eq '' ? 70 : '';   # a bare block ({;}) that did not end its statement
   # the after-effect of a block PPI already split off its keyword: a cascade
   if (exists $w->{split_sec}{refaddr $e->{open}}) {
     $sec = $w->{split_sec}{refaddr $e->{open}};

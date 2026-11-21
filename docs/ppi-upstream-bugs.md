@@ -2150,6 +2150,10 @@ population yet).  Upstream row: `docs/ppi-bug-report.t`.
 ## 34. After a FLOAT / EXP / HEX / OCTAL / BINARY number, `-N` is lexed as a NEGATIVE NUMBER — the subtraction operator disappears  [CONFIRMED 1.291]
 
 **FIXED on PCL's PPI branch** (s527a: group A, commit `a737c524` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-A.md`).
+Task #2095 (s493: `print int(0.6/0.2-2)`, perlfaq4's first example, and `0.5-1`, `$x*0.5-1`) is this row,
+filed before the branch existed: verified s543d -- 51 probes (every number spelling, a `)` `]` `}`, a
+variable, a quote, a list slice (#2541), the negative-literal controls) perl = main = tree.  The term
+end PPI still missed after `__LINE__` is §68.
 
 The sibling of §15 (`)` then `-1`), from the other side: here the term that
 ends before the minus is itself a number.  PPI's plain-integer tokenizer
@@ -3026,6 +3030,109 @@ constructor; a `{` after `do` / `sub` / `eval` / `map` / `grep` inside the const
 by that word as before); upstream PR: pending (`PR-AZ.md`).  PCL needed no change (its
 statement-level `_bare_block_is_anon_hash` was deleted by s527c; `PExpr::_block_is_hash_constructor`
 is the map / grep body rule and stays).  Guard `Pl/t/ppi-token-rows-01.t`.
+
+---
+
+## 68. After `__FILE__`, `__LINE__`, `__PACKAGE__`, `__SUB__` or `__CLASS__` a `-` or a `.` before a digit is lexed as part of a NUMBER  [CONFIRMED 1.291 and PCL's branch 66e690d2]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `main1 0 15`):
+
+```perl
+my $l = __LINE__-1;                 # Test-Simple t/Legacy/use_ok.t line 87; perl's t/op/coreamp.t line 1141
+print __PACKAGE__.1, " $l ", __LINE__.5, "\n";
+```
+
+**PPI tokens**: `Word<__LINE__> Number<-1>`, `Word<__PACKAGE__> Number::Float<.1>`, and `print __LINE__ %h`
+is `Word<__LINE__> Symbol<%h>`.  **Expected**: `Operator<-> Number<1>`, `Operator<.> Number<1>`,
+`Operator<%> Word<h>`.  Each of the five words is a whole TERM in perl's lexer (toke.c: `FUN0OP` for
+`__FILE__` `__LINE__` `__PACKAGE__` `__SUB__`, `FUN0` for `__CLASS__`, both setting
+`PL_expect = XOPERATOR`), exactly as `time` and `wantarray` are; PPI's term-end table
+`%NO_OPERAND` (s527b group J, §55) listed the builtins that take no operand but not these words, so
+every decision that asks "does a term end here" -- the sign of a number, `.digit` (§28), the `%`
+and `*` arms -- read a term after them.  Found by s543d (#2095's member): the expect-state checker's
+three `minus-in-number` rows on the populations were all `__LINE__-1`.
+
+**PCL's workaround**: for `-N`, the bareword arm of `Pl::PExpr::_fix_ppi_negative_number_bug` (any
+Word that is not a named unary before `Number<-N>`), which stays for a user constant (`K -1`: only
+PCL's prototype table knows that `K` is a term); `__FILE__.1` / `__LINE__.5` had none -- a statement
+DROP ("Missing case: [funcall, Number::Float<.1>]", probed s543d).
+
+**FIXED on PCL's PPI branch** (s543d: group BB, commit `b341df79` on branch `pcl-s543d`, vendored as
+vendor/PPI -- the five words join `%NO_OPERAND`, which `_ends_term_at` reads); upstream PR: pending
+(`PR-BB.md`).  Guard `Pl/t/ppi-token-rows-01.t` (§68 row; inverse-verified: it fails on main);
+registry row §68.
+
+---
+
+## 69. `<<` and a word right after a TERM (`1<<index($s, $c)`, `$x<<CONST`) is lexed as a HERE-DOC  [CONFIRMED 1.291 and PCL's branch 66e690d2]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `2`):
+
+```perl
+my $n = (1<<index("ab","b")); print "$n\n";
+# core Devel::Peek, debug_flags():
+#   $num |=  (1<<index($D_flags, $_)) for split //, $on;
+```
+
+**PPI tokens**: `Number<1> HereDoc<<<index> Structure<(> ...` -- and the here-doc's body is every
+following line up to one that reads `index`, so the rest of the file is swallowed.  **Expected**:
+`Number<1> Operator<<<> Word<index> Structure<(> ...`.  perl starts a here-doc only where it expects
+a term (toke.c `yyl_leftpointy`: under `XOPERATOR` `<<` is `SHop(OP_LEFT_SHIFT)`; `scan_heredoc`
+runs otherwise); PPI's `Token::Operator` made a here-doc of every `<<` followed by a word, a quote
+or `\word`.  `1<<2` was right (a digit cannot name a here-doc), which is why arithmetic never showed
+it.  In the filehandle slot `print $fh <<EOT` (whitespace before the `<<`) perl reads the here-doc;
+`print $fh<<EOT` is a shift for perl too (probed: perl then fails on the body line).
+
+**PCL's workaround**: none -- the statement was DROPPED (task #483: Devel::Peek's `debug_flags`,
+reached by perl-tests/undef.t's run-time load, found by the #472 child-drop instrument).
+
+**FIXED on PCL's PPI branch** (s543d: group BC, commit `eebdaacc` on branch `pcl-s543d`, vendored as
+vendor/PPI -- the `<<` arm asks `_after_term` before it makes a here-doc of `<<NAME`); upstream PR:
+pending (`PR-BC.md`).  **Left as it was**: a QUOTED terminator after a term (`1 << "EOT"`, a shift by
+a string for perl) keeps the here-doc reading -- no real program writes it, and PPI's fuzzed
+regression fixtures `t/data/08_regression/45_heredoc_w_paren_in_terminator` and `47_...` test the
+here-doc terminator scanner on exactly that shape (`)<<~'...'`), which the full rule would leave
+untested; its row stays TODO in the twin.  PCL needed no change.  Guard `Pl/t/ppi-token-rows-01.t`
+(§69 row; inverse-verified); registry row §69; the checker's `term-after-term` HereDoc rule now
+names §69.
+
+---
+
+## 70. A bare block opened by `{;` does not end its statement: the next statement is swallowed  [CONFIRMED 1.291 and PCL's branch 66e690d2]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `after`):
+
+```perl
+{;} print "after\n";
+```
+
+**PPI structure**: ONE `Statement( Structure::Block{;} print "after\n" ; )` (on 1.291 the brace is
+a Block too).  **Expected**: `Statement::Compound( {;} )` + `Statement( print ... )`.  perl reads a
+`{` that starts a statement as a block unless its look-ahead finds an anonymous hash, and `{;` is
+perlref's way of saying "block" (toke.c `yyl_leftcurly` under `XSTATE`); a bare block is a statement
+of its own.  PPI's `_curly` blesses the statement into a Compound only when `_curly_lookahead` finds
+nothing; when the look-ahead itself answers Block (the `;` at its first position) the class was
+returned at once and the statement stayed plain, so its `}` did not end it.
+
+**NOT A BUG -- the EMPTY block of task #937.**  `{}`, `{ }` and `{ # comment }` at a statement start
+are an ANONYMOUS HASH for perl itself: toke.c's `XSTATE` arm skips whitespace and comments and
+returns `HASHBRACK` when a `}` follows the `{` at once.  `perl -e '{} print 1'` is a syntax error
+("near "} print""), and so is perl-tests/sprintf2.t lines 741-752 -- a block whose only statement
+PCL commented out long ago ("PPI cannot parse hex float literals", fixed since §2), followed by a
+`{` (`perl` on that region: "syntax error ... near "{""; the census row is PCL's own edit, task
+#5190).  PPI's Constructor there is perl's reading; the twin's controls assert it.
+
+**PCL's workaround**: `Pl::Parser2::_normalize_null_statements` rewrites the `;` of a statement-start
+`{;` to `();` and reparses (#2701) -- for its OWN reparse (deleting the Null statement would leave
+`{}`, an anonymous hash), and the rewritten `{ (); }` takes the look-ahead's fall-through, which was
+always a Compound.  So PCL lowered every probed shape right (40 + 12 probes, base = tree = perl);
+the rewrite STAYS.
+
+**FIXED on PCL's PPI branch** (s543d: group BD, commit `842e6bbd` on branch `pcl-s543d`, vendored as
+vendor/PPI -- a Block from the look-ahead is the same bare block as its fall-through); upstream PR:
+pending (`PR-BD.md`).  Guard: the registry row §70 (inverse: it fails on 1.291 and on main's
+vendored lib) and `Pl/t/ppi-token-rows-01.t` (§70 row, end to end; it passes on main too, because of
+the rewrite above); the checker's `statement-not-ended` after a bare block now names §70.
 
 ---
 

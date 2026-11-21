@@ -1,14 +1,14 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s543d
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: 66e690d2be6c8c030def9abb408e373eec8808fc
-lib-tree: 20a96c837cf9c07d44f99802649bda1ff8a56e01
-date: 2026-11-16
+branch: pcl-s543d
+branch-sha: 842e6bbdc61d9c86ab01b76826b78a94bcd83ba3
+lib-tree: 460d3193e8163956a5eafde2e918a2a1611e626e
+date: 2026-11-21
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
@@ -77,6 +77,9 @@ fix: AX §64 e395a534 Word: __DATA__ and __END__ before a fat comma are words
 fix: AY §66 §19 a9a16511 Tokenizer: x<digits> is a word where perl expects a term
 fix: AZ §67 af11a2c3 Lexer: the first { inside a constructor is an anonymous hash
 fix: BA §65 66e690d2 Document: keep_line_endings tokenizes the source as it is
+fix: BB §68 b341df79 Singletons: __FILE__, __LINE__, __PACKAGE__, __SUB__, __CLASS__ end a term
+fix: BC §69 eebdaacc Operator: << NAME after a term is the left shift
+fix: BD §70 842e6bbd Lexer: a bare block opened by { ; ends its statement
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -210,3 +213,9 @@ commit: c1189f77 TODO tests: the first { inside a constructor is an anonymous ha
 commit: af11a2c3 Lexer: the first { inside a constructor is an anonymous hash
 commit: cc0b1f30 TODO tests: keep_line_endings, the source tokenized as it is
 commit: 66e690d2 Document: keep_line_endings tokenizes the source as it is
+commit: ff1cd0e7 TODO tests: __FILE__, __LINE__, __PACKAGE__, __SUB__, __CLASS__ end a term
+commit: b341df79 Singletons: __FILE__, __LINE__, __PACKAGE__, __SUB__, __CLASS__ end a term
+commit: 71e44672 TODO tests: << after a term is the left shift
+commit: eebdaacc Operator: << NAME after a term is the left shift
+commit: 59e66c8a TODO tests: a bare block opened by { ; ends its statement
+commit: 842e6bbd Lexer: a bare block opened by { ; ends its statement

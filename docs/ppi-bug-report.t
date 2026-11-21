@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 459;
+use Test::More tests => 522;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2223,4 +2223,118 @@ for my $case ( [ 'my $r = [ { "abc", 1 } ];', 'PPI::Structure::Constructor' ], [
     my ( $code, $want ) = @$case;
     my @c = bracket_classes( $code, '{' );
     is( $c[0], $want, "$code: $want (control)" );
+}
+
+# §68 -- __FILE__, __LINE__, __PACKAGE__, __SUB__ and __CLASS__ take no
+# operand: each is a whole term (toke.c FUN0OP / FUN0: PL_expect =
+# XOPERATOR after it), so what follows is an operator -- a - before a
+# digit subtracts, a . before a digit concatenates, a % or a * is the
+# arithmetic operator:
+# `print __LINE__-1, " ", __FILE__.1, "\n";` prints `0 -e1` under -e.
+{
+    for my $case ( [ q{print __LINE__-1;}, q{Operator=-} ], [ q{my $l = __LINE__ -1;}, q{Operator=-} ],
+                   [ q{is( $@, sprintf("%d", __LINE__ -1) );}, q{Operator=-} ],
+                   [ q{my $n = __PACKAGE__-1;}, q{Operator=-} ], [ q{my $n = __SUB__-1;}, q{Operator=-} ],
+                   [ q{my $n = __CLASS__-1;}, q{Operator=-} ], [ q{print __FILE__.1;}, q{Operator=.} ],
+                   [ q{print __FILE__ .1;}, q{Operator=.} ], [ q{print __LINE__.5;}, q{Operator=.} ],
+                   [ q{print __LINE__ %h;}, q{Operator=%} ], [ q{print __LINE__ *f();}, q{Operator=*} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want after the term" ) or diag "got: @t";
+    }
+}
+for my $case ( [ q{print time-1;}, q{Operator=-} ], [ q{print __LINE__ - 1;}, q{Operator=-} ],
+               [ q{print __LINE__, -1;}, q{Number=-1} ], [ q{print -1;}, q{Number=-1} ],
+               [ q{print __LINE__ x2;}, q{Operator=x} ], [ q{print __LINE__ / 2;}, q{Operator=/} ],
+               [ q{print __PACKAGE__->can("f");}, q{Operator=->} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+
+# §69 -- << after a TERM is the left shift: a here-doc starts only where
+# perl expects a term (toke.c yyl_leftpointy: under XOPERATOR << is
+# SHop(OP_LEFT_SHIFT); scan_heredoc runs otherwise), so after a number,
+# a variable, a ), a ], the } of a subscript, a method name, a postfix
+# ++ or a string, <<NAME is a shift by a call of NAME:
+# `my $n = (1<<index("ab","b")); print $n;` prints 2.  (In the
+# filehandle slot of print $fh <<EOT the here-doc stays, as for perl.)
+{
+    for my $code ( q{my $n = (1<<index("ab","a"));}, q{my $n = 1<<length("ab");},
+                   q{my $n = $x<<f();}, q{my $n = 1 <<f();}, q{my $n = 1<<f;},
+                   q{$num |= (1<<index($D_flags, $_)) for split //, $on;},
+                   q{my $n = $a[0]<<f();}, q{my $n = $h{a}<<f();}, q{my $n = f()<<g();},
+                   q{my $n = $i++<<f();}, q{my $n = $o->m<<f();}, q{my $n = "1"<<f();},
+                   q{my $n = time<<f();}, q{print $fh<<EOT;} ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( !grep( /^HereDoc=/, @t ) && grep( $_ eq q{Operator=<<}, @t ), "$code: the left shift, not a here-doc" )
+            or diag "got: @t";
+    }
+}
+# A quoted terminator after a term is a shift by a string for perl; PPI
+# keeps the here-doc there (no real program writes it, and the fuzzed
+# fixtures 45 and 47 of t/data/08_regression test the here-doc scanner
+# on that shape).
+{
+    for my $code ( q{my $n = 1 << "EOT";} ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( !grep( /^HereDoc=/, @t ) && grep( $_ eq q{Operator=<<}, @t ), "$code: the left shift, not a here-doc" )
+            or diag "got: @t";
+    }
+}
+for my $code ( qq{print <<EOT;\nx\nEOT\n}, qq{print <<"EOT";\nx\nEOT\n}, qq{print <<~EOT;\n  x\n  EOT\n},
+               qq{push \@a, <<EOT;\nx\nEOT\n}, qq{my \$x = <<EOT . "tail";\nx\nEOT\n},
+               qq{print \$fh <<EOT;\nx\nEOT\n}, qq{print STDOUT <<EOT;\nx\nEOT\n},
+               qq{return <<EOT;\nx\nEOT\n}, qq{my \@s = sort <<EOT;\nx\nEOT\n},
+               qq{my \$s = "a" . <<EOT;\nx\nEOT\n} ) {
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( /^HereDoc=/, @t ), squash($code) . ": a here-doc (control)" ) or diag "got: @t";
+}
+{
+    my @t = map { short_class($_) } toks(qq{f(<<A, <<B);\na\nA\nb\nB\n});
+    is( scalar( grep { /^HereDoc=/ } @t ), 2, 'f(<<A, <<B): two here-docs (control)' ) or diag "got: @t";
+    for my $code ( q{my $n = 1<<2;}, q{$x <<= 2;}, q{my $n = $x << $y;} ) {
+        my @t = map { short_class($_) } toks($code);
+        ok( !grep( /^HereDoc=/, @t ), "$code: no here-doc (control)" ) or diag "got: @t";
+    }
+}
+
+# §70 -- a { that starts a statement and is followed by ; is a BLOCK
+# (perlref: `{;` is the disambiguator), and a bare block is a statement
+# of its own: perl reads `{;} print 1;` as an empty block and then the
+# print (toke.c yyl_leftcurly under XSTATE: the brace is a block unless
+# its look-ahead finds a hash; the block's } ends the statement).  An
+# EMPTY {} or { # comment } that starts a statement is an anonymous hash
+# for perl itself (toke.c: a } right after the {, comments skipped, is
+# HASHBRACK; `perl -e '{} print 1'` is a syntax error), so PPI's
+# Constructor there is right (controls).
+{
+    for my $case ( [ q{{;} print 1;}, [ 'Statement::Compound: {;}', 'Statement: print 1;' ] ],
+                   [ q{{ ; } print 1;}, [ 'Statement::Compound: { ; }', 'Statement: print 1;' ] ],
+                   [ qq{{;\n# c\n}\nprint 1;}, [ 'Statement::Compound: {; # c }', 'Statement: print 1;' ] ],
+                   [ q{{ ; my $x = 1; } print 1;}, [ 'Statement::Compound: { ; my $x = 1; }', 'Statement: print 1;' ] ],
+                   [ q{{; a => 1 } print 1;}, [ 'Statement::Compound: {; a => 1 }', 'Statement: print 1;' ] ],
+                   [ q{{ ;; } f();}, [ 'Statement::Compound: { ;; }', 'Statement: f();' ] ] ) {
+        my ( $code, $want ) = @$case;
+        is_deeply( [ stmts($code) ], $want, squash($code) . ': the block ends its statement' );
+    }
+    my $doc = PPI::Document->new( \'sub f { {;} 1 }' );
+    my ($blk) = $doc ? @{ $doc->find('PPI::Structure::Block') || [] } : ();
+    my @got = $blk ? map { my $s = squash($_->content); $s =~ s/^ //; short_class(ref $_) . ": $s" } $blk->schildren : ();
+    is_deeply( \@got,
+               [ 'Statement::Compound: {;}', 'Statement: 1' ], 'sub f { {;} 1 }: the inner block ends its statement' );
+}
+for my $case ( [ q{{ 1 } print 1;}, [ 'Statement::Compound: { 1 }', 'Statement: print 1;' ] ],
+               [ q{L: {;} print 1;}, [ 'Statement::Compound: L: {;}', 'Statement: print 1;' ] ],
+               [ q{do {;}; print 1;}, [ 'Statement: do {;};', 'Statement: print 1;' ] ],
+               [ q{{ }; print 1;}, [ 'Statement: { };', 'Statement: print 1;' ] ],
+               [ q{{ "a", 1 }; print 1;}, [ 'Statement: { "a", 1 };', 'Statement: print 1;' ] ] ) {
+    my ( $code, $want ) = @$case;
+    is_deeply( [ stmts($code) ], $want, "$code: as perl reads it (control)" );
+}
+for my $case ( [ q{{} print 1;}, 'PPI::Structure::Constructor' ], [ qq{{ # c\n} print 1;}, 'PPI::Structure::Constructor' ],
+               [ q{my @l = map {; "$_" => 1 } @x;}, 'PPI::Structure::Block' ], [ q{my $h = {};}, 'PPI::Structure::Constructor' ] ) {
+    my ( $code, $want ) = @$case;
+    my @c = bracket_classes( $code, '{' );
+    is( $c[0], $want, squash($code) . ": $want (control)" );
 }

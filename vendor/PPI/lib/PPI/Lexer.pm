@@ -1511,9 +1511,11 @@ sub _curly {
 		return $self->_curly_lookahead || 'PPI::Structure::Block';
 	}
 
-	# We need to scan ahead.
+	# We need to scan ahead.  An anonymous hash stays in its statement; a
+	# block -- the look-ahead's {; or its fall-through -- is a bare block,
+	# a statement of its own ({;} print 1; is two statements).
 	my $class = $self->_curly_lookahead;
-	return $class if $class;
+	return $class if $class and $class ne 'PPI::Structure::Block';
 
 	# Hit the end of the document, or bailed out, go with block
 	if ( ref $Parent eq 'PPI::Statement' ) {
