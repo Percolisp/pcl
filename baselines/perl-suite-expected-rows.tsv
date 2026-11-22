@@ -18,6 +18,7 @@
 # (the file-level reason covers it wholesale, as before #185).  It must be
 # hand-placed and justified by a MEASUREMENT that the row set is
 # nondeterministic; --bless-rows never invents it and never overwrites it.
+# s543s (2026-11-23, Opus 5.5; THE ROUND on MAIN-READY-108 4a0fd0ec = code ee197b1c) -- ONE STALE row LEFT BY HAND (not a --bless-rows): run/fresh_perl.t "@list = ([ 'one', 1 ], [ 'two', 2 ]);" = s543e (MAIN-READY-104, the list-slice lowering #3100 + #2766: `(grep ..., @list)[0]` as a sub value; one-file MR-103 XDIFF 70/21 -> MR-104 STALE 71/20, ~/pcl-agent-scratch/s543/round2/specs/comp1.log).
 # s543r (2026-11-21, Opus; THE ROUND on MAIN-READY-100 64353611 = code 503f24d2) -- ONE STALE row LEFT BY HAND (not a --bless-rows): run/fresh_perl.t "$foo=undef; $foo->go;" = s543a (MAIN-READY-99, line tracking ON: "Can't call method "go" on an undefined value at - line 1."; one-file runs MR-98 69/22 (the row diverges) -> MR-99 70/21 (it does not), round/comp1/).  It passes in the companion --all --quick (round/comp-quick-all.log) and in the one-file runs.
 # s542r (2026-11-16, Opus; THE ROUND on main code cc36604b = MAIN-READY-95) -- ELEVEN STALE rows LEFT BY HAND (row by row, not a --bless-rows: the round edits baselines, it never re-blesses them from a run): cmd/for.t "[perl #78194] Lone C-style for in a block" + op/signatures.t "class / defer / try does not swallow trailing comma" = s537a (MAIN-READY-88; MR-87 -> MR-88 one-file runs); op/signatures.t "($a) interpreted as protoype when not enabled" (between MAIN-READY-63 and -85); run/fresh_perl.t "package X;" x4 + "{" x2 = s538b (MAIN-READY-89, DESTROY at program exit; MR-88 63/28 -> MR-89 69/22).  Each passes in the companion --all --quick (round/comp-quick-all.log) and in the one-file runs.
 class/accessor.t	$o->a accessor
@@ -2309,7 +2310,6 @@ run/fresh_perl.t	$stimpy = 'happy';
 run/fresh_perl.t	$x=0x0eabcd; print $x->ref;
 run/fresh_perl.t	$| = 1;
 run/fresh_perl.t	/(?{"{"}})/ \# Check it outside of eval too
-run/fresh_perl.t	@list = ([ 'one', 1 ], [ 'two', 2 ]);
 run/fresh_perl.t	BEGIN {
 run/fresh_perl.t	BEGIN { 1/$zero }
 run/fresh_perl.t	BEGIN { die "phooey\n" }
