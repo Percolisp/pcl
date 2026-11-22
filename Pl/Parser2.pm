@@ -7113,11 +7113,24 @@ sub _hoist_local_term {
   return 0 if @heredocs && ($compound || $hd_line_ends);
   my $hdtext = @heredocs ? "\n" . join(q{}, map { join(q{}, $_->heredoc) . $_->terminator . "\n" } @heredocs) : q{};
   # `delete local ELEM` (#5001): the hoisted local keeps the element's value
-  # (`local ELEM = ELEM`: the right side is read first) and the term left
-  # behind is `delete ELEM` -- its value the OLD element(s), the element gone
-  # until the block's end, as perl's.  The operand is side-effect free
-  # (_local_operand), so reading it three times is the same program.
-  my $keep = _after_delete($l) ? " = $optext" : '';
+  # and the term left behind is `delete ELEM` -- its value the OLD element(s),
+  # the element gone until the block's end, as perl's.  The old value is
+  # COPIED into a temporary first (`my $t = ELEM; local ELEM = $t;`): a tied
+  # element read in the local's own right side is FETCHed only after the local
+  # stored undef (perl's order too), so `local ELEM = ELEM` lost it
+  # (perl-tests/local.t's tied rows); under a modifier the copy is taken only
+  # when the condition holds.  The operand is side-effect free
+  # (_local_operand), so reading it again is the same program.
+  my $keep = '';
+  if (_after_delete($l)) {
+    my $sig = substr($optext, 0, 1);
+    return 0 if $sig ne '$' && $sig ne '@';
+    my $tmp = ($sig eq '@' ? '@' : '$') . '__pcl_ldel_' . ++$self->{_local_term_n};
+    my ($cv) = $guard =~ /(\$\w+)$/;
+    push @decls, !defined $cv ? "my $tmp = $optext;"
+               : $sig eq '@' ? "my $tmp = $cv ? ($optext) : ();" : "my $tmp = $cv ? $optext : undef;";
+    $keep = " = $tmp";
+  }
   if ($kw =~ /^(?:while|until)$/) {
     # perl restores a LOOP condition's local per iteration and when the loop
     # ends (RT #7615's to-the-block-end reading is if / unless only).  Wrapped

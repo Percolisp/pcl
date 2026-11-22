@@ -48,7 +48,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 43;
+plan tests => 44;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -726,4 +726,24 @@ print "4 $h{k} ", join(",", sort keys %h), "\n";
            . "3 N\n"
            . "4 9 a,b,k\n",
        'M7: delete local ELEM if / unless COND saves, deletes and restores only when COND holds (#5250)');
+}
+
+# M8: the #5001 hoist on a TIED container keeps the deleted VALUE: the old
+# element is copied before the local stores undef (a first cut's `local ELEM
+# = ELEM` FETCHed after it -- perl-tests/local.t's tied rows; perl's own order
+# reads the same).  Passes on main too: the breaking shape, not an inverse row.
+{
+    my $out = run_pl(q{
+{ package TA; sub TIEARRAY { bless [], $_[0] } sub STORE { $_[0]->[$_[1]] = $_[2] }
+  sub FETCH { $_[0]->[$_[1]] } sub EXISTS { exists $_[0]->[$_[1]] } sub DELETE { delete $_[0]->[$_[1]] }
+  sub CLEAR { @{$_[0]} = () } sub FETCHSIZE { scalar(@{$_[0]}) } sub STORESIZE { $#{$_[0]} = $_[1] - 1 } sub EXTEND {} }
+tie my @a, 'TA'; @a = ('a', 'b', 'c'); $a[4] = 'd';
+{ my ($d, $z) = delete local @a[4, 999]; print "1 ", ($d // 'u'), " ", ($z // 'u'), " ", scalar(@a), "\n";
+  my $c = delete local $a[2]; print "2 ", ($c // 'u'), " ", scalar(@a), "\n"; }
+print "3 ", scalar(@a), " ", join(",", map { $_ // 'u' } @a), "\n";
+});
+    is($out, "1 d u 3\n"
+           . "2 c 2\n"
+           . "3 5 a,b,c,u,d\n",
+       'M8: delete local as a term on a TIED array returns the deleted values and restores them (#5001)');
 }
