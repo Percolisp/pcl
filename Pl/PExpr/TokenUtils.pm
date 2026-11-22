@@ -436,16 +436,27 @@ sub is_indirect_call_token {
 # (perlfunc: "evalbytes ... behaves like eval EXPR except that it always
 # parses its argument as a string of bytes"), each also spelled `CORE::`.
 # Every "is a string eval here?" test asks eval_word() for the WORD (and keeps
-# its own negatives: `eval BLOCK`, `->eval`, `eval =>`), so a lexical that is
-# promoted, frozen or licensed because "no eval names it" cannot miss an
-# `evalbytes` (or a `CORE::eval`).  A user's sub named `evalbytes` (no feature
-# in force) is counted too: every such test is conservative in that
-# direction, and only the lowering (ExprToCL) decides the keyword.
+# its own `eval BLOCK` negative), so a lexical that is promoted, frozen or
+# licensed because "no eval names it" cannot miss an `evalbytes` (or a
+# `CORE::eval`).  The cheap BAREWORD negatives are this predicate's own -- a
+# word that is a method name (`->eval`), a fat-comma KEY (`evalbytes =>`, the
+# feature tables of feature.pm / experimental.pm: counting it made
+# experimental.pm's `_enable` capture refusal fire), a sub's NAME (`sub eval`)
+# or an `&` call is no eval of any kind.  A user's sub named `evalbytes` called
+# as a word (no feature in force) is counted: every such test is conservative
+# in that direction, and only the lowering (ExprToCL) decides the keyword.
 my %EVAL_WORD = map { $_ => 1 } qw(eval CORE::eval evalbytes CORE::evalbytes);
 sub eval_word {
   my ($t) = @_;
-  return ref($t) && Scalar::Util::blessed($t) && $t->isa('PPI::Token::Word')
-      && $EVAL_WORD{ $t->content } ? 1 : 0;
+  return 0 unless ref($t) && Scalar::Util::blessed($t) && $t->isa('PPI::Token::Word')
+               && $EVAL_WORD{ $t->content };
+  my $prev = $t->sprevious_sibling;
+  return 0 if $prev && $prev->isa('PPI::Token::Operator')
+              && ($prev->content eq '->' || $prev->content eq '&');
+  return 0 if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+  my $nx = $t->snext_sibling;
+  return 0 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  return 1;
 }
 
 # Is this Word a STRING `eval` — the one spelling whose body is compiled as a
@@ -456,12 +467,7 @@ sub eval_word {
 sub is_string_eval_word {
   my ($t) = @_;
   return 0 unless eval_word($t);
-  my $prev = $t->sprevious_sibling;
-  return 0 if $prev && $prev->isa('PPI::Token::Operator')
-              && ($prev->content eq '->' || $prev->content eq '&');
-  return 0 if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
   my $nx = $t->snext_sibling;
-  return 0 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
   return 0 if $nx && $nx->isa('PPI::Structure::Block');
   return 1;
 }
