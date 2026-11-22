@@ -3951,12 +3951,17 @@ sub _eval_lexical_alist {
   # (`__state__`) are deliberately NOT stripped: those are defvar'd cells, not
   # let bindings, and never enter _let_bound_vars — their pairs arrive via
   # _eval_state_captures below (s418, #401).
+  # EVERY suffix strips (#2630, s543h): a cell can carry two -- a block
+  # lexical the file also spells qualified is the exception rename's
+  # `$x__excl__0` promoted to `$x__excl__0__file__0`, and its key was
+  # "$x__excl__0", which no eval text names.  The depth is the OUTERMOST
+  # numbered suffix's N (the one a single-suffix name has).
   my $skey = sub {
     my ($v) = @_;
-    $v =~ s/__lex__\d+$//;
-    my $d = $v =~ s/__shadow__(\d+)$// ? $1
-          : $v =~ s/__file__(\d+)$//   ? $1
-          : $v =~ s/__excl__(\d+)$//   ? $1 : -1;
+    my $d = -1;
+    while ($v =~ s/__(lex|shadow|file|excl)__(\d+)$//) {
+      $d = $2 if $d < 0 && $1 ne 'lex';
+    }
     return ($v, $d);
   };
   my @vars = sort {
@@ -3998,6 +4003,18 @@ sub _eval_lexical_alist {
   # original-name global, found by p-eval-lex-lookup's global fall-through;
   # ir-spec §9.1).  Only SPAN cells keep emitted pairs, package-qualified
   # for the cross-segment case.)
+  # The PROMOTED file cells this site's pad sees (#2630, s543h): published per
+  # eval word by the binder's answer (Parser2::_publish_eval_cell), so a
+  # package switch in the text cannot re-home them -- identity, #2633 and #470
+  # cells alike.  After the let-bound and state pairs (an inner `my` wins),
+  # before the span pairs.
+  my $home = $parser->lex_home;
+  for my $p ($home->can('eval_site_cells') ? $home->eval_site_cells : ()) {
+    my ($key, $cell) = @$p;
+    next if $seen{$key};
+    push @pairs, ['cons', "\"$key\"", $cell];
+    $seen{$key} = 1;
+  }
   my $span = $parser->lex_home->{_eval_span_captures} // {};
   for my $key (sort keys %$span) {
     next if $seen{$key};

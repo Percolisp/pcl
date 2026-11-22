@@ -83,6 +83,7 @@ package Pl::Binder;
 #       ->requalify_home($tok, $canon) the requalifier's home (s533b)
 #       Pl::Binder::for_node($p2, $n)   the binder answering about $n
 #       ->resolve($node, $canon)       the record visible at $node for $canon
+#       ->pkg_at($node)                the positional package at $node
 #       ->captures($block)             OUTER bindings read inside $block
 #       ->captures_name($n, $bare, $canons, eval => 1)  the capture question (s533d)
 #       ->has_string_eval($cv), ->eval_sees($b)  the string-eval CV fact (s533d)
@@ -888,6 +889,10 @@ sub _pkg_at {
   }
   return $self->{opt}{pkg} // 'main';
 }
+
+# The positional package at $node, for a caller that must spell a cell from
+# there (Parser2::_publish_eval_cell, #2630).
+sub pkg_at { my ($self, $node) = @_; return $self->_pkg_at($node) }
 
 sub _is_lexical { return $_[0] && $_[0]{kind} =~ /^(?:my|state|our|param|lexsub|outer)$/ ? 1 : 0 }
 

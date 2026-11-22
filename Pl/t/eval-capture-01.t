@@ -134,6 +134,26 @@ print "pkg_array=",     (eval { pkg_array() } // "DIED"),     "\n";
 print "pkg_global=",    (eval { pkg_global() } // "DIED"),    "\n";
 print "pkg_promoted=",  (eval { pkg_promoted() } // "DIED"),  "\n";
 print "pkg_made=",      (eval { pkg_made() } // "DIED"),      "\n";
+# #2630 (s543h): a file lexical a named sub captures, whose name the file ALSO
+# spells qualified (the #470 mangle), is still the caller's lexical to a
+# package-switching eval -- in the capturing sub, in a sub that does not name
+# it, at file level, a block lexical; an eval BEFORE the declaration and one in
+# a sub defined above it see the package global; the package global keeps its
+# own value (the alias wrote the lexical into it).
+$main::qd9 = "glob";
+print "qual_before=", eval(q{$qd9}), "\n";
+sub qual_early { eval q{package Other; $qd9} }
+my $qd9 = "lex";
+$Other::qd9 = "pkg";
+sub qual_cap  { my $x = $qd9; eval q{package Other; $qd9} }
+sub qual_free { eval q{package Other; $qd9} }
+print "qual_cap=",   qual_cap(),   "\n";
+print "qual_free=",  qual_free(),  "\n";
+print "qual_file=",  eval(q{package Other; $qd9}), "\n";
+print "qual_early=", qual_early(), "\n";
+print "qual_main=$main::qd9\n";
+{ my $qb9 = "blk"; $Other::qb9 = "pkgb"; sub qual_bsub { $qb9 }
+  print "qual_block=", eval(q{package Other; $qb9}), "\n"; }
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -212,6 +232,13 @@ my %expect = (
     pkg_global    => '7',
     pkg_promoted  => 'cap(1)2',
     pkg_made      => 'Made9:cap(2)',
+    qual_before   => 'glob',
+    qual_cap      => 'lex',
+    qual_free     => 'lex',
+    qual_file     => 'lex',
+    qual_early    => 'pkg',
+    qual_main     => 'glob',
+    qual_block    => 'blk',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',

@@ -195,9 +195,15 @@ sub _eval_feature_seed {
 # every spelling.  Only ENABLED features are recorded: they are what changes
 # how the eval TEXT lexes, and carrying the disabled ones would put noise in
 # the request and the cache key.
+#
+# The same walk records the STRING-eval WORDS (#2630, s543h): every one in
+# document order, and per enclosing statement, so the lowering can hand the
+# eval site's alist builder the words of the statement it is lowering and the
+# promoter can publish a file cell for exactly the words whose pad sees it
+# (_publish_eval_cell).  Returns (features by stmt, words by stmt, words).
 sub _scan_eval_site_features {
   my ($doc) = @_;
-  my %by_stmt;
+  my (%by_stmt, %words_by_stmt, @words);
   # #2103: `strict 'refs'` is inherited by the eval'd code exactly as a
   # feature is, so it rides the same list as the pseudo-feature `strict_refs`
   # (never handed to PPI — _eval_feature_seed filters it).
@@ -213,6 +219,13 @@ sub _scan_eval_site_features {
   my $ui = Pl::Parser::integer_regions_of($doc);
   for my $w (@{ $doc->find(sub {
                   $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
+    my $nx = $w->snext_sibling;
+    if (!($nx && $nx->isa('PPI::Structure::Block'))) {      # eval { } has no alist
+      push @words, $w;
+      for (my $p = $w->parent; $p; $p = $p->parent) {
+        push @{ $words_by_stmt{ refaddr $p } }, $w if $p->isa('PPI::Statement');
+      }
+    }
     my $f = eval { $w->presumed_features } // {};
     my @on = sort grep { $f->{$_} } keys %$f;
     push @on, 'strict_refs'
@@ -241,7 +254,7 @@ sub _scan_eval_site_features {
       $by_stmt{ refaddr $p } = [sort keys %seen];
     }
   }
-  return \%by_stmt;
+  return (\%by_stmt, \%words_by_stmt, \@words);
 }
 
 # #2103: publish whether `strict 'refs'` is in force at STMT, for the deref
@@ -1772,7 +1785,8 @@ sub parse {
   # #364: which features each string-eval site inherits.  Computed here, once,
   # while the document is whole; _lower_stmt publishes the answer for the
   # statement it is lowering and ExprToCL puts it in the (p-eval …) call.
-  $self->{_eval_features_by_stmt} = _scan_eval_site_features($doc);
+  @{$self}{qw(_eval_features_by_stmt _eval_words_by_stmt _eval_words)} =
+    _scan_eval_site_features($doc);
 
   # Cross-file prototypes must be in the shared Environment BEFORE any
   # expression parses: v2 lowers named subs ahead of the statement stream and
@@ -2588,6 +2602,10 @@ sub parse {
     # the alias rule instead (p-alias-eval-cell at the decl's run position;
     # ir-spec §9.1).
     $self->{_eval_span_captures} = $seg->{eval_span_captures} // {};
+    # #2630: the segment-wide map of the promoted cells the #2285 / #2633
+    # publication names -- read only by an eval site that has no word list
+    # (a fragment); every other site asks _eval_word_caps (eval_site_cells).
+    $self->{_eval_unit_caps} = $seg->{eval_unit_caps} // {};
     my (@decls, @defs, @def_lines, @top);
     for my $child (@{ $seg->{stmts} }) {
       # eval_pkg_region (#226): this segment leads with a `package X;` that is
@@ -4806,10 +4824,67 @@ sub _rename_captured_file_lexicals {
   # would have found, so the only change is the compiler's knowledge.
   # (#2633: in a non-program unit the same decl takes the mangle, and the
   # pair names that cell — the value is the CELL, the key the perl name.)
+  # #2630 (s543h): the pairs are published per eval WORD now (_publish_eval_cell,
+  # in _promote_captured); this segment map is what a site WITHOUT a word list
+  # (a fragment) still reads, exactly the cells it carried before.
   my $idcaps = delete $self->{_identity_eval_caps} // {};
   for my $canon (sort keys %$idcaps) {
-    $seg->{eval_span_captures}{$canon} //= cl_sym($idcaps->{$canon});
+    $seg->{eval_unit_caps}{$canon} //= cl_sym($idcaps->{$canon});
   }
+}
+
+# #2630 (s543h): publish a segment-extent PROMOTED file cell to exactly the
+# string-eval words whose pad SEES its declaration -- the binder's answer for
+# the canon at the word (perl's pad_findlex at the eval site: not before the
+# declaration's statement ends, not in a sub defined above it, not under a
+# shadowing `my`).  The eval compiler learns a name is the caller's LEXICAL
+# only from the capture names, so every such word's alist carries the pair:
+# a `package X;` in the eval text then cannot re-home it (the identity cell's
+# #2285 pair, the #2633 mangle's, and the #470 mangle's, which published none:
+# `my $d; $Other::d = 1; sub f { $d } eval q{package Other; $d}` read
+# $Other::d).  The VALUE is the cell, qualified by the declaring package when
+# the word sits in another one (the reader interns it there).  Keyed by
+# refaddr of the word; read by eval_site_cells.
+sub _publish_eval_cell {
+  my ($self, $canon, $cell, $dsym) = @_;
+  my $bd = $self->{_binder}
+    or die "PCL internal: no binder to publish the eval cell of $canon\n";
+  my $b = $bd->decl_binding($dsym)
+    or die "PCL internal: the binder holds no declaration of $canon at line "
+         . ($dsym->line_number // '?') . " -- its eval pair cannot be published\n";
+  my $home = $b->{perl_package} // 'main';
+  for my $w (@{ $self->{_eval_words} || [] }) {
+    my $r = $bd->resolve($w, $canon);
+    next unless $r && refaddr($r) == refaddr($b);
+    my $spell = $bd->pkg_at($w) eq $home ? cl_sym($cell)
+              : cl_pkg($home) . '::' . cl_sym($cell);
+    $self->{_eval_word_caps}{ refaddr $w }{$canon} //= $spell;
+  }
+  # The segment map a word-less site (a fragment) reads, and the mark that
+  # the cell needs no M-F alias in the program unit (_eval_reach_promoted).
+  $self->{_identity_eval_caps}{$canon} //= $cell;
+  $self->{_eval_cell_published}{$cell} = 1;
+  return;
+}
+
+# The promoted file cells the string eval being lowered NOW can name, as
+# [perl name, CL cell] pairs sorted by name (_eval_lexical_alist appends them
+# after the let-bound and state pairs): the union over the published words of
+# the statement under lowering, or -- a site with no word list -- the segment
+# map the #2285 / #2633 publication filled.
+sub eval_site_cells {
+  my ($self) = @_;
+  my $words = $self->{_eval_site_words};
+  my %c;
+  if ($words) {
+    for my $w (@$words) {
+      my $m = $self->{_eval_word_caps}{ refaddr $w } or next;
+      $c{$_} //= $m->{$_} for keys %$m;
+    }
+  } else {
+    %c = %{ $self->{_eval_unit_caps} // {} };
+  }
+  return map { [$_, $c{$_}] } sort keys %c;
 }
 
 # (#2534) Every PLAIN statement at the top level of its lexical extent — the
@@ -4980,6 +5055,9 @@ sub _promote_captured {
     return if $emb_sym && _caprefuse($canon, 'embedded decl: identity = veto path');
     $self->{_file_lex_renamed}{$canon} = 1;
     $self->{_identity_eval_caps}{$canon} = $canon;    # published below (#2285)
+    my ($isym) = grep { $_->content eq $canon } @{ $decl->find('PPI::Token::Symbol') || [] };
+    die "PCL internal: identity promotion of $canon found no declarator\n" if !$isym;
+    $self->_publish_eval_cell($canon, $canon, $isym);  # #2630: per eval word
     $self->_reg_captures($canon, \@cap_subs);
     return 1;
   };
@@ -5117,6 +5195,12 @@ sub _promote_captured {
     $self->{_identity_eval_caps}{$canon} = $sig . $newbare;
     $self->_filecell_note('cap', $canon, 'mangle');
   }
+  # #2630: every segment-extent SCALAR cell (and the would-be identity cell of
+  # any sigil, as before) is published to the eval words that see it -- the
+  # #470 mangle of a name the file also spells qualified included.  A block
+  # cell takes the M5 site pair instead (_eval_reach_promoted).
+  $self->_publish_eval_cell($canon, $sig . $newbare, $dsym)
+    if !$extent && ($sig eq '$' || $id_ok);
   $self->{_emb_promoted}{ $sig . $newbare } = 1 if $emb_sym;     # its cell: _lower_block's embedded arm
   # M-F backstop: the eval refusals above were waived on the promise that
   # _reg_eval_capture runs when this decl lowers to its defvar.  If the decl
@@ -5244,6 +5328,14 @@ sub _eval_reach_promoted {
   for my $name (@names) {
     if ($self->{_eval_block_cells} && $self->{_eval_block_cells}{$name}) {
       $self->{_let_bound_vars}{$name} = 1;
+      delete $self->{_pending_eval_caps}{$name} if $self->{_pending_eval_caps};
+    } elsif ($self->{_eval_cell_published}{$name} && $self->_program_unit) {
+      # #2630 (s543h): every eval word whose pad sees the cell carries its pair
+      # (_publish_eval_cell), so the PROGRAM needs no alias -- which wrote the
+      # lexical's box into the package global of its name: with `$main::d`
+      # also spelled (the #470 mangle) the qualified write clobbered the
+      # lexical.  A non-program unit keeps it (#2640: a named sub defined in
+      # an eval string reaches the unit's lexical no other way, measured).
       delete $self->{_pending_eval_caps}{$name} if $self->{_pending_eval_caps};
     } elsif ($self->{_file_has_str_eval}) {
       push @forms, $self->_reg_eval_capture($name);
@@ -10023,6 +10115,9 @@ sub _lower_block_1 {
   # can only ever see its OWN site's answer.
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $first };
+  # #2630: and its string-eval WORDS (eval_site_cells), `local` so a nested
+  # sub body lowered mid-statement hands the rest of the statement back its own.
+  local $self->{_eval_site_words} = $self->{_eval_words_by_stmt}{ refaddr $first };
   $self->_publish_strict_refs($first);        # #2103, same clock
 
   # #1140: publish THIS region's VarAnnotator verdicts for _lower_expr to hand
@@ -11423,6 +11518,7 @@ sub _lower_stmt {
   # reach here on their own (a compound's parts, a for-head's init/step).
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $stmt };
+  local $self->{_eval_site_words} = $self->{_eval_words_by_stmt}{ refaddr $stmt };   # #2630
   $self->_publish_strict_refs($stmt);         # #2103, same clock
   local $self->{_cur_vi} = $vi;      # #1140, same pairing (see _lower_block)
 
