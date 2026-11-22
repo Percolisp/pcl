@@ -197,6 +197,12 @@ ones in ordinary code, most likely first, are the next fix brief: #1039
 and the stopped PPI batch s543f #5230 and #5232.  The verified count is **82**.  Next: #691 with the nested-element `local`
 family, then string-eval name resolution.
 
+**s543g (2026-11-22) fixed #540 #1190 #3415 #1339 #691 #5128 #4794** (and #5160, #5256 found and
+fixed on the way), the reviewing session closing them at its merge; it filed #5250 #5252-#5256 (silent)
+and #5251 (a drop).  **`tools/task-triage.pl` now reads a task's CURRENT label** (#5162: the subject,
+then the newest `LABEL:` line): on the store before s543g's filings it printed 83 = the verified 82 +
+#5270 (s543h), where it had printed 88.
+
 What pauses: widening the board, new steering populations, perl's own suite
 rows that no IN program reaches. What does not pause: the round instruments,
 the PPI branch when the expect-state checker reports a new mis-lex in an IN
