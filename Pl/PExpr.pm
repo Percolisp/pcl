@@ -2962,6 +2962,19 @@ sub _collapse_braced_bareword_derefs {
       }
     }
     my $bw = _block_sole_bareword($blk);
+    # `${1}` / `@{1}` / `%{12}` / `$#{1}`: an all-DIGIT name is the same
+    # spelling (#5370, s543k: perl's `${ DIGITS }` is the variable, never a
+    # block -- `${1}` read the NUMBER 1).  PPI lexes the digits as a Number,
+    # so the variable takes the token PPI makes for the PLAIN spelling (`$1` /
+    # `@1` Magic, `%1` Symbol, `$#1` ArrayIndex); a subscript after it is the
+    # element of @1 / %1, exactly as for `$1[0]` (#1679).
+    if (!defined $bw && defined(my $dg = _block_sole_digits($blk))) {
+      my $tok = $sigil eq '$#' ? PPI::Token::ArrayIndex->new('$#' . $dg)
+              : $sigil eq '%'  ? PPI::Token::Symbol->new('%' . $dg)
+              :                  PPI::Token::Magic->new($sigil . $dg);
+      splice @$e, $i, 2, $tok;
+      next;
+    }
     # `$#{^CAPTURE}`: a CARET name in the block.  PPI lexes `${^CAPTURE}` and
     # `@{^CAPTURE}` as one Magic token but has no token for the `$#` spelling,
     # so it alone arrives here as Cast + Block (task #412).
@@ -3039,6 +3052,21 @@ sub _block_sole_bareword {
   return undef unless @ch == 1 && ref($ch[0]) eq 'PPI::Token::Word';
   my $w = $ch[0]->content();
   return ($w =~ /\A\w+(?:::\w+)*\z/ && $w !~ /\A\d/) ? $w : undef;
+}
+
+# A deref block holding exactly one all-DIGIT Number (`{1}`, `{ 12 }`, never
+# `{ +1 }` / `{ \ 1 }` / `{ 1; }`, which are blocks): the digits, else undef
+# (#5370).  The ONE reading of that spelling here; Parser2::_brace_name_refs
+# is its document-level twin (the rename / requalify / binder passes).
+sub _block_sole_digits {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return undef unless @ch == 1 && ref($ch[0]) eq 'PPI::Token::Number';
+  my $d = $ch[0]->content();
+  return $d =~ /\A\d+\z/ ? $d : undef;
 }
 
 

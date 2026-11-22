@@ -1196,6 +1196,22 @@ my $s = "ab"; $s =~ s/(a)(b)/$1[1]<$2>$1/; print "3 $s\n";
 $12[5] = 9; my $r = \$1[1]; $$r = "C"; print "4 ", scalar(@12), " @1 ", ("A" =~ /^$1[0]$/ ? "m" : "n"), "\n";
 });
 
+# ── s543k #5370: the BRACE spelling of an all-digit name in CODE is the
+# variable -- `${1}`, `${ 1 }`, `${10}`, `${0}`, `@{1}`, `$#{1}`, `%{1}`, and
+# `${1}[0]` / `${12}{k}` the elements of @1 / %12; inside a string eval too.
+# PPI lexes the digits as a Number, and PExpr's collapse took the block's VALUE
+# (the number) where perl takes the NAME.  INVERSE GUARDS: `${ \ 1 }` is a
+# block (a reference's referent), the interpolating "${1}" (right before).
+test_transpile("\${1} in code is the capture variable, \${1}[0] an element of \@1 (#5370)", q{
+no strict; no warnings;
+@1 = (7, 8); %12 = (k => "v12"); %1 = (a => 1, b => 2);
+"abcdefghijk" =~ /(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)/;
+my $x = ${1}; my @l = (${1}, ${2});
+print "1 $x @l [${1}] ", ${1} . "!", " ", ${ 1 }, ${10}, " ", (${0} eq $0 ? "z" : "Z"), "\n";
+print "2 ", ${1}[0], ${1}[1], " ", ${12}{k}, " ", scalar(@{1}), " ", $#{1}, " ", join(",", sort keys %{1}), "\n";
+print "3 ", eval('${1} . ${2}'), " ", ${ \ 1 }, " ", (eval { ${1} = 5; 1 } ? "w" : "ro"), "\n";
+});
+
 # Task #2286 (s495f): List::Util::pairs builds objects BLESSED into
 # List::Util::_Pair (->key / ->value / ->TO_JSON) and, like every XS list
 # returner, answers the LAST element in scalar context -- the shim answered

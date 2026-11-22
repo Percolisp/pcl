@@ -5516,8 +5516,11 @@ sub _brace_name_refs {
     my @kids = grep { $_->significant } $b->children;
     next unless @kids == 1 && $kids[0]->isa('PPI::Statement');
     my @t = grep { $_->significant } $kids[0]->children;
-    next unless @t == 1 && $t[0]->isa('PPI::Token::Word')
-             && $t[0]->content =~ /^\w+$/;      # a qualified name is no lexical
+    # A Word, or an all-DIGIT Number (#5370, s543k: `${1}` is `$1`, never a
+    # block -- the lowering's own predicate, PExpr::_block_sole_digits).
+    next unless @t == 1 && (($t[0]->isa('PPI::Token::Word')
+                             && $t[0]->content =~ /^\w+$/)  # a qualified name is no lexical
+                            || defined Pl::PExpr::_block_sole_digits($b));
     next if $sig !~ /^(?:\$|\@|%|\$#)$/;         # `\{name}`, `&{name}`: not ours
     # A SUBSCRIPT after the block names the CONTAINER, exactly as for the
     # unbraced spelling (task #2645): `${x}[1]` is an element of @x, `${x}{k}`

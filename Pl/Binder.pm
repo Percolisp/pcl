@@ -357,6 +357,11 @@ sub _token {
     }
     return;
   }
+  # `${1}`: the brace helper's all-digit name (#5370) -- a special of main.
+  if ($t->isa('PPI::Token::Number') && exists $self->{brace}{ refaddr $t }) {
+    $self->_ref($t, $self->{brace}{ refaddr $t }, 'brace', $pkg, $cv);
+    return;
+  }
   if ($t->isa('PPI::Token::Symbol')) {
     my $canon = _sym_canon($t);
     return unless defined $canon;                  # & and * : not a variable
