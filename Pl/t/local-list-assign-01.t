@@ -43,7 +43,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 # One transpile + one SBCL run for the whole family; one `is` per line.
 my $fixture = <<'PL';
@@ -96,6 +96,10 @@ sub e7 { local($E[2]) = $E[2] + 1; local($K{k}) = "s" . $K{k}; return "$E[2] $K{
 print "23 ", e7(), "\n";
 sub e8 { local(@E[0,1]) = (5,6); return "@E" } print "24 ", e8(), "\n";
 print "25 @E @$er $K{k} $K{a}{b}\n";
+our %V = (k => 1, a => 1, b => 2);
+sub v3 { local @V{qw(a b)} = (5,6,7) } sub v4 { my $z = 1; local($V{k}) = 5 }
+my @v3 = v3(); my $s3 = v3(); my @v4 = v4(); my $s4 = v4();
+print "26 @v3|$s3 @v4|$s4 $V{k}$V{a}$V{b}\n";
 PL
 
 my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
@@ -151,3 +155,5 @@ line_is(22, 'in=3', 'the statement-modifier spelling');
 line_is(23, '10 sK', 'a scalar-shaped RHS keeps the -init form: it reads the OLD value');
 line_is(24, '5 6 9', 'a parenthesised SLICE target was a list assignment already');
 line_is(25, '9 9 9 1 2 3 K 1', 'every localization is restored');
+line_is(26, '5 6|3 5|1 112',
+        'a valued local SLICE / paren-element assignment is the list assignment\'s value by context (#5253)');

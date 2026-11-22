@@ -15014,7 +15014,10 @@ sub _lower_local {
   } elsif ($valued && defined $plan->{value}) {
     # The LAST statement of a block whose value is used: its value is the
     # localized target's (perl: `sub f { local $x = 5 }` returns 5; task #4443).
-    push @rest_forms, $plan->{value};
+    # A value by context (_local_ctx_value) reads a SUB's caller context under
+    # the body's :void regime, as every implicit-return leaf does.
+    my $v = $plan->{value};
+    push @rest_forms, _is_local_ctx_value($v) ? $self->_restore_caller_wa($tail_ctx, $v) : $v;
   }
   return _local_nest($plan, \@rest_forms);
 }
@@ -15365,6 +15368,9 @@ sub _local_plan_elem {
     }
     push @opens, _local_open([$mi, $cl, $keys[0], $init], $test);
     $value = _local_elem_place($open, $cl, \@keys) if $mod eq '';
+    # a PARENTHESISED element's assignment is a list assignment (#1339): as a
+    # valued tail in scalar context its value is the right side's count, 1 (#5253)
+    $value = _local_ctx_value($value, 1) if defined $value && $rec->{paren};
   } elsif (defined $init) {
     my $tmp = $self->_local_tmp('pcl-local-init-');
     my $ti = _local_list_ctx($init);
@@ -15377,15 +15383,35 @@ sub _local_plan_elem {
       push @inner, _local_list_assign([{ place => _local_elem_place($open, $cl, \@keys) }],
                                       $tmp, $test);
     } else {
-      my $assign = _local_list_ctx(
-        ['p-setf', [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys], $tmp]);
+      my $sl = [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys];
+      my $assign = _local_list_ctx(['p-setf', $sl, $tmp]);
       push @inner, defined $test ? ['when', $test, $assign] : $assign;
+      # As a VALUED tail (only there: every other site keeps its emission, and
+      # the slice's fast assignment) the statement is the list assignment's
+      # value -- the slice's elements in list context, the right side's count
+      # in scalar (#5253: it was the right side itself, `(5,6,7)` / ARRAY(0x1)).
+      $value = _local_ctx_value($sl, ['make-p-box', ['length', ['p-flatten-args', ['list', 'list', $tmp]]]])
+        if $mod eq '';
     }
   } else {
     $bind_base->() if @keys > 1 || $expr;
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
   }
   return { opens => \@opens, inner => \@inner, value => $value };
+}
+
+# A valued tail's value by the block's context: LIST in list context, else
+# SCALAR (a plan's `value` that reads *wantarray*; _lower_local reads it
+# through the caller's context, _restore_caller_wa).
+sub _local_ctx_value {
+  my ($list, $scalar) = @_;
+  return ['if', ['eq', '*wantarray*', 't'], $list, $scalar];
+}
+
+sub _is_local_ctx_value {
+  my ($v) = @_;
+  return (ref $v eq 'ARRAY' && $v->[0] eq 'if' && ref $v->[1] eq 'ARRAY'
+          && ($v->[1][0] // '') eq 'eq' && ($v->[1][1] // '') eq '*wantarray*') ? 1 : 0;
 }
 
 # Is the expression PARTS provably ONE scalar -- the same value in list and
@@ -15600,7 +15626,7 @@ sub _local_bare_value {
   return undef if grep { ($_->{kind} // '') =~ /^(?:glob|skip)$/ || !defined $_->{place} } @$items;
   return $items->[0]{place} if @$items == 1;
   my @p = map { $_->{place} } @$items;
-  return ['if', ['eq', '*wantarray*', 't'], ['p-flatten-args', ['list', 'list', @p]], $p[-1]];
+  return _local_ctx_value(['p-flatten-args', ['list', 'list', @p]], $p[-1]);
 }
 
 # Is this the SOLO-binding shape -- one variable (or element) target whose
