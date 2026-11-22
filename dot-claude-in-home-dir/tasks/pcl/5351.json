@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543k (Opus 5.5, 2026-11-22), the PATTERN side of #5252 (member 5 fixed the replacement side and left this one as docs/interp-scan.md documents it -- \"postderef_qq is off in pattern mode ... recorded so it is a decision\": perl's answer was not recorded there, it is now).  PRE-EXISTING.\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    use v5.24;\n    my $r = \\\"b\"; my $a = [\"c\"]; my $x = \"abc\"; my $n = ($x =~ s/$r->$*/X/) ? 1 : 0;\n    my $m = (\"abc\" =~ /$a->@*/) ? 1 : 0; print \"$n $x $m\\n\";\n        perl  1 aXc 1        PCL  0 abc 0\n\nWHAT IT IS: ExprToCL::_gen_interp_regex_pattern scans the pattern with Pl::InterpScan::scan(in_regex => 1) WITHOUT postderef_qq, so the arrow stays pattern text.  The ONE reader of the feature at a token is now StringInterpolation::postderef_qq_active_for (s543k); the pattern's token is the m// / s/// token itself (the s543k replacement fix reads it there).  FIX DIRECTION: pass `postderef_qq => postderef_qq_active_for($node)` to the pattern scan and lower a postderef event like the dq side (its reference's own source text through _compile_ref_text_form); then docs/interp-scan.md's residue line goes.  Check the `@*` join with `$\"` and `$a->@[0,1]` in a pattern.",
+   "id" : 5351,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a postfix dereference in a PATTERN under postderef_qq is not interpolated -- `s/$r->$*/X/`, `/$a->@*/` match the literal text (perl interpolates; docs/interp-scan.md records it as a residue)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of an ordinary match under use v5.24 (postderef_qq is in the bundle): IN, LOW (rare spelling)"
+}

@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543k (Opus 5.5, 2026-11-22), found by member 2's probe b18 (#5270).  PRE-EXISTING: base 4a0fd0ec the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    open(my $fh, \"<\", $0) or die;\n    my $g = eval q{$fh};\n    print ref($fh), \"|\", ref($g), \"|\", ref(eval q{$fh}), \"|\", ref(eval q{\\*STDOUT}), \"|\", ref(scalar eval q{$fh}), \"\\n\";\n        perl  GLOB|GLOB|GLOB|GLOB|GLOB        PCL  GLOB|GLOB||GLOB|\n\nWHAT IT IS: the eval's VALUE handed DIRECTLY to `ref` (no variable in between) answers \"\" for a lexical handle; through `my $g` it is right, and `\\*STDOUT` is right.  Suspect (not measured): the value p-eval returns (%p-leavesub's mortal copy of the handle box) is a form p-ref reads as a non-reference, while the scalar assignment unwraps it.  Cheap measurement: `(p-ref (p-eval \"$fh\" ...))` vs `(p-ref (p-scalar-= tmp (p-eval ...)))` at the REPL -- print (type-of) of p-eval's return for a handle-holding box.",
+   "id" : 5350,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `ref(eval q{$fh})` of a lexical filehandle is \"\" (perl GLOB); `my $g = eval q{$fh}; ref $g` is right",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of ref() on an ordinary string-eval value: IN"
+}

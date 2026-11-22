@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543k (Opus 5.5, 2026-11-22), found by member 2's probe b05 (#5270): the span route (a file lexical used in a later package section) and the capture route (a file lexical a named sub captures) answer the same.  PRE-EXISTING: base 4a0fd0ec.\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    sub early { defined(eval q{$x}) ? \"d\" : \"u\" }\n    my $x = \"lex\";\n    sub g { $x }\n    print early(), \" \", g(), \"\\n\";\n        perl  u lex        PCL  d lex\n\nWHAT IT IS: the lexical is promoted under its OWN name (the identity cell: one declaration file-wide, the file never spells `$main::x`), so the cell IS the package variable `$main::x`; the eval in `early` gets no pair (the binder says its pad does not see the declaration -- right) and falls through to the package global, which is the lexical's cell.  s543k's #5270 fixed the MANGLED span cell (no M-F alias in the program unit); the identity cell has no alias to drop -- the shared symbol is the identity.  FIX DIRECTION (not designed): in a file with a string eval whose word does NOT see the declaration and that names the canon (Parser2::_eval_operand_may_name), take the mangle instead of identity (`_own_name_cell_ok` false); measure what moves (every identity cell in an eval file would become a mangle).",
+   "id" : 5352,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an IDENTITY-promoted file lexical is seen by a string eval in a sub defined ABOVE its declaration (perl: the package variable) -- `sub early { eval q{$x} } my $x = \"lex\"; sub g { $x }` gives early() \"lex\"",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of name resolution in a string eval; rare (an eval naming a later file lexical from a sub above it): IN, LOW"
+}

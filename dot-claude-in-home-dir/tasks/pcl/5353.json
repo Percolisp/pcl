@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543k (Opus 5.5, 2026-11-22), found by member 6's probe f10 (#5370: the block spellings that must stay blocks).  PRE-EXISTING: base 4a0fd0ec the same; `${\"1\"}` (a STRING) is right.\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    \"abc\" =~ /(b)/; no strict \"refs\"; my $one = 1;\n    print ${ +1 }, \"|\", ${\"1\"}, \"|\", ${ $one }, \"\\n\";\n        perl  b|b|b        PCL  1|b|1\n\nWHAT IT IS: the scalar cast of a non-reference NUMBER returns the number itself instead of stringifying it and reading the variable of that name (perl: rv2sv of a non-ref is a symbolic reference by its STRING value).  Suspect: p-cast-$ / %p-symref-box's dispatch has a number arm that answers the value.  Rule 12 read of that dispatch owed.",
+   "id" : 5353,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a symbolic scalar deref of a NUMBER reads the number -- `${ +1 }` / `${ $one }` with $one = 1 (no strict refs) give 1, perl $1 (the value is stringified to the name \"1\")",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of a symbolic deref (no strict refs); rare: IN, LOW"
+}
