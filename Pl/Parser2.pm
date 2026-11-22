@@ -4276,7 +4276,7 @@ sub _span_rename_scalar {
   $self->_span_check_rewritten($segments, $bd, $b, $bare, $newbare, $unique, $di);
   $self->{_file_lex_renamed}{"\$$newbare"} = 1;
   $self->{_span_promoted}{ refaddr $b } = 1;
-  _publish_span_pair($segments, $di, $hi, "\$$bare", "\$$newbare");
+  $self->_publish_span_cell($segments, $di, $hi, $b, "\$$bare", "\$$newbare");
 }
 
 # The scalar rewrite of one statement: Symbols, `${x}` braces, interpolated
@@ -4428,7 +4428,7 @@ sub _span_rename_container {
   $self->{_file_lex_renamed}{"$sig$newbare"} = 1;
   $self->{_span_promoted}{ refaddr $b } = 1;
   $self->_filecell_note('cspan', $csym, $unique ? 'identity' : 'mangle');
-  _publish_span_pair($segments, $di, $hi, $csym, "$sig$newbare");
+  $self->_publish_span_cell($segments, $di, $hi, $b, $csym, "$sig$newbare");
   return;
 }
 
@@ -4482,14 +4482,22 @@ sub _check_my_spanning {
   die "Parser2 TODO: my-lexical '$bare' (canon $c) spans a package boundary\n";
 }
 
-# M-F + #2285: record ORIGINAL -> CELL for a span-promoted file lexical on
-# every segment of its extent; the section driver publishes the current
-# segment's map and _eval_lexical_alist appends the pairs after the let-bound
-# ones (a live shadow wins by assoc order).  The package-QUALIFIED cell
-# spelling is valid in every segment.  `//=` keeps the innermost instance's
-# cell where extents overlap (the instance loops run innermost-first).
-sub _publish_span_pair {
-  my ($segments, $di, $hi, $orig, $cell) = @_;
+# A span-promoted file lexical's eval reach (#5270, s543k: the route s543h
+# built for a capture-promoted cell, _publish_eval_cell).  Its cell joins the
+# alist of exactly the string-eval WORDS whose pad the binder says sees
+# binding $b (_publish_eval_words: not an eval before the declaration, not one
+# in a sub defined above it, not under a shadowing `my`), and the program unit
+# then takes NO M-F alias for it (_eval_reach_promoted's published branch) --
+# the alias wrote the lexical's box into the package variable of its name, so
+# `$main::x = ...` wrote the LEXICAL.  The segment map (ORIGINAL -> the
+# package-QUALIFIED cell, valid in every segment of the extent; `//=` keeps the
+# innermost instance's cell where extents overlap) is what a WORD-LESS site
+# still reads (an eval inside interpolated text, `s///ee`: eval_site_cells'
+# other branch), exactly as before.
+sub _publish_span_cell {
+  my ($self, $segments, $di, $hi, $b, $orig, $cell) = @_;
+  $self->_publish_eval_words($b, $cell);
+  $self->{_eval_cell_published}{$cell} = 1;
   my $cl_pkg = cl_pkg($segments->[$di]{pkg});
   for my $j ($di .. $hi) {
     $segments->[$j]{eval_span_captures}{$orig} //= "${cl_pkg}::" . cl_sym($cell);
@@ -4941,10 +4949,24 @@ sub _publish_eval_cell {
   my $b = $bd->decl_binding($dsym)
     or die "PCL internal: the binder holds no declaration of $canon at line "
          . ($dsym->line_number // '?') . " -- its eval pair cannot be published\n";
-  # The KEY is the name the source wrote -- the binding's canon, built before
-  # any rename: a promoter's canon can already be a rename (`$d__excl__0`, the
-  # #3080 exception rename of a name the file also spells qualified), which no
-  # eval text names.
+  my $key = $self->_publish_eval_words($b, $cell);
+  # The segment map a word-less site (a fragment, `s///ee`) reads, and the
+  # mark that the cell needs no M-F alias in the program unit
+  # (_eval_reach_promoted).
+  $self->{_identity_eval_caps}{$key} //= $cell;
+  $self->{_eval_cell_published}{$cell} = 1;
+  return;
+}
+
+# The per-WORD half of _publish_eval_cell, shared with the span pass (#5270,
+# s543k): binding $b's cell $cell joins the alist of exactly the string-eval
+# words whose pad the binder says sees $b.  Returns the KEY: the name the
+# source wrote -- the binding's canon, built before any rename (a promoter's
+# canon can already be a rename, `$d__excl__0`, the #3080 exception rename of a
+# name the file also spells qualified, which no eval text names).
+sub _publish_eval_words {
+  my ($self, $b, $cell) = @_;
+  my $bd   = $self->{_binder};
   my $key  = $b->{canon};
   my $home = $b->{perl_package} // 'main';
   for my $w (@{ $self->{_eval_words} || [] }) {
@@ -4954,12 +4976,7 @@ sub _publish_eval_cell {
               : cl_pkg($home) . '::' . cl_sym($cell);
     $self->{_eval_word_caps}{ refaddr $w }{$key} //= $spell;
   }
-  # The segment map a word-less site (a fragment, `s///ee`) reads, and the
-  # mark that the cell needs no M-F alias in the program unit
-  # (_eval_reach_promoted).
-  $self->{_identity_eval_caps}{$key} //= $cell;
-  $self->{_eval_cell_published}{$cell} = 1;
-  return;
+  return $key;
 }
 
 # The promoted file cells the string eval being lowered NOW can name, as
@@ -4980,6 +4997,18 @@ sub eval_site_cells {
     %c = %{ $self->{_eval_unit_caps} // {} };
   }
   return map { [$_, $c{$_}] } sort keys %c;
+}
+
+# The SPAN cells the string eval being lowered NOW can name (#5270, s543k), as
+# [perl name, qualified CL cell] pairs sorted by name: none at a site with a
+# word list -- the span pass published its cells to exactly the words that see
+# them (_publish_span_cell), so an eval before the declaration reads the
+# package variable -- and the segment map at a word-less site.
+sub eval_site_span_cells {
+  my ($self) = @_;
+  return () if $self->{_eval_site_words};
+  my $span = $self->{_eval_span_captures} // {};
+  return map { [$_, $span->{$_}] } sort keys %$span;
 }
 
 # (#2534) Every PLAIN statement at the top level of its lexical extent — the
@@ -11533,17 +11562,18 @@ sub _blk_expr {
 
 # The package cells of a statement's PROMOTED embedded / chained declarators
 # (_emb_promoted: #2534's promoter, the span pass's extras #4425), published
-# before the statement in place of a `let`.  A span-promoted one also gets the
-# M-F eval alias (the renamed-cell branch's _reg_eval_capture): a string eval
-# naming the original name reaches the cell.  The promoter refuses a later
-# string eval for its embedded decls (#2534), so its own need none.
+# before the statement in place of a `let`.  A span-promoted one reaches a
+# string eval as every span cell does (_eval_reach_promoted: its pair at the
+# words that see it; the M-F alias only outside the program unit, #5270).
+# The promoter refuses a later string eval for its embedded decls (#2534), so
+# its own need none.
 sub _emb_promoted_cells {
   my ($self, $first) = @_;
   my @alias;
   for my $n ($self->_embedded_my_names($first)) {
     my $why = delete $self->{_emb_promoted}{$n} or next;
     push @{ $self->{_captured_decls} }, _decl_cell($n, _fresh_container($n));
-    push @alias, $self->_reg_eval_capture($n) if $why eq q{span} && $self->{_file_has_str_eval};
+    push @alias, $self->_eval_reach_promoted($n) if $why eq q{span};
   }
   return @alias;
 }

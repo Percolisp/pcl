@@ -4057,10 +4057,15 @@ sub _eval_lexical_alist {
     push @pairs, ['cons', "\"$key\"", $cell];
     $seen{$key} = 1;
   }
-  my $span = $parser->lex_home->{_eval_span_captures} // {};
-  for my $key (sort keys %$span) {
+  # The span cells (#5270, s543k): published per eval word like the promoted
+  # ones above, so only a word-less site reads the segment map
+  # (Parser2::eval_site_span_cells).
+  for my $p ($home->can('eval_site_span_cells') ? $home->eval_site_span_cells
+             : map { [$_, $home->{_eval_span_captures}{$_}] }
+                   sort keys %{ $home->{_eval_span_captures} // {} }) {
+    my ($key, $cell) = @$p;
     next if $seen{$key};
-    push @pairs, ['cons', "\"$key\"", $span->{$key}];
+    push @pairs, ['cons', "\"$key\"", $cell];
   }
   # EVAL MODE (#295, ir-spec §9.1): an eval site inside a compiled eval body
   # appends %p-eval-env% — the lexical holding the ENCLOSING eval's alist,

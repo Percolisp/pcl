@@ -224,6 +224,20 @@ print "eb_region=", CORE::evalbytes(q{package Foo; $ebx9}), "\n";
 print "eb_our=",    CORE::evalbytes(q{package Foo; $oa9}), "\n";
 print "eb_wide=",   (eval { CORE::evalbytes "\x{100}"; 1 } ? "ok" : $@ =~ /^Wide character/ ? "wide" : "other"), "\n";
 { use feature 'evalbytes'; my $z9 = 4; print "eb_feature=", evalbytes(q{$z9 * 2}), "\n"; }
+# #5270 (s543k): a SPAN-promoted file lexical (used in a later package section)
+# reaches exactly the eval words whose pad sees it, and the program unit takes
+# no alias for it: the qualified write is the package variable's, an eval
+# before the declaration and one in a sub defined above it read the package
+# variable; after it, a package-switching eval reads the lexical.
+sub span_early9 { eval q{$sp9} }
+$main::sp9 = "pkg-sp";
+print "span_before=", eval(q{$sp9}), "\n";
+my $sp9 = "lex-sp";
+package Sp9; sub span_g9 { $sp9 } package main;
+$main::sp9 = "pkg-sp2";
+print "span_qual=", Sp9::span_g9(), " $main::sp9\n";
+print "span_eval=", eval(q{$sp9}), " ", eval(q{package Other; $sp9}), "\n";
+print "span_early=", span_early9(), "\n";
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -339,6 +353,10 @@ my %expect = (
     eb_our        => 'main-o',
     eb_wide       => 'wide',
     eb_feature    => '8',
+    span_before   => 'pkg-sp',
+    span_qual     => 'lex-sp pkg-sp2',
+    span_eval     => 'lex-sp lex-sp',
+    span_early    => 'pkg-sp2',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',
