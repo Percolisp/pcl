@@ -1,7 +1,7 @@
 From 911e43a383eea643d8c334920469ee9fbef4ec2c Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 21:15:26 +0200
-Subject: [PATCH 143/147] Unknown: % and a digit run where a term is expected
+Subject: [PATCH 143/149] Unknown: % and a digit run where a term is expected
  names a hash
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

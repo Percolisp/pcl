@@ -1,7 +1,7 @@
 From ac6b15c2917dd830f3bd3c550a6825265cf44a98 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 21:17:01 +0200
-Subject: [PATCH 146/147] TODO tests: %^ where a term is expected is one token
+Subject: [PATCH 146/149] TODO tests: %^ where a term is expected is one token
 
 perl reads %^ where it expects a term as the punctuation hash %^ (the
 hash of $^), as it reads %- and %+, and %^ followed by a caret name's

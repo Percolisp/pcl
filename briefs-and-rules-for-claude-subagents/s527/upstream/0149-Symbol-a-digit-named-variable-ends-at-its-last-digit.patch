@@ -1,0 +1,60 @@
+From 7fd02b752960524f33dec35019f71668241e5d63 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 22 Nov 2026 15:57:19 +0200
+Subject: [PATCH 149/149] Symbol: a digit-named variable ends at its last digit
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+perl reads a digit run after a sigil as the whole name (toke.c
+scan_ident), so @1x 2 is the array @1, the repetition operator and 2,
+and @12x3 is @12 x 3.  The Symbol tokenizer sucked in every word
+character after the sigil and then classed a digit-led name as Magic;
+it now keeps only the digit run in the token and hands the rest back to
+the tokenizer, which reads it as the operator it is (after a term, x is
+the repetition).  @1 x 2, @119797, @a1x and the capture variable $1x
+(Magic.pm's digit run) are unchanged.
+
+Fixes PCL §75 (its six rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Symbol.pm | 7 ++++++-
+ t/ppi_bugs_pcl.t        | 3 +--
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Token/Symbol.pm b/lib/PPI/Token/Symbol.pm
+index 32703d6d..6a377473 100644
+--- a/lib/PPI/Token/Symbol.pm
++++ b/lib/PPI/Token/Symbol.pm
+@@ -192,7 +192,12 @@ sub __TOKENIZER__on_char {
+ 		$t->{line_cursor} -= length( $content );
+ 		return $t->_finalize_token->__TOKENIZER__on_char( $t );
+ 	}
+-	if ( $content =~ /^(?:\$|\@)\d+/ ) {
++	if ( $content =~ /^([\$\@]\d+)/ ) {
++		# A digit-named variable: its name is the digit run, and it ends at
++		# the last digit, as perl's scan_ident reads it -- @1x 2 is @1 x 2.
++		my $name = $1;
++		$t->{line_cursor} -= length($content) - length($name);
++		$t->{token}->{content} = $name;
+ 		$t->{class} = $t->{token}->set_class( 'Magic' );
+ 		return $t->_finalize_token->__TOKENIZER__on_char( $t );
+ 	}
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 3d85ff4f..1e48ce52 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2502,8 +2502,7 @@ for my $case ( [ q{my %x = %^H;}, q{Magic=%^H} ], [ q{%^H = ();}, q{Magic=%^H} ]
+ # operator and 2 (`no strict; @1 = (5); print @1x 2;` prints 11), and
+ # `@12x3` is @12 x 3 -- the array twin of §72's %12x.  PPI reads the word
+ # characters after the digits into one Magic token, @1x.
+-TODO: {
+-    local $TODO = q{PCL §75: a digit-named array followed by word characters is lexed as one token};
++{
+     for my $case ( [ q{print @1x 2;}, q{Magic=@1} ], [ q{print @12x3;}, q{Magic=@12} ],
+                    [ q{my $c = @1x2;}, q{Magic=@1} ], [ q{my @l = (@0x 2);}, q{Magic=@0} ],
+                    [ q{print @1x 2;}, q{Operator=x} ], [ q{print @12x3;}, q{Number=3} ] ) {
+-- 
+2.53.0
+

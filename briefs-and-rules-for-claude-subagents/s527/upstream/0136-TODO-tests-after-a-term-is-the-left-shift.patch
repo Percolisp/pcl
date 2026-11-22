@@ -1,7 +1,7 @@
 From 71e4467280a7829f3b7d2651a5a268fe371fa31a Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 18:12:21 +0200
-Subject: [PATCH 136/147] TODO tests: << after a term is the left shift
+Subject: [PATCH 136/149] TODO tests: << after a term is the left shift
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,7 +1,7 @@
 From 72d2bd9e6e6dba7849220c7da43b62f834cd70f3 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 21:17:32 +0200
-Subject: [PATCH 147/147] Magic: %^ where a term is expected is one token
+Subject: [PATCH 147/149] Magic: %^ where a term is expected is one token
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -205,3 +205,16 @@ is a hash, and a cast takes a term (`\%12`, `\*1`, `\<STDIN>`; `PR-BF.md`);
 operand -- `_("text")`, `_ => 1`, `$h{_}` are words; fuzz fixture 45's first
 token updated (`PR-BG.md`); **BH** §74 `%^` (and `%^W`) is one Magic token
 (`PR-BH.md`).  t/ppi_bugs_pcl.t: 522 -> 614 rows.
+
+## s543i (2026-11-22): the branch is now 149 commits, head 7fd02b75 -- the LAST PPI batch
+
+`0001-*.patch` .. `0149-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); pushed fast-forward
+to the BARE repo only (`72d2bd9e` -> `7fd02b75`) at MERGE-READY; the fork's `pcl`
+is moved by the reviewing session.  One group, "TODO tests, then the fix"; PPI's
+suite green after both commits, plain and AUTHOR_TESTING=1: **BI** §75 a
+digit-named variable ends at its last digit -- `@1x 2` is `@1 x 2`, `@12x3` is
+`@12 x 3` (`PR-BI.md`).  t/ppi_bugs_pcl.t: 614 -> 628 rows.  This closes PCL's
+PPI program (docs/ppi-fix-at-source-s527.md §11): 72 catalogued mis-lexes are
+fixed on the branch, in 61 groups (A .. BI); a new PPI bug found from now on
+goes to the branch in the same two-commit shape from whichever batch finds it.

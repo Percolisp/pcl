@@ -1,7 +1,7 @@
 From d27d0c3721be641b990ea04f576ac3af24c3ffbe Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 20:16:22 +0200
-Subject: [PATCH 141/147] Whitespace: / after a builtin that takes an operand
+Subject: [PATCH 141/149] Whitespace: / after a builtin that takes an operand
  starts a match
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

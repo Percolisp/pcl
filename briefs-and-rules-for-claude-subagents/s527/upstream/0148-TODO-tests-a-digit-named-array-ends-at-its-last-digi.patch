@@ -1,0 +1,75 @@
+From 110381864b94b621618ee2038622468b85578854 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sun, 22 Nov 2026 15:56:22 +0200
+Subject: [PATCH 148/149] TODO tests: a digit-named array ends at its last
+ digit
+
+perl reads a digit run after @ as the whole name of the array (toke.c
+scan_ident: a digit run is an identifier, and it ends at the last
+digit):
+
+    perl -e 'no strict; @1 = (5); print @1x 2, "\n"'      # 11
+
+PPI's Symbol tokenizer takes the word characters after the digits into
+the same token, so @1x 2 is one Magic @1x followed by 2 and @12x3 one
+Magic @12x3 -- the array twin of the %12x 2 that the % arm reads right
+since the digit-run hash name.
+
+Six rows inside a new PCL section 75 TODO block -- @1x 2 (its two
+tokens), @12x3 (its two), @1x2 and @0x 2 -- and eight controls that were
+right: a spaced x, names that start with a letter or _, a long digit
+run, a braced name, the capture variable $1x and a digit run before a
+dot, a slice.  Plan 614 -> 628.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 04919ead..3d85ff4f 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 614 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 628 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2496,3 +2496,30 @@ for my $case ( [ q{my %x = %^H;}, q{Magic=%^H} ], [ q{%^H = ();}, q{Magic=%^H} ]
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+ }
++
++# §75 -- a digit-named array ends at its last digit: perl's scan_ident reads
++# a digit run as the whole name, so `@1x 2` is the array @1, the repetition
++# operator and 2 (`no strict; @1 = (5); print @1x 2;` prints 11), and
++# `@12x3` is @12 x 3 -- the array twin of §72's %12x.  PPI reads the word
++# characters after the digits into one Magic token, @1x.
++TODO: {
++    local $TODO = q{PCL §75: a digit-named array followed by word characters is lexed as one token};
++    for my $case ( [ q{print @1x 2;}, q{Magic=@1} ], [ q{print @12x3;}, q{Magic=@12} ],
++                   [ q{my $c = @1x2;}, q{Magic=@1} ], [ q{my @l = (@0x 2);}, q{Magic=@0} ],
++                   [ q{print @1x 2;}, q{Operator=x} ], [ q{print @12x3;}, q{Number=3} ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
++    }
++}
++# The controls: a spaced x, a name that starts with a letter or _, a long
++# digit run, a braced name, a capture variable and a digit run before a dot
++# were right.
++for my $case ( [ q{print @1 x 2;}, q{Magic=@1} ], [ q{print @a1x;}, q{Symbol=@a1x} ],
++               [ q{print @_x;}, q{Symbol=@_x} ], [ q{print @119797;}, q{Magic=@119797} ],
++               [ q{print @{1}x 2;}, q{Operator=x} ], [ q{print $1x 2;}, q{Magic=$1} ],
++               [ q{print @1.5;}, q{Magic=@1} ], [ q{my @l = @12[0, 1];}, q{Magic=@12} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+

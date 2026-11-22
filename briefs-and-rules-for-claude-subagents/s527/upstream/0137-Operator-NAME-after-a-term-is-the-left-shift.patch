@@ -1,7 +1,7 @@
 From eebdaacc76937e03bbc5489e2b164da263149063 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 18:15:06 +0200
-Subject: [PATCH 137/147] Operator: << NAME after a term is the left shift
+Subject: [PATCH 137/149] Operator: << NAME after a term is the left shift
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
