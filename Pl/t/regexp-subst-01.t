@@ -744,4 +744,32 @@ EOP
     is($got, $want, 'a here-doc in an s///e replacement or a (?{ }) block takes the lines after the statement (PPI §42)');
 }
 
+# #691 (s543g): a variable DEREFERENCED inside a quote-like leaf -- an s///
+# replacement, an s/// or split pattern -- is not stringified there, so it is
+# no `:str` use for the raw-slot verdict (VarAnnotator::_tw_scan_quote_leaf
+# asks Pl::InterpScan::scan_one: a `deref` / `expr` reference is an opaque use
+# of its base and of the scalars its code names).  The B-str freeze stored the
+# stringified reference and the replacement read it back empty.  The first
+# two rows FAIL on the 8959afae extraction; the third is the breaking shape (a
+# plain `$v` in a replacement stays a str use, emission unchanged).
+subst_agrees(q{sub t1 { my $r = \"Z"; my $x = "mAn"; $x =~ s/A/${$r}/; $x }
+sub t2 { my $r = \"Z"; my $x = "mAn"; $x =~ s/A/$$r/; $x }
+sub t3 { my $ar = [1,2]; my $x = "mAn"; $x =~ s/A/@{$ar}/; $x }
+sub g1 { my $r = \"Z"; my $x = "mAnA"; $x =~ s/A/${$r}/g; $x }
+sub b1 { my $r = \"Z"; my $x = "mAn"; $x =~ s{A}{@{[ $$r ]}}; $x }
+print join(" ", t1(), t2(), t3(), g1(), b1()), "\n";},
+  "#691: a deref in an s/// replacement reads the referent (subs, /g, \@{[ ]})");
+subst_agrees(q{my $r = \"Z"; my $ar = [1, 2]; my $x = "mAn"; my $y = "mAn";
+$x =~ s/A/$$r/; $y =~ s/A/@{$ar}/;
+sub q1 { my $p = \"A"; my $s = "mAn"; $s =~ s/${$p}/x/; $s }
+sub q4 { my $p = \"A"; join("|", split /$$p/, "mAn") }
+print "$x $y ", q1(), " ", q4(), "\n";},
+  "#691: a file-level deref in a replacement, and a deref in an s/// or split PATTERN");
+subst_agrees(q{sub s1 { my $v = "V"; my $x = "mAn"; $x =~ s/A/$v/; $x }
+sub s2 { my $v = 5; my $x = "mAn"; $x =~ s/A/x$v/g; $x }
+my $t = ""; for my $i (1..3) { my $s = "aXb"; $s =~ s/X/$i/; $t .= $s }
+print join(" ", s1(), s2(), $t), "\n";},
+  "#691 breaking shape: a plain \$v in a replacement is still interpolated");
+
+
 done_testing();

@@ -2177,6 +2177,28 @@ sub _tw_scan_quote_leaf {
       $i += Pl::InterpScan::escape_skip($c, $i, %esc);
       next;
     }
+    # A DEREFERENCE -- `$$r`, `@$ar`, `${ EXPR }`, `@{ EXPR }`, as the ONE
+    # scanner reads them -- is not a stringification of the variable it names
+    # (#691: `s/A/${$r}/` licensed the B-str freeze of `$r` and the
+    # replacement read the stringified reference, empty): its base, and every
+    # scalar its code names, is an opaque use.  Every other reference keeps
+    # the name scan below.
+    if ($ch eq '$' || $ch eq '@') {
+      my $ev = Pl::InterpScan::scan_one($c, $i, %esc);
+      if ($ev && $ev->{form} eq 'deref') {
+        # the base; a subscript after it is scanned on, as before
+        _use($ctx, '$' . $ev->{name}, undef);
+        $i = $ev->{name_span}[1];
+        next;
+      }
+      if ($ev && $ev->{form} eq 'expr') {
+        # the braces' code and every subscript's code: skipped by this scan
+        _tw_code_uses($ctx, substr($c, $_->[0], $_->[1] - $_->[0]))
+          for Pl::InterpScan::code_spans($ev);
+        $i = $ev->{span}[1];
+        next;
+      }
+    }
     if ($ch eq '$') {
       pos($c) = $i;
       if ($c =~ /\G\$\{?(\w+)\}?((?:->)?[\[\{])?/gc) {
@@ -2196,6 +2218,24 @@ sub _tw_scan_quote_leaf {
   return unless $c =~ /\@\{/;
   _arr_esc($ctx, $1, 'interp-block')       while $c =~ /(\@\w+)/g;
   _arr_esc($ctx, '@' . $1, 'interp-block') while $c =~ /\$(\w+)\s*\[/g;
+}
+
+# The CODE inside an interpolated reference (`${ EXPR }`, `@{[ … ]}`, a
+# subscript of one -- Pl::InterpScan::code_spans): the walk never sees it as a
+# tree, so every scalar it names -- a `$x`, the base of a `$$x` / `@$x`, the
+# names of a nested braced expression -- is an OPAQUE use (a licence is never
+# read off code).  The names come from the one scanner's events over the text.
+sub _tw_code_uses {
+  my ($ctx, $code) = @_;
+  return unless $code =~ /[\$\@]/;
+  my $evs = eval { Pl::InterpScan::scan($code) } || [];
+  for my $ev (@$evs) {
+    _use($ctx, '$' . $ev->{name}, undef)
+      if defined $ev->{name} && $ev->{form} ne 'magic'
+      && ($ev->{sigil} eq '$' || $ev->{form} eq 'deref');
+    _tw_code_uses($ctx, substr($code, $_->[0], $_->[1] - $_->[0]))
+      for Pl::InterpScan::code_spans($ev);
+  }
 }
 
 # Classified walk of funcall ARG subtrees (B-regimes): builtins in %USE_FN

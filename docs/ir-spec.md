@@ -297,6 +297,17 @@ dereferenced root cost an accessor loop +97 %, s473b), so a raw slot that
 was WRITTEN undef is still not vivified by a single-level read (#1350's
 residue).  VarAnnotator's reason is `deref-of-unwritten` (`PCL_B_DEBUG`).
 
+**A variable DEREFERENCED inside interpolating text is not STRINGIFIED there**
+(normative, s543g, task #691).  A quote-like leaf the expression tree does not
+parse -- an `s///` pattern and replacement, a `split` / `m//` pattern, a
+heredoc -- is read for its variable uses by the ONE scanner
+(`Pl::InterpScan::scan_one`): a reference of form `deref` (`$$r`, `@$ar`) is an
+opaque use of its base, one of form `expr` (`${ EXPR }`, `@{ EXPR }`) an opaque
+use of every scalar its code names; only a plain `$x` is the `str` use that
+licenses the B-str freeze.  Example: `my $r = \"Z"; $x =~ s/A/${$r}/;` keeps
+`$r`'s reference (perl: mZn; the freeze stored "SCALAR(0x…)" and the
+replacement read it back empty).
+
 ### 2.2b Tied scalars — the raw slot behind the magic
 
 `tie $x, 'Class'` replaces the box's `value` with a **`p-tie-proxy`**
