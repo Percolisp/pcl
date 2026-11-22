@@ -154,6 +154,12 @@ print "qual_early=", qual_early(), "\n";
 print "qual_main=$main::qd9\n";
 { my $qb9 = "blk"; $Other::qb9 = "pkgb"; sub qual_bsub { $qb9 }
   print "qual_block=", eval(q{package Other; $qb9}), "\n"; }
+# ... and the pair's KEY is the SOURCE name: a lexical whose `$main::` twin is
+# spelled is renamed first (`$kx9__excl__0`); a word-less site (an eval inside
+# an interpolation, an `s///ee`) reads the segment map by that key.
+my $kx9 = "lex-k"; $main::kx9 = "pkg-k"; sub kcap9 { $kx9 }
+print "key_interp=@{[ eval q{package Other; $kx9} ]}\n";
+my $ks9 = "x"; $ks9 =~ s/x/'$kx9'/ee; print "key_ee=$ks9\n";
 # #2557 (s543h): the caller's `our` alias names its DECLARING package's
 # variable inside a package-switching eval -- a block region, a single region,
 # an array (and `$#`), `local our`, a third package, a nested eval, a write,
@@ -279,6 +285,8 @@ my %expect = (
     qual_early    => 'pkg',
     qual_main     => 'glob',
     qual_block    => 'blk',
+    key_interp    => 'lex-k',
+    key_ee        => 'lex-k',
     our_block     => 'main-o',
     our_region    => 'main-o',
     our_array     => '21',

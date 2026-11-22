@@ -4930,17 +4930,23 @@ sub _publish_eval_cell {
   my $b = $bd->decl_binding($dsym)
     or die "PCL internal: the binder holds no declaration of $canon at line "
          . ($dsym->line_number // '?') . " -- its eval pair cannot be published\n";
+  # The KEY is the name the source wrote -- the binding's canon, built before
+  # any rename: a promoter's canon can already be a rename (`$d__excl__0`, the
+  # #3080 exception rename of a name the file also spells qualified), which no
+  # eval text names.
+  my $key  = $b->{canon};
   my $home = $b->{perl_package} // 'main';
   for my $w (@{ $self->{_eval_words} || [] }) {
-    my $r = $bd->resolve($w, $canon);
+    my $r = $bd->resolve($w, $key);
     next unless $r && refaddr($r) == refaddr($b);
     my $spell = $bd->pkg_at($w) eq $home ? cl_sym($cell)
               : cl_pkg($home) . '::' . cl_sym($cell);
-    $self->{_eval_word_caps}{ refaddr $w }{$canon} //= $spell;
+    $self->{_eval_word_caps}{ refaddr $w }{$key} //= $spell;
   }
-  # The segment map a word-less site (a fragment) reads, and the mark that
-  # the cell needs no M-F alias in the program unit (_eval_reach_promoted).
-  $self->{_identity_eval_caps}{$canon} //= $cell;
+  # The segment map a word-less site (a fragment, `s///ee`) reads, and the
+  # mark that the cell needs no M-F alias in the program unit
+  # (_eval_reach_promoted).
+  $self->{_identity_eval_caps}{$key} //= $cell;
   $self->{_eval_cell_published}{$cell} = 1;
   return;
 }
@@ -5132,10 +5138,11 @@ sub _promote_captured {
     # the original name, which is what identity means) — keep its emission.
     return if $emb_sym && _caprefuse($canon, 'embedded decl: identity = veto path');
     $self->{_file_lex_renamed}{$canon} = 1;
-    $self->{_identity_eval_caps}{$canon} = $canon;    # published below (#2285)
     my ($isym) = grep { $_->content eq $canon } @{ $decl->find('PPI::Token::Symbol') || [] };
     die "PCL internal: identity promotion of $canon found no declarator\n" if !$isym;
-    $self->_publish_eval_cell($canon, $canon, $isym);  # #2630: per eval word
+    # #2285's pair, per eval word since #2630 (and the segment map, by the
+    # source name)
+    $self->_publish_eval_cell($canon, $canon, $isym);
     $self->_reg_captures($canon, \@cap_subs);
     return 1;
   };
@@ -5269,10 +5276,7 @@ sub _promote_captured {
   # #2633: a decl that would have been an identity cell (a non-program unit's
   # top-level file lexical) is still a LEXICAL to the segment's string evals —
   # published through the SAME #2285 pair, now naming the mangled cell.
-  if ($id_ok) {
-    $self->{_identity_eval_caps}{$canon} = $sig . $newbare;
-    $self->_filecell_note('cap', $canon, 'mangle');
-  }
+  $self->_filecell_note('cap', $canon, 'mangle') if $id_ok;
   # #2630: every segment-extent SCALAR cell (and the would-be identity cell of
   # any sigil, as before) is published to the eval words that see it -- the
   # #470 mangle of a name the file also spells qualified included.  A block
