@@ -168,3 +168,7 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * **s543i LAUNCHED** (`s543/s543i-prompt.md`; IDs 5290-5309; v2-15800; a new worktree): PPI batch 12, the last.
 * Filed so far by the running batches: s543g #5250-#5256, s543h #5270 #5271 (all with `triage` fields).
 * The ROUND is due (three code merges since the last: -103 -104 -105).  It takes the whole box for hours (the board's tree half, the companion `--all --quick` and the full companion are exclusive legs): it runs when the three batches have merged or are waiting, not beside their legs.
+
+## 2026-11-22 ~17:3x -- THE USER: start NO more subtasks after the running three finish; END THE SESSION then
+* Running: s543g, s543h (at its end-of-batch bars: the everyday leg queued), s543i.  Each is reviewed and merged as it reports; nothing new is launched in a freed slot -- not the round either (it runs as a batch): it is the first item of the next session's hand-over.
+* At the end: the hand-over `s543/resume-after-stop.md` rewritten, CLAUDE.md Test Status, STATUS.md, the session log, memory STATE; push.
