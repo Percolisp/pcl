@@ -575,7 +575,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-eval-block` | macro | `(&body body)` | — | — | — | — | — | — | — |
 | `p-eval-lex-lookup` | function | `(name)` | — | — | — | — | — | — | — |
 | `p-eval-thunk` | function | `(free-names fn &optional region-pkg)` | — | — | — | — | — | — | — |
-| `p-evalbytes` | function | `(s)` | — | — | — | — | — | — | — |
+| `p-evalbytes` | function | `(s &optional lex-alist features)` | — | — | — | — | — | — | — |
 | `p-exception` | class | `` | — | — | — | — | — | — | — |
 | `p-exception-object` | generic-function | `(condition)` | — | — | — | — | — | — | — |
 | `p-try` | macro | `(try-form catch-clause &optional finally-form)` | — | — | — | — | — | — | — |
