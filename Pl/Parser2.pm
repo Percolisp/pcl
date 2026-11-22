@@ -802,10 +802,15 @@ sub _requalify_inplace_pkg_blocks {
 # canons worth offering -- the eval-text pass (_requalify_eval_text).
 sub _requalify_region {
   my ($self, $stmts, $pkg, $keep, $only) = @_;
-  # Candidate names: every variable the region MENTIONS, in any of the three
+  # Candidate names: every variable the region MENTIONS, in any of the four
   # spellings a name can reach the emitter through — a Symbol token, an
-  # ArrayIndex ($#a), or interpolating text with no token of its own
-  # ("$v" inside a string is the only appearance some globals have).
+  # ArrayIndex ($#a), a brace name in code (`${v}` `@{v}` `$#{v}` `${v}[0]`:
+  # a Word in a Cast's Block, the spelling _rewrite_var_uses already rewrites
+  # through _brace_name_refs), or interpolating text with no token of its own
+  # ("$v" inside a string is the only appearance some globals have).  s543h:
+  # a name spelled ONLY in braces was never a candidate, so `sub f { package
+  # Bar; ${s} }` read $main::s -- and once an eval text's free names stopped
+  # being region-bound parameters (#2091), so did `eval 'package Bar; ${s}'`.
   my %cand;
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
@@ -813,6 +818,7 @@ sub _requalify_region {
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
       $cand{ '@' . substr($ai->content, 2) } = 1 if $ai->content =~ /^\$\#\w+$/;
     }
+    $cand{ $_->[1] } = 1 for @{ _brace_name_refs($stmt) };
     _interp_canon($stmt, undef, undef, \%cand);   # undef $live = collect all
   }
   for my $canon (sort keys %cand) {

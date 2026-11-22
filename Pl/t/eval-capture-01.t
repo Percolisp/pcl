@@ -200,6 +200,17 @@ eval q{ no strict; $lu9 = 1; sub lshowu9 { $lu9 } sub ltu9 { local $lu9 = 2; lsh
 eval q{ package Baz9; $lg9 = 1; sub lshowg9 { "$lg9$Baz9::lg9" } sub ltg9 { local $lg9 = 9; lshowg9() } print "local_region=", ltg9(), "\n"; };
 eval q{ our $ll9 = 1; sub lshowl9 { $ll9 } sub ltl9 { local $ll9 = 4; lshowl9() } }; print "local_late=", ltl9(), "\n";
 eval q{ our $ga9 = "old"; sub gashow9 { $ga9 } }; our $gb9 = "new"; *ga9 = \$gb9; print "local_glob=", gashow9(), "\n";
+# (s543h) A BRACE spelling (`${n}` `@{n}` `$#{n}` `${n}{k}` `${n}[0]`) under a
+# `package` region names that package's variable: an eval text's leading
+# region (the requalifier's candidates missed a name spelled only in braces --
+# hidden until #2091, when a free name stopped being a region-bound parameter)
+# and a sub body's `package` statement (wrong on the base too).
+$Bz9::bs = "bz-s"; @Bz9::bl = (1,2,3); %Bz9::bh = (k => "bz-v"); @Bz9::ba = (1,2,3,4);
+$main::bs = "m-s"; @main::bl = (9); %main::bh = (k => "m-v"); @main::ba = ();
+print "brace_eval=", eval(q{package Bz9; join ",", ${bs}, scalar(@{bl}), ${bh}{k}, $#{ba}, ${bl}[0]}), "\n";
+eval q{package Bz9; ${bw} = "bz-w"; $#{bx} = 2}; print "brace_write=", ($Bz9::bw // "u"), "/", ($main::bw // "u"), "/", scalar(@Bz9::bx), "\n";
+sub brace_sub { package Bz9; return join ",", ${bs}, $#{ba} }
+print "brace_sub=", brace_sub(), "\n";
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -306,6 +317,9 @@ my %expect = (
     local_region  => '99',
     local_late    => '4',
     local_glob    => 'new',
+    brace_eval    => 'bz-s,3,bz-v,3,1',
+    brace_write   => 'bz-w/u/3',
+    brace_sub     => 'bz-s,3',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',
