@@ -15793,34 +15793,58 @@ sub _fh_drop_name {
 # decides WHEN bytes reach a file (kept under PCL_OPT=none).
 sub _fh_drop_flush_name {
   my ($self, $stmt, $vi) = @_;
-  my $name = _fh_drop_stmt_name($stmt, $vi) // return undef;
+  my $sym = _fh_drop_stmt_sym($stmt) // return undef;
+  my $name = $sym->content;
   return undef if substr($name, 0, 1) ne '$';
-  return undef if !Pl::Passes::enabled('fh-scope-close');
-  return $name;
+  return undef if !($vi && Pl::Passes::enabled('fh-scope-close'));
+  return $name if $vi->{$name};
+  # A lexical this unit does not declare -- a file-level (or enclosing sub's)
+  # `my` / `state` a sub or closure CAPTURES (#5128): the BINDER's answer for
+  # the name at the statement, wherever it was declared; the emitted name is
+  # the one the body's own uses of it lower to.
+  return $self->_captured_lexical_scalar($sym) ? $name : undef;
+}
+
+# Is the scalar token $sym a use of a `my` / `state` binding (perl's pad
+# variable), as the binder resolves it at that point?  An `our` alias, a
+# package global and a string eval's view of its caller's lexical are not.
+sub _captured_lexical_scalar {
+  my ($self, $sym) = @_;
+  my $bd = Pl::Binder::for_captures($self, $sym) or return 0;
+  my $b  = $bd->binding_of($sym) or return 0;
+  return ($b->{kind} // '') =~ /^(?:my|state)\z/ ? 1 : 0;
 }
 
 # `undef $x;' / `undef($x);' / `$x = undef;' as a whole statement, $x a
 # lexical VarAnnotator tracks: its name, else undef.  ONE reading of the
-# shape for the close (_fh_drop_name) and the flush (_fh_drop_flush_name).
+# shape (_fh_drop_stmt_sym) for the close (_fh_drop_name) and the flush
+# (_fh_drop_flush_name).
 sub _fh_drop_stmt_name {
   my ($stmt, $vi) = @_;
-  return undef if !($vi && ref($stmt) eq 'PPI::Statement');
+  return undef if !$vi;
+  my $sym = _fh_drop_stmt_sym($stmt) // return undef;
+  return $vi->{ $sym->content } ? $sym->content : undef;
+}
+
+# The variable token of the statement shapes above, else undef.
+sub _fh_drop_stmt_sym {
+  my ($stmt) = @_;
+  return undef if ref($stmt) ne 'PPI::Statement';
   my @k = _strip_semi($stmt->schildren);
-  my $name;
   if (@k == 2 && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'undef') {
     my $arg = $k[1];
     if ($arg->isa('PPI::Structure::List')) {
       my @in = map { $_->isa('PPI::Statement') ? $_->schildren : $_ } $arg->schildren;
       $arg = @in == 1 ? $in[0] : undef;
     }
-    $name = $arg->content if $arg && $arg->isa('PPI::Token::Symbol');
+    return ($arg && $arg->isa('PPI::Token::Symbol')) ? $arg : undef;
   }
-  elsif (@k == 3 && $k[0]->isa('PPI::Token::Symbol')
-         && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '='
-         && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
-    $name = $k[0]->content;
+  if (@k == 3 && $k[0]->isa('PPI::Token::Symbol')
+      && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '='
+      && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
+    return $k[0];
   }
-  return (defined $name && $vi->{$name}) ? $name : undef;
+  return undef;
 }
 
 # The CONDITION-my half of the same licence: which handles declared in the

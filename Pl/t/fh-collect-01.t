@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -210,4 +210,28 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$undef' '$dir");
     is($pcl_out, $perl, '#4794: undef / = undef of an escaped handle flushes it (read-back sees the bytes)');
+}
+# 8: #5128 (s543g) -- the same statements INSIDE A SUB (or a closure, a
+# nested sub, on a `state` scalar) on a lexical the sub CAPTURES: the binder
+# answers "a my / state scalar" wherever it was declared, and the statement
+# flushes it.  An inner `my` of the same name is the one dropped.
+# INVERSE: main 8959afae printed 0 on every row.
+my $capt = write_prog('capt.pl', <<'PL');
+use strict; use warnings; use feature "state";
+my $f = "$ARGV[0]/capt.out"; my $f2 = "$ARGV[0]/capt2.out";
+sub mk { open my $fh, ">", $_[0] // $f or die; $fh }
+sub size { -s ($_[0] // $f) // 0 }
+my $g = mk(); sub drop_g { undef $g; print "a ", size(), "\n" } print $g "first"; drop_g();
+my $h = mk(); sub drop_h { $h = undef; print "b ", size(), "\n" } print $h "second!"; drop_h();
+my $k = mk(); sub drop_k { undef($k) } print $k "third...."; drop_k(); print "c ", size(), "\n";
+my $m = mk(); sub outer { my $x = sub { inner() }; $x->() } sub inner { undef $m; print "d ", size(), "\n" }
+print $m "nest"; outer();
+my $n = mk(); print $n "closure"; my $c = sub { $n = undef; print "e ", size(), "\n" }; $c->();
+sub st { state $s = mk(); print $s "state!"; my $d = sub { undef $s; print "f ", size(), "\n" }; $d->() } st();
+my $o = mk(); print $o "outer";
+sub sh { my $o = mk($f2); print $o "inner!"; my $e = sub { undef $o; print "g ", size(), " ", size($f2), "\n" }; $e->() } sh();
+PL
+{
+    my ($perl, $pcl_out) = run_both("$capt' '$dir");
+    is($pcl_out, $perl, '#5128: undef / = undef of a CAPTURED lexical inside a sub flushes the escaped handle');
 }
