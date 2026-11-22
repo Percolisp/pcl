@@ -315,8 +315,9 @@ PL
 # SITE's lexical (the binder's kind `outer`: the thunk parameter bound to the
 # caller's container): a file lexical, a sub's lexical, `= undef`, a nested
 # eval, a closure's capture, `evalbytes`, a handle one level inside an object;
-# the text's own `my` and a non-handle are the controls.  INVERSE: main
-# 4a0fd0ec printed 0 for a b c d e f.
+# the text's own `my` and a non-handle are the controls; i j k: a void
+# `delete` as the eval text's LAST statement (lowered `inherit`: the review's
+# k-09).  INVERSE: main 4a0fd0ec printed 0 for a b c d e f i j k.
 my $evs = write_prog('evs.pl', <<'PL');
 use strict; use warnings; use feature 'evalbytes';
 my $f = "$ARGV[0]/evs.out";
@@ -330,6 +331,9 @@ sub de { my $h = mk(); print $h "bytes"; evalbytes q{ undef $h; }; print "e ", s
 sub df { my $o = { fh => mk() }; print { $o->{fh} } "inobj"; eval q{ undef $o; }; print "f ", size(), "\n" } df();
 sub dg { my $h = mk(); print $h "g1"; eval q{ my $k = mk(); print $k "own-my"; undef $k; print "g ", size(), "\n"; } } dg();
 sub dh { my $x = 5; eval q{ undef $x; }; print "h ", defined($x) ? "def" : "undef", "\n" } dh();
+my %eh; { open my $t, ">", $f or die; print $t "hdata!"; $eh{fh} = $t; } eval q{ delete $eh{fh}; }; print "i ", size(), "\n";
+my @ea; { open my $t, ">", $f or die; print $t "adata!!"; $ea[0] = $t; } eval q{ delete $ea[0]; }; print "j ", size(), "\n";
+my $er = {}; { open my $t, ">", $f or die; print $t "rdata!!!"; $er->{fh} = $t; } eval q{ delete $er->{fh} }; print "k ", size(), "\n";
 PL
 {
     my ($perl, $pcl_out) = run_both("$evs' '$dir");

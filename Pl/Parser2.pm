@@ -12097,9 +12097,14 @@ sub _lower_expr_stmt {
   # `delete $h{K};' / `delete $r->{K};' as a whole VOID statement: the dropped
   # element is flushed when it holds an escaped output handle, as `undef $x;'
   # flushes the variable's (task #4794 shape 4; ir-spec §6.5b) -- the delete's
-  # own value, read once.  Gated with that flush (`fh-scope-close').
+  # own value, read once.  Gated with that flush (`fh-scope-close').  In EVAL
+  # text the statement's value may be the eval's own (its last statement is
+  # lowered `inherit`: the eval site's context is a run-time fact), and an
+  # `eval q{ delete $h{fh} };` drops the element all the same -- the wrap
+  # returns the value it flushed, so it serves the tail too (k-09, #5255).
   $form = ['p-flush-dropped-value', $form]
-    if $x->{drop_delete} && !$mod && $vctx eq ':void' && Pl::Passes::enabled('fh-scope-close');
+    if $x->{drop_delete} && !$mod && Pl::Passes::enabled('fh-scope-close')
+       && ($vctx eq ':void' || ($self->eval_mode && "$vctx" eq 'inherit'));
   # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
   # (task #1249(7)) — rewritten IN the lowered form, so every context wrap the
   # ordinary lowering put around the call is preserved exactly.
