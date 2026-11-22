@@ -178,7 +178,7 @@ sub _eval_feature_seed {
   my ($self) = @_;
   my @feats = grep { $_ ne 'strict_refs' && $_ ne 'unicode_strings'
                       && $_ ne 'use_integer'
-                      && $_ ne 'current_sub' && !/\Are-/ }
+                      && $_ ne 'current_sub' && !/\Are-/ && !/\Aour:/ }
                  @{ $self->eval_features // [] }
     or return ();
   return (feature_mods => { map +($_ => 'perl'), @feats });
@@ -202,7 +202,7 @@ sub _eval_feature_seed {
 # promoter can publish a file cell for exactly the words whose pad sees it
 # (_publish_eval_cell).  Returns (features by stmt, words by stmt, words).
 sub _scan_eval_site_features {
-  my ($doc) = @_;
+  my ($doc, $bd) = @_;
   my (%by_stmt, %words_by_stmt, @words);
   # #2103: `strict 'refs'` is inherited by the eval'd code exactly as a
   # feature is, so it rides the same list as the pseudo-feature `strict_refs`
@@ -244,6 +244,15 @@ sub _scan_eval_site_features {
     my $re = re_pragma_at($w);
     push @on, "re-flags:$re->{flags}" if $re->{flags} ne '';
     push @on, 're-eval' if $re->{eval};
+    # #2557 (s543h): the `our` ALIASES the eval's pad sees -- an `our` is a
+    # lexically scoped name for its DECLARING package's variable, and the
+    # eval text is compiled in this scope, so a bare `$o` there is that
+    # variable whatever `package` the text (or the file around the site)
+    # switches to.  Pseudo-feature `our:CANON=PKG` (never PPI's), for the
+    # aliases the operand may spell (a literal text that never names one
+    # leaves it out; a dynamic operand takes them all): the binder's answer
+    # at the word, so an inner `my` or a closed block hides one.
+    push @on, _eval_site_our_aliases($bd, $w, $nx) if $bd && !($nx && $nx->isa('PPI::Structure::Block'));
     next if !@on;
     for (my $p = $w->parent; $p; $p = $p->parent) {
       next if !$p->isa('PPI::Statement');
@@ -255,6 +264,23 @@ sub _scan_eval_site_features {
     }
   }
   return (\%by_stmt, \%words_by_stmt, \@words);
+}
+
+# #2557: the `our:CANON=PKG` pseudo-features of one string-eval WORD -- every
+# `our` binding the binder resolves the canon to there, the declaring package
+# its record holds (a site inside an eval text sees the text's own `our`s and
+# the outer site's, which the eval's binder holds as outer `our` records).
+# $nx is the operand's first token: a literal text that never spells the name
+# (_eval_operand_may_name, the one reading) needs no entry.
+sub _eval_site_our_aliases {
+  my ($bd, $w, $nx) = @_;
+  my @out;
+  for my $b ($bd->ours_visible_at($w)) {
+    (my $bare = $b->{canon}) =~ s/^[\$\@\%]//;
+    next if $nx && !_eval_operand_may_name($nx, $bare);
+    push @out, "our:$b->{canon}=" . ($b->{perl_package} // 'main');
+  }
+  return @out;
 }
 
 # #2103: publish whether `strict 'refs'` is in force at STMT, for the deref
@@ -771,8 +797,11 @@ sub _requalify_inplace_pkg_blocks {
   return;
 }
 
+# $keep (optional, s543h): ($tok, $canon, $home) -> true leaves that token as
+# written although the binder gives it a home -- the eval-text alias pass
+# (_requalify_eval_aliases) rewrites only `our` homes the text is not read in.
 sub _requalify_region {
-  my ($self, $stmts, $pkg) = @_;
+  my ($self, $stmts, $pkg, $keep) = @_;
   # Candidate names: every variable the region MENTIONS, in any of the three
   # spellings a name can reach the emitter through — a Symbol token, an
   # ArrayIndex ($#a), or interpolating text with no token of its own
@@ -816,6 +845,7 @@ sub _requalify_region {
       return 1 if $not_this->($_[0]);
       my $h = $self->_requalify_home($_[0], $canon);
       return 1 if !defined $h;                 # (a) a lexical / its declarator
+      return 1 if $keep && $keep->($_[0], $canon, $h);
       return 0 if $h eq $pkg;                  # (d) a global of X, an `our` of X
       $homes{$h} = 1;                          # an `our` / special / nested
       return 1;                                #   `package Y { }` home: pass 2
@@ -827,9 +857,45 @@ sub _requalify_region {
       $self->_rewrite_var_uses($stmts, $canon, "${home}::${bare}", undef, sub {
         return 1 if $not_this->($_[0]);
         my $h = $self->_requalify_home($_[0], $canon);
+        return 1 if $keep && defined($h) && $keep->($_[0], $canon, $h);
         return defined($h) && $h eq $home ? 0 : 1;
       });
     }
+  }
+  return;
+}
+
+# #2557 (s543h): in an EVAL text, a use the binder resolves to an `our` -- the
+# caller's alias (the site's `our:CANON=PKG` list, outer `our` records) or one
+# the text declares -- is its DECLARING package's variable.  The text is READ
+# in the eval's package, and a single `package X;` region's free names are
+# LOOKED UP in X (p-eval-thunk's region binding), so an `our` home that is
+# not that package takes the qualified spelling: `our $o` in main, `eval
+# 'package Foo; $o'` reads `$main::o` (it read `$Foo::o`), and so does `eval
+# '$o'` from a `package Other;` section of the file.  A block region inside
+# the text is the block requalifier's (it already asked the same binder).
+# Globals are left as they are.
+sub _requalify_eval_aliases {
+  my ($self, $doc) = @_;
+  my $bd = $self->{_binder} or return;
+  return unless $bd->has_kind('our');
+  my @top = grep { $_->isa('PPI::Statement') } $doc->schildren;
+  my ($pi) = grep { $top[$_]->isa('PPI::Statement::Package')
+                    && !_pkg_stmt_has_block($top[$_]) } 0 .. $#top;
+  my $epkg = $self->eval_pkg // 'main';
+  my @parts = ([[ @top ], $epkg]);
+  if (defined $pi && ($top[$pi]->namespace // '') =~ /^\w+(?:::\w+)*$/) {
+    @parts = ([[ @top[0 .. $pi - 1] ], $epkg], [[ @top[$pi + 1 .. $#top] ], $top[$pi]->namespace]);
+  }
+  for my $part (@parts) {
+    my ($stmts, $read) = @$part;
+    next unless @$stmts;
+    $self->_requalify_region($stmts, $read, sub {
+      my ($tok, $canon, $home) = @_;
+      return 1 if $home eq $read;
+      my (undef, $why) = Pl::Binder::for_node($self, $tok)->requalify_home($tok, $canon);
+      return $why =~ /^our/ ? 0 : 1;
+    });
   }
   return;
 }
@@ -1782,12 +1848,6 @@ sub parse {
   # sub_info, hoisting), so all of them see one consistent set of names.
   $self->_rename_lexical_subs($doc);
 
-  # #364: which features each string-eval site inherits.  Computed here, once,
-  # while the document is whole; _lower_stmt publishes the answer for the
-  # statement it is lowering and ExprToCL puts it in the (p-eval …) call.
-  @{$self}{qw(_eval_features_by_stmt _eval_words_by_stmt _eval_words)} =
-    _scan_eval_site_features($doc);
-
   # Cross-file prototypes must be in the shared Environment BEFORE any
   # expression parses: v2 lowers named subs ahead of the statement stream and
   # pre-parses the stream through VarAnnotator, both of which run before the
@@ -1910,6 +1970,13 @@ sub parse {
   require Pl::Binder;
   $self->{_binder} = Pl::Binder::build_for($self, $doc);
 
+  # #364: which features each string-eval site inherits.  Computed here, once,
+  # while the document is whole; _lower_stmt publishes the answer for the
+  # statement it is lowering and ExprToCL puts it in the (p-eval …) call.
+  # After the binder (s543h): the `our` aliases a site sees are its answer.
+  @{$self}{qw(_eval_features_by_stmt _eval_words_by_stmt _eval_words)} =
+    _scan_eval_site_features($doc, $self->{_binder});
+
   # #3080: the QUALIFIED spellings the SOURCE wrote, read before the two
   # requalify passes below write qualified tokens of their own (those are this
   # compiler's spelling of a bare name, not a package global the source named).
@@ -1929,6 +1996,11 @@ sub parse {
   # already interned those symbols.  Requalify them too — AFTER the `our`
   # pass, whose output this one reads as "already qualified".
   $self->_requalify_block_globals_after_pkg_switch($doc);
+
+  # #2557: an eval text's `our` aliases (the caller's and its own) spelled in
+  # their declaring package -- after the block passes, whose output is
+  # "already qualified" here.
+  $self->_requalify_eval_aliases($doc) if $self->eval_mode;
 
   # (s300d) The s295c "bare fork pipe-open with die-on-failure" gate is gone:
   # %p-open-fork-pipe now implements the 2-arg `open FH, "|-"` / "-|" fork
@@ -5279,8 +5351,10 @@ sub _eval_operand_may_name {
         : $nx->isa('PPI::Structure::List')
           ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
   return 'dynamic string eval after decl' if !@q;
+  # `$#name` / `$#{name}` spell the array too (s543h: the `our` alias list
+  # reads this; before, `eval q{$#a}` did not count as naming @a).
   return 'string eval names the lexical'
-    if grep { $_->content =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/ } @q;
+    if grep { $_->content =~ /(?:[\$\@\%]|\$\#)\s*\{?\s*\Q$bare\E\b/ } @q;
   return undef;
 }
 

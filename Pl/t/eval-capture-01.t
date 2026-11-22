@@ -154,6 +154,34 @@ print "qual_early=", qual_early(), "\n";
 print "qual_main=$main::qd9\n";
 { my $qb9 = "blk"; $Other::qb9 = "pkgb"; sub qual_bsub { $qb9 }
   print "qual_block=", eval(q{package Other; $qb9}), "\n"; }
+# #2557 (s543h): the caller's `our` alias names its DECLARING package's
+# variable inside a package-switching eval -- a block region, a single region,
+# an array (and `$#`), `local our`, a third package, a nested eval, a write,
+# the interpolated spellings, a `package` section of the file, the same text
+# at a site with and one without the alias (the cache); a closed block's
+# `our` and an inner `my` are the controls.
+our $oa9 = "main-o"; $Foo::oa9 = "foo-o"; $Other::oa9 = "other-o";
+print "our_block=",  eval('sub { package Foo; $oa9 }')->(), "\n";
+print "our_region=", eval('package Foo; $oa9'), "\n";
+our @ob9 = (1, 2); @Foo::ob9 = (7, 8, 9);
+print "our_array=",  eval('package Foo; scalar(@ob9) . $#ob9'), "\n";
+sub our_local { local our $oc9 = "loc"; eval 'package Foo; $oc9' }
+$Foo::oc9 = "foo-oc";
+print "our_local=",  our_local(), "\n";
+package A9; our $od9 = "a-od"; package main; $C9::od9 = "c-od";
+print "our_third=",  eval('package C9; $od9'), "\n";
+print "our_nested=", eval(q{eval 'package Foo; $oa9'}), "\n";
+eval 'package Foo; $oa9 = "written"'; print "our_write=$oa9 $Foo::oa9\n"; $oa9 = "main-o";
+print "our_interp=", eval('package Foo; "${oa9}|$oa9"'), "\n";
+{ our $oe9; } $main::oe9 = "main-oe"; $Foo::oe9 = "foo-oe";
+print "our_closed=", eval('package Foo; $oe9'), "\n";
+{ my $oa9 = "my-o"; print "our_myshadow=", eval('package Foo; $oa9'), "\n"; }
+sub our_wo { eval 'package Foo; $of9' }
+$Foo::of9 = "foo-of"; $main::of9 = "main-of";
+our $of9;
+sub our_w  { eval 'package Foo; $of9' }
+print "our_cache=", our_w(), " ", our_wo(), " ", our_w(), "\n";
+package Other; print "our_section=", eval('$oa9'), "\n"; package main;
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -239,6 +267,18 @@ my %expect = (
     qual_early    => 'pkg',
     qual_main     => 'glob',
     qual_block    => 'blk',
+    our_block     => 'main-o',
+    our_region    => 'main-o',
+    our_array     => '21',
+    our_local     => 'loc',
+    our_third     => 'a-od',
+    our_nested    => 'main-o',
+    our_write     => 'written foo-o',
+    our_interp    => 'main-o|main-o',
+    our_closed    => 'foo-oe',
+    our_myshadow  => 'my-o',
+    our_cache     => 'main-of foo-of main-of',
+    our_section   => 'main-o',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',

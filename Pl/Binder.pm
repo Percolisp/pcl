@@ -84,6 +84,7 @@ package Pl::Binder;
 #       Pl::Binder::for_node($p2, $n)   the binder answering about $n
 #       ->resolve($node, $canon)       the record visible at $node for $canon
 #       ->pkg_at($node)                the positional package at $node
+#       ->ours_visible_at($node)       the `our` bindings visible at $node (#2557)
 #       ->captures($block)             OUTER bindings read inside $block
 #       ->captures_name($n, $bare, $canons, eval => 1)  the capture question (s533d)
 #       ->has_string_eval($cv), ->eval_sees($b)  the string-eval CV fact (s533d)
@@ -143,6 +144,16 @@ sub bind {
   my %one;
   for my $c (grep { !$one{$_}++ } @{ $self->{opt}{outer} || [] }) {
     $self->_add_binding(kind => 'outer', canon => $c, pkg => undef,
+                        decl => undef, decl_ord => -1, scope => $doc,
+                        from => -1, to => $self->{last});
+  }
+  # ... and the caller's `our` ALIASES (#2557, s543h: the site's `our:` list):
+  # pad entries of the same outermost pad, each naming its DECLARING
+  # package's variable (SvOURSTASH).  A name the alist also carries is the
+  # lexical (the runtime's truth), so it is not added twice.
+  my $ours = $self->{opt}{outer_our} || {};
+  for my $c (sort grep { !$one{$_}++ } keys %$ours) {
+    $self->_add_binding(kind => 'our', canon => $c, pkg => $ours->{$c},
                         decl => undef, decl_ord => -1, scope => $doc,
                         from => -1, to => $self->{last});
   }
@@ -894,6 +905,27 @@ sub _pkg_at {
 # there (Parser2::_publish_eval_cell, #2630).
 sub pkg_at { my ($self, $node) = @_; return $self->_pkg_at($node) }
 
+# Does the table hold a binding of KIND (`our`, ...)?
+sub has_kind { my ($self, $k) = @_; return $self->{stats}{kind}{$k} ? 1 : 0 }
+
+# The `our` bindings a use at $node would resolve to -- one per canon, the
+# innermost visible (a later `my` or a closed block hides an `our`), sorted by
+# canon.  The string-eval site's alias list (Parser2::_eval_site_our_aliases,
+# #2557).
+sub ours_visible_at {
+  my ($self, $node) = @_;
+  my $ord = $self->_first_ord($node);
+  return () unless defined $ord;
+  my $pkg = $self->_pkg_at($node);
+  my @out;
+  for my $b (@{ $self->{bindings} }) {
+    next unless $b->{kind} eq 'our' && $b->{from} <= $ord && $ord <= $b->{to};
+    my $r = $self->_resolve_ord($ord, $b->{canon}, $pkg);
+    push @out, $b if $r && refaddr($r) == refaddr($b);
+  }
+  return sort { $a->{canon} cmp $b->{canon} } @out;
+}
+
 sub _is_lexical { return $_[0] && $_[0]{kind} =~ /^(?:my|state|our|param|lexsub|outer)$/ ? 1 : 0 }
 
 # The refs inside $block whose binding is declared OUTSIDE it (pad_findlex's
@@ -1200,9 +1232,17 @@ sub build_for {
   my ($parser, $doc) = @_;
   local ($!, $@);
   my $mode = $ENV{PCL_BINDER_CHECK} // '';
+  # The eval SITE's `our` aliases (#2557): `our:CANON=PKG` on the feature list.
+  my %ours;
+  if ($parser->eval_mode) {
+    for my $f (@{ $parser->eval_features // [] }) {
+      $ours{$1} = $2 if $f =~ /\Aour:([\$\@\%][^=]+)=(.+)\z/;
+    }
+  }
   my $b = eval {
     Pl::Binder->new($doc, parser => $parser,
                     outer => ($parser->eval_mode ? [ @{ $parser->eval_captures // [] } ] : []),
+                    outer_our => \%ours,
                     pkg => ($parser->eval_mode ? $parser->eval_pkg : undef))->bind;
   };
   if (!$b) {
