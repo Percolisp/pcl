@@ -913,9 +913,13 @@ sub _pkg_at {
 sub pkg_at { my ($self, $node) = @_; return $self->_pkg_at($node) }
 
 # The canons some use resolves to a binding HOMED outside $pkg -- an `our` of
-# another package, or a forced-main special while $pkg is not main (globals
-# are positional and lexicals have no home) -- in one pass over the refs: the
-# candidates of Parser2::_requalify_eval_text (s543h).
+# another package, a GLOBAL whose positional package is another (one inside a
+# leading `package X;` region of eval text, #5272), or a forced-main special
+# while $pkg is not main (lexicals have no home) -- in one pass over the refs:
+# the candidates of Parser2::_requalify_eval_text (s543h), with or without a
+# leading region.  The refs cover every spelling the requalifier reads (sym /
+# arylen / brace / interp / interp-code / readline), so a name left out is one
+# whose every use the keep predicate leaves as written anyway.
 sub homed_away {
   my ($self, $pkg) = @_;
   my %c;
@@ -925,6 +929,7 @@ sub homed_away {
     my $k = $b->{kind};
     $c{ $r->{canon} } = 1
       if ($k eq 'our' && ($b->{perl_package} // 'main') ne $pkg)
+      || ($k eq 'global' && ($b->{perl_package} // 'main') ne $pkg)
       || ($k eq 'special' && $pkg ne 'main');
   }
   return sort keys %c;

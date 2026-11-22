@@ -892,11 +892,12 @@ sub _requalify_region {
 # `$a` / `$b` keep their sort pairing (the region's bare pair, #287).  A block
 # region inside the text is the block requalifier's, which asked the same
 # binder before this runs.
-# COST: without a leading region only the names the binder homes away from
-# the eval's package can move (Binder::homed_away: an `our` of another
-# package, a forced-main name), so only those are offered -- the requalifier
-# walks the statements once per candidate name, and a 300-line eval text of
-# 900 globals cost +68 % compile time when every name was a candidate.
+# COST: only the names the binder homes away from the eval's package can move
+# (Binder::homed_away: an `our` of another package, a global of a leading
+# `package X;` region, a forced-main name), so only those are offered, with
+# or without a region (#5272, s543k) -- the requalifier walks the statements
+# once per candidate name, and a 300-line eval text of 900 globals cost +68 %
+# compile time when every name was a candidate.
 sub _requalify_eval_text {
   my ($self, $doc) = @_;
   my @top = grep { $_->isa('PPI::Statement') } $doc->schildren;
@@ -904,11 +905,15 @@ sub _requalify_eval_text {
   my $epkg = $self->eval_pkg // 'main';
   my $region = grep { $_->isa('PPI::Statement::Package') && !_pkg_stmt_has_block($_) } @top;
   my $only;
-  if (!$region) {
-    my $bd = $self->{_binder} or return;
+  # #5272 (s543k): the candidate filter holds WITH a leading region too (a
+  # global of the region is homed away from the eval's package), so a 300-line
+  # text of 900 globals behind `package Foo;` no longer walks the statements
+  # once per name (+68 % compile time); emission unchanged by construction.
+  if (my $bd = $self->{_binder}) {
     $only = { map { ($_ => 1) } $bd->homed_away($epkg) };
     return unless %$only;
   }
+  elsif (!$region) { return }
   $self->_requalify_region(\@top, $epkg, sub {
     my ($tok, $canon, $home) = @_;
     return $home eq $epkg || $canon eq '$a' || $canon eq '$b';
