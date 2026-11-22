@@ -9249,8 +9249,14 @@ sub _assemble_eval_mode {
   # is declared like a file's global and read through its cell; the text is
   # read in the eval's package and a name homed elsewhere was requalified
   # (_requalify_eval_text).
-  my %cap = map { ($_ => 1) } @{ $self->eval_captures // [] },
-                               keys %{ $self->{_evalcap_names} // {} };
+  # #5126 (s543k): ... and a capture the text DECLARES is not one (an `our $o`
+  # of the text is a new pad entry that shadows the caller's lexical from the
+  # declaration on; the caller's uses took `$o__evalcap__N`): what is left
+  # spelled `$o` is the text's own -- an `our` its package's cell.
+  my $bdc = $self->{_binder};
+  my %cap = map { ($_ => 1) }
+            (grep { !($bdc && $bdc->text_declares($_)) } @{ $self->eval_captures // [] }),
+            keys %{ $self->{_evalcap_names} // {} };
   my @glob = grep { /^[\$\@\%]/ && !$cap{$_} } keys %free;
   delete @free{@glob};
 

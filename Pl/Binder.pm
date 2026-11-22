@@ -1015,8 +1015,21 @@ sub shadowed_capture {
   my ($self, $canon) = @_;
   my @b = @{ $self->{by_canon}{$canon} || [] };
   my ($outer) = grep { $_->{kind} eq 'outer' } @b;
-  return undef unless $outer && grep { $_->{kind} ne 'outer' && $_->{decl_node} } @b;
+  return undef unless $outer && $self->text_declares($canon);
   return $self->uses_of($outer) ? $outer : undef;
+}
+
+# eval-mode: does the eval TEXT itself declare $canon -- a `my` / `state` /
+# `our` / parameter of that spelling anywhere in it (a binding of the text,
+# not the caller's outer record or a site `our:` alias)?  Then the spelling
+# $canon in the text is the text's own variable wherever it is visible, and
+# every use of the caller's lexical took a name of its own
+# (shadowed_capture), so $canon is no capture PARAMETER (#5126, s543k:
+# `eval 'our $o; $o = 9'` beside a lexical `my $o` wrote the lexical).
+sub text_declares {
+  my ($self, $canon) = @_;
+  return scalar grep { $_->{kind} ne 'outer' && $_->{decl_node} }
+                     @{ $self->{by_canon}{$canon} || [] };
 }
 
 # The literal-TEXT uses of $b in [$lo, $hi] -- the string-eval rule of port 2

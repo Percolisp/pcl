@@ -238,6 +238,13 @@ $main::sp9 = "pkg-sp2";
 print "span_qual=", Sp9::span_g9(), " $main::sp9\n";
 print "span_eval=", eval(q{$sp9}), " ", eval(q{package Other; $sp9}), "\n";
 print "span_early=", span_early9(), "\n";
+# #5126 (s543k): an `our NAME` of the eval TEXT is a new pad entry that shadows
+# the site's lexical of that name from the declaration on -- writes and reads
+# after it are the package variable's; a read before it is the caller's.
+{ my $oo9 = 2; eval 'our $oo9; $oo9 = 9;'; print "ourt_write=$oo9 ", ($main::oo9 // "undef"), "\n"; }
+{ my $op9 = 2; $main::op9 = 5; print "ourt_read=", eval('our $op9; $op9'), "\n"; }
+{ my $oq9 = "lex"; $main::oq9 = "pkg"; print "ourt_before=", eval(q{my $r = $oq9; our $oq9; "$r/$oq9"}), "\n"; }
+{ my $VERSION = "lexv"; eval q{our $VERSION = '1.0'; 1}; print "ourt_version=$VERSION $main::VERSION\n"; }
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -357,6 +364,10 @@ my %expect = (
     span_qual     => 'lex-sp pkg-sp2',
     span_eval     => 'lex-sp lex-sp',
     span_early    => 'pkg-sp2',
+    ourt_write    => '2 9',
+    ourt_read     => '5',
+    ourt_before   => 'lex/pkg',
+    ourt_version  => 'lexv 1.0',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',
