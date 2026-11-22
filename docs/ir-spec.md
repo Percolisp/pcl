@@ -1384,7 +1384,7 @@ forced promotion of an oversized extent (F6) takes the same test.
 | an expression-embedded `my` (`open(my $fh, …)`, `f(my $t)`) — in a plain statement OR in a declaration's initializer (`my $l = X->n(my $t)`, #3431) OR in the modifier condition of a `return` / `next` / `last` (`return X if (my $t = f())->[0] eq 'r'`, #4304 -- before it the name was ONE package global shared by every sub that spelled it) | `(p-let (($t :box (make-p-box nil))) <the statement> …rest…)` — let-bound around the statement and the block remainder, so it is FRESH each time the block runs (each loop iteration).  A name the declaration mentions a second time keeps the older path (#3490).  A SCALAR declaration's CHAINED declarator (`my $c = my $d = EXPR`) is one of these (s536d, #4544): `$d` is fresh per execution, and a named sub capturing it is promoted like any other.  An embedded `my` whose name is a lexical of an ENCLOSING scope declares a NEW variable (normative, s536d, #4625 / #3493: `my $in = ""; { my $l = L->new(my $in) }` hands `L->new` an undef `$in`, the outer one stays `""`) -- and when the statement ALSO mentions the name (`chomp(my @env = grep {…} @env)`, `f(my $x = $x + 1)`, `push(my @a, $a[0])`), those mentions read the outer variable (a `my` is visible only after its statement): the declarator is renamed `NAME__shadow__N` (`:why :reread-shadow`) with exactly its binding's later uses, so the let shadows none of them (normative, s536e, #4642).  **The FILE-level veto** (the embedded `my` falls back to the package cell a named sub shares, #199) fires only when a named sub other than the statement's own uses THAT binding (`Pl::Binder::uses_of`; s536e #4641: a sub's own `@d`, another sigil, or a sub defined before the declaration does not veto) |
 | `our $g = V;` | `(p-defcell $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place (`defvar` instead for an exception-set name). `our` shadowing a `my` gates to v1 |
 | `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(p-defcell $n__state__K (make-p-box nil))` + raw once-flag `(p-defcell $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. |
-| `state` anywhere else — file level, a loop or bare block, a nested block of a named sub, a map/grep/sort block, an anon sub, expression position; a container `state @a [= LIST]` / `state %h`; a LIST `state ($x, @y);`; a refaliasing `\state @a = REF` | the SOURCE rewrite (normative, s296; containers, lists and `\` since s537b, #314 F-F / #1579): the declaration becomes `do { unless ($FLAG) { CELL = INIT; $FLAG = 1 } CELL }` (no init: the bare cell; a list: each name its own cell) over fresh cells `$x__state__N` / `@a__state__N` and a SCALAR once-flag named after the first cell; a refaliasing `\` moves INSIDE the guard (`\@CELL = REF` aliases once — it stored the reference before).  The nearest CV decides the cells' home: an ANON sub is wrapped `do { my CELL; my $FLAG; sub {…} }` (one cell per CLONE, perl's rule), anything else gets package globals of the declaring package (one cell per declaration site = per single-instance CV).  Example: `for (1 .. 3) { state @a = (1, 2); push @a, $_ }` leaves `@a` = `1 2 1 2 3`.  A string eval cannot reach these cells by name: a scalar then reads the global (#4821), a container a later eval may name REFUSES (rule 12) |
+| `state` anywhere else — file level, a loop or bare block, a nested block of a named sub, a map/grep/sort block, an anon sub, expression position; a container `state @a [= LIST]` / `state %h`; a LIST `state ($x, @y);`; a refaliasing `\state @a = REF` | the SOURCE rewrite (normative, s296; containers, lists and `\` since s537b, #314 F-F / #1579): the declaration becomes `do { unless ($FLAG) { CELL = INIT; $FLAG = 1 } CELL }` (no init: the bare cell; a list: each name its own cell) over fresh cells `$x__state__N` / `@a__state__N` and a SCALAR once-flag named after the first cell; a refaliasing `\` moves INSIDE the guard (`\@CELL = REF` aliases once — it stored the reference before).  The nearest CV decides the cells' home: an ANON sub is wrapped `do { my CELL; my $FLAG; sub {…} }` (one cell per CLONE, perl's rule), anything else gets package globals of the declaring package (one cell per declaration site = per single-instance CV).  Example: `for (1 .. 3) { state @a = (1, 2); push @a, $_ }` leaves `@a` = `1 2 1 2 3`.  A string eval reaches these cells by the SOURCE name (s543h, #4821): every eval word whose pad sees the declaration (the prepass's binder of the document as written) carries the cell -- scalar or container -- and an anon sub's wrapper cells ride the alist (the key strips `__state__N`); `state $s = 5; print eval '$s'` prints 5 |
 | undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
 | `state $n` cells, promoted lexicals (`__file__`/`__state__`) | the same `p-defcell`, since the renamed name is word-shaped and therefore ordinary |
 
@@ -1606,10 +1606,14 @@ refusal (`eval_ok`):
    compiler learns that a name is LEXICAL only from the capture list, and
    the package-switch requalifier answers "lexical" for any capture-list
    name — so `eval 'sub { package Other; $c->() }'` calls the caller's
-   `my $c`, never `$Other::c`.
+   `my $c`, never `$Other::c`.  Since s543h (#2630) EVERY segment-extent
+   capture-promoted scalar (identity, the #2633 mangle, the #470 mangle of a
+   name the file also spells qualified) is published -- to exactly the eval
+   words whose pad sees its declaration (`Parser2::_publish_eval_cell`, the
+   binder's answer), and the program unit drops its alias.
 3. A cell reachable by **neither** mechanism keeps a hard refusal:
-   today `state`'s `__state__` cells (separate per-instance machinery)
-   and container promotions with a post-decl eval.
+   container promotions with a post-decl eval.  (`state`'s source-rewrite
+   cells are published per eval word since s543h, #4821.)
 
 A new rename family must decide which of the three it is before it may
 pass `eval_ok`.
@@ -5976,6 +5980,36 @@ print eval 'my $x = $x + 1; $x'` prints 8 (was 1), compiled as
 caller's `$x`.  The rename depends on the capture NAMES, which already key the
 eval cache (#296-B1).
 
+**What a bare name in eval text denotes (normative, s543h; #2630 #2557 #2091
+#4821).**  The text is compiled in the SITE's pad, so a bare `$x` / `@x` / `%x`
+in it is, in this order: (1) a lexical the text itself declares; (2) a
+LEXICAL of the site -- a key of the site alist, which is EXACTLY the caller's
+lexicals the eval word's pad sees (below); (3) an `our` ALIAS the site's pad
+sees, or one the text declares -- its DECLARING package's variable; (4)
+otherwise the package variable of the positional package (a leading `package
+X;` region's X, else the eval's package).  Only (2) is a `p-eval-thunk`
+parameter.  (3) and (4) are package CELLS, declared in the eval unit's head
+like a file's globals and read through the cell at every use -- a parameter
+bound once at eval entry was a snapshot that `local` (which installs a fresh
+box in the cell, `p-local-cell`) and a glob assignment never reached; a name
+homed outside the eval's package takes the qualified spelling
+(`Parser2::_requalify_eval_text`, the binder's `requalify_home`).  What the
+SITE hands over: the alist (per eval WORD: the let-bound pairs; the PROMOTED
+file cells and the source-rewritten `state` cells whose declaration the
+binder says the word's pad sees -- `_publish_eval_cell`,
+`_state_eval_visibility` -- qualified with the declaring package from another
+one; a named sub's state cells, `_eval_state_captures`; the span pairs) and,
+on the feature list, one pseudo-feature `our:CANON=PKG` per `our` alias the
+word sees (`Binder::ours_visible_at`; a LITERAL operand that never spells the
+name leaves it out).  Both join the cache key (capture names, features);
+the wire is unchanged.  Examples, one per kind: `my $d = 1; $Other::d = 2;
+sub f { $d } eval q{package Other; $d}` is 1 (the lexical: the #470 mangle's
+pair); `our $o = "m"; eval 'package Foo; $o'` is "m" (`$main::o`); `state
+$s = 5; print eval '$s'` prints 5 (the cell); `eval q{our $x = 1; sub s {
+$x } sub t { local $x = 2; s() }}; print t()` prints 2 (the cell, not a
+snapshot).  An eval BEFORE a declaration, or in a sub defined above it, sees
+the package variable.
+
 An eval whose whole body is one `package X; …` region takes a third
 argument — the region's CL package designator:
 
@@ -6073,7 +6107,11 @@ original-name symbol in the declaring section's package (the quoted
 symbol is unqualified: the reader interns it under the section's
 `in-package`, which is by construction the declaring package). Both
 rename families that produce file cells flow through it: span promotion
-(W10) and capture promotion (M-C/M-F) of a SEGMENT-extent lexical.  **A
+(W10) and capture promotion (M-C/M-F) of a SEGMENT-extent lexical -- in the
+PROGRAM unit the capture promotion's cell takes NO alias since s543h (#2630):
+every eval word that sees it carries its pair, and the alias wrote the
+lexical's box into the package variable of its name (`my $d; $main::d = 2;
+sub f { $d }` made f read 2).  **A
 BLOCK-extent capture promotion never takes the alias** (normative, s537b,
 #4461): whatever declares it -- a single `my $x` or a multi-name
 `my ($r, $x)` -- its cell joins the eval-site alists under the original name for the
@@ -6145,7 +6183,8 @@ Example: `sub un ($) { "u:$_[0]" }  print eval q{join "|", un 1, 2}` prints
 `u:1|2` (was `u:1`).  Guard `Pl/t/eval-proto-01.t`.
 
 **Deliberate divergences** (all shared with v1, listed in
-`docs/not-supported.md` where user-visible): after the alias executes,
+`docs/not-supported.md` where user-visible): after the alias executes
+(a span cell, or a cell of a non-program unit -- #2640),
 an explicit fully-qualified `$Pkg::x` names the lexical's cell rather
 than a distinct package global — exactly v1's defvar-under-original-name
 behaviour. Calling context (`wantarray`) does not propagate into the

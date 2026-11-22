@@ -231,6 +231,15 @@ eval tests (Unicode/bytecode-optimizer internals) for later.
     string.~~  (Now captured via the alist + p-eval-thunk lambda-param mechanism.)
 - Performance: first call for a given string spawns a Perl process (~50–100ms).
   The cache handles repeated identical strings.
+- **UPDATE (s543h): the capture INPUTS.**  What the eval SITE hands the eval's
+  compiler, and what a bare name in the text therefore denotes, is normative in
+  `docs/ir-spec.md` §9.1 "What a bare name in eval text denotes": the alist (per
+  eval WORD -- let-bound lexicals, the promoted file cells and the rewritten
+  `state` cells the word's pad sees, a named sub's state cells, span pairs) and
+  the feature list (#364, plus `re-flags:` / `re-eval` and `our:CANON=PKG` for the
+  `our` aliases the word sees).  Only an alist name is a `p-eval-thunk`
+  parameter; every other free name is a package cell.  Every input keys the eval
+  cache (capture names, features, visible prototypes).
 
 ---
 
