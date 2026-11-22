@@ -1303,7 +1303,13 @@ Two consequences a consumer must know:
   target, then assigns through the targets' places; a GLOB in the list is
   localized by its own glob open, whose value is LIST's element at the glob's
   position (`(p-aref-deref TMP i)`; #4185).  When the statement is the LAST of a
-  block whose value is used, that value is the localized target's (#4443).
+  block whose value is used, that value is the localized target's (#4443) --
+  for a bare `local $x` / `local ($x)` / `local @a` too (one undef, the empty
+  array: #2742), a list `local ($x, $y)` its targets by context (the list, or
+  the last in scalar), and a slice or parenthesised element ASSIGNMENT the list
+  assignment's value (the slice's elements in list context, the right side's
+  count in scalar: #5253) -- a form emitted ONLY at such a valued tail and
+  read through the caller's context (s543j).
   Example: `sub f { local $x = 5 }` lowers to
   `(p-local-cell $x (p-box-for-local 5) $x)` and returns 5.  A static glob
   name is `(p-local-glob "PKG" "NAME" …)`; a STASH glob `*Pkg::` / `*A::B::` is
@@ -2519,6 +2525,31 @@ Three sites read that same rule, and each was a silent wrong before it:
   element forms (`local $h{@a} = V`, `local $r->{@a}`, `local ($h{@a}, ...)`,
   via `ExprToCL::generate_hash_key` from the v1 seam) all take.  A SLICE's
   key list stays LIST (`local @h{@a}` localizes each key).
+* **An AGGREGATE LEAF in a core builtin's `$` slot, and as the bound operand
+  of a match, is its COUNT** (normative, s543j, task #2030): a bare `@a` /
+  `%h` (`@_` and the punctuation aggregates too) or a cast `@$r` `@{E}` `%$h`
+  `%{E}` there is emitted `(p-scalar X)` -- `sprintf(@arr)` formats with the
+  element count, `join(@s, "p", "q")` joins with it, `@a =~ /3/` matches
+  `scalar(@a)`.  The slot is the prototype's (`core_arg_context`, the reading
+  the argument's SCALAR annotation came from), so a reference slot (`\@`:
+  `push`, `splice`) keeps the container and a slurpy slot the list; a
+  consumer that counts by itself (`$n = @a`, `@a + 0`, `scalar(@a)`) keeps its
+  own form.  Example: `my $s = sprintf(@arr)` lowers to `(p-sprintf (p-scalar
+  @arr))`.
+* **A context an emitter imposes after annotation reaches an INHERITING
+  child** (normative, s543j, tasks #5125 #5230; the #611 push-down's rule
+  carried through the two value-passing operators).  (a) An INHERIT comma
+  list -- a valued tail: a sub, `do` or `eval` block's last statement -- is
+  its LAST element in the context the value is read in: that element
+  INHERITS `*wantarray*`, so the list arm reads it in list context and the
+  scalar arm in scalar (`my $r = do { 1, <$h> }` reads ONE line; `sub f { 1,
+  g() }` called in scalar context calls `g` in scalar).  (b) A short-circuit
+  operator (`&&` `||` `//` `and` `or`) is its RIGHT operand's value in the
+  operator's own context, re-derived at emission from the operator's context
+  as a ternary's branches are: `my $x = (1 and 2, 0)` is 0 (the comma list
+  in scalar context), `((1 and 2, 0) or (3, 4))` is `3 4`.  Example: `sub f {
+  1, g() }` lowers to `(if *wantarray* (p-flatten-args (list 1 (pl-g)))
+  (progn 1 (pl-g)))`.
 
 ## 5. Calling convention
 
@@ -4143,9 +4174,17 @@ descriptor, a `flock` held through it and a pipe's child stay as §6.5b says;
 composes with the location forms: the flush follows the statement's
 `(p-line N)`.  "A lexical scalar" is the BINDER's answer at the statement
 (s543g, #5128): a `my` / `state` declared in the unit, or one a sub or closure
-CAPTURES from an enclosing scope (`my $g = mk(); sub drop { undef $g }`); an
-`our` alias, a package global and a string eval's view of its caller's
-lexical are not.  WHAT is flushed (s543g, #5160 #4794): the dropped value as
+CAPTURES from an enclosing scope (`my $g = mk(); sub drop { undef $g }`).  A
+PACKAGE variable is flushed too (s543j, #5254): an `our` alias, a qualified
+`$Foo::fh`, a `use vars` or `local`ized global, through its STORAGE form (the
+one `local` saves; a foreign runtime global's resolver form is no variable and
+is not flushed).  Not flushed: the core's special variables (the global
+partition's exception set -- `$@` `$_` `$/` `$!` `$0`, the sort pair: no
+user's handle holder; their emission is unchanged) and, in a string eval, an
+unqualified free name (it may be the caller's lexical: #5255).  A localized
+global dropped by the SCOPE's exit is no statement and is not covered.
+Example: `undef $Foo::fh;` emits `(p-flush-dropped-handle Foo::$fh) (p-undef
+Foo::$fh)`.  WHAT is flushed (s543g, #5160 #4794): the dropped value as
 stored, never FETCHed -- a descriptor stream; a GLOB handle's stream, read
 from the handle table (no method runs: a tied handle's placeholder is no
 descriptor stream); the stream an fdopen alias forwards to; and when the
@@ -4354,6 +4393,31 @@ scalar `p-local-*-elem-init` form.  Example: `local($h{k}) = f($v)` lowers to
 `(let ((pcl-local-init-0 (let ((*wantarray* t)) (p-list-ctx (pl-f $v))))) (p-local-hash-elem
 %h "k" (p-list-= (vector (p-gethash %h "k")) pcl-local-init-0) …))`, while
 `local($h{k}) = $_[0]` stays `(p-local-hash-elem-init %h "k" (p-aref @_ 0) …)`.
+
+**`delete local ELEM` is ONE reading wherever it stands (normative, s543j /
+#5001 #5250).**  As a whole void statement it is the element open whose first
+body form deletes the slot; an if / unless modifier gates the save, the delete
+and the restore (`p-local-maybe`, below).  As a TERM of an expression (`$v =
+delete local $h{k}`, `f(delete local $h{k})`, `return delete local …`) or a
+valued block's last statement, it is the #3370 hoist (below) with the element's
+value kept: `local ELEM = ELEM;` moves before the statement -- the restore is
+the enclosing block's end, perl's -- and the term left behind is `delete
+ELEM`, whose value is the OLD element (a slice: the old elements; scalar
+context: the last).  The operand is side-effect free (the hoist's operand
+rule), so it is read three times.  A term the hoist's precondition refuses is
+its refusal (#5330), never the plain delete.  Example: `my $v = delete local
+$h{d};` is `local $h{d} = $h{d}; my $v = delete $h{d};`.
+
+**`local %ENV` keeps the environment's magic (normative, s543j / #5210).**  It
+is not a `let` of a plain table: `(p-local-env INIT …)` evaluates the right
+side FIRST (it may read the old `%ENV`), saves the whole process environment
+(its pairs, the #1030 undef marks, the synthetic entry's flag), replaces it
+through the `%ENV = LIST` arm (a bare `local %ENV`: an EMPTY environment) and
+puts it back on every exit.  A child started inside sees the localized
+environment.  `%ENV` is selected by name -- a core variable.  Example: `{ local
+%ENV = (%ENV, K => "v"); system(...) }` lowers to `(p-local-env (let
+((*wantarray* t)) (p-flatten-args (list %ENV "K" "v"))) … (p-system …))`.
+`local %INC` and `local %SIG` still bind a plain table (#5332 #5333).
 
 **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
 #541). Perl does not execute the statement at all when the condition is

@@ -2519,12 +2519,14 @@ stays different from perl, measured s540c / s541:
   inside the hash or array an `undef $obj;` / `$obj = undef;` drops (an object
   holding its handle: Pod::Simple::HTMLBatch's `undef($page)`; at most the
   first 64 elements are looked at, no tie, method or overload is touched;
-  #4794).  NOT flushed at a statement: a handle let go at a BLOCK EXIT (`{ my
-  $fh = $f->openw; print $fh ...; }`, a method's returned handle -- the
-  moment above), a handle two levels down (`$o->{inner}{fh}`, a scalar ref
-  `\$fh` in an object), a package global or `our` variable (`undef
-  $Foo::fh`), a string eval's `undef $g` on the caller's lexical; and the
-  flush never releases a lock or a descriptor;
+  #4794); since s543j a PACKAGE variable as well (an `our` alias, `undef
+  $Foo::fh`, a `use vars` or `local`ized global; #5254).  NOT flushed at a
+  statement: a handle let go at a BLOCK EXIT (`{ my $fh = $f->openw; print
+  $fh ...; }`, a method's returned handle, a `local`ized global's handle at
+  its scope's end -- the moment above), a handle two levels down
+  (`$o->{inner}{fh}`, a scalar ref `\$fh` in an object), a string eval's
+  `undef $g` on an unqualified name (#5255); and the flush never releases a
+  lock or a descriptor;
 * a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
   until one of the triggers or exit; only a blocking `flock` on the same file
   and running out of descriptors are triggers;
