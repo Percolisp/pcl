@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -285,4 +285,28 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$obj' '$dir");
     is($pcl_out, $perl, '#4794: delete $h{fh} / delete $r->{fh} and undef $obj (one level) flush the dropped handle');
+}
+
+# 11: #5254 (s543j) -- the same statements on a PACKAGE variable: an `our`
+# alias (in a sub), a qualified `$Foo::fh`, a `local`ized global, a `use vars`
+# one, an object in a package variable, another package's `our`; the core's
+# special variables (`$@` `$_` `$/` `$!`) keep their plain emission.
+# INVERSE: main b58114ca printed 0 for a b c d e f g.
+my $pkg = write_prog('pkg.pl', <<'PL');
+use strict; use warnings; use vars qw($uv);
+my $f = "$ARGV[0]/pkg.out";
+sub mk { open my $fh, ">", $f or die; $fh }
+sub size { -s $f // 0 }
+our $g = mk(); print $g "our1"; sub dg { undef $g; print "a ", size(), "\n" } dg();
+$Foo::fh = mk(); print {$Foo::fh} "pkg22"; undef $Foo::fh; print "b ", size(), "\n";
+our $l = 5; { local $l = mk(); print $l "loc333"; undef $l; print "c ", size(), "\n"; }
+$uv = mk(); print $uv "vars4444"; $uv = undef; print "d ", size(), "\n";
+our $o = { fh => mk() }; print { $o->{fh} } "object555"; undef $o; print "e ", size(), "\n";
+{ package Bar; our $q = main::mk(); print $q "barq66"; undef $q; print "f ", main::size(), "\n"; }
+our $t = mk(); print $t "assign777"; $t = undef; print "g ", size(), "\n";
+$@ = "x"; undef $@; $_ = "y"; $_ = undef; { local $/; undef $/; } print "h ", (defined $@ ? "D" : "U"), (defined $_ ? "D" : "U"), "\n";
+PL
+{
+    my ($perl, $pcl_out) = run_both("$pkg' '$dir");
+    is($pcl_out, $perl, '#5254: undef / = undef of a PACKAGE variable (our, $Foo::fh, local, use vars) flushes the escaped handle');
 }

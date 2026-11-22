@@ -16212,19 +16212,39 @@ sub _fh_drop_flush_var {
   # an ordinary read of the token lowers to (a promoted file lexical may be
   # spelled `$main::x` by the block-package requalifier, which is
   # `main::$x`); a form that is not a plain variable is no flush.
-  return undef unless $self->_captured_lexical_scalar($sym);
-  my $form = $self->_lower_expr([$sym], $stmt);
-  return ref($form) ? undef : $form;
+  my $kind = $self->_scalar_binding_kind($sym) // return undef;
+  if ($kind eq 'lexical') {
+    my $form = $self->_lower_expr([$sym], $stmt);
+    return ref($form) ? undef : $form;
+  }
+  # A PACKAGE variable (#5254): an `our` alias, a qualified `$Foo::fh`, a
+  # `use vars` / undeclared global, a `local`ized one -- its STORAGE form, the
+  # one the `local` plan reads (_local_var_cl); a foreign runtime global's
+  # resolver form is no plain variable, so no flush.  The core's special
+  # variables (`$@` `$_` `$/` `$!` `$0`, the sort pair: the partition's
+  # exception set) are no user's handle holder and keep their emission.  In a
+  # STRING EVAL an unqualified free name may be the caller's lexical (a thunk
+  # parameter): that is the eval's edge (#5255), no flush here.
+  return undef if $self->eval_mode && $name !~ /::/;
+  my $cl = $self->_local_var_cl($name);
+  return undef if ref($cl) || $cl =~ /[\s()]/ || Pl::GlobalPartition::is_exception_global($cl)
+               || defined Pl::ExprToCL::_foreign_runtime_global_form($name);
+  return $cl;
 }
 
-# Is the scalar token $sym a use of a `my` / `state` binding (perl's pad
-# variable), as the binder resolves it at that point?  An `our` alias, a
-# package global and a string eval's view of its caller's lexical are not.
-sub _captured_lexical_scalar {
+# How the binder resolves the scalar token $sym at that point: 'lexical' -- a
+# `my` / `state` binding (perl's pad variable), wherever declared; 'package'
+# -- an `our` alias or no binding at all (a package global); undef -- no
+# binder (no answer: no flush).  A string eval's view of its caller's
+# lexical is neither (the caller asks eval_mode).
+sub _scalar_binding_kind {
   my ($self, $sym) = @_;
-  my $bd = Pl::Binder::for_captures($self, $sym) or return 0;
-  my $b  = $bd->binding_of($sym) or return 0;
-  return ($b->{kind} // '') =~ /^(?:my|state)\z/ ? 1 : 0;
+  my $bd = Pl::Binder::for_captures($self, $sym) or return undef;
+  my $b  = $bd->binding_of($sym) or return 'package';
+  my $k = $b->{kind} // '';
+  return 'lexical' if $k =~ /^(?:my|state)\z/;
+  return 'package' if $k =~ /^(?:our|global)\z/;
+  return undef;
 }
 
 # `undef $x;' / `undef($x);' / `$x = undef;' as a whole statement, $x a
