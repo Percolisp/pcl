@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 33;
+plan tests => 34;
 
 sub run_cl {
     my ($code) = @_;
@@ -235,6 +235,12 @@ test_cl('#5125 a comma list as a valued tail: its LAST element in the caller\'s 
       my @l = f(); my $s = f(); my $rs = r(); my $x = eval { 1, g() };
       print "$s @l $rs $x ", ($l =~ s/\n//r), " $n\n";},
     "S 1 L dcba S l1 2\n");
+
+test_cl('#5230 a low-precedence and / or whose right operand is a comma list: the list in the operator\'s context',
+    q{my $x = (1 and 2, 0); my $y = (0 or 3, 4); my @r = ((1 and 2, 0) or (3, 4));
+      $_ = "x"; my @q = (1 and /x/, 0 or /x/, not /y/); sub g { wantarray ? "L" : "S" } my $w = (0 || 5, g());
+      print "$x $y @r|@q|$w\n";},
+    "0 4 3 4|1 1|S\n");
 
 test_cl('#790 (&;@) block form: ($ok, $@) from a died eval',
     q{sub tryit (&;@) { my ($cb, @rest) = @_; my $ok = eval { $cb->() }; return ($ok, $@) }

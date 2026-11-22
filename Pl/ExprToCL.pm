@@ -1903,6 +1903,19 @@ sub gen_binary_op_form {
     return ['p-isa', $left, $right];
   }
 
+  # A short-circuit operator's VALUE is its right operand's, in the operator's
+  # own context (child_context: the left is boolean, the right inherits) -- so
+  # the right operand's context is re-derived here from the operator's
+  # EMIT-time one, as gen_ternary does for its branches.  A context pushed
+  # down after annotate_contexts (#611's paren layer, a valued tail's last
+  # element) used to stop at the operator: `my $x = (1 and 2, 0)` lowered the
+  # comma list `2, 0` as the stale LIST of the paren list's kid -- a vector,
+  # ARRAY(0x1) (#5230).  An EXPLICIT annotation only (#611's licence).
+  if ($op eq '&&' || $op eq 'and' || $op eq '||' || $op eq '//' || $op eq 'or') {
+    my $own = defined $node_id ? $self->expr_o->get_node_context_raw($node_id) : undef;
+    $self->expr_o->set_node_context($kids->[1], $own) if defined $own;
+  }
+
   my $right = $self->gen_node_form($kids->[1]);
 
   # `$s =~ $p` with `use re '/FLAGS'` in force: perl compiles a RUN-TIME
