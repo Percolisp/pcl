@@ -220,7 +220,7 @@ sub _scan_eval_site_features {
   for my $w (@{ $doc->find(sub {
                   $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
     my $nx = $w->snext_sibling;
-    if (!($nx && $nx->isa('PPI::Structure::Block'))) {      # eval { } has no alist
+    if (_is_string_eval_word($w)) {                         # eval { } has no alist
       push @words, $w;
       for (my $p = $w->parent; $p; $p = $p->parent) {
         push @{ $words_by_stmt{ refaddr $p } }, $w if $p->isa('PPI::Statement');
@@ -252,7 +252,7 @@ sub _scan_eval_site_features {
     # aliases the operand may spell (a literal text that never names one
     # leaves it out; a dynamic operand takes them all): the binder's answer
     # at the word, so an inner `my` or a closed block hides one.
-    push @on, _eval_site_our_aliases($bd, $w, $nx) if $bd && !($nx && $nx->isa('PPI::Structure::Block'));
+    push @on, _eval_site_our_aliases($bd, $w, $nx) if $bd && _is_string_eval_word($w);
     next if !@on;
     for (my $p = $w->parent; $p; $p = $p->parent) {
       next if !$p->isa('PPI::Statement');
@@ -5337,7 +5337,7 @@ sub _captured_in_subs {
 # NAME the variable $bare?  A DYNAMIC operand (no literal text) can; a literal
 # text can when it spells the name with a sigil (`$x` `@x` `%x` `${x}` ...).
 # Returns the refusal reason, or undef.  ONE reading for the capture promoter's
-# container refusal and the state rewrite's (_state_eval_blocker).
+# container refusal and the eval site's `our` alias list (#2557).
 sub _eval_operand_may_name {
   my ($nx, $bare) = @_;
   my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
@@ -6135,10 +6135,9 @@ sub _rename_use_token {
 #     v1 owns the whole definition (_fallback_stmt), and its own state
 #     machinery handles them (signatures.t t126/t127);
 #   - `state sub NAME` lexical subs (snext is not a Symbol).
-# String eval residue: a renamed cell is NOT reachable by its original name
-# from eval'd code -- a SCALAR then reads the global (#4821, a silent wrong
-# filed s537b); a CONTAINER a later eval may name refuses
-# (_state_eval_blocker).
+# String eval: a renamed cell IS reachable by its original name from eval'd
+# code (#4821, s543h): every eval word that sees the declaration carries the
+# pair (_state_eval_visibility / _state_eval_publish), scalar or container.
 sub _rewrite_state_prepass {
   my ($self, $doc) = @_;
   my $has = $doc->find(sub {
@@ -6146,7 +6145,71 @@ sub _rewrite_state_prepass {
   return $doc unless ref $has && @$has;
   $doc = $self->_reparse_doc($doc) if $self->_state_normalize_decls($doc);
   $doc = $self->_reparse_doc($doc) if $self->_state_rewrite_routes($doc);
+  $self->_state_eval_publish($doc);
   return $doc;
+}
+
+# #4821 (s543h): the name a string eval sees for a source-rewritten `state`
+# variable is its SOURCE name, mapped to its CELL -- for exactly the eval
+# words whose pad sees the declaration (the binder of the document as
+# written, before the rewrite: not before the declaring statement ends, not
+# outside its block, not under a shadowing `my`).  A PACKAGE cell (file level,
+# a loop or bare block, a map block, expression position) is published per
+# word like a promoted file cell (_publish_eval_cell, #2630) and spelled
+# qualified from another package; an ANON sub's cells are `my`s of its
+# wrapper and reach the alist by the let-bound route (the key strips
+# __state__N).  Recorded by string-eval word INDEX: the document is re-parsed
+# after the rewrite, which neither adds nor removes an eval word.
+sub _state_eval_visibility {
+  my ($self, $doc, $sites, $cells) = @_;
+  my $bd = $self->{_binder} or return;
+  my @words = grep { _is_string_eval_word($_) } @{ $doc->find(sub {
+                $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] };
+  return unless @words;
+  my %at;
+  for my $i (0 .. $#$sites) {
+    my ($w, $syms, $route) = @{ $sites->[$i] };
+    next if $route->{route} eq 'anon';
+    for my $j (0 .. $#$syms) {
+      my $sym  = $syms->[$j];
+      my $b    = $bd->decl_binding($sym)
+        or die "PCL internal: the binder holds no declaration for state `"
+             . $cells->[$i][$j] . "` at line " . ($sym->line_number // '?') . "\n";
+      my $home = $b->{perl_package} // 'main';
+      my $cell = $cells->[$i][$j];
+      for my $k (0 .. $#words) {
+        my $r = $bd->resolve($words[$k], $b->{canon});
+        next unless $r && refaddr($r) == refaddr($b);
+        $at{$k}{ $b->{canon} } //= $bd->pkg_at($words[$k]) eq $home ? cl_sym($cell)
+                                   : cl_pkg($home) . '::' . cl_sym($cell);
+      }
+    }
+  }
+  $self->{_state_eval_vis} = { n => scalar(@words), at => \%at } if %at;
+  return;
+}
+
+# ... and onto the re-parsed document's words (rule 12: the same count).
+sub _state_eval_publish {
+  my ($self, $doc) = @_;
+  my $vis = delete $self->{_state_eval_vis} or return;
+  my @words = grep { _is_string_eval_word($_) } @{ $doc->find(sub {
+                $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] };
+  die "PCL internal: the state rewrite changed the string-eval words ($vis->{n} -> "
+    . scalar(@words) . ")\n" if @words != $vis->{n};
+  for my $k (sort { $a <=> $b } keys %{ $vis->{at} }) {
+    my $m = $vis->{at}{$k};
+    $self->{_eval_word_caps}{ refaddr $words[$k] }{$_} //= $m->{$_} for sort keys %$m;
+  }
+  return;
+}
+
+# An `eval` WORD that is a string eval -- not `eval { BLOCK }` (the scan and
+# the state rewrite's word list read the same answer).
+sub _is_string_eval_word {
+  my ($w) = @_;
+  my $nx = $w->snext_sibling;
+  return !($nx && $nx->isa('PPI::Structure::Block'));
 }
 
 # Reparse the document from its own (source-level rewritten) text.  Shared by
@@ -8293,29 +8356,10 @@ sub _state_rw_blocker {
   return undef;
 }
 
-# A CONTAINER cell of the source rewrite (`state @a`, `state %h`) is not
-# reachable from a string eval by its original name -- the scalar's residue
-# too (#4821), but a container has no other route at all (the alist carries
-# scalar cells only, ir-spec §2b.4) -- so a string eval after the declaration
-# in its scope that could NAME it refuses, loudly (rule 12), never reads the
-# global.  The question is the capture promoter's (_eval_operand_may_name):
-# an eval BLOCK and a literal text that never names it are fine.  undef for a
-# scalar or when no such eval exists.
-sub _state_eval_blocker {
-  my ($self, $root, $w, $sym) = @_;
-  my ($sig, $bare) = $sym->content =~ /^([\$\@\%])(\w+)$/;
-  return undef if !defined $sig || $sig eq '$';
-  my $past = 0;
-  for my $t ($root->tokens) {
-    if (!$past) { $past = 1 if $t == $w; next }
-    next unless $t->isa('PPI::Token::Word') && $t->content eq 'eval';
-    my $nx = $t->snext_sibling;
-    next if !$nx || $nx->isa('PPI::Structure::Block');      # eval { } -- fine
-    my $why = _eval_operand_may_name($nx, $bare) or next;
-    return $why;
-  }
-  return undef;
-}
+# (s543h, #4821: `_state_eval_blocker` -- a state CONTAINER a later string
+# eval may name refused the file -- is gone: the eval words that see a
+# rewritten declaration carry its cell, scalar or container alike, per word
+# (_state_eval_visibility); an anon sub's wrapper cells ride the alist.)
 
 # The last token of the init expression that starts after `$sym = ` — the
 # sibling run up to a `;`, a low-precedence / statement-modifier word, or the
@@ -8364,6 +8408,7 @@ sub _state_rewrite_routes {
   require Pl::Binder;
   local $self->{_binder} = Pl::Binder::build_for($self, $doc);
   my @cells = map { [ $self->_state_rename_site($_, $doc) ] } reverse @sites;
+  $self->_state_eval_visibility($doc, [ reverse @sites ], \@cells);
   my %anon;
   $self->_state_rewrite_site($_, \%anon, shift @cells) for reverse @sites;
   for my $a (values %anon) {
@@ -8437,8 +8482,7 @@ sub _state_rename_site {
   my $root = _enclosing_block($w) // $doc;
   my @cells;
   for my $sym (@$syms) {
-    if (my $why = $self->_state_rw_blocker($root, $sym)
-                  // $self->_state_eval_blocker($root, $w, $sym)) {
+    if (my $why = $self->_state_rw_blocker($root, $sym)) {
       die "Parser2 TODO: state " . $sym->content . " rewrite ($why)\n";
     }
     my ($sig, $bare) = $sym->content =~ /^([\$\@\%])(\w+)$/;

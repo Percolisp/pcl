@@ -3947,19 +3947,23 @@ sub _eval_lexical_alist {
   # #291 — a lexical and a package global of the same name coexist now, so
   # nothing mints those suffixes and they have no entries below.  `__shadow__`
   # survives as the v1-SEAM rename only.)
-  # `state` renames
-  # (`__state__`) are deliberately NOT stripped: those are defvar'd cells, not
-  # let bindings, and never enter _let_bound_vars — their pairs arrive via
-  # _eval_state_captures below (s418, #401).
+  # A named sub's `state`
+  # cells are defvar'd, not let bindings, and never enter _let_bound_vars —
+  # their pairs arrive via _eval_state_captures below (s418, #401); the
+  # source rewrite's PACKAGE cells per eval word (eval_site_cells, #4821);
+  # only an anon sub's wrapper cells are let-bound (stripped below).
   # EVERY suffix strips (#2630, s543h): a cell can carry two -- a block
   # lexical the file also spells qualified is the exception rename's
   # `$x__excl__0` promoted to `$x__excl__0__file__0`, and its key was
   # "$x__excl__0", which no eval text names.  The depth is the OUTERMOST
-  # numbered suffix's N (the one a single-suffix name has).
+  # numbered suffix's N (the one a single-suffix name has).  A STATE cell
+  # strips too (#4821): the only ones let-bound are an ANON sub's, `my`s of
+  # its per-clone wrapper (`$x__state__N`, `$x__state__e<hex>_N` in an eval
+  # unit); its once-flag (`__init`) keeps its name.
   my $skey = sub {
     my ($v) = @_;
     my $d = -1;
-    while ($v =~ s/__(lex|shadow|file|excl)__(\d+)$//) {
+    while ($v =~ s/__(lex|shadow|file|excl|state)__(?:e[0-9a-f]{8}_)?(\d+)$//) {
       $d = $2 if $d < 0 && $1 ne 'lex';
     }
     return ($v, $d);

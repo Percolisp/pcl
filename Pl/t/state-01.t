@@ -488,14 +488,11 @@ test_cl('refaliasing a state variable aliases once',
      }',
     "5 6\n3 3 1 2 3 4 1 1\n");
 
-# Test 39 (#314 F-F, s537b): a state CONTAINER of the source rewrite is not
-# reachable from a string eval by its original name, so an eval after it that
-# may NAME it refuses -- loudly, never a read of the global (rule 12).
-{
-    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh 'use feature "state"; for (1..2) { state %h; $h{$_} = 1; print eval q{join ",", keys %h} }';
-    close $fh;
-    my $err = `$pl2cl < $pl 2>&1 >/dev/null`;
-    like($err, qr/state %h rewrite \(string eval names the lexical\)/,
-         'a state container a later string eval may name refuses');
-}
+# Test 39 (#314 F-F, s537b; #4821, s543h): a state CONTAINER of the source
+# rewrite is reachable from a string eval by its original name -- the eval
+# words that see the declaration carry its cell.  Until s543h the program
+# REFUSED (`state %h rewrite (string eval names the lexical)`).
+test_cl('a state container a later string eval names reads its cell',
+    'use feature "state"; for (1..2) { state %h; $h{$_} = 1; print eval q{join ",", sort keys %h}, "\n" }
+     for (1..2) { state @a = (7); push @a, $_; print eval q{"@a"}, "\n" }',
+    "1\n1,2\n7 1\n7 1 2\n");

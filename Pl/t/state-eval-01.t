@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub write_pl {
     my ($code) = @_;
@@ -185,3 +185,26 @@ PL
     like($err, qr/state \$n in named sub \(string eval\)/,
          'the name used OUTSIDE the block keeps the refusal (perl: 1/100/100)');
 }
+
+# ── 7. #4821 (s543h): a `state` of the SOURCE rewrite (file level, a file-level
+# loop or bare block, a map block, an anon sub, expression position) is
+# visible to a string eval by its source name -- the eval words that see the
+# declaration carry its cell (an anon sub's per-clone wrapper cell rides the
+# alist).  Before, every eval read the empty package global.  The cache leg:
+# the same text in two loops with two cells; the position leg: an eval before
+# the declaration reads the global.
+is(run_cl(<<'PL'), "f=5\nl=11 12\nb=7\na=21 22 21\nm=1,2,3\ni=si\nw=1 2 3\nc=A A B B\nx=5\np=global state\n",
+use feature 'state'; no warnings;
+state $s = 5; print "f=", eval('$s'), "\n";
+my @l; for (1..2) { state $t = 10; $t++; push @l, eval('$t') } print "l=@l\n";
+{ state $b = 7; print "b=", eval('$b'), "\n"; }
+my @c = map { sub { state $u = 20; $u++; eval '$u' } } 1, 2;
+print "a=", $c[0]->(), " ", $c[0]->(), " ", $c[1]->(), "\n";
+print "m=", join(",", map { state $m = 0; $m++; eval '$m' } 1 .. 3), "\n";
+state $si = "si"; sub inner_reader { eval '$si' } print "i=", inner_reader(), "\n";
+my @w; for (1..3) { state $wr = 0; eval '$wr++'; push @w, $wr } print "w=@w\n";
+my @cv; for (1..2) { state $cv = "A"; push @cv, eval('$cv') } for (1..2) { state $cv = "B"; push @cv, eval('$cv') } print "c=@cv\n";
+sub ex { my $x = (state $ex = 3) + 1; $ex++; eval '$ex' } ex(); print "x=", ex(), "\n";
+$main::bd = "global"; my $p1 = eval('$bd'); state $bd = "state"; print "p=$p1 ", eval('$bd'), "\n";
+PL
+   'a source-rewritten state is visible to a string eval by its name (perl 5.40.3)');
