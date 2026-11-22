@@ -172,3 +172,10 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 ## 2026-11-22 ~17:3x -- THE USER: start NO more subtasks after the running three finish; END THE SESSION then
 * Running: s543g, s543h (at its end-of-batch bars: the everyday leg queued), s543i.  Each is reviewed and merged as it reports; nothing new is launched in a freed slot -- not the round either (it runs as a batch): it is the first item of the next session's hand-over.
 * At the end: the hand-over `s543/resume-after-stop.md` rewritten, CLAUDE.md Test Status, STATUS.md, the session log, memory STATE; push.
+
+## 2026-11-22 17:2x -- THE USER ENDS THE SESSION (after asking why s543h had waited on one leg so long); the three batches STOPPED ON ORDER
+* (The note above is timed wrongly: the USER's "no more subtasks after these finish" came at about 16:5x.)
+* **What the USER saw, measured:** s543h's exclusive bench leg queued 16:30:12 and started 17:06:14 -- `heavy.sh` writes the exclusive-waiting marker only once it HOLDS slot 1, a 30-minute leg of s543g sat there, and six bounded legs started in slots 2-4 meanwhile.  At 17:06:14 the leg died at once: `bench.sh: Permission denied`, rc=126 (the agent had not set the execute bit).  Re-queued, behind s543g's own exclusive leg, running from 17:14:19.  Not a hang; 45 minutes lost to a queue flaw and an agent mistake, and the reviewing session passed on six "waiting on background work" notices without looking.  Filed **#5191** (tooling) with the fix shape; the script is NOT changed.
+* **Stop order sent 17:19; all three reported within minutes, worktrees clean:** s543g `fc80a722` (all members done, every bar but everyday), s543h `49d54f93` (all members done; bench + records owed), s543i `76437561` (members 1-4 done, #1876 a design, the closing record partly committed; PPI branch `pcl-s543i` = `7fd02b75`, the mirror not moved).  Stale `HEAVY.holder.*` files removed; a marker line in `HEAVY.queue`.
+* The review probes (perl + main halves) are saved in `~/pcl-agent-scratch/s543/review/probes-1122/`.
+* **NEXT ACTION = `s543/resume-after-stop.md`** (rewritten for this stop).  Nothing runs.

@@ -410,7 +410,7 @@ rows `Result: PASS`** (measured on merged main); full sweep **TOTAL passing
 ir-host-leak 31; **EVERYDAY 116 of 122 (95.1 %)**; **82 live IN silent
 wrongs** (s543c's verified 86, minus the 8 s543e closed, plus 4 filed since:
 #5165 #5210 #5230 #5232; `tools/task-triage.pl` prints more until #5162, a
-member of the running s543g); CPAN board (round of s543, on MAIN-READY-100,
+member of the stopped s543g); CPAN board (round of s543, on MAIN-READY-100,
 the oracle refreshed): **668 PASS / 137 PARTIAL / 24 FAIL / 67 SKIP of 896
 files, 109,191 ok / 1,190 not ok** (the ok total is lower than the s542
 round's 109,714 only by the IO-Compress `105oneshot` heap flap, #4643: 1,004
@@ -419,14 +419,16 @@ rows); the companion in the same round: `--all --quick` 128 OK / 103 XDIFF /
 baselines; **the next ROUND is due** (three code merges since: -103 -104
 -105); PPI `pcl` = `72d2bd9e` (147 commits over upstream, 60 groups, 71
 catalogued mis-lexes fixed at the source; the fork pushed, pull request #459
-refreshed; batch 12 = s543i, THE LAST, runs).  Line tracking costs a median
+refreshed; batch 12 = s543i, THE LAST, is STOPPED at a checkpoint).  **THREE
+batches are STOPPED ON ORDER with their members done (s543g, s543h, s543i):
+`briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
 leaves its opening block is written out before the next child process, at a
 `flock` / descriptor trigger, at an explicit `undef $fh` of its own scope or
 at exit, never at the drop (`docs/not-supported.md` ns-escaping-filehandle;
-#4794 #5128 #5160: members of the running s543g); `caller`, `croak` and a
+#4794 #5128 #5160: members of the stopped s543g); `caller`, `croak` and a
 runtime die name perl's file and line since s543a, except from a BEGIN / END
 / `use` body (#5101).
 
