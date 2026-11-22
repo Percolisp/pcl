@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 45;
+plan tests => 47;
 
 my $PREAMBLE = "use feature 'refaliasing', 'declared_refs';\n"
              . "no warnings 'experimental';\n";
@@ -231,10 +231,11 @@ test_cl('an ordinary foreach over a list of refs is not rewritten',
 
 # --- n-at-a-time foreach (task #329) ---------------------------------------
 #
-# perl 5.36's `for my ($q, $r) (LIST)`.  PPI cannot lex it either, and the
-# repair re-spells it as a `while` over `map \$_, LIST` — one write-through ref
-# per element — with `\my $q = $L[$I]` doing the aliasing.  So these rows guard
-# the same mechanism from a second direction.
+# perl 5.36's `for my ($q, $r) (LIST)`.  PCL's PPI builds the compound (group
+# U, §10); the DESUGAR Parser2::_desugar_nary_foreach (s543i: renamed from a
+# repair -- it is none) re-spells it as a `while` over `map \$_, LIST` — one
+# write-through ref per element — with `\my $q = $L[$I]` doing the aliasing.
+# So these rows guard the same mechanism from a second direction.
 
 test_cl('for my ($q,$r) (LIST) walks two at a time',
     q{my @have; for my ($q,$r) ('A','B','C','D') { push @have, "$q;$r" }
@@ -262,6 +263,16 @@ test_cl('redo / next / continue land where perl puts them',
       for my ($l,$r) (@n) { $l *= 3; ++$r; redo unless $redo++; next unless $next++;
                             $l *= 5; $r *= 7 } continue { $cont .= 'x' }
       print "@n|$redo|$next|$cont\n";}, "27 4 15 7|3|2|xx\n");
+# The desugar stays a DOCUMENT rewrite + reparse because a here-doc body in
+# the loop is not in its token's content (s543i): the body must survive it.
+test_cl('a here-doc inside an n-at-a-time loop keeps its body',
+    qq{for my (\$x, \$y) (1..4) { print <<EOT; }\n\$x and \$y\nEOT\nprint "end\\n";\n},
+    "1 and 2\n3 and 4\nend\n");
+test_cl('nested n-at-a-time loops, a label, and the loop in a string eval',
+    q{my $o = ''; OUT: for my ($x, $y) (1..6) { for my ($p, $q) ('a'..'d') {
+        next OUT if $x == 3; $o .= "$x$y$p$q " } }
+      eval q{ for my ($m, $n) (7, 8) { $o .= "$m-$n" } 1 } or $o .= "ERR";
+      print "$o\n";}, "12ab 12cd 56ab 56cd 7-8\n");
 # INVERSE: an ordinary one-variable foreach must be untouched by the repair.
 test_cl('an ordinary foreach is not rewritten',
     q{my @o; for my $x (1,2,3) { push @o, $x*2 } print "@o\n";}, "2 4 6\n");

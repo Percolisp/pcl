@@ -1763,12 +1763,18 @@ sub parse {
   # _normalize_null_statements.
   $doc = $self->_normalize_null_statements($doc);
 
+  # THE N-AT-A-TIME FOREACH (`for my ($q, $r) (LIST)`, perl 5.36) is lowered by
+  # a DESUGAR into a `while` over element references (_desugar_nary_foreach):
+  # not a PPI repair -- PCL's PPI builds the compound since group U
+  # (docs/ppi-upstream-bugs.md §10) -- but a document rewrite, because its
+  # setup declarations scope to the end of the enclosing block and every
+  # document-level analysis below (the binder, VarAnnotator, the file-scope
+  # declaration hoist) must see them.  It runs before the refaliasing foreach
+  # repair, whose loop-head test must not meet the `\my $q = …` it emits.
+  $doc = $self->_desugar_nary_foreach($doc);
+
   # PPI LEXER BUG: a `for` whose loop variable is a \-cast (refaliasing) or a
   # non-scalar swallows the rest of the file — see _repair_alias_foreach.
-  # Its n-at-a-time sibling (`for my ($q,$r) (LIST)`, perl 5.36) mis-lexes the
-  # same way and is repaired the same way, and it runs FIRST because its
-  # rewrite EMITS a `\my $q = …` the alias repair must not see as a loop head.
-  $doc = $self->_repair_nary_foreach($doc);
   $doc = $self->_repair_alias_foreach($doc);
 
   # THE REPAIRS BELOW ASK "IS THIS BAREWORD A TERM", AND PERL ANSWERS THAT FROM
@@ -7542,11 +7548,20 @@ sub _repair_alias_foreach {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
-# PPI LEXER BUG (task #329): `for my ($q, $r) (LIST) {…}` — perl 5.36's
-# n-at-a-time foreach.  Same mis-lex as _repair_alias_foreach (PPI only knows
-# `foreach [my] $scalar (LIST) BLOCK`, so the compound keeps just `for my` and
-# the rest lands in a flat sibling), and the same cure: repair the RAW TOKEN
-# STREAM, then reparse.
+# THE N-AT-A-TIME FOREACH (task #329): `for my ($q, $r) (LIST) {…}` — perl
+# 5.36.  A DESUGAR, not a PPI repair (s543i): PPI 1.291 kept only `for my` in
+# the compound and flattened the rest into a sibling, PCL's PPI builds the
+# compound since group U (docs/ppi-upstream-bugs.md §10), and what is left is
+# the lowering -- a re-spelling of the loop into constructs PCL already has.
+#
+# IT STAYS A DOCUMENT REWRITE + REPARSE (measured s543i), not a desugar inside
+# _lower_foreach_stmt: (1) the setup declarations below scope to the END OF
+# THE ENCLOSING BLOCK, and the binder, VarAnnotator (the loop index's raw
+# verdict) and the file-scope declaration hoist (`p-defcell`) all read the
+# document before any statement is lowered, so a lowering-time fragment would
+# change the emission; (2) a here-doc body inside the loop is not in its
+# token's content -- only the document serializer interleaves it -- so the
+# loop's text cannot be re-parsed as a fragment (op/for-many.t: 46 loops).
 #
 # The re-spelling is a `while` loop over a list of REFERENCES, which is what
 # makes the loop variables ALIAS the list elements the way perl's do:
@@ -7575,7 +7590,7 @@ sub _repair_alias_foreach {
 # missing variable, which is perl's answer (`for my ($q,$r,$s) (@a)` with 7
 # elements leaves $s undef on the last pass) — a single shared pad would make
 # two loop variables the same variable.
-sub _repair_nary_foreach {
+sub _desugar_nary_foreach {
   my ($self, $doc) = @_;
   my ($n, $repaired) = (0, 0);
   for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {

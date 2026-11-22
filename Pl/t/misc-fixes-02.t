@@ -993,7 +993,7 @@ test_cl('for my \\%e (LIST): the declared_refs spelling of a refaliasing loop (ย
     ok( $first && $first->content =~ /\{ A\(\) \}\z/,
         'FIXED ON PCL\'S PPI BRANCH (s527c, group U): a `for my ($q,$r) (LIST)` '
       . 'compound keeps its list and block (ppi-upstream-bugs.md ยง10; '
-      . '_repair_nary_foreach and _repair_alias_foreach stay -- they are the '
+      . '_desugar_nary_foreach and _repair_alias_foreach stay -- they are the '
       . 'LOWERING of the two heads, a token re-spelling, not a PPI repair)' );
 }
 {

@@ -201,7 +201,7 @@ our @BUGS = (
    title => '`for` accepts only `[my] $scalar` as its loop variable — and mis-lexes the rest of the FILE',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { check => 'block-owner-split', shape => 'a `for` whose variable slot holds `my (LIST)` or `\\my %h`: the head and block leave the Compound' },
-   fix => { kind => 'handler', handler => 'Pl::Parser2::_repair_nary_foreach', commit => 'a320f21a', group => 'U', pr => undef },
+   fix => { kind => 'handler', handler => undef, note => 'no PPI workaround left (s543i): the compound is PPI\'s since group U; Pl::Parser2::_desugar_nary_foreach (the n-at-a-time loop, renamed from _repair_nary_foreach) and Pl::Parser2::_repair_alias_foreach (refaliasing, #1649) are LOWERINGS of the two heads', commit => 'a320f21a', group => 'U', pr => undef },
    repro => 'my @l = (1, 2, 3, 4); for my ($q, $r) (@l) { print "$q$r " } print "x\\n";',
    perl => "12 34 x\n",
    tokens => {
