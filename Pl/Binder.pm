@@ -905,9 +905,6 @@ sub _pkg_at {
 # there (Parser2::_publish_eval_cell, #2630).
 sub pkg_at { my ($self, $node) = @_; return $self->_pkg_at($node) }
 
-# Does the table hold a binding of KIND (`our`, ...)?
-sub has_kind { my ($self, $k) = @_; return $self->{stats}{kind}{$k} ? 1 : 0 }
-
 # The `our` bindings a use at $node would resolve to -- one per canon, the
 # innermost visible (a later `my` or a closed block hides an `our`), sorted by
 # canon.  The string-eval site's alias list (Parser2::_eval_site_our_aliases,

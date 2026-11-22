@@ -182,6 +182,18 @@ our $of9;
 sub our_w  { eval 'package Foo; $of9' }
 print "our_cache=", our_w(), " ", our_wo(), " ", our_w(), "\n";
 package Other; print "our_section=", eval('$oa9'), "\n"; package main;
+# #2091 (s543h): inside a string eval only a CAPTURE is a parameter -- a
+# package variable is read through its cell, so `local` reaches a sibling sub
+# the eval defined: an `our` of the text, the caller's `our`, an array, an
+# undeclared global, a leading `package` region, a sub called after the eval
+# returned, a glob assignment after it.
+eval q{ our $lx9 = 1; sub lshow9 { $lx9 } sub lt9 { local $lx9 = 2; lshow9() } print "local_our=", lt9(), lshow9(), "\n"; };
+our $ly9 = 1; eval q{ sub lshowb9 { $ly9 } sub ltb9 { local $ly9 = 2; lshowb9() } }; print "local_outer=", ltb9(), lshowb9(), "\n";
+eval q{ our @la9 = (1,2,3); sub lshowc9 { "@la9" } sub ltc9 { local @la9 = (9); lshowc9() } print "local_array=", ltc9(), "\n"; };
+eval q{ no strict; $lu9 = 1; sub lshowu9 { $lu9 } sub ltu9 { local $lu9 = 2; lshowu9() } print "local_undecl=", ltu9(), lshowu9(), "\n"; };
+eval q{ package Baz9; $lg9 = 1; sub lshowg9 { "$lg9$Baz9::lg9" } sub ltg9 { local $lg9 = 9; lshowg9() } print "local_region=", ltg9(), "\n"; };
+eval q{ our $ll9 = 1; sub lshowl9 { $ll9 } sub ltl9 { local $ll9 = 4; lshowl9() } }; print "local_late=", ltl9(), "\n";
+eval q{ our $ga9 = "old"; sub gashow9 { $ga9 } }; our $gb9 = "new"; *ga9 = \$gb9; print "local_glob=", gashow9(), "\n";
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -279,6 +291,13 @@ my %expect = (
     our_myshadow  => 'my-o',
     our_cache     => 'main-of foo-of main-of',
     our_section   => 'main-o',
+    local_our     => '21',
+    local_outer   => '21',
+    local_array   => '9',
+    local_undecl  => '21',
+    local_region  => '99',
+    local_late    => '4',
+    local_glob    => 'new',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',

@@ -865,38 +865,30 @@ sub _requalify_region {
   return;
 }
 
-# #2557 (s543h): in an EVAL text, a use the binder resolves to an `our` -- the
-# caller's alias (the site's `our:CANON=PKG` list, outer `our` records) or one
-# the text declares -- is its DECLARING package's variable.  The text is READ
-# in the eval's package, and a single `package X;` region's free names are
-# LOOKED UP in X (p-eval-thunk's region binding), so an `our` home that is
-# not that package takes the qualified spelling: `our $o` in main, `eval
-# 'package Foo; $o'` reads `$main::o` (it read `$Foo::o`), and so does `eval
-# '$o'` from a `package Other;` section of the file.  A block region inside
-# the text is the block requalifier's (it already asked the same binder).
-# Globals are left as they are.
-sub _requalify_eval_aliases {
+# (s543h) In an EVAL text every name that is not a lexical -- the text's own
+# or the caller's (a capture) -- is a PACKAGE variable read through its cell
+# (#2091: _assemble_eval_mode no longer makes it a parameter), and the text is
+# READ in the eval's package.  So a use the binder homes elsewhere takes the
+# qualified spelling, exactly as a switched block region's does:
+#   an `our` -- the caller's alias (#2557: the site's `our:CANON=PKG` list,
+#     outer `our` records) or one the text declares -- its DECLARING package
+#     (`our $o` in main, `eval 'package Foo; $o'` reads `$main::o`; so does
+#     `eval '$o'` from a `package Other;` section of the file);
+#   a global inside a leading `package X;` region -- X (it was looked up in X
+#     at eval entry by p-eval-thunk's region binding, a snapshot);
+#   a forced-main name -- main.
+# `$a` / `$b` keep their sort pairing (the region's bare pair, #287).  A block
+# region inside the text is the block requalifier's, which asked the same
+# binder before this runs.
+sub _requalify_eval_text {
   my ($self, $doc) = @_;
-  my $bd = $self->{_binder} or return;
-  return unless $bd->has_kind('our');
   my @top = grep { $_->isa('PPI::Statement') } $doc->schildren;
-  my ($pi) = grep { $top[$_]->isa('PPI::Statement::Package')
-                    && !_pkg_stmt_has_block($top[$_]) } 0 .. $#top;
+  return unless @top;
   my $epkg = $self->eval_pkg // 'main';
-  my @parts = ([[ @top ], $epkg]);
-  if (defined $pi && ($top[$pi]->namespace // '') =~ /^\w+(?:::\w+)*$/) {
-    @parts = ([[ @top[0 .. $pi - 1] ], $epkg], [[ @top[$pi + 1 .. $#top] ], $top[$pi]->namespace]);
-  }
-  for my $part (@parts) {
-    my ($stmts, $read) = @$part;
-    next unless @$stmts;
-    $self->_requalify_region($stmts, $read, sub {
-      my ($tok, $canon, $home) = @_;
-      return 1 if $home eq $read;
-      my (undef, $why) = Pl::Binder::for_node($self, $tok)->requalify_home($tok, $canon);
-      return $why =~ /^our/ ? 0 : 1;
-    });
-  }
+  $self->_requalify_region(\@top, $epkg, sub {
+    my ($tok, $canon, $home) = @_;
+    return $home eq $epkg || $canon eq '$a' || $canon eq '$b';
+  });
   return;
 }
 
@@ -1997,10 +1989,11 @@ sub parse {
   # pass, whose output this one reads as "already qualified".
   $self->_requalify_block_globals_after_pkg_switch($doc);
 
-  # #2557: an eval text's `our` aliases (the caller's and its own) spelled in
-  # their declaring package -- after the block passes, whose output is
+  # #2557 / #2091: an eval text's package variables homed outside the eval's
+  # package -- `our` aliases (the caller's and its own), a leading region's
+  # globals -- spelled there; after the block passes, whose output is
   # "already qualified" here.
-  $self->_requalify_eval_aliases($doc) if $self->eval_mode;
+  $self->_requalify_eval_text($doc) if $self->eval_mode;
 
   # (s300d) The s295c "bare fork pipe-open with die-on-failure" gate is gone:
   # %p-open-fork-pipe now implements the 2-arg `open FH, "|-"` / "-|" fork
@@ -9058,14 +9051,30 @@ sub _assemble_eval_mode {
   # named subs — the modifier idiom's captures).  Reuses v1's engine.
   my %free = %{ $fb->_eval_free_vars_from_ppi($doc) };
 
+  # #2091 (s543h): ONLY A CAPTURE IS A PARAMETER.  The caller's lexicals the
+  # text can name are exactly the site alist's keys (eval_captures; a
+  # capture the text re-declares took a name of its own, _evalcap_names), so
+  # every other free name is a PACKAGE variable -- and a parameter bound to
+  # its container once, at eval entry, was a SNAPSHOT: `local $x` (a fresh
+  # box in the cell, p-local-cell) and a glob assignment never reached a sub
+  # the eval defined, which kept reading the old box (`eval q{our $x = 1;
+  # sub show { $x } sub t { local $x = 2; show() }}` printed 1).  Such a name
+  # is declared like a file's global and read through its cell; the text is
+  # read in the eval's package and a name homed elsewhere was requalified
+  # (_requalify_eval_text).
+  my %cap = map { ($_ => 1) } @{ $self->eval_captures // [] },
+                               keys %{ $self->{_evalcap_names} // {} };
+  my @glob = grep { /^[\$\@\%]/ && !$cap{$_} } keys %free;
+  delete @free{@glob};
+
   # Text-scan half: what _forward_global_decls would defvar.  In eval mode
-  # those names go to %free instead (the defvar would proclaim them special
-  # and defeat the lambda's lexical binding); cross-package + caret vars
-  # still get their defvars here.
+  # the CAPTURES among them go to %free instead (a defvar would proclaim them
+  # special and defeat the lambda's lexical binding); every other name, and
+  # the AST half's globals, is declared here.
   my @fwd = $self->_forward_global_decls(
     join("\n", @{ $sec->{captured} }, @{ $sec->{defs} },
                @{ $sec->{sched} },    @{ $sec->{run} }),
-    $sec->{pkg}, $sec->{seg_lex}, \%free);
+    $sec->{pkg}, $sec->{seg_lex}, \%free, \%cap, \@glob);
 
   # Names the promotion machinery renamed to defvar'd cells are NOT free —
   # they resolve through the capture alist / alias rule (ir-spec §9.1).
@@ -9281,8 +9290,12 @@ sub _runtime_caret_syms {
 # thunk lambda's lexical binding (docs/eval-lexical-capture.md).  Cross-package
 # and caret vars still get their defvars (they are genuine globals, never
 # capturable lexicals).
+# $caps / $extra (s543h, #2091; eval mode): only a name in %$caps (the site's
+# capture names) is routed to $free_out -- the rest are declared like a file's
+# globals, and so are the perl names in @$extra (the AST half's free globals,
+# which the let-bound exclusion below can hide from the text scan).
 sub _forward_global_decls {
-  my ($self, $text, $pkg, $seg_lex, $free_out) = @_;
+  my ($self, $text, $pkg, $seg_lex, $free_out, $caps, $extra) = @_;
   $pkg //= 'main';
   $text = _blank_string_innards($text // '');
   # $a/$b are runtime-owned: the section head defvars the BARE pair
@@ -9320,7 +9333,7 @@ sub _forward_global_decls {
   # that question.
   my $lb = $free_out ? ($seg_lex // {}) : {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
-  my (%seen, %cross, %caret);
+  my (%seen, %cross, %caret, %perl_of);
   for my $line (split /\n/, $text) {
     next if $line =~ /^\s*;;/;
     # A declaration line is not a USE — skip both spellings (a p-defcell line
@@ -9375,6 +9388,7 @@ sub _forward_global_decls {
       # saw the LAST value).  Never forward-declare it.
       next if $v =~ /__lex__\d+$/;
       $seen{$v} = 1;
+      $perl_of{$v} = $bare;
     }
     # Cross-package refs (main::$IS_ASCII from a required harness, Foo::@bar)
     # get a defvar in THEIR package — v1's %cross_pkg_vars behaviour.
@@ -9391,7 +9405,17 @@ sub _forward_global_decls {
       $cross{"$pkg\::$var"} = 1;
     }
   }
-  if ($free_out) {
+  if ($free_out && $caps) {
+    for my $v (keys %seen) {
+      next unless $caps->{ $perl_of{$v} // $v } || $caps->{$v};
+      $free_out->{$v} = 1;
+      delete $seen{$v};
+    }
+    for my $v (@{ $extra || [] }) {
+      next if $self->{_file_lex_renamed}{$v} || $runtime_vars{$v};
+      $seen{ cl_sym($v) } = 1;
+    }
+  } elsif ($free_out) {
     $free_out->{$_} = 1 for keys %seen;
     %seen = ();
   }
