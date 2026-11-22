@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **772**
+* names exported: **773**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **71** of 772
+* with a machine-readable `Contract:` tail: **71** of 773
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -261,7 +261,7 @@ ir-spec §10 row **introspection** — §7; `p-caller` returns package but file/
 | `p-undef-sub` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
 | `pl-__SUB__` | function | `nil` | — | — | — | — | — | — | — |
 
-## io (27)
+## io (28)
 
 ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument.  2-arg `p-open` parses pipe/dup modes; `p-close` on a pipe handle reaps the child and sets `$?`
 
@@ -275,6 +275,7 @@ ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-ope
 | `p-fileno` | macro | `(fh)` | — | — | — | — | — | — | — |
 | `p-flock` | macro | `(fh op)` | — | — | — | — | — | — | — |
 | `p-flush-dropped-handle` | macro | `(var)` | — | — | — | — | — | — | — |
+| `p-flush-dropped-value` | macro | `(form)` | — | — | — | — | — | — | — |
 | `p-formline` | function | `(picture &rest args)` | — | — | — | — | — | — | — |
 | `p-getc` | macro | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-install-data-handle` | function | `(handle text)` | insensitive | none | none | no | no | no | none |

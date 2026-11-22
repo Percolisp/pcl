@@ -16,8 +16,6 @@
 094-typeglob	1117	the LAST line only: after `undef *a` and a READ of @a, perl has RE-VIVIFIED the slot and `*a{ARRAY}` is a ref where PCL still answers undef -- residue (a) of #1117's shape (B), NS:`undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it.  The four-slot line ABOVE it agrees since s484b (the rows 077/078/092 that covered it left this file then)
 138-local	221	warnings-gated diagnostics are absent ("Filehandle $fh opened only for output")
 139-local	1451	the statement is REFUSED (`local` in a non-leading expression position, "not supported (#3370)"), so the caught text names that refusal where perl names "Can't use an undefined value as an ARRAY reference" -- its location half (#1240) left with s543a
-141-local	1190	`local $y[0][0] = 5` reads empty and never vivifies $y[0]
-142-local	1190	`local $h{a}{b} = 5` reads empty inside the scope
 144-local	1190	the four `local` nested-element spellings, one row each
 243-string	1389	utf8::is_utf8 on a byte string answers 1; perl answers 0 -- RULED DIVERGENCE (s473h): PCL has no downgraded form, so 1 is the honest answer for its model
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line

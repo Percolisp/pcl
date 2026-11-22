@@ -241,7 +241,7 @@ my %FAMILY;
               p-seek p-sysseek p-pipe p-select p-write p-formline p-binmode p-read
               p-sysread p-syswrite p-fileno p-flock p-fcntl p-getc p-readline
               *p-filehandles* p-lock p-install-data-handle
-              p-flush-dropped-handle)],
+              p-flush-dropped-handle p-flush-dropped-value)],
   'directory-io' => [qw(p-opendir p-readdir p-closedir p-rewinddir
                          p-telldir p-seekdir)],
   'socket' => [qw(p-socket p-socketpair p-bind p-connect p-listen p-accept
