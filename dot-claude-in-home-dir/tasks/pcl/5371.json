@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543 by the reviewing session (2026-11-22, evening), review probe b-13 of s543h's CODE MOVED change 9b024238 (~/pcl-agent-scratch/s543/review/probes-1122/rh2, rh3).  Not a regression: main b58114ca is wrong on the same program with another face.\n\nREPRODUCER (perl 5.40 | main b58114ca | s543h 9b024238):\n    our $v = \"mainv\"; $Bar::v = \"barv\";\n    print eval('package Bar; my @o; for (1..2) { local ${v} = \"loc$_\"; push @o, ${v} } join(\",\", @o) . \" \" . ${v}'), \" $v\\n\";\n    # perl:  loc1,loc2 mainv mainv\n    # main:  loc1,loc2 barv mainv        (the read after the loop is $Bar::v)\n    # s543h: mainv,mainv mainv mainv     (the reads are right; the `local` hits another variable)\n\nWHAT NARROWS IT (all = perl on s543h's tree): the plain spelling `local $v` in the same eval (c-01); the brace spelling outside an eval, `package Bar; ... local ${v}` (c-02); the eval without the `package` (c-03); the eval + package with NO `our` at the site (c-05, c-06).  So: the eval site's `our` alias (s543h's `our:` site input) reaches the READ of a brace-spelled name and not the `local` statement's target for the same spelling.\n\nFIX DIRECTION: one resolver (CLAUDE.md \"A detector, its rewriter and its promoter share ONE resolver\"): the `local` plan's target (`_local_var_cl` and the plan s543g wrote) must take a brace-spelled name through the same site-input lookup as `_rewrite_var_uses` / `_brace_name_refs`.  Probe the three sigils and an element (`local ${h}{k}` is #5372 -- it dies before it gets here).\n",
+   "id" : 5371,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: in an eval text behind `package Bar;`, at a site with `our $v` in scope, `local ${v} = ...` localizes another variable than `${v}` reads (perl: both are the site's `our`)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong in string-eval name resolution (IN: eval STRING must work); a rare spelling"
+}

@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543 by the reviewing session (2026-11-22, evening), found by the review probes of s543h's brace-name change (~/pcl-agent-scratch/s543/review/probes-1122/rh3 c-07 .. c-09).  PRE-EXISTING: main b58114ca (MAIN-READY-106), s543h's tree 9b024238 and s543i's tree all the same.\n\nREPRODUCER (perl 5.40 | ./runpcl on main):\n    \"abc\" =~ /(b)(c)/; my $x = ${1}; my @l = (${1}, ${2});\n    print \"G: $x @l [${1}] \", ${1} . \"!\", \"\\n\";        # G: b b c [b] b!   |  G: 1 1 2 [b] 1!\n    print \"H: <$0> <${0}> <\", ${0}, \">\\n\";             # <d1.pl> <d1.pl> <d1.pl>  |  <d1.pl> <d1.pl> <0>\n    print eval('${1} . ${2}'), \"\\n\";                   # bc  |  12\n\nWHAT IT IS: in code the brace spelling of an all-digit name (`${1}`, `${0}`, `${12}`) yields the digits themselves; the interpolating spelling `\"${1}\"` is right (InterpScan knows it).  `${_}` and `${;}` are right.  PPI gives a Cast + a Block holding a Number; the block's VALUE is taken where perl takes the NAME (perl: `${ DIGITS }` and `${ IDENTIFIER }` are the variable, never a block).\n\nFIX DIRECTION: the brace-NAME reading has ONE helper since s543h -- Parser2::_brace_name_refs (a Word in a Cast's Block) -- used by the rewriter and, since 9b024238, by the requalifier's candidate list.  A Number that is all digits in a Cast's Block is the same spelling: teach THAT helper (and whatever lowers the Word case to a variable read) rather than a second reader.  Check `@{1}`-style and `$#{1}` only as far as perl accepts them; `${1}[0]` / `${1}{k}` are elements of @1 / %1 (cf. #1679, s543i).  BAR: the reproducer rows + the eval row + a write (`${1}` is read-only in perl: the write dies there too -- probe it).\n",
+   "id" : 5370,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `${1}` / `${0}` in CODE read as the NUMBER -- `\"abc\" =~ /(b)/; my $x = ${1};` gives 1 (perl: b); inside a string `\"${1}\"` is right",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of a core spelling (a capture variable written with braces): IN"
+}

@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543 by the reviewing session (2026-11-22, evening), review probes of s543h (~/pcl-agent-scratch/s543/review/probes-1122/rh3 c-10).  PRE-EXISTING on main b58114ca; the same on s543h's and s543i's trees.\n\nREPRODUCER (perl 5.40 | ./runpcl on main):\n    our %h = (k => \"m\");\n    { local ${h}{k} = \"L\"; print \"E: $h{k}\\n\"; } print \"F: $h{k}\\n\";\n    # perl: E: L / F: m\n    # PCL:  Undefined subroutine &main::h called at x.pl line 2.\n    my $r = eval('package Bar; local ${h}{k} = \"L\"; \"$h{k}\"');     # the same die, &Bar::h\n\nWHAT IT IS: under `local` the `${h}` of `${h}{k}` is read as a BLOCK calling `h()`; the element READ `${h}{k}` is right, and so is `local @{a} = (5,6)`.  LOUD, so behind the silent wrongs; it hides #5371's element face.\n\nFIX DIRECTION: the `local` plan (s543g: the target is the LAST subscript) should see a brace NAME through Parser2::_brace_name_refs like the read does -- not a second reader.  `${h}[0]` likewise.\n",
+   "id" : 5372,
+   "status" : "pending",
+   "subject" : "LOUD: `local ${h}{k} = V` (a brace-named hash ELEMENT under `local`) dies `Undefined subroutine &main::h` -- perl localizes $h{k}; `local @{a} = (..)` and the read `${h}{k}` work",
+   "triage" : "in",
+   "triage_reason" : "loud (a tidy die), a core spelling of `local`: IN, after the silent wrongs"
+}
