@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543g (Opus 5.5, 2026-11-22) -- found while A/B-ing #540's fix over perl-tests/local.t (line 765, `local $_[0]`) and args.t (70, 75); PRE-EXISTING on 8959afae.\n\nREPRODUCER:\n    sub f { local $_[0] = 5; print \"in:$_[0] \" } my $v = 1; f($v); print \"v=$v\\n\";\n    $_ = \"T\"; sub h { local $_[0]; print defined $_[0] ? \"def\" : \"undef\", \" $_\\n\" } h(7);\n        perl  in:5 v=1 / undef T        base  in:1 v=1 / def (empty $_: it localized $_ to 5 / to undef)\n(s543g scratch/s543g/probes/m1c/c01_underscore.pl.)  CAUSE: PPI makes `$_` / `$^H` / `$+` a MAGIC token, and Pl::Stmt::local_elem_base and Parser2::_local_target_item took only a Symbol before a subscript, so the statement fell to the items reading and localized the Magic token as a scalar.\n\n=== DONE (s543g) ===\nFixed in s543g WIP 1 (the same reading as #540: a Magic token before a subscript is a named container, Pl::Stmt::local_elem_base + _local_target_item).  Guard Pl/t/local-elem-02.t M5 (`local $_[0] = 5` reads 5, the caller's $v untouched; fails on 8959afae).  Corpus: perl-tests/local.t:765 and args.t:70/75 now localize the element of @_.\n",
+   "id" : "5256",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (fixed s543g): `local $_[0]`, `local $^H{x}`, `local $+{n}` -- a PUNCTUATION aggregate's element as a `local` target localized the SCALAR (`$_`, `$^H`, `$+`) and assigned the value there",
+   "triage" : "in",
+   "triage_reason" : "local of a punctuation aggregate element localized the scalar"
+}

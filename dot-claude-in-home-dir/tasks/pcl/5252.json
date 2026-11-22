@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543g (Opus 5.5, 2026-11-22) from #691's probe list.  PRE-EXISTING; NOT the raw-slot verdict (PCL_OPT=-raw-slot gives the same).\n\nREPRODUCER:\n    use v5.24; use feature 'postderef_qq';\n    sub p1 { my $r = \\\"Z\"; my $x = \"mAn\"; $x =~ s/A/$r->$*/; $x }\n    sub p2 { my $r = [1,2]; my $x = \"mAn\"; $x =~ s/A/$r->@*/; $x }\n    print join(\" \", p1(), p2()), \"\\n\";\n        perl  mZn m1 2n        PCL  mSCALAR(0x1)->$*n mARRAY(0x2)->@*n\n(s543g scratch/s543g/probes/m4/r05_postderef.pl.)  Suspect: ExprToCL::_gen_interp_replacement builds a FAKE dq token for the replacement, and StringInterpolation::_postderef_qq_active_for reads the feature lexically from the TOKEN (docs/interp-scan.md 'postderef_qq is off in pattern mode') -- the fake token has no position, so the feature is off.  Discriminating measurement: `\"$r->$*\"` in a plain dq string in the same scope (expected right).\n",
+   "id" : "5252",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a postfix deref in an s/// REPLACEMENT under postderef_qq -- `s/A/$r->$*/`, `s/A/$r->@*/` -- is not dereferenced: the replacement reads `SCALAR(0x..)->$*`",
+   "triage" : "in",
+   "triage_reason" : "s/// replacement ignores postderef_qq"
+}

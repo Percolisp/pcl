@@ -26,6 +26,10 @@ not-supported.md → only then probe.*
 - **(2026-11-21) Exit criterion 1 is counted from VERDICTS, not labels**: s543c ran every listed task's own reproducer; 86 live IN silent wrongs where the queue said 118 (82 at the session's end).  `tools/task-triage.pl` still reads a task's whole history (#5162).
 - **(2026-11-21) A batch that edits a sweep baseline runs the sweep**: s543c edited `fail-baseline.tsv` from one-file runs; the review ran the full sweep on its tree before the merge (clean).
 - **(2026-11-21) The gate that counts is on the tree that MERGES**: s543d gated three commits before its head; since then the reviewing session runs the full gate on merged main at every code merge and the PPI brief says so.
+- **(2026-11-22) THREE batches in parallel on the USER's word, the box otherwise idle = the FOUR-SLOT `heavy.sh`** (`heavy.sh.four-slot-s542`); at most two bounded legs per batch, one exclusive leg on the box -> `s543/PAUSE-s543.md`.
+- **(2026-11-22) s543f MERGED = MAIN-READY-105 `8ef15927`** (PPI batch 11: §71-§74, v2-15500; its rulings are `## s543f`); the fork at `72d2bd9e`, pull request #459 = 60 groups / 147 commits.  **§11's USER-SUB half stays PCL's for good**: `ok /x/` after an imported sub needs the declaration, which PPI never sees (`_repair_word_match`, #5231 #2774).
+- **(2026-11-22) PPI batch 12 (s543i) is the LAST dedicated PPI batch**: after it a new PPI bug is fixed on the branch inside whichever batch finds it (principle 13) -> `s543/s543i-prompt.md` member 6, `docs/ppi-fix-at-source-s527.md` §11 when written.
+- **(2026-11-22) `local %ENV` and a child (#5210) is not part of the nested-`local` batch** (s543g works on the PLACE of an element target); it is a member for the next fix brief, with #1494 #2440 #2765 #1002 #2030 #5230.
 
 ## s542 (2026-11-15, the reviewing session) -- the three stopped batches resumed; merges MAIN-READY-93 ..
 

@@ -399,35 +399,37 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-21: main = MAIN-READY-104 `8959afae` (generation v2-15400;
-six batches merged in this session: s543a, line tracking ON by default
+**s543, 2026-11-22: main = MAIN-READY-105 `8ef15927` (generation v2-15500;
+seven batches merged in this session: s543a, line tracking ON by default
 (MAIN-READY-99 `78202d0a`); s543b, seven filed silent wrongs (-100
 `64353611`); s543c, the verification batch (-101); s543r, the round (-102);
 s543d, PPI batch 10 (-103 `a5a60b62`); s543e, seven live silent wrongs
-(-104)).**  Gate **380 files / 12,380 rows `Result: PASS`** (measured on
-merged main); full sweep **TOTAL passing 18,807**, GATE clean (one TODO row
-of magic.t that passed on a bug left by edit); corpus-diff population 111
-files; ir-conform 335 / 0; ir-host-leak 31; **EVERYDAY 116 of 122 (95.1 %)**;
-**82 live IN silent wrongs** (s543c's verified 86, minus the 8 s543e closed,
-plus 4 filed since: #5165 #5210 #5230 #5232; `tools/task-triage.pl` prints 87
-until #5162); CPAN board (round
-of s543, on MAIN-READY-100, the oracle refreshed): **668 PASS / 137 PARTIAL /
-24 FAIL / 67 SKIP of 896 files, 109,191 ok / 1,190 not ok** (the ok total is
-lower than the s542 round's 109,714 only by the IO-Compress `105oneshot` heap
-flap, #4643: 1,004 rows); the companion in the same round: `--all --quick`
-128 OK / 103 XDIFF / 239 DIFF of 528, the full run 0 NEW / 0 FIXED / 0 LOST
-against the edited baselines; PPI `pcl` = `842e6bbd` (139 commits over
-upstream, 67 catalogued mis-lexes fixed at the source; batch 11 = s543f is
-STOPPED at a checkpoint, batch 12 planned in `docs/ppi-fix-at-source-s527.md`
-§10); CI green on MAIN-READY-103.  Line tracking costs a median +0.8 % on the
-bench (the counting loops +16 %: #5103) and +11 % emitted text
+(-104 `8959afae`); s543f, PPI batch 11 (-105)).**  Gate **380 files / 12,397
+rows `Result: PASS`** (measured on merged main); full sweep **TOTAL passing
+18,807**, GATE clean; corpus-diff population 111 files; ir-conform 335 / 0;
+ir-host-leak 31; **EVERYDAY 116 of 122 (95.1 %)**; **82 live IN silent
+wrongs** (s543c's verified 86, minus the 8 s543e closed, plus 4 filed since:
+#5165 #5210 #5230 #5232; `tools/task-triage.pl` prints more until #5162, a
+member of the running s543g); CPAN board (round of s543, on MAIN-READY-100,
+the oracle refreshed): **668 PASS / 137 PARTIAL / 24 FAIL / 67 SKIP of 896
+files, 109,191 ok / 1,190 not ok** (the ok total is lower than the s542
+round's 109,714 only by the IO-Compress `105oneshot` heap flap, #4643: 1,004
+rows); the companion in the same round: `--all --quick` 128 OK / 103 XDIFF /
+239 DIFF of 528, the full run 0 NEW / 0 FIXED / 0 LOST against the edited
+baselines; **the next ROUND is due** (three code merges since: -103 -104
+-105); PPI `pcl` = `72d2bd9e` (147 commits over upstream, 60 groups, 71
+catalogued mis-lexes fixed at the source; the fork pushed, pull request #459
+refreshed; batch 12 = s543i, THE LAST, runs).  Line tracking costs a median
++0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
 leaves its opening block is written out before the next child process, at a
 `flock` / descriptor trigger, at an explicit `undef $fh` of its own scope or
 at exit, never at the drop (`docs/not-supported.md` ns-escaping-filehandle;
-#4794 #5128 #5160); `caller`, `croak` and a runtime die name perl's file and
-line since s543a, except from a BEGIN / END / `use` body (#5101).
+#4794 #5128 #5160: members of the running s543g); `caller`, `croak` and a
+runtime die name perl's file and line since s543a, except from a BEGIN / END
+/ `use` body (#5101).
+
 
 
 

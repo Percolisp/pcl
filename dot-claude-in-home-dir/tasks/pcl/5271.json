@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543h (Opus 5.5, 2026-11-22), found by the word-less eval-site probe of #2630 (scratch/s543h/p1/frag.pl row 3).  PRE-EXISTING: base 5e8b88c0 the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    use feature \"evalbytes\";\n    my $x = 5; print evalbytes(q{$x}), \"\\n\";                      # 5 | (empty)\n    sub f { my $y = 7; evalbytes q{$y + 1} } print f(), \"\\n\";     # 8 | 1\n\nWHAT IT IS: `evalbytes` lowers to `(p-evalbytes STRING)` with NO site alist (and no feature list / visible prototypes), so the text sees none of the caller's lexicals -- every name is a package global.  `eval STRING` takes ExprToCL::_gen_eval_string_form (the alist, the #364 features, the s543h `our:` aliases); evalbytes is the same compile with a byte-string operand (perlfunc: \"evalbytes ... behaves like eval EXPR except that it always parses its argument as a string of bytes\").\n\nFIX DIRECTION: route `evalbytes` through _gen_eval_string_form's inputs (the same three site inputs) and have p-evalbytes hand them to %p-eval-1; the scan's eval-word list (Parser2::_scan_eval_site_features, _is_string_eval_word) then counts an `evalbytes` word too, so the per-word publication (#2630 / #4821) reaches it.  BAR: the reproducer + a package-switching text + an `our` alias; the companion op/evalbytes.t one-file (7/2 today).\n",
+   "id" : 5271,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `evalbytes STRING` sees none of the caller's lexicals -- `my $x = 5; evalbytes q{$x}` is empty (perl 5): p-evalbytes gets no site alist, features or `our` aliases",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of a core builtin (evalbytes, feature-gated eval): IN"
+}

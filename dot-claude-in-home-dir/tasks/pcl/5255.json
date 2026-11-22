@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543g (Opus 5.5, 2026-11-22) from #5128's probe list.  PRE-EXISTING.  The eval route: s543h's area (the capture alist, Parser2::_assemble_eval_mode), not touched by s543g.\n\nREPRODUCER (perl 1 5, PCL 1 0):\n    my $f = \"/tmp/x.$$\"; sub mk { open my $fh, \">\", $f or die; $fh } sub size { -s $f // 0 }\n    my $g = mk(); print $g \"evalx\";\n    sub de { eval q{ undef $g; }; print \"1 \", size(), \"\\n\" } de();\n(s543g scratch/s543g/probes/m5/f06_evalstr.pl.)  The binder kind of the eval's `$g` is `outer` (excluded by Parser2::_captured_lexical_scalar), and its CL form inside the eval is the capture alist's, not cl_sym('$g').\n",
+   "id" : "5255",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: inside a string eval, `undef $g;` on the CALLER's lexical holding an escaped output handle writes nothing (the drop flush does not reach the eval's view of a captured lexical)",
+   "triage" : "in",
+   "triage_reason" : "the drop flush skips a string eval's caller lexicals"
+}

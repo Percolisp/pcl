@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543g (Opus 5.5, 2026-11-22).  PRE-EXISTING.\n\nREPRODUCER:\n    no strict \"refs\"; our @a = (1); our $p;\n    { local ($p, @{\"main::a\"}) = (5,6); print \"$p @a\\n\"; } print \"@a\\n\";\n        perl  5 6 / 1        PCL  PCL: statement dropped ... unsupported `local` target: @{\"main::a\"}\n(s543g scratch/s543g/probes/m1c/c07_symlist.pl.)  Pl::Parser2::_local_target_item takes a `$` cast (`$$r`, `${EXPR}`, #3470) but no `@` / `%` cast; the single-target statement has the p-local-deref-array / -hash opens already (lk deref).  Pl/t/stmt-modifier-01.t's rule-12 drop row now uses this shape (s543g moved it off the chained subscript #540 fixed): a fix rewrites that row.\n",
+   "id" : "5251",
+   "status" : "pending",
+   "subject" : "DROP: `local ($p, @{\"NAME\"}) = LIST` -- a symbolic ARRAY (or hash) deref in a `local` LIST is a dropped statement (\"unsupported `local` target\")",
+   "triage" : "in",
+   "triage_reason" : "a symbolic aggregate deref in a local list drops"
+}
