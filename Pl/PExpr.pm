@@ -244,6 +244,18 @@ sub _is_prefix_op_token {
   return 0;
 }
 
+# Is $e->[$j] a UNARY operator: a prefix operator, or a `-` / `+` whose left
+# neighbour is an operator (the binding loop's positional reading of unary
+# minus / plus)?  Asked for the right operand of `**` (s543i).
+sub _is_unary_at {
+  my ($self, $e, $j) = @_;
+  return 0 unless $j >= 1 && $j < @$e;
+  return 1 if $self->_is_prefix_op_token($e->[$j]);
+  my $name = $self->is_token_operator($e->[$j]) // '';
+  return 0 unless $name eq '-' || $name eq '+';
+  return $self->is_token_operator($e->[$j - 1]) ? 1 : 0;
+}
+
 # Token utilities for type checking
 has token_utils => (
   is       => 'ro',
@@ -1894,6 +1906,40 @@ sub parse {
         $op_info  = $rn_info;
         $op_name  = $rn_str;
         $hi_prio  = $rn_info->{prec};
+      }
+    }
+
+    # `**` AND A UNARY OPERATOR (s543i; docs/ppi-upstream-bugs.md §15 §34):
+    # `**` binds TIGHTER than a unary operator on its LEFT and its RIGHT
+    # operand may itself start with one -- perly.y's `term POWOP term` with
+    # UMINUS looser than POWOP: `-3**2` is `-(3**2)`, `2**-$x**2` is
+    # `2**(-($x**2))`, `2**!$x` is `2**(!$x)`.  ONE reading, here, where every
+    # operand of `**` is bound.
+    if (($op_name // '') eq '**') {
+      # LEFT: perl has no negative literal, but PPI hands `-3**2` over as
+      # Number<-3> ** 2 (a signed Number token is PPI's design, not a mis-lex):
+      # give the token back as perl's two -- the unary minus (90) then takes
+      # the power (91) -- and select again.
+      my $l = $hi_ix > 0 ? $e->[$hi_ix - 1] : undef;
+      if ($l && _is_number_token($l) && $l->content =~ /\A-(.+)\z/s) {
+        my $minus = bless { content => '-' }, 'PPI::Token::Operator';
+        my $num   = bless { content => $1 }, ref($l);
+        splice @$e, $hi_ix - 1, 1, $minus, $num;
+        next;
+      }
+      # RIGHT: a unary operator (or a run of them: `2**-!$x`) after `**`
+      # reduces first, its rightmost member innermost.  The `**` chain to its
+      # right is already one term: `**` is right-associative, so the
+      # rightmost `**` of a run is always the one selected.
+      my $j = $hi_ix + 1;
+      if ($self->_is_unary_at($e, $j)) {
+        $j++ while $self->_is_unary_at($e, $j + 1);
+        $hi_ix   = $j;
+        $op      = $e->[$j];
+        $op_name = $self->is_token_operator($op);
+        $op_info = $op_name =~ /\A[-+]\z/ ? +{ assoc => 'r', no => 1, prec => 90 }
+                                          : $self->op_info($op);
+        $hi_prio = $op_info->{prec};
       }
     }
 
@@ -6761,11 +6807,10 @@ sub cleanup_for_parsing {
     ref($_) !~ /Token::Whitespace/ && ref($_) ne 'PPI::Token::Comment'
   } @$stmts;
 
-  # PPI BUG WORKAROUND: PPI parses "expr)-1" as "expr)" followed by negative
-  # number "-1", but Perl actually interprets this as subtraction "expr) - 1".
-  # We detect negative numbers following expression-ending tokens and split
-  # them into minus operator + positive number.
-  # TODO: File bug report with PPI project.
+  # `K -1` after `use constant K => 5` is a subtraction, but PPI -- which
+  # splits `-N` after every term end it can see (`)-1`, `$x-1`, `time -1`)
+  # -- cannot know K is a term: the prototype table's half of
+  # docs/ppi-upstream-bugs.md §15 / §34, split here.
   @no_ws = $self->_fix_ppi_negative_number_bug(\@no_ws);
 
   # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
@@ -6906,13 +6951,12 @@ sub _qualified_word_callable {
 }
 
 
-# PPI BUG WORKAROUND: Split negative numbers into minus operator + positive number
-# when they follow expression-ending tokens. PPI incorrectly parses "foo()-1" as
-# the number -1 rather than subtraction. Perl's actual parser treats this as "- 1".
-# See cleanup_for_parsing() for context.
+# Split a negative number into the minus operator + the positive number where
+# it follows a term PPI cannot see: a word that is a term by declaration (see
+# cleanup_for_parsing; the `**` reading is the binding loop's, s543i).
 # A PPI number token of ANY subclass (Number, ::Float, ::Exp, ::Hex, ::Octal,
-# ::Binary, ::Version) — the one predicate the negative-number split asks,
-# for the token itself and for the term it follows.
+# ::Binary, ::Version) — the one predicate the negative-number split and the
+# `**` reading of parse() ask.
 sub _is_number_token {
   my ($t) = @_;
   return ref($t) =~ /\APPI::Token::Number(?:::\w+)?\z/ ? 1 : 0;
@@ -6936,28 +6980,33 @@ sub _fix_ppi_negative_number_bug {
     if (_is_number_token($token) && $token->content =~ /^-(.+)$/) {
       my $positive_part = $1;
 
-      # ** has higher precedence than unary minus in Perl.
-      # If a negative literal is followed by **, always split: -3**2 = -(3**2).
-      my $next_is_pow = ($i + 1 < @$tokens &&
-                         ref($tokens->[$i+1]) eq 'PPI::Token::Operator' &&
-                         $tokens->[$i+1]->content eq '**');
-
+      # (`-3**2` is `-(3**2)`: the binding loop of parse() reads a signed
+      # Number before `**` since s543i -- the `**` arm that split it here,
+      # 5 files / 46 fires over the wide list, was a precedence rule, not a
+      # PPI repair.)
+      #
       # Does the previous token end an expression (where subtraction makes
-      # sense)?  After a ) ] }, a symbol, a number or a quote PCL's PPI
-      # already splits `-N` itself (s527a group A, s527b group J; the arms
-      # that tested those here were deleted in s527b).  What is left is the
-      # one term end PPI cannot know: a BAREWORD that is a constant or a
-      # term-like call (`K -1` with `use constant K`), which only PCL's
-      # prototype table can tell from a list operator -- and a named unary
-      # (chr, abs, uc, ...) is NOT one: "chr -1" means chr(-1).
+      # sense)?  After a ) ] }, a symbol, a number, a quote and a builtin
+      # without an operand (`time -1`, `__LINE__ -1`) PCL's PPI splits `-N`
+      # itself (groups A, J, BB).  What is left is the one term end PPI cannot
+      # know: a bareword that is a TERM BY DECLARATION -- a constant or a
+      # `()`-prototyped sub (`K -1` after `use constant K => 5`), which only
+      # PCL's prototype table knows.  After a list operator (`return -1`,
+      # `chown -1, ...`, a user's `cmp_ok -1, ...`) or a named unary
+      # (`chr -1`) the `-1` is the operand, and the split was a no-op for the
+      # lowering (s543d: every one of its 12 population fires); narrowed to
+      # the declared term, s543i.  A NEGATED word (`-K -1`, `-foo -1`: one
+      # Word until _split_negated_call_words below) is a term too -- the
+      # negation of a term, or perl's string "-foo".
       my $is_expr_end = 0;
       if ($i > 0) {
         my $prev = $result[-1];  # Use result array since we may have inserted
         $is_expr_end = ref($prev) eq 'PPI::Token::Word'
-                    && !$self->is_named_unary($prev->content, $prev);
+                    && ($prev->content =~ /\A-/
+                        || $self->_is_zero_arg_func($prev->content));
       }
 
-      if ($is_expr_end || $next_is_pow) {
+      if ($is_expr_end) {
         # Split into minus operator and positive number
         my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
         my $pos_num  = bless { content => $positive_part }, ref($token);

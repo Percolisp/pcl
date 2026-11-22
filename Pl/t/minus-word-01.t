@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 33;
 
 sub write_pl {
     my ($code) = @_;
@@ -186,6 +186,19 @@ both_agree('print join(" ", -2**2, -1.5**2, -2.0**2, -1e1**2, -0x10**2, -0b11**2
 
 both_agree('my %h = ("-1.5" => "k"); my @a = (1.5, -0.5); print join(" ", $h{-1.5}, "@a", 2 ** -1.5 < 1 ? "y" : "n", -2**-1, 4 * -2 ** 2), "\n";',
            '#2530 negatives: $h{-1.5} is a key, (1.5, -0.5) two elements, 2 ** -1.5 a power');
+
+# ---- s543i: the `**` reading lives in PExpr's binding loop (the split of a
+# negative literal before `**` was a precedence rule, not a PPI repair), and
+# the RIGHT operand of `**` may start with a unary operator: every one of
+# these DROPPED the statement on main ("Handle single node of unknown type")
+both_agree('my $x = 3; print join(" ", 2**-$x, 2 ** - 3, 2**-3**2, 2 ** -3 ** 2, 2**-$x**2, -$x**-$x, 2**-(3**2), 2**!$x, 2**~0 > 1 ? "big" : "small"), "\n";',
+           's543i 2**-$x, 2**-3**2 = 2**(-(3**2)), 2**!$x: a unary operator after ** reduces first');
+
+# ...and the bareword half stays for a word that is a TERM BY DECLARATION:
+# `K -1` after `use constant K` subtracts, a negated word is a term; after a
+# list operator the `-1` is the operand (the narrowed split, s543i).
+both_agree('use constant K => 5; sub one() { 1 } sub f { return -1 } sub n { scalar @_ } my @l = (K -1, one -1, -K -1, K -1.5, f(), n -1, -2); print "@l\n";',
+           's543i K -1 / one -1 / -K -1 subtract; return -1 and n -1 take the operand');
 
 # ---- #4222 + #4602 (s536g): `-NAME` of a CALLABLE name is `-` applied to a
 # CALL of NAME -- perl's lexer reads the two tokens; PPI hands over ONE Word.
