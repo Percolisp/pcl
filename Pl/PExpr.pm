@@ -4635,7 +4635,7 @@ sub handle_subcalls {
         # ONE question, Pl::Environment::print_slot_handle -- the repair of a
         # `/` after the word (Parser2::_repair_word_match) asks it too (#5231).
         my $slot_fh = $self->has_environment
-          ? $self->environment->print_slot_handle($fh_name, $self->_is_zero_arg_func($fh_name))
+          ? $self->environment->print_slot_handle($fh_name, sub { $self->_is_zero_arg_func($fh_name) })
           : Pl::Environment::fh_bareword_shape($fh_name);
         if ($slot_fh) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())

@@ -960,7 +960,12 @@ sub print_slot_handle {
 
     my $registered = $self->is_filehandle($name);
     return 0 unless fh_bareword_shape($name) || $registered;
-    return ($registered || !$is_declared_term) ? 1 : 0;
+    return 1 if $registered;
+    # A CODE ref is asked only here, when the answer matters: the prototype
+    # question has a side effect (an unknown word joins the run-time
+    # detector's table), so a registered handle must never ask it.
+    my $term = ref $is_declared_term eq 'CODE' ? $is_declared_term->() : $is_declared_term;
+    return $term ? 0 : 1;
 }
 
 =head2 all_caps_shape($name)

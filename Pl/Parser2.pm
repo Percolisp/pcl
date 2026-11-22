@@ -7759,7 +7759,7 @@ sub _repair_word_match_pass {
                   && $pw->content =~ /\A(?:print|printf|say)\z/;
     my $env = $print_slot ? $self->environment : undef;
     my $handle = $env && $env->print_slot_handle(
-      $prev->content, $self->_word_is_declared_term($prev->content, $doc));
+      $prev->content, sub { $self->_word_is_declared_term($prev->content, $doc) });
     next if !$handle && $self->_word_is_term($prev->content, $doc);
     # A match needs a closing delimiter; without one this is not the shape and
     # the statement is left to the ordinary error path to name.
