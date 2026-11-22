@@ -4226,7 +4226,9 @@ value is a HASH or an ARRAY (the referent of a dropped reference: an object
 holding its handle), each of its first 64 DIRECT elements as one of those --
 never deeper, never through a tie.  `delete $h{K};` / `delete $r->{K};` as a
 whole void statement is the same flush on the delete's own value,
-`(p-flush-dropped-value (p-delete %h "K"))`, read once.  The inline gate costs
+`(p-flush-dropped-value (p-delete %h "K"))`, read once -- in eval text also
+as the text's LAST statement (lowered `inherit`, the eval site's context
+being a run-time fact; the wrap returns the value it flushed: s543k, #5255).  The inline gate costs
 one `typep` of five types at an `undef` statement; a 10-key object 0.1 µs, a
 10,000-key one is bounded by the 64.
 Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5
