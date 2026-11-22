@@ -5993,7 +5993,11 @@ like a file's globals and read through the cell at every use -- a parameter
 bound once at eval entry was a snapshot that `local` (which installs a fresh
 box in the cell, `p-local-cell`) and a glob assignment never reached; a name
 homed outside the eval's package takes the qualified spelling
-(`Parser2::_requalify_eval_text`, the binder's `requalify_home`).  What the
+(`Parser2::_requalify_eval_text`, the binder's `requalify_home`) in EVERY
+spelling the name has -- `$x`, `${x}`, `$#x`, `$#{x}`, `${x}[0]`, `${x}{k}`,
+interpolated text: `eval q{package Bar; ${s}}` reads `$Bar::s` (a name spelled
+only in braces is a requalifier candidate, `_brace_name_refs`; so is it under
+a `package` statement in a sub body).  What the
 SITE hands over: the alist (per eval WORD: the let-bound pairs; the PROMOTED
 file cells and the source-rewritten `state` cells whose declaration the
 binder says the word's pad sees -- `_publish_eval_cell`,
