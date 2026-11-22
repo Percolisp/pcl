@@ -1172,7 +1172,7 @@ print "4 ", 7%12, " ", $x %12, " ", K %12, " ", (time %12 < 12 ? "mod" : "?"), "
 # Magic token and the binder refused the transpile until group BI
 # (docs/ppi-upstream-bugs.md §75).  INVERSE GUARDS: a spaced `x`, a letter-led
 # name `@a1x`, `"@1x"` in a string and `@{1}x 2`.
-test_transpile("a digit-named array ends at its last digit, @1x 2 (#5233)", q{
+test_transpile('a digit-named array ends at its last digit, @1x 2 (#5233)', q{
 no strict; no warnings;
 @1 = (5, 6); @12 = (7); @a1x = (8, 9);
 print "1 ", @1x 2, " ", @12x3, " ", @1 x 2, "\n";
