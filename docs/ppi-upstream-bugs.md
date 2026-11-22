@@ -3293,6 +3293,35 @@ also splits a `%^` after a declared term.  Guard: the registry row §74, the twi
 
 ---
 
+## 75. A digit-named array followed by word characters is lexed as ONE token: `@1x 2` (task #5233)  [CONFIRMED 1.291 and PCL's branch 72d2bd9e]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `11`):
+
+```perl
+no strict; @1 = (5); print @1x 2, "\n";
+```
+
+**PPI tokens**: `Word(print) Magic(@1x) Number(2)`; `@12x3` is one `Magic(@12x3)`.
+**Expected**: `Magic(@1) Operator(x) Number(2)` and `Magic(@12) Operator(x) Number(3)`.  perl's
+`scan_ident` reads a digit run after a sigil as the whole name and stops at the last digit (toke.c), so
+`@1x 2` is the array `@1` in scalar context repeated twice; `@1::x` is a syntax error for perl (the
+`::x` is a bareword after a term).  PPI's `Token/Symbol.pm` sucks every word character after the sigil
+into the token and then classes a digit-led name as Magic -- the array twin of §72's `%12x`, which the
+`%` arm reads right since group BF.  The capture variable `$1x` was right (`Token/Magic.pm` takes only
+the digits).
+
+**Impact on PCL**: the binder refused the transpile ("unknown variable token shape `@1x`"): `@1x 2`,
+`@12x3`, `my $c = @1x2`.  No file of the four populations spells it (s543f's wide A/B); `"@1x"` in a
+string was right (PCL's interpolation scanner reads the digit run).
+
+**FIXED on PCL's PPI branch** (s543i: group BI, commit `7fd02b75` on branch `pcl-s543i`, vendored as
+vendor/PPI -- `Token/Symbol.pm` keeps only the digit run of a digit-led `$` / `@` name in the token and
+hands the rest back to the tokenizer, which reads the `x` after a term as the repetition); upstream
+PR: pending (`PR-BI.md`).  PCL needed no change.  Guard: the registry row §75, the twins' §75 rows (six
++ eight controls), `Pl/t/transpile-test-09.t`'s §75 row beside #1680's.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`

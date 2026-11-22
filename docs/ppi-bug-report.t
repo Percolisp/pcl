@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 614;
+use Test::More tests => 628;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2479,6 +2479,32 @@ for my $case ( [ q{print -e _ ? 1 : 0;}, q{Magic=_} ], [ q{print 1 if -e _ && 1;
 for my $case ( [ q{my %x = %^H;}, q{Magic=%^H} ], [ q{%^H = ();}, q{Magic=%^H} ],
                [ q{my $w = $^W;}, q{Magic=$^W} ], [ q{my $t = $^;}, q{Magic=$^} ],
                [ q{my $n = $x %2;}, q{Operator=%} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+
+# §75 -- a digit-named array ends at its last digit: perl's scan_ident reads
+# a digit run as the whole name, so `@1x 2` is the array @1, the repetition
+# operator and 2 (`no strict; @1 = (5); print @1x 2;` prints 11), and
+# `@12x3` is @12 x 3 -- the array twin of §72's %12x.  PPI reads the word
+# characters after the digits into one Magic token, @1x.
+{
+    for my $case ( [ q{print @1x 2;}, q{Magic=@1} ], [ q{print @12x3;}, q{Magic=@12} ],
+                   [ q{my $c = @1x2;}, q{Magic=@1} ], [ q{my @l = (@0x 2);}, q{Magic=@0} ],
+                   [ q{print @1x 2;}, q{Operator=x} ], [ q{print @12x3;}, q{Number=3} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: a spaced x, a name that starts with a letter or _, a long
+# digit run, a braced name, a capture variable and a digit run before a dot
+# were right.
+for my $case ( [ q{print @1 x 2;}, q{Magic=@1} ], [ q{print @a1x;}, q{Symbol=@a1x} ],
+               [ q{print @_x;}, q{Symbol=@_x} ], [ q{print @119797;}, q{Magic=@119797} ],
+               [ q{print @{1}x 2;}, q{Operator=x} ], [ q{print $1x 2;}, q{Magic=$1} ],
+               [ q{print @1.5;}, q{Magic=@1} ], [ q{my @l = @12[0, 1];}, q{Magic=@12} ] ) {
     my ( $code, $want ) = @$case;
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";

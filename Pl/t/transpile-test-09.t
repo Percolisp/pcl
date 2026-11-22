@@ -1167,6 +1167,18 @@ use constant K => 29; my $x = 17;
 print "4 ", 7%12, " ", $x %12, " ", K %12, " ", (time %12 < 12 ? "mod" : "?"), "\n";
 });
 
+# ── s543i #5233: the ARRAY twin of %12x.  A digit-named array's name ends at
+# its last digit (`@1x 2` is `@1 x 2`, perl's scan_ident); PPI made `@1x` one
+# Magic token and the binder refused the transpile until group BI
+# (docs/ppi-upstream-bugs.md §75).  INVERSE GUARDS: a spaced `x`, a letter-led
+# name `@a1x`, `"@1x"` in a string and `@{1}x 2`.
+test_transpile("a digit-named array ends at its last digit, @1x 2 (#5233)", q{
+no strict; no warnings;
+@1 = (5, 6); @12 = (7); @a1x = (8, 9);
+print "1 ", @1x 2, " ", @12x3, " ", @1 x 2, "\n";
+my $c = @1x2; print "2 $c @a1x @{1}x 2 [@1x]\n";
+});
+
 # Task #2286 (s495f): List::Util::pairs builds objects BLESSED into
 # List::Util::_Pair (->key / ->value / ->TO_JSON) and, like every XS list
 # returner, answers the LAST element in scalar context -- the shim answered

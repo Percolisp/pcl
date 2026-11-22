@@ -192,7 +192,12 @@ sub __TOKENIZER__on_char {
 		$t->{line_cursor} -= length( $content );
 		return $t->_finalize_token->__TOKENIZER__on_char( $t );
 	}
-	if ( $content =~ /^(?:\$|\@)\d+/ ) {
+	if ( $content =~ /^([\$\@]\d+)/ ) {
+		# A digit-named variable: its name is the digit run, and it ends at
+		# the last digit, as perl's scan_ident reads it -- @1x 2 is @1 x 2.
+		my $name = $1;
+		$t->{line_cursor} -= length($content) - length($name);
+		$t->{token}->{content} = $name;
 		$t->{class} = $t->{token}->set_class( 'Magic' );
 		return $t->_finalize_token->__TOKENIZER__on_char( $t );
 	}

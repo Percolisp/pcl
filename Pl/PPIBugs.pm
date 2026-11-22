@@ -1079,6 +1079,19 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => [],
    tasks => [550] },
+ { id => 75, kind => 'token', dump => 'tokens',
+   title => 'A digit-named array followed by word characters (`@1x 2`, `@12x3`) is lexed as ONE token -- perl\'s name is the digit run, `@1 x 2`; the array twin of §72\'s `%12x`',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => undef, shape => 'Magic @ + a digit run + word characters' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE (PCL never had a repair): the binder refused the transpile on `@1x` ("unknown variable token shape"); the token now ends at its last digit, as perl\'s scan_ident reads it', commit => '7fd02b75', group => 'BI', pr => undef },
+   repro => 'no strict; @1 = (5); print @1x 2, "\\n";',
+   perl => "11\n",
+   tokens => {
+     got  => ['Word=no', 'Word=strict', 'Structure=;', 'Magic=@1', 'Operator==', 'Structure=(', 'Number=5', 'Structure=)', 'Structure=;', 'Word=print', 'Magic=@1x', 'Number=2', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=no', 'Word=strict', 'Structure=;', 'Magic=@1', 'Operator==', 'Structure=(', 'Number=5', 'Structure=)', 'Structure=;', 'Word=print', 'Magic=@1', 'Operator=x', 'Number=2', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [5233] },
 );
 
 # The one accessor.

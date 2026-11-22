@@ -1,14 +1,14 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s543i
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl
-branch-sha: 72d2bd9e6e6dba7849220c7da43b62f834cd70f3
-lib-tree: 74e6257dc0226433d0b5804a998330b0db4a6116
-date: 2026-11-21
+branch: pcl-s543i
+branch-sha: 7fd02b752960524f33dec35019f71668241e5d63
+lib-tree: 52400a4362fbf66d4e0240a4ebf83e0ac900dc9c
+date: 2026-11-22
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
 fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
@@ -84,6 +84,7 @@ fix: BE §71 d27d0c37 Whitespace: / after a builtin that takes an operand starts
 fix: BF §72 911e43a3 Unknown: % and a digit run where a term is expected names a hash
 fix: BG §73 f8630d3e Word: _ is a word except as a filetest's or stat's operand
 fix: BH §74 72d2bd9e Magic: %^ where a term is expected is one token
+fix: BI §75 7fd02b75 Symbol: a digit-named variable ends at its last digit
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -231,3 +232,5 @@ commit: 96155372 TODO tests: _ is a word except as a filetest's or stat's operan
 commit: f8630d3e Word: _ is a word except as a filetest's or stat's operand
 commit: ac6b15c2 TODO tests: %^ where a term is expected is one token
 commit: 72d2bd9e Magic: %^ where a term is expected is one token
+commit: 11038186 TODO tests: a digit-named array ends at its last digit
+commit: 7fd02b75 Symbol: a digit-named variable ends at its last digit
