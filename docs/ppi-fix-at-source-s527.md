@@ -272,3 +272,52 @@ name (the foreach pair); the negative-number pass is half PCL precedence, half p
    refinements: `Pl/PPIExpect.pm`, PCL's side), #1649 (the USER's decision).
 
 **Batch 12, corrected by s543f (2026-11-21).**  Item 4 (the closes) was done in batch 11 (each task's `=== DONE (s543f) ===`).  Add one branch item: **#5233** -- `@1x` (a digit-named array before word characters) is ONE token on 1.291 and the branch, the array twin of §72 (BF made `%12x` end at its last digit); PCL's binder refuses `@1x 2`.  Not branch items, filed by s543f: #5231 (`print STDOUT /x/` -- the user half of §11, `_repair_word_match`'s ALL-CAPS guess), #5232 (`"$^{$k}"` -- InterpScan), #5230 (a low-precedence `and` / `or` lowering).
+
+
+## 11. Where the PPI program ended (s543i, 2026-11-22)
+
+**(i) What is fixed at the source.**  72 of the catalogued mis-lexes (registry rows with `fixed_in => 'pcl'`; of
+74 rows, §3 was fixed upstream and §11's user half is PCL's for good) are fixed on PCL's PPI branch: 61 PR groups,
+A .. BI, 76 fix commits, **149 commits** over upstream master `455bfa73` (branch `pcl` = `7fd02b75`, vendored as
+`vendor/PPI`; upstream pull request #459).  The report twins (`docs/ppi-bug-report.t` = the branch's
+`t/ppi_bugs_pcl.t`): 628 rows, 623 ok on the vendored lib -- the five left are §11's four user-half rows (only a
+declaration says `ok` takes a list) and §69's quoted-terminator row (`1 << "EOT"`, kept for PPI's fuzz fixtures
+45 / 47).  The expect-state checker (all populations): raw 149, pcl 137 on the base and on the tree, the rows byte-identical (the population has no `@1x`; s543f took it from 205 / 151).
+
+**(ii) The repair passes still in `Pl/`, and why each is PCL's for good** (fires = s543d's counter, adapted:
+`scratch/s543i/instrument.pl`, over the 2,053-file wide list on the final tree; files / fires):
+
+| pass | fires | why it stays |
+|---|---|---|
+| `Parser2::_repair_alias_foreach` | 2 / 9 (PERL t/op/const-optree.t, t/op/lvref.t) | a LOWERING (the refaliasing foreach `for \my %e (...)` re-spelled as `\my %e = $tmp`); PPI lexes it since group U; its fate is the USER's #1649 |
+| `Parser2::_desugar_nary_foreach` (was `_repair_nary_foreach`) | 1 / 46 (PERL t/op/for-many.t) | a LOWERING, out of the repair family since s543i (a desugar of 5.36's `for my ($a, $b) (LIST)`; it stays a document rewrite + reparse: its setup declarations scope to the end of the enclosing block, which the binder, VarAnnotator and the `p-defcell` hoist read before any lowering) |
+| `Parser2::_repair_punct_hash_name` (the magic-split arm) | 0 / 0 | the prototype table: `N %.5e1` after a declared constant `N` (the caret arm was deleted in s543f, group BH) |
+| `Parser2::_repair_word_match` (+ `_pass`) | 3 / 9 (PERL t/re/pat.t, pat_advanced.t, pat_re_eval.t -- every fire after `ok`) | §11's user half: `/` after a word only a declaration makes a list operator (an imported `ok`, a user's `one /a/`) opens a match; after `print` / `printf` / `say` it asks the lowering's ONE handle question, `Pl::Environment::print_slot_handle` (#5231) |
+| `Parser2::_repair_term_initial_complement` | 0 / 0 | the prototype table: `f ~~$y` after a user's list-operator sub (PPI gives `Operator<~~>`) |
+| `Parser2::_repair_readline_cascade` | 0 / 0 | the prototype table: §14's user-sub half (`foo <$f> // 1`) |
+| `Parser2::_repair_glob_pattern_cascade` (+ `_pass`) | 0 / 0 | the prototype table: a glob after a USER sub (`foo </tmp/x-1/y/*.pl>`) |
+| `Parser2::_repair_word_x_call` | 0 / 0 | the prototype table: `x` after a bareword handle or a user's word (`print STDOUT x()`, `foo x 3`) |
+| `PExpr::_fix_ppi_negative_number_bug` (the bareword arm) | 0 / 0 (was 9 / 58 at s543d: the `**` arm 5 / 46, DELETED s543i -- PExpr's binding loop reads `-3**2`; the bareword arm 4 / 12, every one after a list operator, narrowed s543i) | the prototype table: `K -1` after `use constant K => 5` (a term by declaration) or a negated word |
+| `PExpr::_fix_ppi_glob_after_block` | 4 / 19 (PERL t/op/coreamp.t, t/op/filehandle.t, t/op/glob.t; Pl/t/shapes/punct-arrays-glob.pl) -- readline 13, glob 4, `*>` 2 | the prototype table: every fire follows an IMPORTED sub (`is <$fh>`, `like <*>`, `ok <~>`): §14's declaration half |
+
+Every remaining half is decided by a DECLARATION PPI never sees (a user's sub takes a list, a word is a
+constant, an ALL-CAPS word is a handle) -- the prototype table's, which PCL fills from `use` / `sub NAME ()` /
+`use constant` -- or it is a LOWERING; and every population fire of the declaration halves follows an IMPORTED
+name (`is`, `like`, `ok`), so a "sub declared above" rule on the branch would move nothing measured (s543d).
+
+**(iii) The open tasks that name PPI, a repair pass or a catalogue §** (`grep -l -a` over the task store, status
+open / pending / in_progress, on 2026-11-22 after the s543g merge: 78 tasks):
+- **Done here (s543i):** #5233 (§75, group BI); #1679 (ExprToCL, not PPI); #5231 (`_repair_word_match` asks the print-slot handle question); #329 was done, its pass is the desugar now (member 1).
+- **The USER's decision:** #1649 (declared-ref / refaliasing foreach; `_repair_alias_foreach` waits on it), #4902 (an eval string's lone-CR here-doc lines), #1876 (`extra_paired_delimiters`: a FEATURE on the branch, designed in the task, not built -- rare; may be ruled OUT).
+- **Branch items LEFT (none planned; found by this census, not catalogued -- rule 13's § is owed by the batch that takes one):** #1686 (a quote-like operator name used as a package, `q::zyx` / `s:: eq s||`: perl's tokenizer reads the operator; t/comp/colon.t's 10 rows), #650 (a diamond glob holding whitespace, `sort < ./g-*.t >`: read right, dropped or a readline depending on later `/`s).
+- **PCL's side, the declaration PPI never sees (the prototype table):** #2774 (a user sub's `/a;b # x/`, `//`: LOUD by design, s543i), #822 (`_repair_word_match`'s close scan and a `;` inside a group), #662 (`f % 3` after a declared sub), #4901 (`x<digits>` after a user's list operator), #405 (`print $fh -$n`), #1479 (indirect object of a lower-case class), #478 #1509 #2610 #3024 #4324 #3920 (how and when prototypes reach the table), #2760 (a user's `sub say`).
+- **PCL's side, a lowering / InterpScan / runtime question (PPI named in passing or as history):** #340 #352 #382 #388 #415 #463 #479 #653 #693 #938 #1053 #1054 #1142 #1192 #1243 #1580 #1648 #1693 #1750 #2200 #2542 #3020 #3414 #3943 #3944 #4663 #4807 #5190 #5230 #5232 #271 #314.
+- **Tooling, plans, perf, infrastructure (PPI as a component, not a mis-lex):** #71 #379 #409 #434 #444 #582 #1034 #1035 #1501 #1511 #1833 #2196 #2423 #2647 #2740 #3694 #3697 #4087 #4480 #4501 #4503 #4523 #4524 #4903 (the checker's refinements) #4904.
+
+**(iv) A new PPI bug from now on.**  There is no dedicated PPI batch any more.  The expect-state checker
+(`tools/ppi-expect-check.pl`, kinds in `Pl/PPIExpect.pm`) or a probe finds it; principle 13 holds unchanged: a
+catalogue § in `docs/ppi-upstream-bugs.md`, a row in both report twins (TODO on stock PPI), a registry row in
+`Pl/PPIBugs.pm`, and the fix on the branch in PPI's two-commit shape (TODO tests, then the fix; PPI's suite plain +
+AUTHOR_TESTING) -- in whichever batch is running, which vendors its clone branch with `tools/vendor-ppi`,
+fast-forwards the bare mirror at its MERGE-READY and leaves the fork and #459 to the reviewing session.  A repair in
+`Pl/` is written only for the declaration half PPI cannot know.
