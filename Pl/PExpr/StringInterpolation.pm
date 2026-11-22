@@ -610,7 +610,7 @@ sub _postderef_qq_active_for {
           $verdict = 1 if $c =~ /\bpostderef(?:_qq)?\b/
             || $c =~ /^\s*use\s+feature\b.*:5\.(\d+)/s && $1 >= 24
             || $c =~ /^\s*use\s+v5\.(\d+)/ && $1 >= 24
-            || $c =~ /^\s*use\s+5\.0*(\d+)/ && $1 >= 24;
+            || _use_decimal_minor($c) >= 24;
         } elsif ($c =~ /^\s*no\s+feature\b/) {
           $verdict = 0 if $c =~ /\bpostderef_qq\b/
             || $c =~ /:all\b/
@@ -622,6 +622,20 @@ sub _postderef_qq_active_for {
     $node = $parent;
   }
   return $SITE_POSTDEREF_QQ ? 1 : 0;
+}
+
+# The MINOR version a `use 5.x` statement asks for: the dotted spelling
+# `use 5.24.0` is 24; the decimal one counts three digits a minor
+# (`use 5.024` / `use 5.024001` is 24, `use 5.006001` is 6 -- the old
+# `5\.0*(\d+)` read `5.006001` as 6001 and enabled postderef_qq in every file
+# that says `use 5.006001`, Getopt::Long among them; s543k).  -1 for any
+# other statement.
+sub _use_decimal_minor {
+  my ($c) = @_;
+  return $1 + 0 if $c =~ /^\s*use\s+5\.(\d+)\.\d+/;
+  return -1 unless $c =~ /^\s*use\s+5\.([\d_]+)/;
+  (my $d = $1) =~ tr/_//d;
+  return substr($d . '000', 0, 3) + 0;
 }
 
 # Parse a postfix dereference following an interpolated variable, under
