@@ -4006,8 +4006,11 @@ sub handle_subcalls {
     # and `, 3` vanished; `return (1, 2) x 2, 3` lost its tail the same way).
     # Every other list operator keeps perl's "looks like a function" rule
     # (`print((1, 2), 3)`, `die ("A"), "B"`).  Left, like a declaration list
-    # above, to the bare list-operator pass below.
-    next if $func_name eq 'return';
+    # above, to the bare list-operator pass below -- when a COMMA follows the
+    # parens at this level: without one the two readings are the same list,
+    # and `return (A, B);` keeps its `(p-return A B)`.
+    next if $func_name eq 'return'
+         && grep { ref($_) eq 'PPI::Token::Operator' && $_->content =~ /^(?:,|=>)$/ } @$e[$i + 2 .. $#$e];
     if (($func_name eq 'open' || $func_name eq 'sysopen') && $self->has_environment) {
       # Peek at first argument - if it's a bareword, register it as filehandle
       my @list_children = $next->children();
