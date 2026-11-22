@@ -4400,13 +4400,17 @@ body form deletes the slot; an if / unless modifier gates the save, the delete
 and the restore (`p-local-maybe`, below).  As a TERM of an expression (`$v =
 delete local $h{k}`, `f(delete local $h{k})`, `return delete local …`) or a
 valued block's last statement, it is the #3370 hoist (below) with the element's
-value kept: `local ELEM = ELEM;` moves before the statement -- the restore is
-the enclosing block's end, perl's -- and the term left behind is `delete
-ELEM`, whose value is the OLD element (a slice: the old elements; scalar
-context: the last).  The operand is side-effect free (the hoist's operand
-rule), so it is read three times.  A term the hoist's precondition refuses is
-its refusal (#5330), never the plain delete.  Example: `my $v = delete local
-$h{d};` is `local $h{d} = $h{d}; my $v = delete $h{d};`.
+value kept: the old element is COPIED into a temporary and `local ELEM = TMP;`
+moves before the statement -- the restore is the enclosing block's end,
+perl's -- and the term left behind is `delete ELEM`, whose value is the OLD
+element (a slice: the old elements; scalar context: the last).  The copy comes
+first because a TIED element read in the local's own right side is FETCHed
+only after the local stored undef; under a modifier it is taken only when the
+condition holds.  The operand is side-effect free (the hoist's operand rule),
+so it is read again.  A term the hoist's precondition refuses is its refusal
+(#5330), never the plain delete.  Example: `my $v = delete local $h{d};` is
+`my $__pcl_ldel_1 = $h{d}; local $h{d} = $__pcl_ldel_1; my $v = delete
+$h{d};`.
 
 **`local %ENV` keeps the environment's magic (normative, s543j / #5210).**  It
 is not a `let` of a plain table: `(p-local-env INIT …)` evaluates the right
