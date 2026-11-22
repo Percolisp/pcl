@@ -2186,7 +2186,11 @@ sub _tw_scan_quote_leaf {
     if ($ch eq '$' || $ch eq '@') {
       # postderef_qq at THIS token (the ONE reader, #5252): `$r->$*` /
       # `$r->@*` in an s/// replacement or a dq text is a dereference of `$r`.
-      $pdq //= Pl::PExpr::StringInterpolation::postderef_qq_active_for($node) ? 1 : 0;
+      # (The reader walks the enclosing blocks' statements: asked only when the
+      # text holds a postfix-deref arrow at all, so a leaf without one costs
+      # one index.)
+      $pdq //= ($c =~ /->[\$\@]/
+                && Pl::PExpr::StringInterpolation::postderef_qq_active_for($node)) ? 1 : 0;
       my $ev = Pl::InterpScan::scan_one($c, $i, %esc, postderef_qq => $pdq);
       if ($ev && $ev->{postderef} && defined $ev->{name} && $ev->{form} ne 'magic') {
         # the base is an opaque use; the slice guts' code too
