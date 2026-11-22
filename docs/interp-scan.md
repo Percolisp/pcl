@@ -226,7 +226,19 @@ Cache note for every wiring commit that changes emission: bump
   `/$r->@*/` leaves the arrow literal exactly as before.  The dq side computes
   it lexically from the token (`_postderef_qq_active_for`); the pattern side
   would need the NODE, not just the pattern text, to do the same.  Unchanged
-  behavior, recorded so it is a decision and not an oversight.
+  behavior, recorded so it is a decision and not an oversight.  **Probed
+  (s543k): perl DOES interpolate it in a pattern** (`use v5.24; my $r =
+  \"b"; "abc" =~ s/$r->$*/X/` substitutes) -- a silent wrong, task #5351.
+- **The feature reader is ONE function (s543k, #5252)**:
+  `StringInterpolation::postderef_qq_active_for($tok)`.  The s/// REPLACEMENT
+  is compiled through a manufactured `"…"` token with no position, so
+  `parse_interpolated_string` takes the s/// token as a separate
+  `feature_tok` (the fake stays the ORIGIN: its `\"` are the escaped
+  delimiters); `VarAnnotator::_tw_scan_quote_leaf` passes the reader's answer
+  to `scan_one(postderef_qq => …)` and reads a postderef event as a
+  dereference of its base; a string eval's site sends it as the pseudo-feature
+  `postderef_qq`, which the eval text's document level answers
+  (`$SITE_POSTDEREF_QQ`).
 - **`${^TAINT}` reads undef, perl reads 0** — a pre-existing *runtime value*
   divergence (visible in plain code and dq text too), newly visible in
   patterns because the caret-brace magic now interpolates there.  Task #293.

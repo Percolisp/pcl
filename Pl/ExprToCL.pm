@@ -4040,11 +4040,10 @@ sub _eval_lexical_alist {
   # name wins (p-eval-lex-lookup assoc takes the first match); a key already
   # let-bound is skipped outright.  The cell is a defvar'd box, so eval
   # writes propagate back exactly like let-bound captures.
-  # (Promoted — captured-lexical — cells carry no per-site pairs: they reach
-  # evals through the alias rule (p-alias-eval-cell writes the cell into the
-  # original-name global, found by p-eval-lex-lookup's global fall-through;
-  # ir-spec §9.1).  Only SPAN cells keep emitted pairs, package-qualified
-  # for the cross-segment case.)
+  # (In a NON-program unit a promoted cell still reaches evals through the
+  # alias rule too -- p-alias-eval-cell writes the cell into the original-name
+  # global, found by p-eval-lex-lookup's global fall-through, #2640; in the
+  # program unit only these pairs do: ir-spec §9.1.)
   # The PROMOTED file cells this site's pad sees (#2630, s543h): published per
   # eval word by the binder's answer (Parser2::_publish_eval_cell), so a
   # package switch in the text cannot re-home them -- identity, #2633 and #470

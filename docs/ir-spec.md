@@ -1844,8 +1844,26 @@ these rules (every one probed on perl 5.40.3):
 - `$name` / `@name` continue into a subscript CHAIN — `"$x[1]"`,
   `"$h{k}[0]"`, `"$r->[0]{k}"`, `"@x[0,1]"`, `"@h{'a','b'}"`; an arrow is
   taken only when `[` or `{` follows it (`->@*` only under `postderef_qq`).
+  **`postderef_qq` is read at the SITE's token (normative, s543k, #5252)** --
+  one reader, `StringInterpolation::postderef_qq_active_for`: a dq string's
+  own token, an s/// REPLACEMENT's s/// token (its manufactured `"…"` has no
+  position), VarAnnotator's quote-leaf use scan (`$r->@*` is a dereference
+  of `$r`, never a `str` use), and a string eval's site, which sends it as the
+  pseudo-feature `postderef_qq` -- the eval text's document level answers it,
+  its own `use` / `no feature` still decide from where they stand.  Example:
+  `use v5.24; my $r = [1,2]; (my $x = "mAn") =~ s/A/$r->@*/` gives `m1 2n`
+  (was `mARRAY(0x…)->@*n`).  The PATTERN side does not interpolate a postfix
+  deref (#5351: perl does).
 - A DEREF base continues the same way: `"$$r[1]"` is `$r->[1]`, `"@$r[0,1]"`
   is a slice, `"$$h{k}"` an element, `"${$r}[1]"` is `$r->[1]`.
+- **In CODE the brace spelling of a NAME is the variable, an all-digit name
+  included (normative, s543k, #5370)**: `${1}`, `${ 1 }`, `${10}`, `${0}`,
+  `@{1}`, `$#{1}`, `%{12}` are `$1` / `@1` / `$#1` / `%12` (never a block
+  yielding the number), and a subscript after one names the container:
+  `${1}[0]` is an element of `@1`, `${12}{k}` of `%12` (as `$1[0]`, #1679).
+  `${ +1 }`, `${ \ 1 }` and `${ 1; }` are blocks.  One reading: PExpr's
+  collapse (`_block_sole_digits`) and Parser2's `_brace_name_refs`.  Example:
+  `"abc" =~ /(b)/; print ${1}` prints `b` (was 1).
 - A braced NAME **closes** the reference — `"${x}[0]"` is `$x` followed by a
   literal `[0]`, and so is `"${x}->{k}"`; so do the braced magic spellings
   `${^NAME}`, `@{^NAME}`, `${+}`, `@{+}` (the magic arrays `@-`, `@+`,
@@ -4184,17 +4202,23 @@ descriptor, a `flock` held through it and a pipe's child stay as §6.5b says;
 composes with the location forms: the flush follows the statement's
 `(p-line N)`.  "A lexical scalar" is the BINDER's answer at the statement
 (s543g, #5128): a `my` / `state` declared in the unit, or one a sub or closure
-CAPTURES from an enclosing scope (`my $g = mk(); sub drop { undef $g }`).  A
-PACKAGE variable is flushed too (s543j, #5254): an `our` alias, a qualified
-`$Foo::fh`, a `use vars` or `local`ized global, through its STORAGE form (the
-one `local` saves; a foreign runtime global's resolver form is no variable and
-is not flushed).  Not flushed: the core's special variables (the global
-partition's exception set -- `$@` `$_` `$/` `$!` `$0`, the sort pair: no
-user's handle holder; their emission is unchanged) and, in a string eval, an
-unqualified free name (it may be the caller's lexical: #5255).  A localized
-global dropped by the SCOPE's exit is no statement and is not covered.
-Example: `undef $Foo::fh;` emits `(p-flush-dropped-handle Foo::$fh) (p-undef
-Foo::$fh)`.  WHAT is flushed (s543g, #5160 #4794): the dropped value as
+CAPTURES from an enclosing scope (`my $g = mk(); sub drop { undef $g }`), a
+signature parameter, and -- inside a string eval -- the eval SITE's lexical
+(s543k, #5255: the binder's kind `outer`, the thunk parameter bound to the
+caller's own container; `my $g = mk(); print $g "x"; eval q{ undef $g; };
+print -s $f` prints 1, was 0).  A PACKAGE variable is flushed too (s543j,
+#5254): an `our` alias, a qualified `$Foo::fh`, a `use vars` or `local`ized
+global, through its STORAGE form (the one `local` saves; a foreign runtime
+global's resolver form is no variable and is not flushed).  Not flushed: the
+core's special variables (the global partition's exception set -- `$@` `$_`
+`$/` `$!` `$0`, the sort pair: no user's handle holder; their emission is
+unchanged) and, in a string eval, an unqualified free name that is no site
+lexical (a package variable named in eval text: #5254's eval half, not
+taken).  The binding-kind set is closed: an unknown kind dies naming it.  A
+localized global dropped by the SCOPE's exit is no statement and is not
+covered.  Example: `undef $Foo::fh;` emits `(p-flush-dropped-handle
+Foo::$fh) (p-undef Foo::$fh)`.  WHAT is flushed (s543g, #5160 #4794): the
+dropped value as
 stored, never FETCHed -- a descriptor stream; a GLOB handle's stream, read
 from the handle table (no method runs: a tied handle's placeholder is no
 descriptor stream); the stream an fdopen alias forwards to; and when the
@@ -6095,6 +6119,29 @@ $x } sub t { local $x = 2; s() }}; print t()` prints 2 (the cell, not a
 snapshot).  An eval BEFORE a declaration, or in a sub defined above it, sees
 the package variable.
 
+**The text's own declaration shadows a site lexical (normative, s543k,
+#5126).**  Kind (1) includes an `our` of the text: `our NAME` in eval text is
+a new pad entry, so from the declaration on (in its block) NAME is that
+package's variable although the site alist carries a lexical NAME -- a
+capture the text DECLARES (`Binder::text_declares`: a `my` / `state` /
+`our` / parameter of the text) is no thunk parameter, and a use of the
+caller's lexical (before the declaration, outside its block) took
+`NAME__evalcap__N` (#4796).  Example: `{ my $o = 2; eval 'our $o; $o = 9;';
+print "$o $main::o" }` prints `2 9` (was `9` and undef).
+
+**`evalbytes` is a string eval (normative, s543k, #5271).**  `evalbytes EXPR`
+(the keyword: the feature in force, or `CORE::evalbytes`) takes the SAME site
+inputs as `eval EXPR` -- the alist, the features, the `our:` aliases, the
+context bind -- `(p-evalbytes STRING ALIST FEATURES)`; the runtime refuses a
+character above 0xFF at the call (perl's croak, catchable by an outer `eval
+{}`), then compiles exactly as `p-eval` (one cache key: PCL reads every eval
+text as octets).  Every "a string eval is here" test of the compiler asks
+ONE word list, `Pl::PExpr::TokenUtils::eval_word` (`eval`, `CORE::eval`,
+`evalbytes`, `CORE::evalbytes`), so no lexical is promoted, frozen in a raw
+slot or licensed for a handle close because "no eval names it" beside an
+`evalbytes`.  Example: `use feature "evalbytes"; sub f { my $y = 7;
+evalbytes q{$y + 1} }` returns 8 (was 1).
+
 An eval whose whole body is one `package X; …` region takes a third
 argument — the region's CL package designator:
 
@@ -6193,10 +6240,16 @@ symbol is unqualified: the reader interns it under the section's
 `in-package`, which is by construction the declaring package). Both
 rename families that produce file cells flow through it: span promotion
 (W10) and capture promotion (M-C/M-F) of a SEGMENT-extent lexical -- in the
-PROGRAM unit the capture promotion's cell takes NO alias since s543h (#2630):
-every eval word that sees it carries its pair, and the alias wrote the
-lexical's box into the package variable of its name (`my $d; $main::d = 2;
-sub f { $d }` made f read 2).  **A
+PROGRAM unit neither takes an alias any more: the capture promotion's cell
+since s543h (#2630), the SPAN promotion's since s543k (#5270, normative):
+every eval word whose pad the binder says sees the declaration carries its
+pair (`_publish_eval_words`, the span pass's `_publish_span_cell`), and the
+alias wrote the lexical's box into the package variable of its name (`my
+$d; $main::d = 2; sub f { $d }` made f read 2; `my $x = "lex"; package Foo;
+sub g { $x } package main; $main::x = "pkg"` made g read "pkg").  An eval
+before the declaration, or in a sub defined above it, reads the package
+variable (`$main::y = "glob"; print eval q{$y}; my $y = 1; package Bar; sub
+h { $y }` prints `glob`, was empty).  **A
 BLOCK-extent capture promotion never takes the alias** (normative, s537b,
 #4461): whatever declares it -- a single `my $x` or a multi-name
 `my ($r, $x)` -- its cell joins the eval-site alists under the original name for the
@@ -6241,8 +6294,10 @@ Consequences an implementer must preserve:
 - **Cross-package spans still need site pairs.** Stop 2 interns in the
   *eval site's* package, so a cell aliased in the declaring package is
   invisible to an eval in a later `package` segment. For those, the
-  span pass records original-name → package-qualified-cell pairs per
-  extent segment, and piece 1 appends them after the let-bound pairs
+  span pass publishes the original-name → package-qualified-cell pair to
+  the eval WORDS that see the declaration (s543k, #5270) and, for a
+  word-less site only (an eval inside interpolated text, `s///ee`), per
+  extent segment; piece 1 appends them after the let-bound pairs
   (`(cons "$x" MAIN::$x__file__0)`). They are position-static and carry
   no lifetime hazard.
 
@@ -6269,7 +6324,8 @@ Example: `sub un ($) { "u:$_[0]" }  print eval q{join "|", un 1, 2}` prints
 
 **Deliberate divergences** (all shared with v1, listed in
 `docs/not-supported.md` where user-visible): after the alias executes
-(a span cell, or a cell of a non-program unit -- #2640),
+(a cell of a non-program unit -- #2640; a span cell of the program unit no
+longer takes one, s543k #5270),
 an explicit fully-qualified `$Pkg::x` names the lexical's cell rather
 than a distinct package global — exactly v1's defvar-under-original-name
 behaviour. Calling context (`wantarray`) does not propagate into the

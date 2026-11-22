@@ -240,6 +240,13 @@ eval tests (Unicode/bytecode-optimizer internals) for later.
   `our` aliases the word sees).  Only an alist name is a `p-eval-thunk`
   parameter; every other free name is a package cell.  Every input keys the eval
   cache (capture names, features, visible prototypes).
+- **UPDATE (s543k).**  `evalbytes` is a site like any other (#5271: the same
+  inputs through `_gen_eval_string_form`; one word list for every "a string eval
+  is here" test, `Pl::PExpr::TokenUtils::eval_word`); the span pass's cells are
+  published per eval WORD like the promoted ones, the segment map only for a
+  word-less site (#5270); a capture the TEXT declares (`our $o` of the text) is
+  no parameter (#5126); the feature list gains the pseudo-feature
+  `postderef_qq` (#5252).
 
 ---
 
