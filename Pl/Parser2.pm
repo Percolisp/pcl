@@ -11227,8 +11227,8 @@ sub _blk_tail {
   # its opening block may sit in it, and the program says "done with it" --
   # its buffered bytes are written NOW (a FLUSH, never a close: another holder
   # may exist; task #4794).  One type test when the value is no handle.
-  if (defined(my $flush = $self->_fh_drop_flush_name($first, $vi))) {
-    return (['p-flush-dropped-handle', cl_sym($flush)],
+  if (defined(my $flush = $self->_fh_drop_flush_var($first, $vi))) {
+    return (['p-flush-dropped-handle', $flush],
             $self->_lower_stmt($first, $vi, $first_tail),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
@@ -15793,22 +15793,27 @@ sub _fh_drop_name {
 }
 
 # The same three statement shapes on a LEXICAL SCALAR the licence does not
-# cover (task #4794): its name, for the flush of an escaped output handle the
-# old value may be (ir-spec §6.5b) -- at file level too, where the licence
-# closes nothing.  Gated with the licence: `fh-scope-close' is the family that
-# decides WHEN bytes reach a file (kept under PCL_OPT=none).
-sub _fh_drop_flush_name {
+# cover (task #4794): the variable's CL form, for the flush of an escaped
+# output handle the old value may be (ir-spec §6.5b) -- at file level too,
+# where the licence closes nothing.  Gated with the licence: `fh-scope-close'
+# is the family that decides WHEN bytes reach a file (kept under
+# PCL_OPT=none).
+sub _fh_drop_flush_var {
   my ($self, $stmt, $vi) = @_;
   my $sym = _fh_drop_stmt_sym($stmt) // return undef;
   my $name = $sym->content;
   return undef if substr($name, 0, 1) ne '$';
   return undef if !($vi && Pl::Passes::enabled('fh-scope-close'));
-  return $name if $vi->{$name};
+  return cl_sym($name) if $vi->{$name};
   # A lexical this unit does not declare -- a file-level (or enclosing sub's)
   # `my` / `state` a sub or closure CAPTURES (#5128): the BINDER's answer for
-  # the name at the statement, wherever it was declared; the emitted name is
-  # the one the body's own uses of it lower to.
-  return $self->_captured_lexical_scalar($sym) ? $name : undef;
+  # the name at the statement, wherever it was declared.  Its form is the one
+  # an ordinary read of the token lowers to (a promoted file lexical may be
+  # spelled `$main::x` by the block-package requalifier, which is
+  # `main::$x`); a form that is not a plain variable is no flush.
+  return undef unless $self->_captured_lexical_scalar($sym);
+  my $form = $self->_lower_expr([$sym], $stmt);
+  return ref($form) ? undef : $form;
 }
 
 # Is the scalar token $sym a use of a `my` / `state` binding (perl's pad
@@ -15824,7 +15829,7 @@ sub _captured_lexical_scalar {
 # `undef $x;' / `undef($x);' / `$x = undef;' as a whole statement, $x a
 # lexical VarAnnotator tracks: its name, else undef.  ONE reading of the
 # shape (_fh_drop_stmt_sym) for the close (_fh_drop_name) and the flush
-# (_fh_drop_flush_name).
+# (_fh_drop_flush_var).
 sub _fh_drop_stmt_name {
   my ($stmt, $vi) = @_;
   return undef if !$vi;

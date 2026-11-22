@@ -214,8 +214,11 @@ PL
 # 8: #5128 (s543g) -- the same statements INSIDE A SUB (or a closure, a
 # nested sub, on a `state` scalar) on a lexical the sub CAPTURES: the binder
 # answers "a my / state scalar" wherever it was declared, and the statement
-# flushes it.  An inner `my` of the same name is the one dropped.
-# INVERSE: main 8959afae printed 0 on every row.
+# flushes it.  An inner `my` of the same name is the one dropped.  Line h: a
+# lexical the block-package requalifier spells `$main::p` (a `package Q { }`
+# in its block) is flushed through its lowered form `main::$p` -- the first
+# cut emitted the token's spelling and the reader died (perl-tests/scalar.t,
+# caught by the sweep).  INVERSE: main 8959afae printed 0 on every row.
 my $capt = write_prog('capt.pl', <<'PL');
 use strict; use warnings; use feature "state";
 my $f = "$ARGV[0]/capt.out"; my $f2 = "$ARGV[0]/capt2.out";
@@ -230,6 +233,7 @@ my $n = mk(); print $n "closure"; my $c = sub { $n = undef; print "e ", size(), 
 sub st { state $s = mk(); print $s "state!"; my $d = sub { undef $s; print "f ", size(), "\n" }; $d->() } st();
 my $o = mk(); print $o "outer";
 sub sh { my $o = mk($f2); print $o "inner!"; my $e = sub { undef $o; print "g ", size(), " ", size($f2), "\n" }; $e->() } sh();
+{ my $p = mk(); package QQ { use overload fallback => 1, q("") => sub { "q" } } print $p "pkgblk"; undef $p; print "h ", size(), "\n"; }
 PL
 {
     my ($perl, $pcl_out) = run_both("$capt' '$dir");
