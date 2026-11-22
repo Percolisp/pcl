@@ -15581,7 +15581,26 @@ sub _local_plan_items {
   # condition's, which is the expression statement's rule, not this.)
   my $value = ($init_idx >= 0 && $solo && $mod eq '' && ($items[0]{kind} // '') eq 'var'
                && _local_sigil($v0) eq '$') ? $items[0]{place} : undef;
+  # A bare `local $x` / `local ($x)` / `local @a` (no assignment) is the
+  # localized variable too (#2742: `sub f { local $g }` returned NO element in
+  # list context, perl one undef); a list `local ($x, $y)` its targets by
+  # context -- the list, or the last one in scalar context (the comma's rule).
+  $value //= $self->_local_bare_value(\@items, $rec, $stmt) if $init_idx < 0 && $mod eq '';
   return { opens => \@opens, inner => \@inner, value => $value };
+}
+
+# The VALUE of a bare `local TARGETS` (no assignment, no modifier) that ends a
+# valued block (#2742): the localized targets read after the localization --
+# one variable's place (an array / hash place is its count in scalar context,
+# as `local @a = L`'s), or a list's places by the caller's context: the list,
+# else the LAST one (the comma's rule).  A glob or a skip slot in the list:
+# undef (no value form; as before).
+sub _local_bare_value {
+  my ($self, $items, $rec, $stmt) = @_;
+  return undef if grep { ($_->{kind} // '') =~ /^(?:glob|skip)$/ || !defined $_->{place} } @$items;
+  return $items->[0]{place} if @$items == 1;
+  my @p = map { $_->{place} } @$items;
+  return ['if', ['eq', '*wantarray*', 't'], ['p-flatten-args', ['list', 'list', @p]], $p[-1]];
 }
 
 # Is this the SOLO-binding shape -- one variable (or element) target whose
