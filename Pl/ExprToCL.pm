@@ -1845,6 +1845,10 @@ sub gen_binary_op_form {
     }
     $l;
   };
+  # The bound operand of `=~` / `!~` is a SCALAR (perl: "Applying pattern
+  # match to @array will act on scalar(@array)"): an aggregate leaf binds its
+  # COUNT -- #2030's second site, the same reading as a builtin's `$` slot.
+  $left = $self->_aggregate_leaf_count_form($kids->[0], $left) if $op eq '=~' || $op eq '!~';
   # Flat text of the left form == v1's $left bytes (to_flat contract); used
   # only to make the `=` dispatch decisions below, mirroring gen_binary_op.
   my $left_flat = ($op eq '=') ? Pl::CLForm::to_flat($left) : undef;
@@ -3517,6 +3521,14 @@ sub gen_funcall_form {
     # the aliasing half of the question `_is_elem_arg` answers for elements.
     $arg = $self->_alias_slice_arg($kid, $arg)
       if index($cl_func, 'pl-') >= 0;
+    # A CORE builtin's `$` slot (its prototype: core_arg_context, the reading
+    # the argument's SCALAR annotation came from, #2004) fed an aggregate
+    # leaf takes the aggregate's COUNT (#2030: `sprintf(@arr)`).  `scalar(@a)`
+    # is that count already (its head IS p-scalar).
+    $arg = $self->_aggregate_leaf_count_form($kid, $arg)
+      if index($cl_func, 'pl-') < 0 && $cl_func ne 'p-scalar'
+      && exists $self->expr_o->known_no_of_params->{$func_name}
+      && (Pl::PExpr::Config::core_arg_context($func_name, $param_idx) // '') eq 'SCALAR';
 
     # Write slot 3 of the #873 family, and the one perl makes CONDITIONAL:
     # `open $1, …` on a DEFINED capture is an ordinary symbolic filehandle
@@ -5840,6 +5852,30 @@ sub gen_glob_slot_form {
 
 
 # Helper: true if a node represents an @array (should flatten in list context).
+# #2030: an AGGREGATE LEAF -- a bare `@a` / `%h` (a Symbol, or a Magic token:
+# `@_`, `%+`) or a cast of one (`@$r`, `@{EXPR}`, `%$h`, `%{EXPR}`) -- read
+# where perl reads a SCALAR is its COUNT, `(p-scalar FORM)`: a core
+# builtin's `$` slot (`sprintf(@arr)` formats with "2", `join(@s, …)`
+# joins with the count) and the bound operand of a match.  The CONTEXT was
+# already annotated (#2004); the leaf's emission ignored it, and the builtin
+# received the vector.  Not a generic leaf rule: a `\@` reference slot (push,
+# splice) inherits and must keep the container, and every consumer that
+# counts by itself (`$n = @a`, `@a + 0`, `if (@a)`) keeps its own form -- the
+# two callers ask for the `$` slot.  Any other node: FORM unchanged.
+sub _aggregate_leaf_count_form {
+  my ($self, $node_id, $form) = @_;
+  my $node = $self->expr_o->get_a_node($node_id);
+  my $r = ref $node;
+  my $leaf = ($r eq 'PPI::Token::Symbol' || $r eq 'PPI::Token::Magic')
+           ? (($node->content() // '') =~ /^[\@%]/ ? 1 : 0) : 0;
+  if (!$leaf && $self->expr_o->is_internal_node_type($node) && $node->{type} eq 'prefix_op') {
+    my $kids = $self->expr_o->get_node_children($node_id);
+    my $cast = @$kids ? $self->expr_o->get_a_node($kids->[0]) : undef;
+    $leaf = (ref($cast) eq 'PPI::Token::Cast' && $cast->content() =~ /^[\@%]$/) ? 1 : 0;
+  }
+  return $leaf ? ['p-scalar', $form] : $form;
+}
+
 sub _is_array_expr_node {
   my ($self, $node, $node_id) = @_;
   if (ref($node) eq 'PPI::Token::Symbol') {

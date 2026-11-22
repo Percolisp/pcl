@@ -62,7 +62,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -124,6 +124,20 @@ print "c ", (1 ? sprintf("%s-%s", pair()) : ""), "\n";
 print "d ", lc(sprintf("%s-%s", pair())), "\n";
 print "e ", (sprintf("%s%s", pair()) eq "12" ? "ok" : "bad"), "\n";
 my $s = sprintf("%s-%s", pair()); print "f $s\n";
+P
+
+# ---- 2b. #2030 (s543j): an AGGREGATE LEAF in a builtin's `$` slot -- and as
+#          the bound operand of a match -- is its COUNT; a slurpy slot, a
+#          `\@` slot and `scalar(@a)` keep theirs.  INVERSE: main b58114ca
+#          printed ARRAY(0x..) / HASH(0x..) on a b d f, and "no" on g.
+both_agree($PRELUDE . <<'P', '#2030 an aggregate leaf in a builtin $ slot / a bound match operand is its count');
+my @a2 = (3, 4); my @s2 = ("-", "x"); my $r2 = [5, 6, 7];
+print "a ", sprintf(@a2), " ", sprintf(@$r2), "\n";
+print "b ", join(@s2, "p", "q"), "\n";
+print "c ", sprintf("%s-%s", @a2), " ", push(my @q2, @a2), " ", scalar(@a2), "\n";
+print "d ", sprintf(%h), " ", hex(@g), " ", oct(@g), "\n";
+my @m2 = (@g =~ /(\d)/); print "f ", scalar(@m2), " $m2[0]\n";
+print "g ", ((@g =~ /3/) ? "yes" : "no"), "\n";
 P
 
 # ---- 3. a LIST SLICE's list and index list are always LIST context ---------
