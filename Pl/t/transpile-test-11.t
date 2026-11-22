@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 my $DIR = tempdir(CLEANUP => 1);
 
@@ -308,4 +308,24 @@ $r = [1,2,3]; ($x, @$r) = @$r; my $sc = \my $t; ($x, $$sc) = (1,2,3); my $e = [0
 our @log; tie my @ta, 'TA'; my $tr = \@ta; ($x, @$tr) = (1, 2, 3); print "11 [@ta] log=@log\n";
 $r = []; for (($x, @$r) = (7,8)) { $_ .= "!" } my $cnt = () = (($x, @$q) = (1,2,3)); $r = [9]; $hr = {q => 1}; (@$r, %$hr) = (1,2);
 print "12 $x $cnt [@$r] [", hs($hr), "]\n";
+PL
+
+# ==== s543j (2026-11-22) ====
+
+# ---- #5210 `local %ENV` keeps the environment's magic: a child process
+#      started inside the scope sees the localized environment (a bare
+#      `local %ENV` an empty one), the old one comes back at the exit -- also
+#      by die, and with the #1030 undef marks; `local $ENV{K}` unchanged ----
+both_agree(<<'PL', '#5210 local %ENV reaches a child process and is restored at the scope exit');
+no warnings;
+$ENV{T11A} = "outer"; $ENV{T11U} = undef; my $c = 1;
+sub sh { my $o = `/bin/sh -c 'echo "[\$T11A][\$T11B]"'`; chomp $o; $o }
+{ local %ENV = (T11B => "inner"); print "1 ", sh(), " ", ($ENV{T11A} // 'U'), "\n"; }
+{ local %ENV = (%ENV, T11B => "b"); delete $ENV{T11A}; print "2 ", sh(), "\n"; }
+{ local %ENV; $ENV{T11B} = "x"; print "3 ", sh(), " ", scalar(keys %ENV), "\n"; }
+sub f { local %ENV = (T11B => $_[0]); sh() } print "4 ", f("p"), f("q"), "\n";
+eval { local %ENV = (T11B => "d"); die "x\n" }; print "5 ", sh(), "\n";
+{ local %ENV = (T11B => "m") if $c; print "6 ", sh(), "\n"; }
+{ local $ENV{T11A} = "e"; print "7 ", sh(), "\n"; }
+print "8 ", sh(), " ", (defined $ENV{T11U} ? "D" : "U"), (exists $ENV{T11U} ? "E" : "N"), "\n";
 PL

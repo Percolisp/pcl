@@ -15725,6 +15725,12 @@ sub _local_fresh_bindings {
 # fast-path operators (the notinline declaration; `locally` when no `let`).
 sub _local_binding_opens {
   my ($self, $st, $stmt, $mod, $let) = @_;
+  # `local %ENV` keeps the environment's magic (#5210): not a `let` of a plain
+  # table (a child saw the OUTER environment) but p-local-env, which saves,
+  # replaces and restores the process environment itself.  %ENV is a core
+  # variable (rule 9a: the name is the language's).
+  my @env_b = grep { $_->[0] eq '%ENV' } @{ $st->{bindings} };
+  local $st->{bindings} = [grep { $_->[0] ne '%ENV' } @{ $st->{bindings} }] if @env_b;
   my @let_b  = grep {  Pl::GlobalPartition::is_exception_global($_->[0]) } @{ $st->{bindings} };
   my @cell_b = grep { !Pl::GlobalPartition::is_exception_global($_->[0]) } @{ $st->{bindings} };
   my @outer = $mod ne '' ? (grep { $_->[2] } @let_b) : @let_b;
@@ -15738,7 +15744,19 @@ sub _local_binding_opens {
   push @opens, ['p-local-maybe', $st->{ctmp}, ['let', $pairs->(@cond)]] if @cond;
   push @opens, map { $mod ne '' ? ['p-local-cell-if', $st->{ctmp}, @$_[0, 1]]
                                 : ['p-local-cell', @$_[0, 1]] } @cell_b;
+  push @opens, map { _local_open(['p-local-env', _local_env_init($_->[1])],
+                                 $mod ne '' ? $st->{ctmp} : undef) } @env_b;
   return @opens;
+}
+
+# The LIST a `%ENV` binding's init form fills the hash from: the solo
+# binding's `(p-copy-hash LIST)`; a fresh (bare) binding's empty table is
+# `nil` (p-local-env: an empty environment).  Rule 12: any other form dies.
+sub _local_env_init {
+  my ($init) = @_;
+  return $init->[1] if ref $init eq 'ARRAY' && $init->[0] eq 'p-copy-hash';
+  return 'nil' if ref $init eq 'ARRAY' && $init->[0] eq 'make-hash-table';
+  die "PCL internal: an unexpected `local %ENV` initializer: " . Pl::CLForm::to_flat($init) . "\n";
 }
 
 # The list assignment of a `local (…) = LIST`: an ordinary list assignment

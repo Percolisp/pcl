@@ -310,7 +310,7 @@
    #:p-local-glob-dynamic #:p-local-dot
    #:p-defcell #:p-local-cell #:p-local-cell-if #:p-local-maybe
    #:p-local-pipe
-   #:p-local-hash-elem #:p-local-array-elem
+   #:p-local-hash-elem #:p-local-array-elem #:p-local-env
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
    #:p-local-hash-slice
@@ -9576,6 +9576,35 @@
   (remhash k *p-env-undef-keys*)
   (sb-posix:unsetenv k))
 
+(defun %p-env-clear ()
+  "Remove every variable from the environment (a wholesale `%ENV = LIST`,
+   `local %ENV`)."
+  (dolist (entry (sb-ext:posix-environ))
+    (let ((eq-pos (position #\= entry)))
+      (when eq-pos
+        (%p-env-remove (subseq entry 0 eq-pos))))))
+
+(defun %p-env-save ()
+  "The whole %ENV for `local %ENV` (task #5210): every exported NAME=VALUE
+   pair, a copy of the undef marks (#1030) and the synthetic entry's flag."
+  (let ((marks (make-hash-table :test 'equal)))
+    (maphash (lambda (k v) (setf (gethash k marks) v)) *p-env-undef-keys*)
+    (list (sb-ext:posix-environ) marks *p-runtime-env-hidden*)))
+
+(defun %p-env-restore (saved)
+  "Put back the environment %p-env-save took: every variable now set is
+   removed, the saved pairs are exported again, the undef marks and the
+   synthetic entry's flag come back."
+  (destructuring-bind (pairs marks hidden) saved
+    (%p-env-clear)
+    (dolist (entry pairs)
+      (let ((eq-pos (position #\= entry)))
+        (when eq-pos
+          (sb-posix:setenv (subseq entry 0 eq-pos) (subseq entry (1+ eq-pos)) 1))))
+    (clrhash *p-env-undef-keys*)
+    (maphash (lambda (k v) (setf (gethash k *p-env-undef-keys*) v)) marks)
+    (setf *p-runtime-env-hidden* hidden)))
+
 (defun %p-env-cell-box (k)
   "The ELEMENT box of $ENV{K}: a magic cell that reads and writes the
    environment through the layer above, the %SIG cell's shape
@@ -10970,10 +10999,7 @@ per element."
       ;; setenv loop below makes it a real variable, which wins anyway.
       ((eq place '%ENV-MARKER%)
        (setf *p-runtime-env-hidden* t)
-       (dolist (entry (sb-ext:posix-environ))
-         (let ((eq-pos (position #\= entry)))
-           (when eq-pos
-             (%p-env-remove (subseq entry 0 eq-pos)))))
+       (%p-env-clear)
        ;; each pair through the value layer's writer (#1030): an undef value
        ;; (or the missing last one of an odd list) is an undef element
        (loop for i from 0 below cnt by 2
@@ -37154,6 +37180,26 @@ would consume, so it dies naming the stream (rule 12)."
             (,sv (%p-lhe-save ,hv ,kv)))
        (unwind-protect (progn ,@body)
          (%p-lhe-restore ,hv ,kv ,sv)))))
+
+(defmacro p-local-env (init &body body)
+  "`local %ENV [= LIST]` (task #5210): perl localizes %ENV WITH its magic, so
+   inside the scope the hash is still the process environment -- a child
+   process sees the localized one -- and at the exit the old environment is
+   exported again.  INIT is the right side's LIST value, evaluated FIRST (it
+   may read the old %ENV: `local %ENV = (%ENV, K => V)`), or NIL for a bare
+   `local %ENV` (an EMPTY environment, as perl gives the child).  Then the
+   whole environment is saved (%p-env-save: the pairs, the #1030 undef marks,
+   the synthetic entry's flag), replaced through the `%ENV = LIST` arm of
+   p-hash-fill, and put back by %p-env-restore on every exit (unwind-protect:
+   a die, a goto, a return).  %ENV is a CORE variable (rule 9a): the `local`
+   lowering selects this macro by that one name, the way the element macros
+   select the %ENV value layer by its marker.  Under a modifier it is the
+   localizer of p-local-maybe."
+  (let ((v (gensym "INIT")) (s (gensym "SAVED")))
+    `(let* ((,v ,(if init `(p-flatten-args (list ,init)) '(vector)))
+            (,s (%p-env-save)))
+       (unwind-protect (progn (p-hash-fill '%ENV-MARKER% ,v) ,@body)
+         (%p-env-restore ,s)))))
 
 (defmacro p-local-array-elem (arr-var idx-form &body body)
   "Save/restore one array element: local $arr[N].  A TIED array (task #155)
