@@ -399,8 +399,8 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-22 (late evening): main = MAIN-READY-107 `0eb941e3` (generation
-v2-15700; nine batches merged in this session: s543a, line tracking ON by
+**s543, 2026-11-22 (late evening): main = MAIN-READY-108 `4a0fd0ec` (generation
+v2-15800; ten batches merged in this session: s543a, line tracking ON by
 default (MAIN-READY-99 `78202d0a`); s543b, seven filed silent wrongs (-100
 `64353611`); s543c, the verification batch (-101); s543r, the round (-102);
 s543d, PPI batch 10 (-103 `a5a60b62`); s543e, seven live silent wrongs
@@ -409,12 +409,13 @@ silent wrongs -- a `local` element target is its last subscript, a
 dereference in interpolating text, the dropped-handle flush (-106
 `b58114ca`); s543h, string-eval name resolution -- a captured lexical is
 published per eval word, the site's `our` aliases reach the text, only a
-capture is a parameter, a `state` variable is read by a later eval (-107)).**  Gate
-**380 files / 12,450 rows `Result: PASS`** (measured on merged main); full
+capture is a parameter, a `state` variable is read by a later eval (-107 `0eb941e3`); s543i, PPI batch 12, the LAST -- a digit-named
+variable ends at its last digit, `$12[1]` is the array's element, `print STDOUT /x/` is a match (-108)).**  Gate
+**380 files / 12,458 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,807**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
 (95.1 %)**; **85 live IN silent wrongs** (the number `tools/task-triage.pl` prints: s543h closed four; the batches and
-the reviews of tonight filed #5270 #5271 #5330-#5334 #5370 #5371 #5373 -- `return (LIST), MORE` returns only LIST, #5373, is the worst of them);
+the reviews of tonight filed #5270 #5271 #5330-#5334 #5370 #5371 #5373 -- `return (LIST), MORE` returns only LIST, #5373, the worst of them, is fixed in s543j, unmerged);
 CPAN board (round of s543, on MAIN-READY-100, the oracle refreshed): **668
 PASS / 137 PARTIAL / 24 FAIL / 67 SKIP of 896 files, 109,191 ok / 1,190 not
 ok** (the ok total is lower than the s542 round's 109,714 only by the
@@ -422,11 +423,11 @@ IO-Compress `105oneshot` heap flap, #4643: 1,004 rows; since then Pod-Simple
 `htmlbat.t` passes 13 of 13 in a one-file run, s543g); the companion in the
 same round: `--all --quick` 128 OK / 103 XDIFF / 239 DIFF of 528, the full
 run 0 NEW / 0 FIXED / 0 LOST against the edited baselines; **the next ROUND
-is due** (five code merges since: -103 .. -107; its brief is `s543/s543s-prompt.md`); PPI `pcl` =
-`72d2bd9e` (147 commits over upstream, 60 groups, 71 catalogued mis-lexes
-fixed at the source; the fork pushed, pull request #459 refreshed; batch 12
-= s543i, THE LAST, is finished but for its merge).  **Running: s543i (stacked on -107, merges next) and s543j
-(nine silent wrongs + #5373, on -106, rebased at each merge): `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`.**  Line tracking costs a median
+is due** (six code merges since: -103 .. -108; it RUNS as s543s, `s543/s543s-prompt.md`); PPI `pcl` =
+`7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
+fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **Running: s543j
+(nine silent wrongs + #5373; every member done, at its end-of-batch bars), s543k (the string-eval residue + #5370) and the round s543s: `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
@@ -441,7 +442,6 @@ the s536 rule: s543g, `local($h{k}) = g(...)` +28.6 % (the call now
 runs in list context, as in perl) and a chained `local $h{a}{b}` +13.1 %;
 s543h, the first compile of a large eval text behind a `package` statement
 +70 % (42.9 -> 72.9 s for 900 free globals; #5272 carries a two-line fix, not applied).
-
 
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
@@ -573,8 +573,8 @@ Full text: `docs/claude-md/REFERENCE.md` "Dependencies".
   hand: `tools/vendor-ppi <clone> pcl` (`Pl/t/vendor-ppi-01.t` checks the tree
   id; run the canary `PCL_SYSTEM_PPI=1 prove Pl/t/ppi-bugs-registry-01.t` at
   every refresh).  The branch's public home is `https://github.com/Percolisp/PPI` branch
-  `pcl`, mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git`.  A PPI
-  batch (an agent) fast-forwards the BARE MIRROR at MERGE-READY and nothing
+  `pcl`, mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git`.  A batch
+  that carries a PPI fix (an agent; the PPI batches ended with s543i) fast-forwards the BARE MIRROR at MERGE-READY and nothing
   else; the reviewing session pushes the fork after the merge and refreshes
   upstream pull request #459.  Agents never push to GitHub.  `PCL_SYSTEM_PPI=1` uses the installed PPI on
   purpose.

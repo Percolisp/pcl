@@ -203,3 +203,13 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * The reviews: `rh2/`, `rh3/` (the brace change: #5370 #5371 #5372 filed), `rj/` (s543j: 24 of 28; three findings sent to it, #5373 filed = its member 10).
 * s543i (READY-BUT-FOR-RECORD `98961982` on `9b024238`) and s543j (members done, WAITING-FOR-MAIN, at the three findings) get the ONE message "main is now <sha>".  For s543i it is records only.  **s543k is LAUNCHED now** (`s543/s543k-prompt.md`, six members; IDs 5350-5369; v2-16000; a new worktree): its base has s543h.
 * Still owed: the round (`s543/s543s-prompt.md`) after s543i's merge; the fork push + pull request #459 at that merge.
+
+## 2026-11-22 22:5x -- s543i MERGED: MAIN-READY-108 = `4a0fd0ec` (v2-15800); THE ROUND s543s LAUNCHED
+* s543i's report: MERGE-READY `4a0fd0ec`, 14 commits over `7cd495e6`; every bar in `scratch/s543i/legs/` (gate5, sweep4, ab-final4, cd4 against `9b024238`; the rest against `a8889369`, standing under the same-DIFF-set ruling); `--record` committed.  Model `claude-opus-5-5`.  PPI batch 12 = the LAST: `docs/ppi-fix-at-source-s527.md` section 11.
+* Fast-forward; **the FULL gate on merged main: 380 files / 12,458 rows PASS** (`~/pcl-agent-scratch/s543/review/gate-4a0fd0ec.log`).  CLOSED #5233 #1679 #5231.  The fork pushed (`7fd02b75`), pull request #459 PATCHed (61 groups / 149 commits, row BI).  `tools/task-triage.pl`: 85 IN silent wrongs.
+* **RUNNING NOW (three):**
+  * **s543s, THE ROUND** (`s543/s543s-prompt.md`; IDs 5310-5329; no code, no generation; a new worktree; `~/pcl-agent-scratch/s543/round2/`): the board's tree half in bounded chunks (at most two at a time), then the two companion runs as EXCLUSIVE legs -- long, for memory.
+  * **s543j** (`.claude/worktrees/agent-abcd8b98eb856dbee`; v2-15900; ten members -- #5373 `return (LIST), MORE` and two review residues added -- all done; at its end-of-batch bars on `4a0fd0ec`).
+  * **s543k** (v2-16000; the string-eval residue #5271 #5270 #5126 #5255 #5252 + #5370; started 22:5x).
+* Order of the next merges: s543j (MAIN-READY-109), then s543k (rebased onto it).  The round measures `4a0fd0ec`'s code whatever merges meanwhile.
+* Owed to the USER: #1876 IN or OUT (s543i: OUT); the two PPI branch items left (#1686, #650) -- a batch 13 or the ordinary queue; the 39 `decision` tasks; s543h's cost flag #5272.

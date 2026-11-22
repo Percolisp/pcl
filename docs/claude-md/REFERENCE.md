@@ -730,7 +730,7 @@ record, kept only as history.)
   `use YAML::PP` was found by the first red CI run of MAIN-READY-48.  Never edit `vendor/PPI/lib` by
   hand: `tools/vendor-ppi <clone> pcl` refreshes it and the stamp
   (`Pl/t/vendor-ppi-01.t` checks the tree id; run the canary at every refresh);
-  the branch's PUBLIC home is the fork `https://github.com/Percolisp/PPI` (branch `pcl`, created and first pushed s532, 2026-11-02, `a376a6d8`; `gh` is logged in as Percolisp on this box), mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git` (remote `fork`, HTTPS) -- **who pushes:** a PPI batch (an agent) fast-forwards the BARE MIRROR at MERGE-READY and nothing else (COMMON.md: an agent never pushes to GitHub); the REVIEWING SESSION pushes the fork after the batch's merge and refreshes upstream pull request #459 (`gh api -X PATCH`)
+  the branch's PUBLIC home is the fork `https://github.com/Percolisp/PPI` (branch `pcl`, created and first pushed s532, 2026-11-02, `a376a6d8`; `gh` is logged in as Percolisp on this box), mirrored by the bare repo `~/pcl-agent-scratch/ppi/PPI.git` (remote `fork`, HTTPS) -- **who pushes:** a batch that carries a PPI fix (an agent; the dedicated PPI batches ended with s543i, `docs/ppi-fix-at-source-s527.md` section 11) fast-forwards the BARE MIRROR at MERGE-READY and nothing else (COMMON.md: an agent never pushes to GitHub); the REVIEWING SESSION pushes the fork after the batch's merge and refreshes upstream pull request #459 (`gh api -X PATCH`)
   (branches `master` = upstream, `pcl`) -- the fork exists since s532 (2026-11-02): `https://github.com/Percolisp/PPI`, branch `pcl`.
   A PPI bug is FIXED on that branch in PPI's two-commit PR shape (the failing
   rows first as TODO, then the fix; PPI's own suite green after every commit;
