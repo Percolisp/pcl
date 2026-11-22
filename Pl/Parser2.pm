@@ -798,10 +798,10 @@ sub _requalify_inplace_pkg_blocks {
 }
 
 # $keep (optional, s543h): ($tok, $canon, $home) -> true leaves that token as
-# written although the binder gives it a home -- the eval-text alias pass
-# (_requalify_eval_aliases) rewrites only `our` homes the text is not read in.
+# written although the binder gives it a home; $only (optional): the only
+# canons worth offering -- the eval-text pass (_requalify_eval_text).
 sub _requalify_region {
-  my ($self, $stmts, $pkg, $keep) = @_;
+  my ($self, $stmts, $pkg, $keep, $only) = @_;
   # Candidate names: every variable the region MENTIONS, in any of the three
   # spellings a name can reach the emitter through — a Symbol token, an
   # ArrayIndex ($#a), or interpolating text with no token of its own
@@ -816,6 +816,7 @@ sub _requalify_region {
     _interp_canon($stmt, undef, undef, \%cand);   # undef $live = collect all
   }
   for my $canon (sort keys %cand) {
+    next if $only && !$only->{$canon};
     my $sig = substr($canon, 0, 1);
     (my $bare = $canon) =~ s/^[\$\@\%]//;
     next unless $sig =~ /^[\$\@\%]$/;          # &sub / *glob: not this axis
@@ -880,15 +881,27 @@ sub _requalify_region {
 # `$a` / `$b` keep their sort pairing (the region's bare pair, #287).  A block
 # region inside the text is the block requalifier's, which asked the same
 # binder before this runs.
+# COST: without a leading region only the names the binder homes away from
+# the eval's package can move (Binder::homed_away: an `our` of another
+# package, a forced-main name), so only those are offered -- the requalifier
+# walks the statements once per candidate name, and a 300-line eval text of
+# 900 globals cost +68 % compile time when every name was a candidate.
 sub _requalify_eval_text {
   my ($self, $doc) = @_;
   my @top = grep { $_->isa('PPI::Statement') } $doc->schildren;
   return unless @top;
   my $epkg = $self->eval_pkg // 'main';
+  my $region = grep { $_->isa('PPI::Statement::Package') && !_pkg_stmt_has_block($_) } @top;
+  my $only;
+  if (!$region) {
+    my $bd = $self->{_binder} or return;
+    $only = { map { ($_ => 1) } $bd->homed_away($epkg) };
+    return unless %$only;
+  }
   $self->_requalify_region(\@top, $epkg, sub {
     my ($tok, $canon, $home) = @_;
     return $home eq $epkg || $canon eq '$a' || $canon eq '$b';
-  });
+  }, $only);
   return;
 }
 

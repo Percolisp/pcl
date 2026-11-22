@@ -85,6 +85,7 @@ package Pl::Binder;
 #       ->resolve($node, $canon)       the record visible at $node for $canon
 #       ->pkg_at($node)                the positional package at $node
 #       ->ours_visible_at($node)       the `our` bindings visible at $node (#2557)
+#       ->homed_away($pkg)             canons some use homes outside $pkg (s543h)
 #       ->captures($block)             OUTER bindings read inside $block
 #       ->captures_name($n, $bare, $canons, eval => 1)  the capture question (s533d)
 #       ->has_string_eval($cv), ->eval_sees($b)  the string-eval CV fact (s533d)
@@ -904,6 +905,24 @@ sub _pkg_at {
 # The positional package at $node, for a caller that must spell a cell from
 # there (Parser2::_publish_eval_cell, #2630).
 sub pkg_at { my ($self, $node) = @_; return $self->_pkg_at($node) }
+
+# The canons some use resolves to a binding HOMED outside $pkg -- an `our` of
+# another package, or a forced-main special while $pkg is not main (globals
+# are positional and lexicals have no home) -- in one pass over the refs: the
+# candidates of Parser2::_requalify_eval_text (s543h).
+sub homed_away {
+  my ($self, $pkg) = @_;
+  my %c;
+  for my $r (@{ $self->_sorted_refs }) {
+    my $b = $r->{binding} or next;
+    next if $r->{via} eq 'decl';
+    my $k = $b->{kind};
+    $c{ $r->{canon} } = 1
+      if ($k eq 'our' && ($b->{perl_package} // 'main') ne $pkg)
+      || ($k eq 'special' && $pkg ne 'main');
+  }
+  return sort keys %c;
+}
 
 # The `our` bindings a use at $node would resolve to -- one per canon, the
 # innermost visible (a later `my` or a closed block hides an `our`), sorted by
