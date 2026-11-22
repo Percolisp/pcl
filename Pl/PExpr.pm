@@ -4000,6 +4000,14 @@ sub handle_subcalls {
     # `sysopen` takes its handle in the SAME first slot (task #730), so the two
     # share this registration rather than growing a second copy of it.
     my $func_name = $now->can('content') ? $now->content() : '';
+    # `return` is a list operator that is NEVER a function: its parentheses
+    # are a TERM of its list, not its call parens -- `return (1, 2), 3`
+    # returns 1, 2, 3 (#5373: the parens were taken as the whole argument list
+    # and `, 3` vanished; `return (1, 2) x 2, 3` lost its tail the same way).
+    # Every other list operator keeps perl's "looks like a function" rule
+    # (`print((1, 2), 3)`, `die ("A"), "B"`).  Left, like a declaration list
+    # above, to the bare list-operator pass below.
+    next if $func_name eq 'return';
     if (($func_name eq 'open' || $func_name eq 'sysopen') && $self->has_environment) {
       # Peek at first argument - if it's a bareword, register it as filehandle
       my @list_children = $next->children();

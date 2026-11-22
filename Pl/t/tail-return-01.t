@@ -56,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 sub run_cl {
     my ($code, %opt) = @_;
@@ -371,4 +371,20 @@ PL
     my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
     is(run_cl($prog), $perl,
        '#4281: a loop that ends its block reads its condition as a VALUE (no string-slot freeze; perl oracle)');
+}
+
+# #5373 (s543j): `return` is a list operator, never a function -- its parens
+# are a TERM of the list (`return (1, 2), 3` is 1, 2, 3; main returned 1, 2),
+# while an operator after them is still read (`return (1) + 2`) and every other
+# list operator keeps the function-call reading (`print((1, 2), 3)`).
+{
+    my $prog = <<'PL';
+sub h  { return (1, 2), 3 } sub h2 { return (1), 2, 3 } sub h4 { my @x = (8, 9); return (@x), "t" }
+sub h6 { return (1, 2) , 3 if 1; 0 } sub a1 { return (1, 2) x 2, 3 } my $s = h(); my $c = () = h();
+print join(",", h()), "|", join(",", h2()), "|", join(",", h4()), "|", join(",", h6()), "|", join(",", a1()), "|$s $c\n";
+sub k1 { return (1) + 2 } sub k2 { return (0) || 5 } sub k3 { return ((1, 2), 3) } sub k4 { return +(1, 2), 3 }
+sub k5 { return ($_[0])->[1] } print k1(), k2(), " ", join(",", k3()), " ", join(",", k4()), " ", k5([4, 5]), "\n";
+PL
+    my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
+    is(run_cl($prog), $perl, '#5373: return (LIST), MORE returns every value; return (X) OP Y still reads the operator (perl oracle)');
 }
