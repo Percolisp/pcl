@@ -417,11 +417,11 @@ ok** (the ok total is lower than the s542 round's 109,714 only by the
 IO-Compress `105oneshot` heap flap, #4643: 1,004 rows; since then Pod-Simple
 `htmlbat.t` passes 13 of 13 in a one-file run, s543g); the companion in the
 same round: `--all --quick` 128 OK / 103 XDIFF / 239 DIFF of 528, the full
-run 0 NEW / 0 FIXED / 0 LOST against the edited baselines; **the next ROUND
-is due** (six code merges since: -103 .. -108; it RUNS as s543s, `s543/s543s-prompt.md`); PPI `pcl` =
+run 0 NEW / 0 FIXED / 0 LOST against the edited baselines; **the ROUND s543s on -108
+is STOPPED ON ORDER and NOT merged** (the board 670 PASS / 136 PARTIAL / 23 FAIL / 67 SKIP, 111,258 ok / 1,188 not ok; `--all --quick` 130 OK / 103 XDIFF / 237 DIFF; the full run not taken; it found a REGRESSION of -107, #5310, and six `op/decl-refs.t` rows lost at -107, not reduced); PPI `pcl` =
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
-program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **Running: s543k (the string-eval residue + #5370 + #5272; every member done, at its end-of-batch bars on -109) and the round s543s (on -108's code: the board taken, the companion runs left): `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`.**  Line tracking costs a median
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **NOTHING RUNS (the USER ended the session 2026-11-23 01:3x): s543k (the string-eval residue + #5370 + #5272; every member done, half its end-of-batch bars taken on -109) and the round are STOPPED ON ORDER in their worktrees -- NEXT ACTION = `briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
