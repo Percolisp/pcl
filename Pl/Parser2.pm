@@ -16292,18 +16292,23 @@ sub _fh_drop_flush_var {
 }
 
 # How the binder resolves the scalar token $sym at that point: 'lexical' -- a
-# `my` / `state` binding (perl's pad variable), wherever declared; 'package'
-# -- an `our` alias or no binding at all (a package global); undef -- no
-# binder (no answer: no flush).  A string eval's view of its caller's
-# lexical is neither (the caller asks eval_mode).
+# PAD variable: a `my` / `state` binding wherever declared, a signature
+# parameter, or (in eval text) the eval SITE's lexical (#5255, s543k: kind
+# `outer`, the capture alist's key -- the thunk parameter bound to the
+# caller's own container); 'package' -- an `our` alias or no binding at all
+# (a package global, #5254); undef -- no binder, a special or a lexical sub
+# (no flush).  The kind set is closed: an unknown one dies naming it (rule 12).
+my %FLUSH_BINDING_KIND = (my => 'lexical', state => 'lexical', param => 'lexical',
+                          outer => 'lexical', our => 'package', global => 'package',
+                          special => undef, lexsub => undef);
 sub _scalar_binding_kind {
   my ($self, $sym) = @_;
   my $bd = Pl::Binder::for_captures($self, $sym) or return undef;
   my $b  = $bd->binding_of($sym) or return 'package';
-  my $k = $b->{kind} // '';
-  return 'lexical' if $k =~ /^(?:my|state)\z/;
-  return 'package' if $k =~ /^(?:our|global)\z/;
-  return undef;
+  my $k  = $b->{kind} // '(none)';
+  die "PCL internal: the drop flush met binding kind `$k` for "
+    . $sym->content . " (no answer for it)\n" if !exists $FLUSH_BINDING_KIND{$k};
+  return $FLUSH_BINDING_KIND{$k};
 }
 
 # `undef $x;' / `undef($x);' / `$x = undef;' as a whole statement, $x a

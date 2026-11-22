@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -309,4 +309,29 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$pkg' '$dir");
     is($pcl_out, $perl, '#5254: undef / = undef of a PACKAGE variable (our, $Foo::fh, local, use vars) flushes the escaped handle');
+}
+
+# 12: #5255 (s543k) -- the same statements INSIDE A STRING EVAL on the eval
+# SITE's lexical (the binder's kind `outer`: the thunk parameter bound to the
+# caller's container): a file lexical, a sub's lexical, `= undef`, a nested
+# eval, a closure's capture, `evalbytes`, a handle one level inside an object;
+# the text's own `my` and a non-handle are the controls.  INVERSE: main
+# 4a0fd0ec printed 0 for a b c d e f.
+my $evs = write_prog('evs.pl', <<'PL');
+use strict; use warnings; use feature 'evalbytes';
+my $f = "$ARGV[0]/evs.out";
+sub mk { open my $fh, ">", $f or die; $fh }
+sub size { -s $f // 0 }
+my $g = mk(); print $g "evalx"; sub da { eval q{ undef $g; }; print "a ", size(), "\n" } da();
+sub db { my $h = mk(); print $h "subxy"; eval q{ $h = undef; }; print "b ", size(), "\n" } db();
+sub dc { my $h = mk(); print $h "nested"; eval q{ eval q{ undef $h; }; }; print "c ", size(), "\n" } dc();
+my $cl = do { my $h = mk(); print $h "closure!"; sub { print $h ""; eval q{ undef $h; }; size() } }; print "d ", $cl->(), "\n";
+sub de { my $h = mk(); print $h "bytes"; evalbytes q{ undef $h; }; print "e ", size(), "\n" } de();
+sub df { my $o = { fh => mk() }; print { $o->{fh} } "inobj"; eval q{ undef $o; }; print "f ", size(), "\n" } df();
+sub dg { my $h = mk(); print $h "g1"; eval q{ my $k = mk(); print $k "own-my"; undef $k; print "g ", size(), "\n"; } } dg();
+sub dh { my $x = 5; eval q{ undef $x; }; print "h ", defined($x) ? "def" : "undef", "\n" } dh();
+PL
+{
+    my ($perl, $pcl_out) = run_both("$evs' '$dir");
+    is($pcl_out, $perl, '#5255: undef / = undef inside a string eval of the SITE\'s lexical flushes the escaped handle');
 }
