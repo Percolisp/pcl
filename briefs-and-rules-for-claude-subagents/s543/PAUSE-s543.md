@@ -179,3 +179,14 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * **Stop order sent 17:19; all three reported within minutes, worktrees clean:** s543g `fc80a722` (all members done, every bar but everyday), s543h `49d54f93` (all members done; bench + records owed), s543i `76437561` (members 1-4 done, #1876 a design, the closing record partly committed; PPI branch `pcl-s543i` = `7fd02b75`, the mirror not moved).  Stale `HEAVY.holder.*` files removed; a marker line in `HEAVY.queue`.
 * The review probes (perl + main halves) are saved in `~/pcl-agent-scratch/s543/review/probes-1122/`.
 * **NEXT ACTION = `s543/resume-after-stop.md`** (rewritten for this stop).  Nothing runs.
+
+## 2026-11-22 19:3x -- THE USER: continue, the whole box again; the three stopped batches RESUMED, stacked
+* `s543/resume-1122b.md`: s543g first (rebase onto main, records only; everyday; records), s543h rebased onto s543g's code (`bcf25a90`) as soon as that sha existed, s543i onto s543h's rebased code -- each takes its bars once.  All three resumed in their old worktrees, Opus 5.5 / xhigh.
+* #5191 (`heavy.sh` starves an exclusive leg) went to a tooling agent: `heavy.sh.four-slot-s543` + a test under its own `HEAVY_DIR`; the reviewing session installs it between legs.
+* The reviews on the stop trees, perl -> main -> tree (`~/pcl-agent-scratch/s543/review/probes-1122/`): `rh/` 33 of 35 (main 13), `rg/` 28 of 30 (main 8; the two = #5001), `ri/` 13 of 14 (main 9; the bignum limit).  Nothing found that a batch owes.
+
+## 2026-11-22 19:5x -- s543g MERGED: MAIN-READY-106 = `b58114ca` (v2-15600)
+* Its report: MERGE-READY `b58114ca`, 11 commits over `00b75ac5`; every bar in `scratch/s543g/legs/` (gate 380 / 12,418; sweep 18,807 +0 GATE clean; wide A/B 198 DIFF / RCDIFF 0, 165 the `delete` wrap and 33 attributed; gate-set scan and census identical; ir-conform 337 / 0; EVERYDAY 116 -> 116; `--record` committed).
+* Fast-forward; **the FULL gate on merged main: 380 files / 12,418 rows PASS** (`~/pcl-agent-scratch/s543/review/gate-b58114ca.log`).  CLOSED #540 #1190 #3415 #1339 #691 #5128 #5160 #4794 #5256 #5162.  `tools/task-triage.pl`: 82 IN silent wrongs.
+* s543h gets the ONE message "main is now <sha>" (records only for it: it is already on s543g's code).
+* Left to the round: `baselines/cpan-board-dists.tsv`'s Pod-Simple line (htmlbat PARTIAL -> PASS).
