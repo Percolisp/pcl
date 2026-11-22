@@ -734,9 +734,9 @@ print "4 $h{k} ", join(",", sort keys %h), "\n";
 # reads the same).  Passes on main too: the breaking shape, not an inverse row.
 {
     my $out = run_pl(q{
-{ package TA; sub TIEARRAY { bless [], $_[0] } sub STORE { $_[0]->[$_[1]] = $_[2] }
-  sub FETCH { $_[0]->[$_[1]] } sub EXISTS { exists $_[0]->[$_[1]] } sub DELETE { delete $_[0]->[$_[1]] }
-  sub CLEAR { @{$_[0]} = () } sub FETCHSIZE { scalar(@{$_[0]}) } sub STORESIZE { $#{$_[0]} = $_[1] - 1 } sub EXTEND {} }
+sub TA::TIEARRAY { bless [], $_[0] } sub TA::STORE { $_[0]->[$_[1]] = $_[2] } sub TA::FETCH { $_[0]->[$_[1]] }
+sub TA::EXISTS { exists $_[0]->[$_[1]] } sub TA::DELETE { delete $_[0]->[$_[1]] } sub TA::CLEAR { @{$_[0]} = () }
+sub TA::FETCHSIZE { scalar(@{$_[0]}) } sub TA::STORESIZE { $#{$_[0]} = $_[1] - 1 } sub TA::EXTEND {}
 tie my @a, 'TA'; @a = ('a', 'b', 'c'); $a[4] = 'd';
 { my ($d, $z) = delete local @a[4, 999]; print "1 ", ($d // 'u'), " ", ($z // 'u'), " ", scalar(@a), "\n";
   my $c = delete local $a[2]; print "2 ", ($c // 'u'), " ", scalar(@a), "\n"; }
