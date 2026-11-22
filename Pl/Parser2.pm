@@ -7748,7 +7748,19 @@ sub _repair_word_match_pass {
     next if $i >= 2 && $tok[$i - 2]->isa('PPI::Token::Operator')
                     && $tok[$i - 2]->content eq '<';       # <op/*> glob run
     next if _is_method_name_word($prev);                # $o->w / $o->h: division
-    next if $self->_word_is_term($prev->content, $doc);
+    # The slot right after print / printf / say (#5231): there a bareword
+    # that no declaration makes a term is a FILEHANDLE, and after it perl
+    # expects a term (toke.c: the indirect object right after a list
+    # operator sets XTERM), so `print STDOUT /x/` prints a match.  The
+    # lowering's ONE handle question decides it, never the ALL-CAPS guess
+    # of _word_is_term, which reads STDOUT as a constant.
+    my $pw = $i >= 2 ? $tok[$i - 2] : undef;
+    my $print_slot = $pw && $pw->isa('PPI::Token::Word')
+                  && $pw->content =~ /\A(?:print|printf|say)\z/;
+    my $env = $print_slot ? $self->environment : undef;
+    my $handle = $env && $env->print_slot_handle(
+      $prev->content, $self->_word_is_declared_term($prev->content, $doc));
+    next if !$handle && $self->_word_is_term($prev->content, $doc);
     # A match needs a closing delimiter; without one this is not the shape and
     # the statement is left to the ordinary error path to name.
     next unless _match_close_after(\@tok, $i);

@@ -1070,6 +1070,24 @@ package main;
 my $o = O->new;                         print "g=", $o->w / $o->h, "\n";
 ');
 
+# ── s543i #5231: `/re/` after a bareword FILEHANDLE in the print slot.  After
+# `print STDOUT` perl expects a term (the indirect object right after a list
+# operator), so `/x/` is a match; PPI calls STDOUT a user's word and lexes
+# division, and the repair declined it because _word_is_term's ALL-CAPS guess
+# read STDOUT as a constant -- the statement was DROPPED.  The repair now asks
+# the lowering's handle question (Pl::Environment::print_slot_handle).
+# INVERSE GUARDS: a DECLARED constant in the slot still divides, and so does a
+# number after the handle.
+test_transpile('#5231: /re/ after print STDOUT / printf STDOUT / an opened handle is a MATCH', '
+use constant FOO => 8;
+$_ = "xx";
+print STDOUT /x/, "\n";
+printf STDOUT /(x)(x)/ ? "a=%s\n" : "n\n", "y";
+open(OUT, ">&STDOUT") or die; print OUT /x/g ? "b\n" : "n\n"; close OUT;
+print FOO / 2, "\n";
+print STDOUT 4 / 2, "\n";
+');
+
 # The statement no longer DROPS — but a `(?{ … })` code block in the pattern is
 # still stripped (docs/not-supported.md "Regex code blocks"), so the match runs
 # WITHOUT the block: perl sets $foo, PCL leaves it undef.  This row pins that

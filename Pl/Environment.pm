@@ -941,6 +941,28 @@ sub fh_bareword_shape {
     return all_caps_shape($name);
 }
 
+=head2 print_slot_handle($name, $is_declared_term)
+
+THE handle question of the slot right after C<print> / C<printf> / C<say>: is
+the bareword NAME there a FILEHANDLE?  It is when it has the handle shape or is
+a registered handle -- unless a DECLARATION makes it a term
+(C<$is_declared_term>, the caller's own reading of the prototype table: PExpr's
+C<_is_zero_arg_func>, Parser2's C<_word_is_declared_term>), in which case perl
+calls it (C<use constant FOO =E<gt> 4; print FOO / 2> divides, C<print STDOUT
+/x/> prints a match).  A registered handle wins over a same-named constant.
+Asked by the lowering of C<print NAME LIST> and by
+C<Parser2::_repair_word_match>, which must agree with it (#5231).
+
+=cut
+
+sub print_slot_handle {
+    my ($self, $name, $is_declared_term) = @_;
+
+    my $registered = $self->is_filehandle($name);
+    return 0 unless fh_bareword_shape($name) || $registered;
+    return ($registered || !$is_declared_term) ? 1 : 0;
+}
+
 =head2 all_caps_shape($name)
 
 THE ALL-CAPS bareword convention, as a shape — the one test behind every site

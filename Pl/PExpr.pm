@@ -4626,16 +4626,18 @@ sub handle_subcalls {
         # operand once the word was pruned as a filehandle.  A name that IS a
         # registered filehandle stays one: `open(FOO, …)` wins over a same-named
         # constant, because that is the only reading that can be intended.
-        my $registered_fh = $self->has_environment
-                         && $self->environment->is_filehandle($fh_name);
         # A package-QUALIFIED spelling is the same handle, so the ALL-CAPS
         # shape is asked of the NAME, not of the qualifier (#491): perl reads
         # `print main::STDOUT "a"` and `print Foo::H1 "x"` as handles, and
         # PCL read them as CALLS to undefined subs.  The lower-case negative
         # is unchanged and is perl's own: `sub main::f {…}; print main::f "a"`
         # CALLS f (probed), because `f` fails this test either way.
-        if ((Pl::Environment::fh_bareword_shape($fh_name) || $registered_fh)
-            && ($registered_fh || !$self->_is_zero_arg_func($fh_name))) {
+        # ONE question, Pl::Environment::print_slot_handle -- the repair of a
+        # `/` after the word (Parser2::_repair_word_match) asks it too (#5231).
+        my $slot_fh = $self->has_environment
+          ? $self->environment->print_slot_handle($fh_name, $self->_is_zero_arg_func($fh_name))
+          : Pl::Environment::fh_bareword_shape($fh_name);
+        if ($slot_fh) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
           # A comma/fat-comma right after the bareword means it is a LIST
