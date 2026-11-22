@@ -148,3 +148,11 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * **s543f (PPI batch 11) STOPPED ON ORDER at `f83ea7da`**, all five members done on the branch clone (`pcl-s543f` = `72d2bd9e`, §71-§74), the bare mirror NOT moved; owed: the rebase onto -104 and every merge bar again.  Filed #5230 (a comma list under a low-precedence `and` / `or`: SILENT WRONG) #5231 #5232 #5233.
 * The verified silent-wrong count: 86 - 8 + #5165 #5210 #5230 #5232 = **82** (the tool prints 87: #5162).
 * **NEXT ACTION = `s543/resume-after-stop.md`** (rewritten for this stop).  Nothing runs.
+
+## 2026-11-22 14:4x -- s543 CONTINUES (the USER: continue, THREE tasks in parallel, the box is otherwise idle)
+* The box was shut down in order and booted at 14:22; the cache is whole (no zero-size file).  `heavy.sh` = the FOUR-SLOT script (`heavy.sh.four-slot-s542`) on the USER's word; a marker line in `HEAVY.queue` separates the stale text.
+* **s543f RESUMED** in its worktree (`s543/resume-1122.md`; v2-15500): the rebase onto -104 and every merge bar again; it merges first.
+* **s543g LAUNCHED** (`s543/s543g-prompt.md`; IDs 5250-5269; v2-15600): `local` on a nested element (#540 #1190 #3415 #1339), #691 (the raw-slot verdict vs an `s///` replacement), the dropped-handle flush's three holes (#5128 #5160, #4794 shapes 4-5: eight Pod-Simple board rows), #5162 (the counter).
+* **s543h LAUNCHED** (`s543/s543h-prompt.md`; IDs 5270-5289; v2-15700): string-eval name resolution (#2630 #2557 #2091 #4821) -- the sweep is its gate.
+* The triage check owed for #5230-#5233 #5210 #5211: all six carry `triage` fields (`tools/task-triage.pl`: untriaged 0).  #5210 (`local %ENV` and a child) is NOT in s543g (its `local` group is the nested PLACE); it is a member for the next fix brief.
+* PPI batch 12 (the LAST) is written when s543f has merged.  The ROUND is due after s543f's merge (three code merges since the last).
