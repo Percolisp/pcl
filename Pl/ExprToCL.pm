@@ -3842,9 +3842,11 @@ sub _push_item_is_scalar {
     return 0 if $t eq 'a_ref_acc'
              && $self->expr_o->node_tree->get_metadata($id, 'list_ctx_subscript');
     # an interpolated string; an anon container/sub constructor (ONE ref); a
-    # single element of an array/hash, through a name or a reference
+    # single element of an array/hash, through a name or a reference.  (With
+    # a parser the anonymous `sub {…}` is a `func_ref` node; the one marked
+    # `block_arg` is a `do {}` / `eval {}` BLOCK, whose value may be a list.)
     return 1 if $t eq 'string_concat' || $t eq 'arr_init' || $t eq 'hash_init'
-             || $t eq 'anon_sub'
+             || $t eq 'anon_sub' || ($t eq 'func_ref' && !$n->{block_arg})
              || $t eq 'h_acc'     || $t eq 'a_acc'
              || $t eq 'h_ref_acc' || $t eq 'a_ref_acc';
     return $self->_push_item_is_scalar($kids->[0])

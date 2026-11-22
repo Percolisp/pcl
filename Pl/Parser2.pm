@@ -14978,7 +14978,13 @@ sub _local_plan_elem {
   return { opens => [], inner => [] } if _local_is_stash($cl);   # stash element: body only
   my @kg = Pl::Stmt::subscript_key_groups($sub);
   my $rhs = Pl::Stmt::local_rhs_after($nw, $rec->{sub_idx} + 1);
-  my $init = $rhs ? $self->_lower_expr($rhs, $stmt, (@kg > 1 || $slice) ? 1 : undef) : undef;
+  # `local($h{k}) = RHS` is a LIST assignment (#1339): the right side runs in
+  # list context and its FIRST value is stored.  When RHS is provably ONE
+  # scalar the two readings coincide, so it keeps the scalar -init form (the
+  # fast path every `local($SIG{__WARN__}) = sub {…}` takes); otherwise it
+  # takes the slice branch's list assignment.
+  my $listy = $rec->{paren} && $rhs && !$slice && @kg == 1 && !$self->_rhs_one_scalar($rhs);
+  my $init = $rhs ? $self->_lower_expr($rhs, $stmt, (@kg > 1 || $slice || $listy) ? 1 : undef) : undef;
   my $kctx = ($open eq '[' || $slice) ? 1 : undef;
   my @keys = map { $self->_local_key_form($_, $open, $stmt, $kctx, (!$slice && @kg == 1)) } @kg;
   my $macro = $open eq '{' ? 'p-local-hash-elem' : 'p-local-array-slice';
@@ -15005,7 +15011,7 @@ sub _local_plan_elem {
     push @opens, _local_let1($bt, defined $test ? ['if', $test, $cl, 'nil'] : $cl);
     $cl = $bt;
   };
-  if (defined $init && @keys == 1 && !$slice) {
+  if (defined $init && @keys == 1 && !$slice && !$listy) {
     my $mi = $open eq '{' ? 'p-local-hash-elem-init' : 'p-local-array-elem-init';
     if ($expr) {
       my $it = $self->_local_tmp('pcl-local-init-');
@@ -15021,14 +15027,35 @@ sub _local_plan_elem {
     push @opens, _local_let1($tmp, defined $test ? ['if', $test, $ti, 'nil'] : $ti);
     $bind_base->();
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
-    my $assign = _local_list_ctx(
-      ['p-setf', [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys], $tmp]);
-    push @inner, defined $test ? ['when', $test, $assign] : $assign;
+    if ($listy) {
+      # the list `local` items' assignment: its value is perl's by context
+      # (the element in list context, the right side's count in scalar)
+      push @inner, _local_list_assign([{ place => _local_elem_place($open, $cl, \@keys) }],
+                                      $tmp, $test);
+    } else {
+      my $assign = _local_list_ctx(
+        ['p-setf', [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys], $tmp]);
+      push @inner, defined $test ? ['when', $test, $assign] : $assign;
+    }
   } else {
     $bind_base->() if @keys > 1 || $expr;
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
   }
   return { opens => \@opens, inner => \@inner, value => $value };
+}
+
+# Is the expression PARTS provably ONE scalar -- the same value in list and
+# scalar context?  ExprToCL's own answer to that question
+# (_push_item_is_scalar: a literal, a `$` variable or element, a string, an
+# anonymous constructor, a scalar operator), asked of an analysis parse; a
+# call, an array, a list, a ternary answer no (they decline, never guess).
+sub _rhs_one_scalar {
+  my ($self, $parts) = @_;
+  my $p = $self->fallback_parser;
+  return $self->_with_analysis_parse($parts, sub {
+    my ($expr_o, $id) = @_;
+    return $p->_expr_generator($expr_o)->_push_item_is_scalar($id) ? 1 : 0;
+  }) ? 1 : 0;
 }
 
 # The container of an element target: a named one's storage (a stash's is

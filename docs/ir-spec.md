@@ -4316,6 +4316,19 @@ $h{a}{b} = 6` lowers to `(let ((pcl-local-init-0 6)) (let ((pcl-local-base-1
 (p-viv-container (p-gethash %h "a")))) (p-local-hash-elem-init
 pcl-local-base-1 "b" pcl-local-init-0 …)))`.
 
+**A PARENTHESISED element target is a LIST assignment (normative, s543g /
+#1339)**, as a parenthesised variable is (#1243 (a)): `local($a[1]) = (7,8)`
+stores 7, and the right side runs in LIST context (`= @l` stores `$l[0]`, a
+call sees `wantarray` true); the statement's value is the list assignment's (the
+element in list context, the right side's count in scalar).  When the right
+side is provably ONE scalar (ExprToCL's `_push_item_is_scalar`: a literal, a
+`$` variable or element, a string, an anonymous constructor or sub, a scalar
+operator) the two readings store the same value, and the statement keeps the
+scalar `p-local-*-elem-init` form.  Example: `local($h{k}) = f($v)` lowers to
+`(let ((pcl-local-init-0 (let ((*wantarray* t)) (p-list-ctx (pl-f $v))))) (p-local-hash-elem
+%h "k" (p-list-= (vector (p-gethash %h "k")) pcl-local-init-0) …))`, while
+`local($h{k}) = $_[0]` stays `(p-local-hash-elem-init %h "k" (p-aref @_ 0) …)`.
+
 **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
 #541). Perl does not execute the statement at all when the condition is
 false, so nothing is saved and nothing is restored — and a WRITE to the slot

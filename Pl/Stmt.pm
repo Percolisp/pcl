@@ -313,7 +313,11 @@ sub local_shape {
     my $x = ref $_;
     $x ne 'PPI::Token::Whitespace' && !($x eq 'PPI::Token::Word' && $_->content eq 'local')
   } @parts;
+  # A parenthesised target is a LIST assignment's (perl reads the parens):
+  # paren = the pre-unwrap below took the parens off a single target.
+  my $paren0 = (@nonws && ref($nonws[0]) eq 'PPI::Structure::List') ? 1 : 0;
   $r{deref_paren} = local_paren_unwrap(\@nonws);
+  $r{paren} = ($paren0 && !(@nonws && ref($nonws[0]) eq 'PPI::Structure::List')) ? 1 : 0;
   $r{nonws} = \@nonws;
   my ($n0, $n1, $n2) = @nonws;
   my $c0 = $n0 ? $n0->content : '';
@@ -342,9 +346,10 @@ sub local_shape {
 # `local($x)`, `local($h{k})`, `local($r->{k})`, `local(@$r{…})`, `local($$r)`
 # -- IN PLACE on @$nonws.  Returns 1 for an UNSUBSCRIPTED cast (its parens
 # still make the assignment a LIST one, #3365), else 0.  The parens of a
-# SUBSCRIPTED single element are discarded here, and that is #1339 (perl
-# reads list-vs-scalar assignment off them); a lone variable keeps them in
-# `parts`, which the items path reads (#1243 (a)).
+# SUBSCRIPTED single element are discarded here; local_shape records that
+# they were there (`paren`), which the element plan reads (#1339: perl reads
+# list-vs-scalar assignment off them); a lone variable keeps them in `parts`,
+# which the items path reads (#1243 (a)).
 sub local_paren_unwrap {
   my ($nonws) = @_;
   return 0 unless @$nonws && ref($nonws->[0]) eq 'PPI::Structure::List';
