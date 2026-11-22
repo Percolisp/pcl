@@ -48,7 +48,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 36;
+plan tests => 41;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -597,4 +597,97 @@ our $hr = \%h; { local $hr->{@a} = "dr"; print "15 $h{2}\n"; } print "16 $h{2}\n
     is($out, "1 loc\n2 two\n3 undef\n4 two\n5 10 11 99 13\n6 10 11 12 13\n9 lr\n10 two\n"
            . "11 x y\n12 one two\n13 p q\n14 two 10\n15 dr\n16 two\n",
        'L1: local $h{@a} / $hr->{@a} / ($h{@a}, ...) key on the COUNT; slices still spread');
+}
+
+# ─── Group M: a CHAINED / expression element as a `local` target (s543g) ─────
+# The element is the target's LAST subscript; its container is the run before
+# it, evaluated once as an ordinary expression (an element container vivifies,
+# p-viv-container; a reference value is dereferenced) -- Pl::Stmt::
+# local_expr_elem_base, Parser2::_local_expr_container.  #540 #1190 #3415: the
+# base localized the chain's FIRST element and stored the value there (the
+# inner element read empty), dropped the list / call spellings, and `local
+# $_[0]` localized $_.  Expected text probed under perl 5.40.3
+# (scratch/s543g/probes/guardA); every row FAILS on the 8959afae extraction.
+{
+    my $out = run_pl(q{
+our %hh; $hh{a} = {b => 1}; our @a = ({k => 1}, [5, 6]); our %rm = (R => {c => 3});
+my $r = {a => {b => 1}, l => [0, {k => 2}]}; my $o = bless {list => [1, 2, 3]}, 'Obj';
+my %m = (x => {y => 1}); %Foo::h = (a => {b => 1});
+my %store = (a => {b => 1}); sub f { \%store }
+{ local $hh{a}{b} = 6; local $a[0]{k} = 7; local $a[1][1] = 8; local $r->{a}{b} = 9;
+  local $r->{l}[1]{k} = 10; local $rm{R}->{c} = 11; local $$r{a}{b} = 12; local $o->{list}[2] = 13;
+  local $m{x}{y} = 14; local $Foo::h{a}{b} = 15; local f()->{a}{b} = 16;
+  print "1 $hh{a}{b} $a[0]{k} $a[1][1] $r->{a}{b} $r->{l}[1]{k} $rm{R}{c} $o->{list}[2] $m{x}{y} $Foo::h{a}{b} $store{a}{b}\n"; }
+print "2 $hh{a}{b} $a[0]{k} $a[1][1] $r->{a}{b} $r->{l}[1]{k} $rm{R}{c} $o->{list}[2] $m{x}{y} $Foo::h{a}{b} $store{a}{b}\n";
+});
+    is($out, "1 6 7 8 12 10 11 13 14 15 16\n"
+           . "2 1 1 6 1 2 3 3 1 1 1\n",
+       'M1: local on a CHAINED element localizes the LAST subscript of the chain, every spelling (#540 #3415)');
+}
+
+{
+    my $out = run_pl(q{
+my %h; my @y; our %g = (a => {b => 1});
+{ local $h{a}{b} = 5; local $y[0][0] = 6; print "1 $h{a}{b} $y[0][0]\n"; }
+print "2 ", (exists $h{a} ? "viv" : "-"), (exists $h{a}{b} ? "E" : "N"), (defined $y[0] ? "viv" : "-"), "\n";
+my @w; { my $q = local $w[0][0]; } print "3 ", (defined $w[0] ? "viv" : "-"), "\n";
+{ local $g{a}{b}; print "4 ", (defined $g{a}{b} ? "def" : "undef"), (exists $g{a}{b} ? "E" : "N"), "\n"; }
+{ local $g{a}{b} = $g{a}{b} + 1; print "5 $g{a}{b}\n"; }
+sub v { local $g{a}{b} = 7 } print "6 ", v(), " $g{a}{b}\n";
+my ($t, $u) = (1, 0); { local $g{a}{b} = 8 if $t; print "7 $g{a}{b}\n"; }
+{ local $g{a}{b} = 9 if $u; $g{a}{b} = 10; } print "8 $g{a}{b}\n";
+});
+    is($out, "1 5 6\n"
+           . "2 vivNviv\n"
+           . "3 viv\n"
+           . "4 undefE\n"
+           . "5 2\n"
+           . "6 7 1\n"
+           . "7 8\n"
+           . "8 10\n",
+       'M2: a chained local vivifies the container, restores to non-existence, keeps the stale read, the value and the modifier (#1190)');
+}
+
+{
+    my $out = run_pl(q{
+our %h = (a => {b => 1, c => 2}, x => [1, 2]); our $p = 0;
+{ local ($p, $h{a}{b}, $h{x}[0]) = (5, 6, 7); print "1 $p $h{a}{b} $h{x}[0]\n"; }
+print "2 $p $h{a}{b} $h{x}[0]\n";
+{ delete local $h{a}{b}; print "3 ", join(",", sort keys %{$h{a}}), "\n"; }
+print "4 ", join(",", sort keys %{$h{a}}), "\n";
+});
+    is($out, "1 5 6 7\n"
+           . "2 0 1 1\n"
+           . "3 c\n"
+           . "4 b,c\n",
+       'M3: a chained element in a local LIST and under delete local (#540)');
+}
+
+{
+    my $out = run_pl(q{
+my $x = {a => 1, b => 2, c => 3}; my @k = qw(a b); our %h = (q => {x => 1, y => 2, z => 3}); my $r = [10, 20, 30];
+{ local $x->@{@k}; print "1 ", join(",", map { $_ // "u" } @$x{qw(a b c)}), "\n"; }
+{ local $h{q}->@{qw(x y)} = (5, 6); print "2 ", join(",", @{$h{q}}{qw(x y z)}), "\n"; }
+{ local $r->@[1, 2] = (7, 8); print "3 @$r\n"; }
+print "4 ", join(",", @$x{qw(a b c)}), " ", join(",", @{$h{q}}{qw(x y z)}), " @$r\n";
+});
+    is($out, "1 u,u,3\n"
+           . "2 5,6,3\n"
+           . "3 10 7 8\n"
+           . "4 1,2,3 1,2,3 10 20 30\n",
+       'M4: a postfix slice local localizes the named elements of the referent (#3415)');
+}
+
+{
+    my $out = run_pl(q{
+sub f { local $_[0] = 5; return $_[0] } my $v = 1; print "1 ", f($v), " $v\n";
+sub TA::TIEARRAY { bless {a => []}, shift } sub TA::FETCH { $_[0]{a}[$_[1]] } sub TA::STORE { $_[0]{a}[$_[1]] = $_[2] }
+sub TA::FETCHSIZE { scalar @{$_[0]{a}} } sub TA::STORESIZE {}
+tie my @t, 'TA'; $t[1] = {n => "N"};
+{ local $t[1]{n} = "LN"; print "2 $t[1]{n}\n"; } print "3 $t[1]{n}\n";
+});
+    is($out, "1 5 1\n"
+           . "2 LN\n"
+           . "3 N\n",
+       'M5: local $_[0] is the element of @_; a chained local under a tied OUTER array calls no EXISTS (#1190)');
 }

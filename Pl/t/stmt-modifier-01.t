@@ -79,7 +79,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 46;
+plan tests => 47;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -341,15 +341,23 @@ PL
 # Rule 12: a target shape with no lowering is a DROP — loud at compile time
 # and a perl-shaped die when reached — never the old silent flattening to
 # whatever Symbol it happened to contain.  (A `local` statement handler cannot
-# just die: nothing above it catches, so the whole FILE would be lost.)
+# just die: nothing above it catches, so the whole FILE would be lost.)  The
+# chained-subscript target these two rows used to drop is LOWERED since s543g
+# (#540: the row after them runs it); a symbolic ARRAY deref in a list is the
+# shape that still has no lowering.
 {
     my ($cl, $err, $rc) = PCLCore::transpile_raw("$pl2cl " . write_pl(
-        q{our %h; our $p; $h{a}={b=>1}; local ($p, $h{a}{b}) = (5,6);}));
+        q{no strict "refs"; our @a = (1); our $p; local ($p, @{"main::a"}) = (5,6);}));
     like($err, qr/^PCL: statement dropped.*unsupported `local` target/m,
-         'a chained-subscript target in a local LIST drops loudly (rule 12)');
+         'a symbolic array-deref target in a local LIST drops loudly (rule 12)');
     like($cl, qr/PARSE ERROR: .*unsupported `local` target/,
          '…and the file still compiles: only that statement is replaced');
 }
+is(run_cl(<<'PL'), "5,6\nundef,1\n",
+our %h; our $p; $h{a}={b=>1}; { local ($p, $h{a}{b}) = (5,6); print "$p,$h{a}{b}\n" }
+print defined $p ? "def" : "undef", ",$h{a}{b}\n";
+PL
+   'a chained-subscript target in a local LIST localizes the inner element (#540; was the drop above)');
 
 # ── 7. task #541 — the SAVE AND RESTORE are conditional, never the value ────
 # Every expectation below is the live `perl` answer (probed s450v, 5.40.3).

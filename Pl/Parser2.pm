@@ -14856,8 +14856,12 @@ sub _local_notinline_decl {
 sub _local_plan_delete {
   my ($self, $stmt, $rec) = @_;
   my $open = $rec->{sub}->start->content;
-  my $cl;
-  if ($rec->{arrow}) {
+  my ($cl, @pre);
+  if ($rec->{expr}) {
+    # an expression container (#540), evaluated once
+    $cl = $self->_local_tmp('pcl-local-base-');
+    @pre = (_local_let1($cl, $self->_local_expr_container($rec->{expr}, $open, $stmt)));
+  } elsif ($rec->{arrow}) {
     $cl = ['unbox', $self->_lower_expr([$rec->{sym}], $stmt)];
   } else {
     my $base = substr($rec->{sym}->content, 1);
@@ -14867,7 +14871,7 @@ sub _local_plan_delete {
   my @keys = $self->_local_key_list($rec->{sub}, $open, $stmt);
   my ($macro, $del) = $open eq '{' ? ('p-local-hash-elem', 'p-delete')
                                    : ('p-local-array-elem', 'p-delete-array');
-  return { opens => [map { [$macro, $cl, $_, [$del, $cl, $_]] } @keys], inner => [] };
+  return { opens => [@pre, map { [$macro, $cl, $_, [$del, $cl, $_]] } @keys], inner => [] };
 }
 
 # The keys of a subscript, one form each; a lone qw// expands into its words.
@@ -14981,23 +14985,34 @@ sub _local_plan_elem {
   # A hash SLICE's key group that is not one literal key may name many keys
   # at run time (`@h{@k}`): p-local-hash-slice localizes each.
   my @macros = map { ($slice && $open eq '{' && !_local_literal_key($_)) ? 'p-local-hash-slice' : $macro } @kg;
+  # An EXPRESSION container (a chain, a call: Pl::Stmt::local_expr_elem_base)
+  # is evaluated ONCE, after the right side and before the localization --
+  # perl's order -- into a temporary (the element macros read their container
+  # more than once); a condition is then read more than once too.
+  my $expr = $rec->{ebase} eq 'expr';
   my (@opens, @inner, $test, $value);
   if ($mod ne '') {
     $test = $self->_local_cond_form($mod, $rec->{cond}, $stmt);
-    if (@keys > 1 || $slice) {
+    if (@keys > 1 || $slice || $expr) {
       my $ct = $self->_local_tmp('pcl-local-cond-');
       push @opens, _local_let1($ct, $test);
       $test = $ct;
     }
   }
   my $bind_base = sub {
-    return unless $rec->{base_expr};
+    return unless $rec->{base_expr} || $expr;
     my $bt = $self->_local_tmp('pcl-local-base-');
     push @opens, _local_let1($bt, defined $test ? ['if', $test, $cl, 'nil'] : $cl);
     $cl = $bt;
   };
   if (defined $init && @keys == 1 && !$slice) {
     my $mi = $open eq '{' ? 'p-local-hash-elem-init' : 'p-local-array-elem-init';
+    if ($expr) {
+      my $it = $self->_local_tmp('pcl-local-init-');
+      push @opens, _local_let1($it, defined $test ? ['if', $test, $init, 'nil'] : $init);
+      $init = $it;
+      $bind_base->();
+    }
     push @opens, _local_open([$mi, $cl, $keys[0], $init], $test);
     $value = _local_elem_place($open, $cl, \@keys) if $mod eq '';
   } elsif (defined $init) {
@@ -15010,7 +15025,7 @@ sub _local_plan_elem {
       ['p-setf', [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys], $tmp]);
     push @inner, defined $test ? ['when', $test, $assign] : $assign;
   } else {
-    $bind_base->() if @keys > 1;
+    $bind_base->() if @keys > 1 || $expr;
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
   }
   return { opens => \@opens, inner => \@inner, value => $value };
@@ -15018,10 +15033,12 @@ sub _local_plan_elem {
 
 # The container of an element target: a named one's storage (a stash's is
 # the `(p-stash …)` text, which the caller skips), an arrow's referent, a
-# cast's through the cast form a plain read uses (#1341).
+# cast's through the cast form a plain read uses (#1341), an expression's
+# through _local_expr_container.
 sub _local_elem_container {
   my ($self, $stmt, $rec, $open) = @_;
   my $nw = $rec->{nonws};
+  return $self->_local_expr_container($rec, $open, $stmt) if $rec->{ebase} eq 'expr';
   if ($rec->{ebase} eq 'sym') {
     my $base = substr($nw->[0]->content, 1);
     return $self->_local_container(($open eq '{' ? '%' : '@') . $base);
@@ -15031,6 +15048,22 @@ sub _local_elem_container {
     ? $self->_lower_expr([$nw->[1]], $stmt)
     : $self->_lower_expr([Pl::Stmt::flat_children($nw->[1])], $stmt);
   return Pl::ExprToCL::_cast_form($open eq '{' ? 'p-cast-%' : 'p-cast-@', $base);
+}
+
+# The container of an EXPRESSION element target (#540 #1190 #3415; the
+# record of Pl::Stmt::local_expr_elem_base): the container's tokens lowered
+# as the ordinary expression they are.  An ELEMENT container is used as an
+# aggregate, so it takes the mark a plain read of the chain gives it
+# (`p-viv-container` / `p-viv-array-container`, #1241: `local $y[0][0]`
+# vivifies `$y[0]` as `$y[0][0] = 5` does); any other container is a
+# reference value, dereferenced through the cast form a plain `${EXPR}{k}`
+# reads (`f()->{k}`, `$o->meth->{k}`, the postfix slice `$r->@{…}`).
+sub _local_expr_container {
+  my ($self, $rec, $open, $stmt) = @_;
+  my $form = $self->_lower_expr($rec->{cont}, $stmt);
+  return [($open eq '{' ? 'p-viv-container' : 'p-viv-array-container'), $form]
+    if $rec->{cont_elem};
+  return Pl::ExprToCL::_cast_form($open eq '{' ? 'p-cast-%' : 'p-cast-@', $form);
 }
 
 # A key group that is one literal key (a string, a number, a bareword, one
@@ -15147,6 +15180,13 @@ sub _local_plan_items {
     $rhs = ['if', $st{ctmp}, $rhs, 'nil'] if $mod ne '';
     $rhs_tmp = $self->_local_tmp('pcl-local-rhs-');
     unshift @{ $st{bindings} }, [$rhs_tmp, $rhs, 1];
+  }
+  # An expression element's container (#540), after the right side and
+  # before any target is localized -- gated on the condition like the RHS.
+  if (my @pre = map { $_->{pre} ? $_->{pre} : () } @items) {
+    splice(@{ $st{bindings} }, ($rhs_tmp ? 1 : 0), 0,
+           map { [$_->[0], ($mod ne '' ? ['if', $st{ctmp}, $_->[1], 'nil'] : $_->[1]), 1] } @pre);
+    $st{let_star} = 1;
   }
   if (defined $st{ctmp}) {
     unshift @{ $st{bindings} }, [$st{ctmp}, $self->_local_cond_form($mod, $rec->{cond}, $stmt), 1];
@@ -15336,7 +15376,8 @@ sub _local_target_item {
     my $place = ref($t0) eq 'PPI::Token::Magic' ? $self->_lower_expr([$t0], $stmt) : $cl;
     return { kind => 'var', cl => $cl, place => $place };
   }
-  if (@$g == 2 && ref($t0) eq 'PPI::Token::Symbol' && ref($t1) eq 'PPI::Structure::Subscript') {
+  if (@$g == 2 && (ref($t0) eq 'PPI::Token::Symbol' || ref($t0) eq 'PPI::Token::Magic')
+      && ref($t1) eq 'PPI::Structure::Subscript') {
     my $open = $t1->start->content;
     my $cl = $self->_local_container(($open eq '{' ? '%' : '@') . substr($t0->content, 1));
     my @kg = Pl::Stmt::subscript_key_groups($t1);
@@ -15352,6 +15393,23 @@ sub _local_target_item {
     my $place = $self->_lower_expr([@$g], $stmt);
     return { kind => 'deref', place => $place, macro => 'p-local-deref-scalar',
              cl => $self->_local_deref_ref_form($t1, $stmt) };
+  }
+  # An EXPRESSION container (a chain `$h{a}{b}`, a call, a postfix slice):
+  # the single statement's reading and container (#540), the container
+  # evaluated once into a temporary bound before the opens (`pre`).
+  if (my $e = Pl::Stmt::local_expr_elem_base($g)) {
+    my $open = $e->{sub}->start->content;
+    my @kg = Pl::Stmt::subscript_key_groups($e->{sub});
+    die "Parser2 TODO: empty subscript in a `local` target\n" unless @kg;
+    my $elem = !$e->{slice} && @kg == 1;
+    my $kctx = ($open eq '[' || $e->{slice}) ? 1 : undef;
+    my @keys = map { $self->_local_key_form($_, $open, $stmt, $kctx, $elem) } @kg;
+    my $bt = $self->_local_tmp('pcl-local-base-');
+    return { kind => 'elem', cl => $bt, keys => \@keys, scalar => $elem ? 1 : 0,
+             pre => [$bt, $self->_local_expr_container($e, $open, $stmt)],
+             macro => $open eq '[' ? 'p-local-array-slice'
+                    : $e->{slice} ? 'p-local-hash-slice' : 'p-local-hash-elem',
+             place => _local_elem_place($open, $bt, \@keys) };
   }
   die "Parser2 TODO: unsupported `local` target: "
     . join('', map { $_->content // '' } @$g) . "\n";

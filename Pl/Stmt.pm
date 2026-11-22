@@ -424,21 +424,76 @@ sub local_rhs_after {
 
 # An element / slice `local` target's fields, or undef.  Three bases: a named
 # container (`$h{k}`, `@a[…]`), an arrow off a scalar (`$r->{k}`), a cast
-# (`${$r}{k}`, `@{EXPR}{…}`, `@$r[…]`).
+# (`${$r}{k}`, `@{EXPR}{…}`, `@$r[…]`) -- and a fourth, `expr`, for every
+# other target that ends in a subscript (local_expr_elem_base).
 sub local_elem_shape {
   my ($nw) = @_;
   my ($n0, $n1, $n2) = @$nw;
   return undef unless $n0 && $n1;
-  my $e = local_elem_base($nw) or return undef;
+  my $e = local_expr_elem_base($nw) // local_elem_base($nw) or return undef;
   # An EMPTY subscript is not an element target (v1's branch fell through).
   return subscript_key_groups($e->{sub}) ? $e : undef;
+}
+
+# A target whose CONTAINER is an expression of its own (#540 #1190 #3415): the
+# target is the run before the statement's first `=`, it ENDS in a subscript,
+# and that LAST subscript is the element -- the container is the whole run
+# before it (a `->` between the two dropped), evaluated as an ordinary
+# expression.  So `$h{a}{b}` is element `{b}` of `$h{a}`, `$o->{l}[2]` element
+# `[2]` of `$o->{l}`, `f()->{a}{b}` element `{b}` of `f()->{a}`, and the
+# POSTFIX slice `$r->@{…}` / `$h{a}->@[…]` (perl 5.24) the slice of the
+# referent.  The ONE-level spellings (`$h{k}`, `$r->{k}`, `${$r}{k}`) are not
+# this shape: local_elem_base keeps them, byte for byte.  Fields: ebase
+# `expr`, cont (the container's tokens), cont_elem (1 when the container is
+# itself an element -- perl then VIVIFIES it, `local $y[0][0]` creates
+# `$y[0]`; else it is a reference value to dereference), sub / sub_idx (the
+# last subscript), slice.  A postfix key/value slice (`->%{…}`) is not a
+# `local` target perl accepts: undef (the caller's other kinds refuse it).
+sub local_expr_elem_base {
+  my ($nw) = @_;
+  my $end = scalar @$nw;
+  for my $i (0 .. $#$nw) {
+    next unless ref($nw->[$i]) eq 'PPI::Token::Operator' && $nw->[$i]->content eq '=';
+    $end = $i;
+    last;
+  }
+  return undef unless $end >= 2 && ref($nw->[$end - 1]) eq 'PPI::Structure::Subscript';
+  my ($j, $postfix) = ($end - 2, '');
+  if ($j >= 1 && ref($nw->[$j]) eq 'PPI::Token::Cast' && $nw->[$j]->content =~ /^[\@%]$/
+      && ref($nw->[$j - 1]) eq 'PPI::Token::Operator' && $nw->[$j - 1]->content eq '->') {
+    $postfix = $nw->[$j]->content;
+    $j -= 2;
+  } elsif (ref($nw->[$j]) eq 'PPI::Token::Operator' && $nw->[$j]->content eq '->') {
+    $j -= 1;
+  }
+  return undef if $j < 0 || $postfix eq '%';
+  my @cont = @$nw[0 .. $j];
+  my $arrow = $j < $end - 2;
+  # The three one-level bases stay local_elem_base's (their emission is fixed).
+  if ($postfix eq '') {
+    my $c0 = ref $cont[0];
+    return undef if @cont == 1 && ($c0 eq 'PPI::Token::Symbol' || $c0 eq 'PPI::Token::Magic');
+    return undef if @cont == 2 && !$arrow && $c0 eq 'PPI::Token::Cast'
+      && (ref($cont[1]) eq 'PPI::Structure::Block' || ref($cont[1]) eq 'PPI::Token::Symbol');
+  }
+  my $head = $cont[0]->content;
+  my $slice = $postfix eq '@' ? 1 : 0;
+  # A chain spelled with a leading array / hash sigil (`@{$h{a}}{…}` is the
+  # cast base above): not this shape.
+  return undef if !$slice && $head =~ /^[\@%]/;
+  return { ebase => 'expr', cont => \@cont,
+           cont_elem => (ref($cont[-1]) eq 'PPI::Structure::Subscript' ? 1 : 0),
+           sub => $nw->[$end - 1], sub_idx => $end - 1, slice => $slice };
 }
 
 sub local_elem_base {
   my ($nw) = @_;
   my ($n0, $n1, $n2) = @$nw;
   my $sub = 'PPI::Structure::Subscript';
-  if (ref($n0) eq 'PPI::Token::Symbol' && ref($n1) eq $sub) {
+  # (A punctuation name's element -- `$_[0]`, `$^H{x}`, `$+{n}` -- is a
+  # MAGIC token before its subscript: the same named container.  It used to
+  # fall to the items reading, which localized the SCALAR `$_` / `$^H`.)
+  if ((ref($n0) eq 'PPI::Token::Symbol' || ref($n0) eq 'PPI::Token::Magic') && ref($n1) eq $sub) {
     return { ebase => 'sym', sub => $n1, sub_idx => 1,
              slice => ($n0->content =~ /^\@/ ? 1 : 0) };
   }
@@ -464,6 +519,11 @@ sub local_delete_shape {
     unless $l && ref($l) eq 'PPI::Token::Word' && $l->content eq 'local'
         && $s && ref($s) eq 'PPI::Token::Symbol' && $x;
   my $sub = 'PPI::Structure::Subscript';
+  # An EXPRESSION container (`delete local $h{a}{b}`, #540): the one reading
+  # the `local` statement takes (local_expr_elem_base).
+  my $e = local_expr_elem_base([@$parts[2 .. $#$parts]]);
+  return { lk => 'delete', parts => $parts, expr => $e, sub => $e->{sub} }
+    if $e && !$e->{slice} && subscript_key_groups($e->{sub});
   return { lk => 'delete', parts => $parts, sym => $s, arrow => 0, sub => $x }
     if ref($x) eq $sub;
   return { lk => 'delete', parts => $parts, sym => $s, arrow => 1, sub => $y }

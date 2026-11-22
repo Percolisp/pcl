@@ -4298,6 +4298,24 @@ localize through a reference" as perl does -- and its place is the deref
 expression itself. Example: `local($$r, $y) = (7, 8)` with `$r = "g"` gives
 `$g` = 7 and `$y` = 8 inside the block, both restored after.
 
+**A `local` element target is its LAST subscript (normative, s543g / #540
+#1190 #3415).**  The element is the target's final subscript; the container
+is the whole run before it (a `->` between them dropped), evaluated ONCE as
+the ordinary expression it is, after the right side and before the
+localization.  An ELEMENT container (`$h{a}{b}`, `$o->{l}[2]`) is marked as a
+plain read of the chain marks it (`p-viv-container` / `-array-`: perl
+vivifies `$y[0]` for `local $y[0][0]`); any other container is a reference
+value dereferenced through the cast form (`f()->{k}`, `$o->m->{k}`, the
+postfix slice `$r->@{…}` / `$r->@[…]`, whose elements are localized one by
+one).  The restore puts back the old element or REMOVES a key that did not
+exist; a tied OUTER aggregate is only FETCHed.  The same reading serves a
+target in a `local (…)` list and `delete local`; a punctuation aggregate's
+element (`$_[0]`, `$^H{x}`, `$+{n}`) is a named container's.  The one-level
+spellings (`$h{k}`, `$r->{k}`, `${$r}{k}`) emit as before.  Example: `local
+$h{a}{b} = 6` lowers to `(let ((pcl-local-init-0 6)) (let ((pcl-local-base-1
+(p-viv-container (p-gethash %h "a")))) (p-local-hash-elem-init
+pcl-local-base-1 "b" pcl-local-init-0 …)))`.
+
 **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
 #541). Perl does not execute the statement at all when the condition is
 false, so nothing is saved and nothing is restored — and a WRITE to the slot

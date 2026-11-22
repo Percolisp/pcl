@@ -1518,10 +1518,12 @@ row now pass and are no longer in the skip registry.
   **Since s519a (#3370) both rows PASS and left the registry (s519b, Fable ruling s520)**: row 47
   honestly (the hoisted `local` restores the element), row 49 by ACCIDENT (the
   multideref.t:220 refusal dies before its assignment runs, #3414 -- re-examine when :220 is lowered).
-- **`local` on a nested element whose intermediate is undef — BUG, task #1190 (not a
-  limitation).**  `local $y[0][0] = 5` must vivify `$y[0]` and read 5 inside the scope;
-  PCL reads empty and never vivifies.  `my $q = local $w[0][0]` likewise leaves `$w[0]`
-  undef where perl vivifies.  Owner #1190 (the local-element family, #508–#510).
+- **`local` on a nested element — SUPPORTED since s543g (#540 #1190 #3415).**
+  `local $y[0][0] = 5` vivifies `$y[0]` and reads 5 inside the scope, `my $q =
+  local $w[0][0]` vivifies `$w[0]`; every chain spelling, a call or method
+  container, a postfix slice, the `local (…)` list and `delete local` localize the
+  target's LAST subscript (ir-spec §7.2 "A `local` element target is its LAST
+  subscript").  The RT #130727 corner above is unchanged.
 
 ---
 
