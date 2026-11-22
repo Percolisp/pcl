@@ -48,7 +48,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 41;
+plan tests => 43;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -690,4 +690,40 @@ tie my @t, 'TA'; $t[1] = {n => "N"};
            . "2 LN\n"
            . "3 N\n",
        'M5: local $_[0] is the element of @_; a chained local under a tied OUTER array calls no EXISTS (#1190)');
+}
+
+{
+    my $out = run_pl(q{
+our %g = (d => 'kept'); my %h = (d => 'kept', e => 'E'); our @a = (1, 2, 3); our %c = (a => {x => 1, y => 2});
+sub dl { my $v; { $v = delete local $h{d}; } "1 $v " . ($h{d} // 'U') }
+sub dg { my @v = delete local @a[0, 1]; "2 @v " . scalar(grep { defined } @a) }
+sub show { "[@_]" . (exists $g{d} ? "E" : "N") }
+sub ca { show(delete local $g{d}) }
+sub rt { return delete local $g{d} }
+sub ch { my $v = delete local $c{a}{x}; $v . (exists $c{a}{x} ? "E" : "N") }
+print dl(), "\n", dg(), " @a\n", "3 ", ca(), " $g{d}\n", "4 ", rt(), " $g{d}\n", "5 ", ch(), " $c{a}{x}\n";
+my $t = do { delete local $h{e} }; print "6 $t $h{e}\n";
+});
+    is($out, "1 kept kept\n"
+           . "2 1 2 1 1 2 3\n"
+           . "3 [kept]N kept\n"
+           . "4 kept kept\n"
+           . "5 1N 1\n"
+           . "6 E E\n",
+       'M6: delete local as an EXPRESSION term: the value is the deleted element, the restore at the block end (#5001)');
+}
+
+{
+    my $out = run_pl(q{
+our %h = (k => 1, a => 1, b => 2); my $c = 0;
+{ delete local $h{k} if $c; print "1 ", (exists $h{k} ? "E" : "N"), "\n"; $h{k} = 9; }
+{ delete local @h{qw(a b)} unless $c; print "2 ", join(",", sort keys %h), "\n"; }
+{ delete local $h{k} if !$c; print "3 ", (exists $h{k} ? "E" : "N"), "\n"; $h{k} = 7; }
+print "4 $h{k} ", join(",", sort keys %h), "\n";
+});
+    is($out, "1 E\n"
+           . "2 k\n"
+           . "3 N\n"
+           . "4 9 a,b,k\n",
+       'M7: delete local ELEM if / unless COND saves, deletes and restores only when COND holds (#5250)');
 }

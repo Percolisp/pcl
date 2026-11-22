@@ -516,8 +516,27 @@ sub local_elem_base {
   return undef;
 }
 
-# Standalone `delete local SYM SUBSCRIPT` / `delete local $r->SUBSCRIPT`.
+# Standalone `delete local SYM SUBSCRIPT` / `delete local $r->SUBSCRIPT`.  A
+# trailing if / unless modifier is cut off into mod / cond -- the plan gates
+# the save and restore on it, as every other kind's (#5250: it was ignored, the
+# element deleted when the condition was false); a loop modifier never gets
+# here (the statement-modifier desugar makes the loop first).
 sub local_delete_shape {
+  my ($parts) = @_;
+  my ($mod, $cond) = ('', []);
+  for my $i (2 .. $#$parts) {
+    next unless ref($parts->[$i]) eq 'PPI::Token::Word'
+      && Pl::PExpr::Config::is_statement_modifier_word($parts->[$i]);
+    last unless $parts->[$i]->content =~ /^(?:if|unless)$/;
+    ($mod, $cond, $parts) = ($parts->[$i]->content, [@$parts[$i + 1 .. $#$parts]],
+                             [@$parts[0 .. $i - 1]]);
+    last;
+  }
+  my $r = _local_delete_target($parts);
+  return $r->{lk} eq 'delete' ? { %$r, mod => $mod, cond => $cond } : $r;
+}
+
+sub _local_delete_target {
   my ($parts) = @_;
   my ($d, $l, $s, $x, $y) = @$parts;
   return { lk => 'seam', why => 'delete-local-other' }

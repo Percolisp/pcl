@@ -6615,6 +6615,10 @@ sub _lower_local_terms {
     next if $changed;
     for my $m (@miss) {
       my ($l, $s) = @$m;
+      # a `delete local` the hoist declines in a statement the local machinery
+      # owns -- a valued `delete local ELEM;`, `my (…) = delete local …` (the
+      # seam) -- keeps that lowering, as before (#5001)
+      next if _after_delete($l) && Pl::Stmt::is_local_stmt($s);
       if (_local_value_consumed($l, $s)) {
         $self->{_local_term_refusal}{ refaddr $s } //=     # holds $s: no address reuse
           [$s, "local in this expression position is not supported (#3370)"];
@@ -6733,8 +6737,13 @@ sub _real_statement_of {
 sub _local_term_reached {
   my ($l, $s) = @_;
   return 1 if $s->schild(0) == $l;
-  my $p = $l->sprevious_sibling;
-  return 1 if $p && $p->isa('PPI::Token::Word') && $p->content eq 'delete';
+  # `delete local ELEM` is the statement machinery's only as a whole VOID
+  # statement (Pl::Stmt::local_delete_shape, an if / unless modifier
+  # included); as a TERM of an expression, or as a block's VALUED last
+  # statement, the hoist gives the term its value -- the deleted element
+  # (#5001: the expression lowered as a plain delete, the element gone for good).
+  return (_delete_local_stmt($l, $s) && !_stmt_in_value_position($s)) ? 1 : 0
+    if _after_delete($l);
   for (my $a = $l->parent; $a && $a != $s; $a = $a->parent) {
     return 1 if $a->isa('PPI::Structure::Signature');
   }
@@ -6745,6 +6754,19 @@ sub _local_term_reached {
     return 1 if defined $mine && defined $its && $mine eq $its;
   }
   return 0;
+}
+
+# Is the `local` word $l the operand of a `delete` (`delete local ELEM`)?
+sub _after_delete {
+  my ($l) = @_;
+  my $p = $l->sprevious_sibling;
+  return ($p && $p->isa('PPI::Token::Word') && $p->content eq 'delete') ? 1 : 0;
+}
+
+# ... and is that `delete` the first word of statement $s (the statement form)?
+sub _delete_local_stmt {
+  my ($l, $s) = @_;
+  return (_after_delete($l) && $s->schild(0) == $l->sprevious_sibling) ? 1 : 0;
 }
 
 # The operand of a `local` word as source text (parens stripped, spaces
@@ -7040,7 +7062,8 @@ sub _hoist_local_term {
       $owner = 1 if $k eq 'owner';
       next;
     }
-    return 0 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/ && !$owner;
+    return 0 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/ && !$owner
+             && !_decl_list_comma($t);
     return 0 if !_token_inert_before_local($t, \%names);
   }
   my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
@@ -7089,6 +7112,12 @@ sub _hoist_local_term {
   return 0 if @heredocs != grep { $_->isa(q{PPI::Token::HereDoc}) } $s->tokens;
   return 0 if @heredocs && ($compound || $hd_line_ends);
   my $hdtext = @heredocs ? "\n" . join(q{}, map { join(q{}, $_->heredoc) . $_->terminator . "\n" } @heredocs) : q{};
+  # `delete local ELEM` (#5001): the hoisted local keeps the element's value
+  # (`local ELEM = ELEM`: the right side is read first) and the term left
+  # behind is `delete ELEM` -- its value the OLD element(s), the element gone
+  # until the block's end, as perl's.  The operand is side-effect free
+  # (_local_operand), so reading it three times is the same program.
+  my $keep = _after_delete($l) ? " = $optext" : '';
   if ($kw =~ /^(?:while|until)$/) {
     # perl restores a LOOP condition's local per iteration and when the loop
     # ends (RT #7615's to-the-block-end reading is if / unless only).  Wrapped
@@ -7099,10 +7128,21 @@ sub _hoist_local_term {
     my $c = $s->find_first('PPI::Structure::Condition') or return 0;
     return 0 if grep { !$own{ refaddr $_ } && $_->isa('PPI::Token::Symbol') && $names{ $_->symbol } }
                 $c->tokens;
-    return $self->_replace_statement_by($s, join(' ', '{', @decls, "local $optext;", $body, '}') . $hdtext, 1);
+    return $self->_replace_statement_by($s, join(' ', '{', @decls, "local $optext$keep;", $body, '}') . $hdtext, 1);
   }
-  my @stmts = (@decls, "local $optext$guard;", $body);
+  my @stmts = (@decls, "local $optext$keep$guard;", $body);
   return $self->_replace_statement_by($s, join(' ', @stmts) . $hdtext, scalar @stmts);
+}
+
+# A comma that separates the variables of a declaration's list (`my ($x, $y)
+# = delete local @a[1, 2]`): it evaluates nothing (#5001).
+sub _decl_list_comma {
+  my ($t) = @_;
+  my $e = $t->parent;
+  my $list = $e && $e->parent;
+  return 0 unless $e->isa('PPI::Statement::Expression') && $list && $list->isa('PPI::Structure::List');
+  my $w = $list->sprevious_sibling;
+  return ($w && $w->isa('PPI::Token::Word') && $w->content =~ /^(?:my|our|state)$/) ? 1 : 0;
 }
 
 # A token before the `local` term that the hoist may move the local above
@@ -15151,10 +15191,19 @@ sub _local_plan_delete {
   my ($self, $stmt, $rec) = @_;
   my $open = $rec->{sub}->start->content;
   my ($cl, @pre);
+  # `delete local ELEM if COND` (#5250): the condition FIRST and once, then
+  # each key's save / delete / restore only when it held (p-local-maybe, #541)
+  # (a temporary: a slice or an expression container reads it more than once)
+  my $test;
+  if (($rec->{mod} // '') ne '') {
+    $test = $self->_local_tmp('pcl-local-cond-');
+    push @pre, _local_let1($test, $self->_local_cond_form($rec->{mod}, $rec->{cond}, $stmt));
+  }
   if ($rec->{expr}) {
     # an expression container (#540), evaluated once
     $cl = $self->_local_tmp('pcl-local-base-');
-    @pre = (_local_let1($cl, $self->_local_expr_container($rec->{expr}, $open, $stmt)));
+    my $cont = $self->_local_expr_container($rec->{expr}, $open, $stmt);
+    push @pre, _local_let1($cl, defined $test ? ['if', $test, $cont, 'nil'] : $cont);
   } elsif ($rec->{arrow}) {
     $cl = ['unbox', $self->_lower_expr([$rec->{sym}], $stmt)];
   } else {
@@ -15165,7 +15214,8 @@ sub _local_plan_delete {
   my @keys = $self->_local_key_list($rec->{sub}, $open, $stmt);
   my ($macro, $del) = $open eq '{' ? ('p-local-hash-elem', 'p-delete')
                                    : ('p-local-array-elem', 'p-delete-array');
-  return { opens => [@pre, map { [$macro, $cl, $_, [$del, $cl, $_]] } @keys], inner => [] };
+  return { opens => [@pre, map { _local_open([$macro, $cl, $_, [$del, $cl, $_]], $test) } @keys],
+           inner => [] };
 }
 
 # The keys of a subscript, one form each; a lone qw// expands into its words.
