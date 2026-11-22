@@ -6617,8 +6617,10 @@ sub _lower_local_terms {
       my ($l, $s) = @$m;
       # a `delete local` the hoist declines in a statement the local machinery
       # owns -- a valued `delete local ELEM;`, `my (…) = delete local …` (the
-      # seam) -- keeps that lowering, as before (#5001)
-      next if _after_delete($l) && Pl::Stmt::is_local_stmt($s);
+      # seam) -- keeps that lowering, as before (#5001); only where it IS the
+      # statement's operand: one nested deeper (a ternary arm, `&&`) was a
+      # silent plain delete on the seam and is refused like any other term
+      next if _after_delete($l) && _delete_local_owned($l, $s);
       if (_local_value_consumed($l, $s)) {
         $self->{_local_term_refusal}{ refaddr $s } //=     # holds $s: no address reuse
           [$s, "local in this expression position is not supported (#3370)"];
@@ -6767,6 +6769,19 @@ sub _after_delete {
 sub _delete_local_stmt {
   my ($l, $s) = @_;
   return (_after_delete($l) && $s->schild(0) == $l->sprevious_sibling) ? 1 : 0;
+}
+
+# Does the statement machinery own the `delete local` at $l outright -- the
+# statement form `delete local ELEM`, or a `my` / `our` declaration whose `=`
+# is followed directly by the `delete` (Pl::Stmt::is_local_stmt's seam shape)?
+# A `delete local` deeper in the expression (`my $t = C ? delete local … : 0`)
+# is not: the seam lowered it as a plain delete.
+sub _delete_local_owned {
+  my ($l, $s) = @_;
+  return 1 if _delete_local_stmt($l, $s);
+  return 0 unless Pl::Stmt::is_local_stmt($s);
+  my $eq = $l->sprevious_sibling->sprevious_sibling;
+  return ($eq && $eq->isa('PPI::Token::Operator') && $eq->content eq '=' && $eq->parent == $s) ? 1 : 0;
 }
 
 # The operand of a `local` word as source text (parens stripped, spaces

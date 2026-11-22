@@ -258,6 +258,22 @@ PERL
          '... and the transpile announces the refusal');
 }
 
+# 8b. #5001 review (s543j): a `delete local` the hoist cannot lower -- a ternary
+#     arm, an `&&` / `||` / `//` operand -- inside a `my` declaration is REFUSED
+#     like any other term, never the old seam's plain delete (the element was
+#     gone for good: main printed err=0 and "a").  `do { delete local … }` and
+#     a `my (…)` list assignment's right side ARE lowered (local-elem-02.t).
+{
+    my $code = <<'PERL';
+our %h = (a => 1, b => 2); my $c = 1;
+sub f { my $t = 1 ? delete local $h{b} : 0; $t } sub g { my $t = $c && delete local $h{b}; $t }
+for my $s (\&f, \&g) { eval { $s->() }; print "err=", ($@ =~ /local in this expression position is not supported/ ? 1 : 0), " "; }
+print join(",", sort keys %h), "\n";
+PERL
+    my $err;
+    is(run_cl($code, \$err), "err=1 err=1 a,b\n", '#5001: delete local in a ternary arm / && operand refuses, the element kept');
+}
+
 # 9. #3363 (R1): a `local` term in an argument list a paren-less list operator
 #    OWNS is not a void comma list -- never split; the hoist owns it (the
 #    operator runs AFTER its arguments).  print / return / push / die / a

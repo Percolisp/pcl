@@ -5593,7 +5593,7 @@ sub gen_progn_form {
   elsif ($self->_scalar_ctx_pushdown($node_id)) {
     $self->expr_o->set_node_context($kids->[-1], SCALAR_CTX);
   }
-  elsif ($ctx == INHERIT_CTX && @$kids > 1) {
+  elsif ($ctx == INHERIT_CTX) {
     # #5125: an INHERIT comma list is a VALUED tail (a sub, `do`, `eval`
     # block's last statement): its value is the LAST element in the context
     # the value is read in, so the last kid INHERITS *wantarray* -- the
@@ -5601,7 +5601,10 @@ sub gen_progn_form {
     # arm and in scalar context in the scalar arm (`my $r = do { 1, <$h> }`
     # read the whole file: annotate_contexts gives every comma kid LIST, and
     # both arms carried the same `(p-list-ctx …)` form).  One generation, no
-    # leading element evaluated twice.
+    # leading element evaluated twice.  A ONE-kid layer passes the context on
+    # as well (the transparent layer of #611): `sub t { $_[0] and 3, 4 }` is
+    # progn(and($_[0], (3, 4))), and the `and` kept the layer's LIST, so its
+    # right operand was a vector in scalar context too (ARRAY(0x1)).
     $self->expr_o->set_node_context($kids->[-1], INHERIT_CTX);
   }
   my @forms = map { $self->gen_node_form($_) } @$kids;
