@@ -16,7 +16,7 @@ and are quoted below per family.
 * names exported: **774**
 * families: **19** with an ir-spec §10 rule, **36** without one
 * with a machine-readable `Contract:` tail: **71** of 774
-* UNCLASSIFIED (no family rule matches): **20**
+* UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -525,7 +525,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-seekdir` | macro | `(dh pos)` | — | — | — | — | — | — | — |
 | `p-telldir` | macro | `(dh)` | — | — | — | — | — | — | — |
 
-## dynamic-scope (19)
+## dynamic-scope (20)
 
 *No ir-spec §10 row.*  `local` in each of its place shapes — ir-spec §7.2
 
@@ -542,6 +542,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-local-deref-hash` | macro | `(ref-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-deref-scalar` | macro | `(ref-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-dot` | macro | `(&body body)` | — | — | — | — | — | — | — |
+| `p-local-env` | macro | `(init &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob` | macro | `(pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob-dynamic` | macro | `(name-form cond-form rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob-if` | macro | `(cond-form pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
@@ -1178,7 +1179,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (20)
+## UNCLASSIFIED (19)
 
 *No ir-spec §10 row and no note.*
 
@@ -1198,7 +1199,6 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-ensure-class` | macro | `(name)` | — | — | — | — | — | — | — |
 | `p-eof-argv` | function | `nil` | — | — | — | — | — | — | — |
 | `p-import-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
-| `p-local-env` | macro | `(init &body body)` | — | — | — | — | — | — | — |
 | `p-scope-close` | macro | `((&rest handles) &body body)` | — | — | — | — | — | — | — |
 | `p-symref-site` | macro | `nil` | insensitive | none | none | no | no | no | none |
 | `p-unimport-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
