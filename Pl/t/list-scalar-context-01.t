@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 33;
 
 sub run_cl {
     my ($code) = @_;
@@ -227,6 +227,14 @@ test_cl('#790 inverse: empty array / bare return / () still contribute 0',
       print scalar(my @p = a()), scalar(my @q = b()), scalar(my @r = c()),
             scalar(my @s = d()), "\n";},
     "0001\n");
+
+test_cl('#5125 a comma list as a valued tail: its LAST element in the caller\'s context',
+    q{sub g { wantarray ? "L" : defined(wantarray) ? "S" : "V" }
+      sub f { 1, g() } sub r { 1, reverse("ab", "cd") }
+      open my $h, "<", \"l1\nl2\nl3\n"; my $l = do { 1, <$h> }; my $n = () = <$h>;
+      my @l = f(); my $s = f(); my $rs = r(); my $x = eval { 1, g() };
+      print "$s @l $rs $x ", ($l =~ s/\n//r), " $n\n";},
+    "S 1 L dcba S l1 2\n");
 
 test_cl('#790 (&;@) block form: ($ok, $@) from a died eval',
     q{sub tryit (&;@) { my ($cb, @rest) = @_; my $ok = eval { $cb->() }; return ($ok, $@) }

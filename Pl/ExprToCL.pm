@@ -5568,6 +5568,17 @@ sub gen_progn_form {
   elsif ($self->_scalar_ctx_pushdown($node_id)) {
     $self->expr_o->set_node_context($kids->[-1], SCALAR_CTX);
   }
+  elsif ($ctx == INHERIT_CTX && @$kids > 1) {
+    # #5125: an INHERIT comma list is a VALUED tail (a sub, `do`, `eval`
+    # block's last statement): its value is the LAST element in the context
+    # the value is read in, so the last kid INHERITS *wantarray* -- the
+    # `*wantarray*` dispatch below then reads it in list context in the list
+    # arm and in scalar context in the scalar arm (`my $r = do { 1, <$h> }`
+    # read the whole file: annotate_contexts gives every comma kid LIST, and
+    # both arms carried the same `(p-list-ctx …)` form).  One generation, no
+    # leading element evaluated twice.
+    $self->expr_o->set_node_context($kids->[-1], INHERIT_CTX);
+  }
   my @forms = map { $self->gen_node_form($_) } @$kids;
   if ($ctx == 1) {
     my $all_scalar = 1;
