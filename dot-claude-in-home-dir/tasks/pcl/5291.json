@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543i (Opus 5.5, 2026-11-22), found by the full gate run on a `git archive` extraction (scratch/s543i/x-final, a directory INSIDE the s543i git worktree): Pl/t/pcl-runtime-env-01.t row 1 FAILS there and passes in the checkout.\n\n    got:      v0.1.0-3239-gafbfc7c7 (git checkout)          <- the runtime, %p-pcl-version (cl/pcl-runtime.lisp ~9488)\n    expected: unknown (no VERSION file, and not a git checkout)   <- `pcl --version`, pcl_version() (pcl ~413)\n\nTwo derivations of ONE string disagree, although the runtime's docstring says \"SAME SOURCE, not a second one\":\n(1) `pcl` asks `git describe` only when ROOT itself holds `.git` (`-d \"$ROOT/.git\" || -f \"$ROOT/.git\"`); `%p-version-from-git` runs `git -C ROOT describe` unconditionally, and git walks UP to an enclosing repository -- so a PCL tree nested inside some other git checkout (an extraction, or a user who vendors PCL into his own repo) reports THAT repository's describe as PCL's version;\n(2) with no VERSION and no git the runtime answers \"unknown\" where `pcl` answers \"unknown (no VERSION file, and not a git checkout)\" -- so the row fails in ANY tree that is neither installed nor a checkout (a plain tarball extraction outside any repo too, by the second difference).\nFix (cl/, one place): give %p-pcl-version the same two tests and the same fallback text as pcl_version() -- or better, have one of them read the other's answer.  Guard: run Pl/t/pcl-runtime-env-01.t in a `git archive` extraction both inside and outside a git checkout.\n",
+   "id" : "5291",
+   "status" : "pending",
+   "subject" : "DIVERGENCE (tooling, minor): $ENV{_PCL_RUNTIME_}'s version string and `pcl --version` are two derivations that disagree outside a checkout -- the runtime runs `git describe` without checking ROOT/.git (a tree nested in another repo reports THAT repo) and falls back to \"unknown\" without the reason; Pl/t/pcl-runtime-env-01.t row 1 fails in an extraction",
+   "triage" : "tooling",
+   "triage_reason" : "a version string in a diagnostic variable, not program semantics; the gate row fails only outside a checkout or an install"
+}

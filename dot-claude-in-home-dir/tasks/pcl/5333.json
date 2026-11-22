@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543j (Opus 5.5, 2026-11-22) while fixing #5210 (`local %ENV`: the same shape).  PRE-EXISTING.\n\nREPRODUCER (scratch/s543j/probes/file in the s543j worktree (agent-abcd8b98eb856dbee)/t5333.pl):\n    $SIG{USR1} = 'IGNORE'; { local %SIG = (USR1 => sub { print \"1 handled\\n\" }); kill 'USR1', $$; select(undef, undef, undef, 0.2); } print \"2 after\\n\";\n  perl: 1 handled / 2 after      PCL: 2 after\n  (with no IGNORE before: `{ local %SIG; $SIG{USR1} = sub {...}; kill 'USR1', $$ }` -- PCL is KILLED by the signal, rc 138, probes/m4/d14 in the s543j worktree.)\n\nMECHANISM: `local %SIG` lowers to a `let` of %SIG to a fresh table; %SIG's slots are magic cells (%p-signal-cell-box-p) that install the handler.  NOT the p-local-env macro (the env layer is a different store): a localizer of its own that saves every signal's disposition, empties them, fills through the %SIG store, and restores the dispositions on exit.  `local $SIG{K}` is right (the element macros keep the cell).",
+   "id" : "5333",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `local %SIG` / `local %SIG = (USR1 => sub {...})` binds a plain hash table -- a handler stored inside the scope is never installed (the signal keeps its old disposition: IGNORE, or the default action KILLS the process)",
+   "triage" : "in",
+   "triage_reason" : "`local %SIG` binds a plain table, handlers stored in it never install"
+}

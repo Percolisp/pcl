@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543i (Opus 5.5, 2026-11-22), found by member 2's probe table (scratch/s543i/probes/m2e.txt row w21 in the s543i worktree): pre-existing, the same on main / the base a8889369 and on the s543i tree.\n\nA NEGATED BAREWORD (perl's string \"-foo\", toke.c force_word after a unary minus) followed by a binary `-` or `+` is read by PCL as a CALL of a sub named \"-foo\" with the rest as its argument list:\n\n    no strict; my $x = -foo - 1; print \"$x\\n\";      # perl -1      PCL: Undefined subroutine &main::-foo called\n    use strict; my $x = -foo + 1; print \"$x\\n\";     # perl 1       PCL: the same die\n    my @a = (-foo, -bar - 1); print \"@a\\n\";         # perl -foo -1 PCL: Undefined subroutine &main::-bar\n    no strict; my $x = - foo -1; print \"$x\\n\";      # perl -1      PCL: Undefined subroutine &main::foo\n\nControls = perl: `-foo` alone, `-foo . \"x\"`, `-foo x 2`, `-foo * 2`, `-foo < 1`, `(-foo, 1)`, `-foo eq \"-foo\"`, and a DECLARED `sub foo` (`-foo -1` is -(foo(-1)), probe w22).  PPI gives Word<-foo> Operator<-> Number<1> (and Word<-foo> Number<-1>, which PExpr's _fix_ppi_negative_number_bug splits since s543i because a negated word is a term): the tokens are right; the call reading is PCL's -- a Word followed by an operator that can be unary (`-`, `+`) is taken as a list operator with an operand, which perl never does for a word forced after a unary minus unless it is a declared sub.  Where to look: PExpr's bareword-call decision (the same question _is_zero_arg_func / _word_is_declared_term answer) for a Word whose content starts with `-` (and for `foo` right after a split unary `-`).\nRare in real code (the `-option => value` idiom is autoquoted and unaffected).\n",
+   "id" : "5290",
+   "status" : "pending",
+   "subject" : "LOUD (rare): a negated bareword before a binary minus / plus is called as a sub -- `-foo - 1` dies \"Undefined subroutine &main::-foo\" (perl: the string \"-foo\" minus 1 = -1); PPI's tokens are right, the call reading is PExpr's",
+   "triage" : "in",
+   "triage_reason" : "a run-time die where perl runs, on core syntax (a negated bareword string before a binary - / +); rare"
+}

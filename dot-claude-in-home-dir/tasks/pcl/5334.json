@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543j (Opus 5.5, 2026-11-22) from #2742's probe table (the modifier row; s543j's #2742 fix covers the modifier-free bare local only).  PRE-EXISTING.\n\nREPRODUCER (scratch/s543j/probes/file in the s543j worktree (agent-abcd8b98eb856dbee)/t5334.pl):\n    our $g = 3; my $c = 1; sub f { local $g if $c } my @l = f(); $c = 0; my @m = f(); print scalar(@l), \" \", scalar(@m), \" \", join(\",\", map { $_ // \"u\" } @m), \"\\n\";\n  perl: 1 1 0      PCL: 0 0\n\nWHY NOT FIXED: the false arm's value is the CONDITION's perl value, and the plan keeps only `(p-true-p COND)` in its temporary (p-local-maybe's test); keeping the raw value would change every modified `local` statement's emission for a value only a valued tail reads.  A plan `value` of `(if ctmp TARGET <raw cond>)` with the raw condition in its own temporary only when the statement is a valued tail is the shape (the s543j _local_ctx_value licence: emitted only there).",
+   "id" : "5334",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): `local TARGET if COND` as a VALUED tail -- `sub f { local $g if $c }` returns no element in list context (perl: the localized variable when COND holds, the condition's value when it does not)",
+   "triage" : "in",
+   "triage_reason" : "the value of a modified local as a valued tail"
+}

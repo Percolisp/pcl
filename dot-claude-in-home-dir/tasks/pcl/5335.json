@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543j (Opus 5.5, 2026-11-22) while writing Pl/t/local-elem-02.t M8 (its program was re-spelled with qualified `sub TA::NAME` definitions to sidestep this).  The test harnesses that call Pl::Parser2->parse_code directly (local-elem-02.t run_pl and others) see it; the pl2cl binary emits the main package (the program path).\n\nREPRODUCER: a file `{ package TA; sub f { 1 } } print TA::f(), \"\\n\";` -- `perl -e 'use lib \".\"; use Pl::Parser2; local $/; open my $f, \"<\", $ARGV[0]; print Pl::Parser2->parse_code(<$f>)' FILE | grep -n defpackage` lists only TA; `sbcl --load` of it dies at the first `(in-package :main)`.  `./runpcl FILE` prints 1.\n\nNot a user-visible defect of the compiler path; a harness trap (a row that opens with a package block fails for a reason unrelated to its subject).",
+   "id" : "5335",
+   "status" : "pending",
+   "subject" : "LOUD (tooling): Pl::Parser2->parse_code of a program that OPENS with a package block (`{ package TA; ... } tie my @a, q(TA); ...`) emits `(in-package :main)` with no `(p-defpackage :main)` -- the --load dies \"The name MAIN does not designate any package\"; pl2cl / runpcl of the same text are right",
+   "triage" : "tooling",
+   "triage_reason" : "test-harness path only (parse_code), the program path is right"
+}

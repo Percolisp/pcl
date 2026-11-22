@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-22",
+   "description" : "FILED s543j (Opus 5.5, 2026-11-22) from #5001's probe list.  Before s543j both were SILENT (lowered as a plain delete, the element gone for good); s543j's #5001 fix sends every expression-position `delete local` through the #3370 hoist, whose CHECKED precondition (ir-spec 7.2 \"A `local` TERM\") refuses these two: a binary operator before the term is not on the inert list, and the first `delete $h{a}` is a call that runs BEFORE the second term and names the same hash.\n\nREPRODUCER (scratch/s543j/probes/file in the s543j worktree (agent-abcd8b98eb856dbee)/t5330.pl):\n    our %h = (a => 'A', b => 'B', k => 'K');\n    sub f { my @v = (delete local $h{a}, delete local $h{b}); \"@v|\" . join(\",\", sort keys %h) } print f(), \"|\", join(\",\", sort keys %h), \"\\n\";\n    sub g { 1 + delete local $h{k}; exists $h{k} ? \"E\" : \"N\" } print g(), $h{k}, \"\\n\";\n  perl: A B|k|a,b,k / NK      PCL (s543j): PCL: refused statement ... (#3370)      PCL (main b58114ca): A B|k|k / N (silent)\n\nDIRECTION: widen _token_inert_before_local to the value operators that apply AFTER both operands (+ - * / . x == eq ... -- never && || // ?: and or, which decide whether the term runs) and let a `delete`-of-a-different-key word count as inert when its operand names no key the term's operand names (static keys only) -- a ruled precondition (s519 #1), so a widening needs the gate-set scan.",
+   "id" : "5330",
+   "status" : "pending",
+   "subject" : "LOUD: a `delete local` term after a binary operator (`1 + delete local $h{k}`) or after an earlier call on the same aggregate (`(delete local $h{a}, delete local $h{b})`) is refused -- \"local in this expression position is not supported (#3370)\"",
+   "triage" : "in",
+   "triage_reason" : "a delete local term the #3370 hoist precondition refuses (LOUD)"
+}
