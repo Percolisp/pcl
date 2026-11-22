@@ -11689,6 +11689,12 @@ sub _lower_expr_stmt {
   # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
   my $vctx = $tail_ctx // ':void';
   my $form = $self->_lower_expr($expr, $stmt, $vctx);
+  # `delete $h{K};' / `delete $r->{K};' as a whole VOID statement: the dropped
+  # element is flushed when it holds an escaped output handle, as `undef $x;'
+  # flushes the variable's (task #4794 shape 4; ir-spec §6.5b) -- the delete's
+  # own value, read once.  Gated with that flush (`fh-scope-close').
+  $form = ['p-flush-dropped-value', $form]
+    if $x->{drop_delete} && !$mod && $vctx eq ':void' && Pl::Passes::enabled('fh-scope-close');
   # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
   # (task #1249(7)) — rewritten IN the lowered form, so every context wrap the
   # ordinary lowering put around the call is preserved exactly.

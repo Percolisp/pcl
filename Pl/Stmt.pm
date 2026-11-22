@@ -930,7 +930,24 @@ sub expr_shape {
       if defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--');
   }
   $r{bareword} = $expr->[0] if @$expr == 1 && $expr->[0]->isa('PPI::Token::Word');
+  $r{drop_delete} = 1 if drop_delete_shape($expr);
   return \%r;
+}
+
+# `delete $h{K}' / `delete $r->{K}' / `delete $a[I]' / `delete $r->[I]', the
+# parenthesised spelling too: an expression that DROPS one element of a named
+# aggregate or of a scalar's referent (task #4794 shape 4: the drop flush).
+# A slice, a chain, `delete local' and any other container are not this shape.
+sub drop_delete_shape {
+  my ($expr) = @_;
+  return 0 unless @$expr >= 2 && $expr->[0]->isa('PPI::Token::Word')
+    && $expr->[0]->content eq 'delete';
+  my @t = @$expr[1 .. $#$expr];
+  @t = flat_children($t[0]) if @t == 1 && $t[0]->isa('PPI::Structure::List');
+  return 0 unless @t >= 2 && $t[0]->isa('PPI::Token::Symbol') && $t[0]->content =~ /^\$/;
+  return 1 if @t == 2 && $t[1]->isa('PPI::Structure::Subscript');
+  return (@t == 3 && $t[1]->isa('PPI::Token::Operator') && $t[1]->content eq '->'
+          && $t[2]->isa('PPI::Structure::Subscript')) ? 1 : 0;
 }
 
 1;

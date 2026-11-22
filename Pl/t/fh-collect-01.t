@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 10;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -234,4 +234,51 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$capt' '$dir");
     is($pcl_out, $perl, '#5128: undef / = undef of a CAPTURED lexical inside a sub flushes the escaped handle');
+}
+# 9: #5160 (s543g) -- a GLOB handle (`IO::File->new`, `Symbol::gensym` + open,
+# an fdopen alias `IO::Handle->new_from_fd`) dropped by `undef $x;` / `$x =
+# undef;` is flushed through the glob's IO slot (the handle table, no method
+# called; a tied handle runs no FETCH / CLOSE).  INVERSE: main 8959afae printed
+# 0 for a b c d e.
+my $glob = write_prog('glob.pl', <<'PL');
+use strict; use warnings; use IO::File; use IO::Handle; use Symbol;
+my $f = "$ARGV[0]/glob.out";
+sub size { -s $f // 0 }
+my $io = IO::File->new($f, "w"); print $io "io\n"; undef $io; print "a ", size(), "\n";
+$io = IO::File->new($f, "w"); $io->print("io2\n"); $io = undef; print "b ", size(), "\n";
+my $g = gensym; open $g, ">", $f or die; print $g "gensym"; undef $g; print "c ", size(), "\n";
+open my $raw, ">", $f or die; my $h = IO::Handle->new_from_fd(fileno($raw), "w"); print $h "fromfd!";
+undef $h; print "d ", size(), "\n"; close $raw;
+sub w { my $s = IO::File->new($f, "w"); print $s "scoped12"; return $s } my $k = w(); undef $k; print "e ", size(), "\n";
+{ package TH; our @log; sub TIEHANDLE { bless {}, shift } sub PRINT { push @log, "P"; 1 } sub FETCH { push @log, "F" } sub CLOSE { push @log, "C" } }
+my $t = gensym; tie *$t, "TH"; print $t "x"; undef $t; print "f @TH::log\n";
+PL
+{
+    my ($perl, $pcl_out) = run_both("$glob' '$dir");
+    is($pcl_out, $perl, '#5160: undef / = undef of a GLOB handle (IO::File, gensym, an fdopen alias) flushes it');
+}
+
+# 10: #4794 shapes 4 and 5 (s543g) -- `delete $h{K};` / `delete $r->{K};` as a
+# void statement flushes the dropped element (the delete's own value, read
+# once: a tied hash's DELETE runs once, no FETCH), and `undef $obj;` /
+# `$obj = undef;` flushes a handle held ONE level inside the dropped hash or
+# array (an object holding its handle: Pod::Simple::HTMLBatch's `undef($page)`);
+# a handle two levels down is not reached.  INVERSE: main 8959afae printed 0
+# for a b c d e f.
+my $obj = write_prog('obj.pl', <<'PL');
+use strict; use warnings; use IO::File;
+my $f = "$ARGV[0]/obj.out";
+sub mk { open my $fh, ">", $f or die; $fh }
+sub size { -s $f // 0 }
+{ my %h; $h{fh} = mk(); print { $h{fh} } "inhash88"; delete $h{fh}; print "a ", size(), "\n"; }
+{ my $r = { fh => mk() }; print { $r->{fh} } "hashref9"; delete $r->{fh}; print "b ", size(), "\n"; }
+{ my $o = bless { fh => mk() }, "Obj"; print { $o->{fh} } "object1010"; undef $o; print "c ", size(), "\n"; }
+{ my $o = bless [1, mk()], "Arr"; print { $o->[1] } "blessarr"; $o = undef; print "d ", size(), "\n"; }
+{ my $o = { io => IO::File->new($f, "w") }; $o->{io}->print("ioobj"); undef $o; print "e ", size(), "\n"; }
+{ my %h = (io => IO::File->new($f, "w")); $h{io}->print("iohash!"); delete $h{io}; print "f ", size(), "\n"; }
+my %d = (a => 1, b => 2); delete $d{a}; print "g ", join(",", sort keys %d), "\n";
+PL
+{
+    my ($perl, $pcl_out) = run_both("$obj' '$dir");
+    is($pcl_out, $perl, '#4794: delete $h{fh} / delete $r->{fh} and undef $obj (one level) flush the dropped handle');
 }

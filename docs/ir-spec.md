@@ -4141,8 +4141,17 @@ composes with the location forms: the flush follows the statement's
 (s543g, #5128): a `my` / `state` declared in the unit, or one a sub or closure
 CAPTURES from an enclosing scope (`my $g = mk(); sub drop { undef $g }`); an
 `our` alias, a package global and a string eval's view of its caller's
-lexical are not.  Not covered: a handle dropped through an element, `delete`,
-or an object holding it.
+lexical are not.  WHAT is flushed (s543g, #5160 #4794): the dropped value as
+stored, never FETCHed -- a descriptor stream; a GLOB handle's stream, read
+from the handle table (no method runs: a tied handle's placeholder is no
+descriptor stream); the stream an fdopen alias forwards to; and when the
+value is a HASH or an ARRAY (the referent of a dropped reference: an object
+holding its handle), each of its first 64 DIRECT elements as one of those --
+never deeper, never through a tie.  `delete $h{K};` / `delete $r->{K};` as a
+whole void statement is the same flush on the delete's own value,
+`(p-flush-dropped-value (p-delete %h "K"))`, read once.  The inline gate costs
+one `typep` of five types at an `undef` statement; a 10-key object 0.1 µs, a
+10,000-key one is bounded by the 64.
 Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5
 (was 0) -- `(p-flush-dropped-handle $fh) (p-undef $fh)`.
 

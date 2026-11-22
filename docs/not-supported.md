@@ -2510,9 +2510,21 @@ stays different from perl, measured s540c / s541:
   second holder still writes through it, its bytes merely reach the file
   sooner than perl's (perl keeps them buffered while another reference
   lives), and the descriptor and a `flock` held through it stay until a
-  trigger or exit.  A handle dropped by `delete $h{fh}`, inside an object
-  that goes, or by `undef $g;` inside a sub on a file-level lexical the sub
-  captures (#5128) is not covered;
+  trigger or exit.  Since s543g the same flush reaches a lexical a sub or
+  closure CAPTURES (`undef $g;` inside the sub, #5128), a GLOB handle
+  (`IO::File->new`, `Symbol::gensym` + open, an fdopen alias
+  `IO::Handle->new_from_fd`, `\*FH` -- a named glob the program still uses
+  gets its bytes early, never wrongly; #5160), the element `delete $h{K};` /
+  `delete $r->{K};` drops as a whole statement, and a handle held ONE level
+  inside the hash or array an `undef $obj;` / `$obj = undef;` drops (an object
+  holding its handle: Pod::Simple::HTMLBatch's `undef($page)`; at most the
+  first 64 elements are looked at, no tie, method or overload is touched;
+  #4794).  NOT flushed at a statement: a handle let go at a BLOCK EXIT (`{ my
+  $fh = $f->openw; print $fh ...; }`, a method's returned handle -- the
+  moment above), a handle two levels down (`$o->{inner}{fh}`, a scalar ref
+  `\$fh` in an object), a package global or `our` variable (`undef
+  $Foo::fh`), a string eval's `undef $g` on the caller's lexical; and the
+  flush never releases a lock or a descriptor;
 * a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
   until one of the triggers or exit; only a blocking `flock` on the same file
   and running out of descriptors are triggers;
@@ -2530,7 +2542,7 @@ stays different from perl, measured s540c / s541:
   child is reaped at `close` or exit (perl reaps it at the drop);
 * a GLOB handle (`Symbol::gensym`, `IO::File->new`, or any handle a `*$fh`
   dereference made a glob for) is named in the handle table, so it stays open
-  until exit;
+  until exit (its bytes are written at an `undef $x;` statement, above);
 * `$.` keeps a dropped last-read handle's count until a trigger (perl: undef
   as soon as the handle is freed);
 * the collector is CONSERVATIVE: a stale word on a stack can keep a dropped

@@ -250,7 +250,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-scope-close #:%p-scope-close #:p-flush-dropped-handle
+   #:p-scope-close #:%p-scope-close #:p-flush-dropped-handle #:p-flush-dropped-value
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-eof-argv #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
    #:p-use-open #:p-default-layers
@@ -22247,17 +22247,100 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    flush is invisible to every other holder (the bytes would reach the file at
    the close anyway).  The lock, the descriptor and a pipe's child stay as
    they are, until a trigger or exit (§6.5b).  VAR is the variable itself (a
-   box, or a raw slot), never read through a tie: a non-handle value costs
-   the one type test."
+   box, or a raw slot), never read through a tie: a value that holds no
+   handle costs the one inline type test (%p-flush-dropped-value says which
+   values those are)."
   (let ((v (gensym "V")))
     `(let ((,v (%p-peek-slot ,var)))
-       (when (sb-sys:fd-stream-p ,v) (%p-flush-dropped-stream ,v)))))
+       (when (%p-may-hold-handle-p ,v) (%p-flush-dropped-value ,v)))))
+
+(defmacro p-flush-dropped-value (form)
+  "`delete $h{K};' / `delete $r->{K};' as a whole statement (task #4794 shape
+   4): FORM is the delete, whose value is the dropped element as stored -- the
+   flush of p-flush-dropped-handle applies to it, and FORM's value is
+   returned.  Never a second read of the element, never a FETCH: a tied
+   hash's DELETE runs once, as perl runs it."
+  (let ((v (gensym "V")) (p (gensym "P")))
+    ;; (delete's value of a handle element is the handle's own BOX: peeked)
+    `(let* ((,v ,form)
+            (,p (%p-peek-slot ,v)))
+       (when (%p-may-hold-handle-p ,p) (%p-flush-dropped-value ,p))
+       ,v)))
+
+(defmacro %p-may-hold-handle-p (v)
+  "The inline gate of the drop flush: V is a handle, a glob, an fdopen alias,
+   or a hash / array whose DIRECT elements may be (an object holding its
+   handle, task #4794 shape 5).  Everything else -- undef, a number, a string
+   -- fails it at once."
+  `(typep ,v '(or sb-sys:fd-stream p-typeglob synonym-stream hash-table
+               (and vector (not string)))))
 
 (declaim (inline %p-peek-slot))
 (defun %p-peek-slot (x)
   "The raw payload of variable X -- a box's value, or X itself for a raw slot
    -- without FETCH or any other magic."
   (if (p-box-p x) (p-box-value x) x))
+
+(defconstant +p-flush-walk-limit+ 64
+  "How many direct elements of a dropped hash / array the drop flush looks at
+   (%p-flush-dropped-value): an object's handle sits among its few fields; a
+   10,000-key hash must not cost a walk at every `undef $ref' (measured s543g:
+   see docs/ir-spec.md §6.5b).")
+
+(defun %p-flush-dropped-value (v)
+  "THE dispatch of the flush at a dropping statement (p-flush-dropped-handle;
+   tasks #4794 #5160): V is the dropped value as stored, never FETCHed.
+     a descriptor stream  -- its buffer is written (%p-flush-dropped-stream);
+     a GLOB handle        -- `IO::File->new', `Symbol::gensym' + open, `\\*FH':
+                             the stream in the glob's IO slot, read from the
+                             handle table (%p-resolve-fh: table lookups only --
+                             a tied handle's placeholder is no descriptor
+                             stream, so no method runs, task #5160);
+     an fdopen alias      -- `>&=N' (`IO::Handle->new_from_fd'): the stream it
+                             forwards to (%p-stream-target), whose buffer it is;
+     a HASH or an ARRAY   -- the referent of a dropped reference, an object
+                             holding its handle (`undef $obj', task #4794 shape
+                             5): each DIRECT element is flushed as one of the
+                             three kinds above, never deeper, never through a
+                             tie (a tied container is an empty shell), no
+                             method or overload called; at most
+                             +P-FLUSH-WALK-LIMIT+ elements are looked at;
+   and nothing for every value that holds no handle this flush reaches: undef,
+   a number, a string, a code ref, a scalar ref, a socket object (unbuffered),
+   an in-memory handle (no descriptor), a handle two levels down -- the inline
+   gate %p-may-hold-handle-p admits only the kinds above."
+  (typecase v
+    (hash-table
+     (unless (%p-tied v)
+       (let ((n 0))
+         (block walk
+           (maphash (lambda (k e)
+                      (declare (ignore k))
+                      (when (> (incf n) +p-flush-walk-limit+) (return-from walk))
+                      (%p-flush-dropped-handle-1 (%p-peek-slot e)))
+                    v)))))
+    ((and vector (not string))
+     (unless (%p-tied v)
+       (loop for e across v
+             for n from 1 to +p-flush-walk-limit+
+             do (%p-flush-dropped-handle-1 (%p-peek-slot e)))))
+    (t (%p-flush-dropped-handle-1 v)))
+  (values))
+
+(defun %p-flush-dropped-handle-1 (v)
+  "One value as a HANDLE: a descriptor stream, the stream in a glob's IO slot
+   (%p-resolve-fh: table lookups only), or the stream an fdopen alias forwards
+   to -- written when it is an output fd-stream above fd 2.  A handle held in
+   an element is the handle's own BOX (a lexical `$fh' is a box holding the
+   stream): that box is peeked, as the variable's would be.  Any other value
+   holds no handle at this level: nothing."
+  ;; (p-typeglob-p, not a typecase arm: the struct is defined further down.)
+  (let* ((v (%p-peek-slot v))
+         (s (cond ((p-typeglob-p v) (%p-resolve-fh v))
+                  ((streamp v) v))))
+    (when s
+      (let ((tgt (%p-stream-target s)))
+        (when (sb-sys:fd-stream-p tgt) (%p-flush-dropped-stream tgt))))))
 
 (defun %p-flush-dropped-stream (s)
   "p-flush-dropped-handle's write: an OPEN output fd-stream on a descriptor
