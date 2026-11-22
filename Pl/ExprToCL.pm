@@ -6542,7 +6542,7 @@ sub gen_substitution_form {
   # measured change (docs/interp-scan.md §wiring).
   if (_replacement_interpolates($subst)) {
     return ['p-subst', ':pat', $match_form, ':rep',
-            ['lambda', ['list'], $self->_gen_interp_replacement($subst)],
+            ['lambda', ['list'], $self->_gen_interp_replacement($subst, $node)],
             @tail];
   }
 
@@ -6647,8 +6647,11 @@ sub _unescape_subst_replacement {
 # correct, so normalise into that path instead of teaching the copy new
 # tricks.  The ONE thing a replacement has that a dq string does not is
 # \1..\9 as backrefs, so those are rewritten to $1..$9 first.
+# $site is the s/// token: the manufactured `"…"` has no position, so the
+# lexical features (postderef_qq: `s/A/$r->$*/`) are read at the s/// token's
+# (#5252, s543k) -- the ONE reader the dq path uses, at the real site.
 sub _gen_interp_replacement {
-  my ($self, $str) = @_;
+  my ($self, $str, $site) = @_;
 
   my $norm = _subst_backrefs_to_dollars($str);
   # PPI needs a well-formed "..." token; a trailing odd backslash would eat
@@ -6668,7 +6671,8 @@ sub _gen_interp_replacement {
       e => [$fake],
       ($self->environment ? (environment => $self->environment) : ()),
     );
-    my $id = $expr_o->str_interpol->parse_interpolated_string($expr_o, $fake);
+    my $id = $expr_o->str_interpol->parse_interpolated_string($expr_o, $fake, $fake,
+                                                              $site);
     my $gen = Pl::ExprToCL->new(
       expr_o       => $expr_o,
       environment  => $self->environment,

@@ -2169,6 +2169,7 @@ sub _tw_scan_quote_leaf {
       for @{ Pl::InterpScan::comment_spans($pat, %rx) };
   }
   my ($i, $n) = (0, length $c);
+  my $pdq;                      # postderef_qq here: asked once, when a sigil is met
   while ($i < $n) {
     if (exists $skip{$i}) { $i = $skip{$i}; next }
     my $ch = substr($c, $i, 1);
@@ -2183,7 +2184,18 @@ sub _tw_scan_quote_leaf {
     # scalar its code names, is an opaque use.  Every other reference keeps
     # the name scan below.
     if ($ch eq '$' || $ch eq '@') {
-      my $ev = Pl::InterpScan::scan_one($c, $i, %esc);
+      # postderef_qq at THIS token (the ONE reader, #5252): `$r->$*` /
+      # `$r->@*` in an s/// replacement or a dq text is a dereference of `$r`.
+      $pdq //= Pl::PExpr::StringInterpolation::postderef_qq_active_for($node) ? 1 : 0;
+      my $ev = Pl::InterpScan::scan_one($c, $i, %esc, postderef_qq => $pdq);
+      if ($ev && $ev->{postderef} && defined $ev->{name} && $ev->{form} ne 'magic') {
+        # the base is an opaque use; the slice guts' code too
+        _use($ctx, '$' . $ev->{name}, undef);
+        _tw_code_uses($ctx, substr($c, $_->[0], $_->[1] - $_->[0]))
+          for Pl::InterpScan::code_spans($ev);
+        $i = $ev->{span}[1];
+        next;
+      }
       if ($ev && $ev->{form} eq 'deref') {
         # the base; a subscript after it is scanned on, as before
         _use($ctx, '$' . $ev->{name}, undef);

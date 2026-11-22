@@ -177,7 +177,7 @@ sub _build_fallback_parser {
 sub _eval_feature_seed {
   my ($self) = @_;
   my @feats = grep { $_ ne 'strict_refs' && $_ ne 'unicode_strings'
-                      && $_ ne 'use_integer'
+                      && $_ ne 'use_integer' && $_ ne 'postderef_qq'
                       && $_ ne 'current_sub' && !/\Are-/ && !/\Aour:/ }
                  @{ $self->eval_features // [] }
     or return ();
@@ -236,6 +236,11 @@ sub _scan_eval_site_features {
       if Pl::Parser::feature_at($cs, $w->location);
     push @on, 'use_integer'
       if Pl::Parser::integer_at($ui, $w->location);
+    # #5252 (s543k): `postderef_qq` -- the eval text's `"$r->$*"` and
+    # `s/A/$r->$*/` interpolate the dereference under the site's feature;
+    # pseudo-feature `postderef_qq` (never PPI's), read by the ONE reader.
+    push @on, 'postderef_qq'
+      if Pl::PExpr::StringInterpolation::postderef_qq_active_for($w);
     # #4101: the `use re` hints too -- perl compiles the eval text with the
     # site's %^H, so `use re '/FLAGS'`'s default modifiers and `use re 'eval'`
     # reach its patterns.  Pseudo-features `re-flags:LETTERS` / `re-eval`
@@ -1690,6 +1695,11 @@ sub parse {
   # fragment re-parse of the eval text included; `local` so a nested unit's
   # compile starts from its own.
   local $RE_SEED = $self->_eval_re_seed;
+  # #5252 (s543k): `postderef_qq` the same way -- the eval text is compiled in
+  # its SITE's lexical scope, so its document level answers the site's state
+  # (the pseudo-feature _scan_eval_site_features sent); 0 for a file.
+  local $Pl::PExpr::StringInterpolation::SITE_POSTDEREF_QQ =
+    ($self->eval_mode && grep { $_ eq 'postderef_qq' } @{ $self->eval_features // [] }) ? 1 : 0;
   # #2610: the detector table, emitted for every program and module unit
   # (never a string eval's) since s514d -- see _detect_table_form.
   $self->environment->{detect_calls} = {} if !$self->eval_mode;

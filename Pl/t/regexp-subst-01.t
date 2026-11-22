@@ -771,5 +771,28 @@ my $t = ""; for my $i (1..3) { my $s = "aXb"; $s =~ s/X/$i/; $t .= $s }
 print join(" ", s1(), s2(), $t), "\n";},
   "#691 breaking shape: a plain \$v in a replacement is still interpolated");
 
+# #5252 (s543k): a POSTFIX dereference in an s/// replacement under
+# postderef_qq -- the manufactured `"..."` of the replacement read the feature
+# at no position (off); it is read at the s/// token now (the ONE reader,
+# StringInterpolation::postderef_qq_active_for), and VarAnnotator's quote-leaf
+# scan reads `$r->@*` as a dereference (no B-str freeze of `$r`).  A string
+# eval inherits the site's feature (the `postderef_qq` pseudo-feature on the
+# #364 list).  The first two rows FAIL on the 4a0fd0ec extraction; the third is
+# the breaking shape (without the feature `->@*` stays text after the ref).
+subst_agrees(q{use v5.24;
+sub p1 { my $r = \"Z"; my $x = "mAn"; $x =~ s/A/$r->$*/; $x }
+sub p2 { my $r = [1,2]; my $x = "mAnAn"; $x =~ s/A/<$r->@*>/g; $x }
+sub p3 { my $r = [1,2,3]; my $x = "q"; $x =~ s/q/$r->$#*|$r->@[0,1]/; $x }
+sub p4 { my $h = {a => 1, b => 2}; my $x = "q"; $x =~ s/q/$h->@{qw(a b)}/; $x }
+print join(" ", p1(), p2(), p3(), p4()), "\n";},
+  "#5252: a postfix deref in an s/// replacement under postderef_qq (subs, /g, \$#*, slices)");
+subst_agrees(q{use v5.24;
+my $r = \"Z"; my $x = "mAn"; eval q{ $x =~ s/A/$r->$*/; 1 } or die $@;
+print "$x ", eval(q{"$r->$*"}), "\n";},
+  "#5252: a string eval inherits the site's postderef_qq (a replacement and a dq text)");
+subst_agrees(q{my $r = [1,2]; my $x = "mAn"; $x =~ s/A/$r->@*/; $x =~ s/ARRAY\(0x[0-9a-f]+\)/REF/;
+{ use v5.24; no feature "postderef_qq"; my $y = "mAn"; $y =~ s/A/$r->@*/; $y =~ s/ARRAY\(0x[0-9a-f]+\)/REF/; print "$x $y\n"; }},
+  "#5252 breaking shape: without postderef_qq `->\@*` stays text after the reference");
+
 
 done_testing();

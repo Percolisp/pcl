@@ -57,10 +57,15 @@ sub parse_interpolated_string {
   # (postderef_qq) is looked up from this token's document position; a
   # detached synthetic token without an origin simply gets no features.
   my $origin_tok = shift // $str_token;
+  # Optional: the token whose POSITION decides the lexical features when it is
+  # not the origin -- an s/// replacement arrives as a manufactured `"…"`
+  # whose origin must stay itself (its `\"` are the escaped delimiters), and
+  # the replacement's feature state is the s/// token's (#5252, s543k).
+  my $feature_tok = shift // $origin_tok;
 
   # postderef_qq ("$ref->@*" interpolation) is lexically scoped in Perl;
   # resolve it once per string from the token's enclosing blocks.
-  $self->{_postderef_qq} = _postderef_qq_active_for($origin_tok);
+  $self->{_postderef_qq} = _postderef_qq_active_for($feature_tok);
   # Which characters of this construct's source are ESCAPED DELIMITERS?  Only
   # the ORIGINAL token can say (task #694) — a heredoc/backtick/glob arrives
   # here wrapped in a synthetic `"…"` over RAW text.  The escapes are undone
@@ -580,6 +585,15 @@ sub _interp_hash_key {
 # with postderef_qq or a :5.24+ bundle, `use experimental` with postderef,
 # `use v5.24`+.  Disabler: `no feature` naming postderef_qq / :all / bare.
 # A detached token (no parent — synthetic strings without an origin) gets 0.
+# THE ONE READER (#5252, s543k): the dq path, an s/// replacement (at the
+# s/// token, ExprToCL::_gen_interp_replacement), VarAnnotator's quote-leaf
+# use scan and the string-eval site's feature list (Parser2's #364 scan) all
+# ask it.  In EVAL text the document level answers the SITE's state
+# ($SITE_POSTDEREF_QQ, from the `postderef_qq` pseudo-feature the site sent):
+# the eval is compiled in the site's lexical scope, and its own `use` / `no
+# feature` statements still decide from where they stand.
+our $SITE_POSTDEREF_QQ = 0;
+sub postderef_qq_active_for { return _postderef_qq_active_for(@_) }
 sub _postderef_qq_active_for {
   my ($tok) = @_;
   return 0 unless ref $tok && $tok->can('parent');
@@ -607,7 +621,7 @@ sub _postderef_qq_active_for {
     }
     $node = $parent;
   }
-  return 0;
+  return $SITE_POSTDEREF_QQ ? 1 : 0;
 }
 
 # Parse a postfix dereference following an interpolated variable, under
