@@ -1118,7 +1118,10 @@ sub _replacement_interpolates {
   return 0 if $subst !~ /[\$\@]/;
   for my $ev (@{ Pl::InterpScan::scan($subst) }) {
     return 1 if substr($subst, $ev->{span}[0] + length($ev->{sigil}), 1) eq '{';
-    next if $ev->{form} eq 'magic'
+    # A BARE capture `$1` is the runtime's native backref; `$1[0]` / `$1{k}`
+    # (a subscript chain, the scanner's reading) is an ELEMENT of @1 / %1
+    # (#1679) and interpolates.
+    next if $ev->{form} eq 'magic' && !@{ $ev->{chain} || [] }
          && defined $ev->{name} && $ev->{name} =~ /^[1-9][0-9]*\z/;
     return 1;
   }
@@ -4630,7 +4633,10 @@ sub gen_array_access_form {
   my $idx = $self->_subscript_form($kids->[1]);
   if ($is_bare) {
     $arr = $self->_bare_container_sym($arr_node, $arr, q(@));
-    return ['p-undef'] if $arr =~ /^@\d+$/;
+    # A digit-named array (`$12[1]`, `$1[0]`, `$0[0]`) is an ordinary package
+    # array like any other (#1650 / #1679): only the BARE `$12` is the capture
+    # group.  (A rule here answered undef for every element of `@<digits>`,
+    # "not a valid identifier" -- it is one -- in code and in a string alike.)
     $self->environment->register_punct_global($arr)
       if $self->environment && $arr eq '@#';
     if ($self->environment) {
@@ -5127,10 +5133,13 @@ sub _bare_container_sym {
   (my $agg = $content) =~ s/^\Q$from\E/$to/;
   # A STASH (`@Pkg::{LIST}` names `%Pkg::`, task #3511) goes through the
   # symbol form too: its `%Pkg::` arm is the stash lowering, and a bare
-  # `%Pkg::` symbol cannot even be READ ("too many colons").
+  # `%Pkg::` symbol cannot even be READ ("too many colons").  So does a
+  # DIGIT name (#1679): the scalar `$119797` renders as the capture group
+  # `(p-high-capture 119797)`, which has no sigil to swap, while `@119797`
+  # is the ordinary package array the element belongs to.
   if ($agg ne $content
       && (ref $SPECIAL_VARS{$content} || _foreign_runtime_global_form($agg)
-          || $agg =~ /^%.*::\z/)) {
+          || $agg =~ /^%.*::\z/ || $content =~ /\A\$\d+\z/)) {
     return Pl::CLForm::to_flat($self->gen_symbol_form($node, $agg));
   }
   return _swap_elem_sigil($rendered, $to, $from);

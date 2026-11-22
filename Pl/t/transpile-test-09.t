@@ -1179,6 +1179,23 @@ print "1 ", @1x 2, " ", @12x3, " ", @1 x 2, "\n";
 my $c = @1x2; print "2 $c @a1x @{1}x 2 [@1x]\n";
 });
 
+# ── s543i #1679: an ELEMENT of a digit-named array is the array's element --
+# `$12[1]`, `$1[0]`, `$0[0]` -- in code, in a string, in an s/// replacement
+# and in a pattern; only the BARE `$12` is the capture group.  ExprToCL's
+# element lowering answered undef for every `@<digits>` element (and the high
+# capture `$119797` had no sigil to swap), and the replacement gate took
+# `$1[0]` for the native backref `$1`.  INVERSE GUARDS: a bare `$1` / `$2`,
+# `${1}[0]` (the capture, then text), `$1\[0]`, `[$1]` and `$1{k}`.
+test_transpile("an element of a digit-named array is not the capture group (#1679)", q{
+no strict; no warnings;
+@119797 = (1, 2, 3); @12 = (3, 4); @1 = ("A", "B"); %1 = (k => "K"); @0 = ("z");
+"xy" =~ /(x)(y)/;
+print "1 $119797[1] ", $119797[1], " $12[1] ", $12[1], " $0[0] $1[0] $1[1] $1{k}\n";
+print "2 $1 $2 ${1}[0] $1\[0] [$1] $1-[0]\n";
+my $s = "ab"; $s =~ s/(a)(b)/$1[1]<$2>$1/; print "3 $s\n";
+$12[5] = 9; my $r = \$1[1]; $$r = "C"; print "4 ", scalar(@12), " @1 ", ("A" =~ /^$1[0]$/ ? "m" : "n"), "\n";
+});
+
 # Task #2286 (s495f): List::Util::pairs builds objects BLESSED into
 # List::Util::_Pair (->key / ->value / ->TO_JSON) and, like every XS list
 # returner, answers the LAST element in scalar context -- the shim answered
