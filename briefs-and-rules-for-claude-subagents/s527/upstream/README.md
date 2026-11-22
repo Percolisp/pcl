@@ -194,8 +194,8 @@ quoted terminator after a term keeps the here-doc for the fuzzed fixtures 45 /
 
 `0001-*.patch` .. `0147-*.patch` and `pcl-branch.bundle` are regenerated from
 the whole branch (`git format-patch origin/master..pcl`); to be pushed fast-forward
-to the BARE repo only (`842e6bbd` -> `72d2bd9e`) at MERGE-READY -- NOT pushed yet
-(s543f stopped at the s543 stop order); the fork's `pcl` is moved by the reviewing session.  Four groups, each "TODO tests, then the fix"; PPI's suite
+to the BARE repo only (`842e6bbd` -> `72d2bd9e`) at MERGE-READY -- pushed
+(s543f, resumed 2026-11-22); the fork's `pcl` is moved by the reviewing session.  Four groups, each "TODO tests, then the fix"; PPI's suite
 green after every commit, plain and AUTHOR_TESTING=1: **BE** §71 a `/` after a
 builtin that takes an operand starts a match (`print /x/`, `sin /;/`, the
 `when` / `while` modifiers; `//` stays the defined-or after `shift` and the
