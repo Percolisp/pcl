@@ -2525,6 +2525,14 @@ Three sites read that same rule, and each was a silent wrong before it:
   element forms (`local $h{@a} = V`, `local $r->{@a}`, `local ($h{@a}, ...)`,
   via `ExprToCL::generate_hash_key` from the v1 seam) all take.  A SLICE's
   key list stays LIST (`local @h{@a}` localizes each key).
+* **`return`'s parentheses are a TERM of its list, never call parens**
+  (normative, s543j, task #5373): `return` is a list operator that is never
+  a function, so `return (1, 2), 3` returns 1, 2, 3 and `return (1, 2) x 2,
+  3` returns 1, 2, 1, 2, 3; an operator after the parens is read as always
+  (`return (1) + 2` is 3).  Every other list operator keeps perl's "looks
+  like a function" reading (`print((1, 2), 3)`, `die ("A"), "B"`).  Without a
+  comma after the parens both readings are one list, and `return (A, B);`
+  lowers to `(p-return A B)` as before.
 * **An AGGREGATE LEAF in a core builtin's `$` slot, and as the bound operand
   of a match, is its COUNT** (normative, s543j, task #2030): a bare `@a` /
   `%h` (`@_` and the punctuation aggregates too) or a cast `@$r` `@{E}` `%$h`
@@ -2543,7 +2551,9 @@ Three sites read that same rule, and each was a silent wrong before it:
   its LAST element in the context the value is read in: that element
   INHERITS `*wantarray*`, so the list arm reads it in list context and the
   scalar arm in scalar (`my $r = do { 1, <$h> }` reads ONE line; `sub f { 1,
-  g() }` called in scalar context calls `g` in scalar).  (b) A short-circuit
+  g() }` called in scalar context calls `g` in scalar); a ONE-element layer
+  passes the context on as well (`sub t { $_[0] and 3, 4 }` is 4 in scalar
+  context).  (b) A short-circuit
   operator (`&&` `||` `//` `and` `or`) is its RIGHT operand's value in the
   operator's own context, re-derived at emission from the operator's context
   as a ternary's branches are: `my $x = (1 and 2, 0)` is 0 (the comma list
@@ -4408,7 +4418,10 @@ first because a TIED element read in the local's own right side is FETCHed
 only after the local stored undef; under a modifier it is taken only when the
 condition holds.  The operand is side-effect free (the hoist's operand rule),
 so it is read again.  A term the hoist's precondition refuses is its refusal
-(#5330), never the plain delete.  Example: `my $v = delete local $h{d};` is
+(#5330), never the plain delete -- a ternary arm, an `&&` / `||` / `//`
+operand, a hash-constructor value; only a `delete local` that IS a
+declaration's direct operand keeps the old lowering when its operand cannot
+be hoisted.  Example: `my $v = delete local $h{d};` is
 `my $__pcl_ldel_1 = $h{d}; local $h{d} = $__pcl_ldel_1; my $v = delete
 $h{d};`.
 
