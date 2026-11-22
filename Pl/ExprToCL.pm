@@ -3028,7 +3028,13 @@ sub gen_funcall_form {
   # Block forms → (p-eval-block …) [inline_lambda bodies stay a raw atom
   # until that conversion]; string/computed forms → (p-eval …) carrying the
   # lexical-capture alist (docs/eval-lexical-capture.md).
-  if ($func_name eq 'eval' && @$kids == 2) {
+  # `evalbytes STRING` (the KEYWORD: cl_name lowered it to the builtin, so not
+  # a user's sub of that name, #4603) is eval STRING with a byte-string
+  # operand (#5271, s543k): the SAME three site inputs -- the alist, the
+  # features, the `our:` aliases -- and the same context bind; only the head
+  # differs (p-evalbytes refuses a wide character, then compiles as p-eval).
+  my $bytes_eval = ($func_name eq 'evalbytes' && !$user_call && @$kids == 2) ? 1 : 0;
+  if (($func_name eq 'eval' || $bytes_eval) && @$kids == 2) {
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     # Every spelling -- eval BLOCK and eval STRING (#2800) -- is bound by
     # the eval node's own context.
@@ -3038,6 +3044,9 @@ sub gen_funcall_form {
       return $inner if $ctx == INHERIT_CTX;
       return $self->_ctx_wrap_form($inner, $ctx);
     };
+    return $wrap->($self->_gen_eval_string_form($self->gen_node_form($kids->[1]),
+                                                'p-evalbytes'))
+      if $bytes_eval;
     if ($self->expr_o->is_internal_node_type($arg_node)) {
       if ($arg_node->{type} eq 'anon_sub') {
         my $block_kids = $self->expr_o->get_node_children($kids->[1]);
@@ -3924,11 +3933,12 @@ sub _ctx_wrap_form {
 # Shorter forms are kept EXACTLY as they were — no features and no lexicals
 # still emits a plain (p-eval STRING) — so nothing that has neither moves.
 sub _gen_eval_string_form {
-  my ($self, $arg_form) = @_;
+  my ($self, $arg_form, $head) = @_;
+  $head //= 'p-eval';          # p-evalbytes takes the same inputs (#5271)
   my $alist = $self->_eval_lexical_alist;
   my $feats = $self->_eval_site_features;
-  return ['p-eval', $arg_form, ($alist || 'nil'), $feats] if $feats;
-  return $alist ? ['p-eval', $arg_form, $alist] : ['p-eval', $arg_form];
+  return [$head, $arg_form, ($alist || 'nil'), $feats] if $feats;
+  return $alist ? [$head, $arg_form, $alist] : [$head, $arg_form];
 }
 
 # The features in effect at this eval site, as a quoted CL list of names, or

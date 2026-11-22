@@ -1203,8 +1203,7 @@ sub _tw_region_facts {
   # The same walk answers the handle licence's own question, "is there a
   # STRING eval here", which must not depend on `raw-block-eval' (#2006 (b)).
   $stmt->find(sub {
-    return '' if !($_[1]->isa('PPI::Token::Word')
-                && $_[1]->content eq 'eval');
+    return '' if !(Pl::PExpr::TokenUtils::eval_word($_[1]));
     my $next = $_[1]->snext_sibling;
     my $str  = !($next && $next->isa('PPI::Structure::Block'));
     push @{ $ctx->{str_eval_toks} }, $_[1] if $str;

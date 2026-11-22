@@ -431,6 +431,23 @@ sub is_indirect_call_token {
   return 0;
 }
 
+# THE ONE LIST OF EVAL WORDS (#5271, s543k): the words whose operand is perl
+# TEXT compiled at run time in the caller's pad -- `eval` and `evalbytes`
+# (perlfunc: "evalbytes ... behaves like eval EXPR except that it always
+# parses its argument as a string of bytes"), each also spelled `CORE::`.
+# Every "is a string eval here?" test asks eval_word() for the WORD (and keeps
+# its own negatives: `eval BLOCK`, `->eval`, `eval =>`), so a lexical that is
+# promoted, frozen or licensed because "no eval names it" cannot miss an
+# `evalbytes` (or a `CORE::eval`).  A user's sub named `evalbytes` (no feature
+# in force) is counted too: every such test is conservative in that
+# direction, and only the lowering (ExprToCL) decides the keyword.
+my %EVAL_WORD = map { $_ => 1 } qw(eval CORE::eval evalbytes CORE::evalbytes);
+sub eval_word {
+  my ($t) = @_;
+  return ref($t) && Scalar::Util::blessed($t) && $t->isa('PPI::Token::Word')
+      && $EVAL_WORD{ $t->content } ? 1 : 0;
+}
+
 # Is this Word a STRING `eval` — the one spelling whose body is compiled as a
 # separate unit, so its loop-control statements cannot be seen from here?
 # `eval BLOCK` is not one: its `last` is either lexical (and already right) or
@@ -438,8 +455,7 @@ sub is_indirect_call_token {
 # bareword ones — a method name and a fat-comma key.
 sub is_string_eval_word {
   my ($t) = @_;
-  return 0 unless ref($t) && Scalar::Util::blessed($t)
-               && $t->isa('PPI::Token::Word') && $t->content eq 'eval';
+  return 0 unless eval_word($t);
   my $prev = $t->sprevious_sibling;
   return 0 if $prev && $prev->isa('PPI::Token::Operator')
               && ($prev->content eq '->' || $prev->content eq '&');

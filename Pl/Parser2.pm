@@ -218,7 +218,7 @@ sub _scan_eval_site_features {
   # so the integer ops reach it; pseudo-feature `use_integer`, never PPI's.
   my $ui = Pl::Parser::integer_regions_of($doc);
   for my $w (@{ $doc->find(sub {
-                  $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
+                  Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] }) {
     my $nx = $w->snext_sibling;
     if (_is_string_eval_word($w)) {                         # eval { } has no alist
       push @words, $w;
@@ -2172,8 +2172,7 @@ sub parse {
   $self->{_file_has_str_eval} = 0;
   $self->{_str_eval_in_named_sub} = 0;
   $self->{_sub_str_eval} = {};
-  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
-                                 && $_[1]->content eq 'eval' }) || [] }) {
+  for my $w (@{ $doc->find(sub { Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] }) {
     my $nx = $w->snext_sibling;
     next if $nx && $nx->isa('PPI::Structure::Block');
     $self->{_file_has_str_eval} = 1;
@@ -5239,8 +5238,7 @@ sub _promote_captured {
   my $site_pair = 0;
   for my $st (@post) {
     next unless ref $st && $st->isa('PPI::Node');
-    for my $w (@{ $st->find(sub { $_[1]->isa('PPI::Token::Word')
-                                  && $_[1]->content eq 'eval' }) || [] }) {
+    for my $w (@{ $st->find(sub { Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] }) {
       my $nx = $w->snext_sibling;
       next if !$nx || $nx->isa('PPI::Structure::Block');    # eval { } — fine
       if ($eval_pair) { $post_eval = 1; next }
@@ -5550,8 +5548,7 @@ sub _shadow_rename_blocker {
   # outside that region can never resolve the name, so it is not a blocker.
   unless ($eval_ok) {
     my $er = $eval_root // $root;
-    for my $w (@{ $er->find(sub { $_[1]->isa('PPI::Token::Word')
-                                  && $_[1]->content eq 'eval' }) || [] }) {
+    for my $w (@{ $er->find(sub { Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] }) {
       my $nx = $w->snext_sibling;
       return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
     }
@@ -5596,8 +5593,7 @@ sub _state_container_blocker {
   # string eval still reaches a container shadow.  state renames produce
   # cells the alist does not carry, so they keep the refusal.
   unless ($eval_ok) {
-    for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                   && $_[1]->content eq 'eval' }) || [] }) {
+    for my $w (@{ $root->find(sub { Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] }) {
       my $nx = $w->snext_sibling;
       return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
     }
@@ -6193,7 +6189,7 @@ sub _state_eval_visibility {
   my ($self, $doc, $sites, $cells) = @_;
   my $bd = $self->{_binder} or return;
   my @words = grep { _is_string_eval_word($_) } @{ $doc->find(sub {
-                $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] };
+                Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] };
   return unless @words;
   my %at;
   for my $i (0 .. $#$sites) {
@@ -6223,7 +6219,7 @@ sub _state_eval_publish {
   my ($self, $doc) = @_;
   my $vis = delete $self->{_state_eval_vis} or return;
   my @words = grep { _is_string_eval_word($_) } @{ $doc->find(sub {
-                $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] };
+                Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] };
   die "PCL internal: the state rewrite changed the string-eval words ($vis->{n} -> "
     . scalar(@words) . ")\n" if @words != $vis->{n};
   for my $k (sort { $a <=> $b } keys %{ $vis->{at} }) {
@@ -9834,8 +9830,7 @@ sub _body_observes_args {
   return 1 if $txt =~ /\@_|\$_\[|\bshift\b|\bpop\b(?!\s*\(?\s*[\@\$])|\bgoto\b|&\s*[\$\w:]+\s*[;}]/;
   for my $s (@$stmts) {
     next unless ref $s && $s->isa('PPI::Node');
-    for my $w (@{ $s->find(sub { $_[1]->isa('PPI::Token::Word')
-                                 && $_[1]->content eq 'eval' }) || [] }) {
+    for my $w (@{ $s->find(sub { Pl::PExpr::TokenUtils::eval_word($_[1]) }) || [] }) {
       my $nx = $w->snext_sibling;
       return 1 unless $nx && $nx->isa('PPI::Structure::Block');
     }
@@ -13523,7 +13518,7 @@ sub _anon_compiles_at_runtime {
   my ($block) = @_;
   my $hits = $block->find(sub {
     my $e = $_[1];
-    return 1 if $e->isa('PPI::Token::Word') && $e->content eq 'eval';
+    return 1 if Pl::PExpr::TokenUtils::eval_word($e);
     return 1 if $e->isa('PPI::Token::Regexp::Substitute');
     return 1 if $e->isa('PPI::Token::Regexp::Match');
     return '';

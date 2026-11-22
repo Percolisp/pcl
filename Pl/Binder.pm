@@ -350,7 +350,7 @@ sub _token {
   my ($self, $t, $pkg, $cv) = @_;
   if ($t->isa('PPI::Token::Word')) {
     my $w = $t->content;
-    $self->_note_string_eval($t, $cv) if ($w eq 'eval' || $w eq 'CORE::eval') && _is_string_eval($t);
+    $self->_note_string_eval($t, $cv) if Pl::PExpr::TokenUtils::eval_word($t) && _is_string_eval($t);
     if ($w eq 'my' || $w eq 'our' || $w eq 'state') { $self->_declare($t, $pkg) }
     elsif (exists $self->{brace}{ refaddr $t }) {
       $self->_ref($t, $self->{brace}{ refaddr $t }, 'brace', $pkg, $cv);
@@ -387,7 +387,8 @@ sub _token {
 # that occurs only inside TEXT -- `eval '$x'`, `my $c = '$x'; eval $c` --
 # can read a visible outer lexical that the compile-time pad never records.
 # The binder records every string eval with its CV (`eval EXPR` /
-# `CORE::eval EXPR` / `s///ee`; never `eval BLOCK`, a method `->eval` or a
+# `CORE::eval EXPR` / `evalbytes EXPR`, the ONE word list
+# Pl::PExpr::TokenUtils::eval_word / `s///ee`; never `eval BLOCK`, a method `->eval` or a
 # key `eval =>`): has_string_eval($cv) is the CV fact.  A literal TEXT
 # (text_refs: a quote, a heredoc, qw) that names a lexical L counts as a use
 # of L exactly when a string eval runs INSIDE L's visible range
@@ -1048,7 +1049,7 @@ sub _is_eval_operand {
                                       || $n->parent->isa('PPI::Structure::List'))
                     && !$n->sprevious_sibling;
   my $w = $n->sprevious_sibling;
-  return $w && $w->isa('PPI::Token::Word') && ($w->content eq 'eval' || $w->content eq 'CORE::eval')
+  return Pl::PExpr::TokenUtils::eval_word($w)
       && _is_string_eval($w) ? 1 : 0;
 }
 

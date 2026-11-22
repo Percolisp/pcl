@@ -27747,9 +27747,20 @@ would consume, so it dies naming the stream (rule 12)."
   (%p-sig-apply "ALRM")
   (sb-posix:alarm (if secs (truncate (to-number secs)) 0)))
 
-(defun p-evalbytes (s)
-  "Perl evalbytes - evaluate byte string as Perl code. PCL: delegates to eval."
-  (p-eval s))
+(defun p-evalbytes (s &optional lex-alist features)
+  "Perl evalbytes - eval STRING with a BYTE-string operand (#5271, s543k).
+   The SITE hands over what an eval site hands over -- LEX-ALIST and FEATURES
+   (the #364 list with its `our:' aliases), emitted by the same code
+   (ExprToCL::_gen_eval_string_form) -- and the compile is p-eval's, cache key
+   included: PCL reads every eval text as octets already (a `use utf8' inside
+   it decodes them, Parser::_maybe_decode_utf8), so the two words compile the
+   same text the same way.  The one difference is perl's croak on a string
+   that is not bytes: a character above 0xFF dies at the CALL (not caught by
+   the evalbytes itself; perl 5.40.3: `Wide character in eval \"string\"')."
+  (let ((str (to-string (p-scalar s))))
+    (when (find-if (lambda (c) (> (char-code c) 255)) str)
+      (p-die "Wide character in eval \"string\""))
+    (p-eval str lex-alist features)))
 
 (defun p-study (&optional str)
   "Perl study - deprecated no-op in modern Perl. Returns 1."
@@ -28756,7 +28767,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-15900"
+(defparameter *pcl-cache-generation* "v2-16000"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

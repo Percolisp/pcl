@@ -211,6 +211,19 @@ print "brace_eval=", eval(q{package Bz9; join ",", ${bs}, scalar(@{bl}), ${bh}{k
 eval q{package Bz9; ${bw} = "bz-w"; $#{bx} = 2}; print "brace_write=", ($Bz9::bw // "u"), "/", ($main::bw // "u"), "/", scalar(@Bz9::bx), "\n";
 sub brace_sub { package Bz9; return join ",", ${bs}, $#{ba} }
 print "brace_sub=", brace_sub(), "\n";
+# #5271 (s543k): `evalbytes` is eval STRING with a byte operand -- the same site
+# inputs (the alist, the features, the `our:` aliases), and every "a string
+# eval is here" test counts its word (a sub's lexical it writes is a box, not
+# a raw slot); a wide character dies at the call.
+sub eb_read9  { my $y = 7; CORE::evalbytes q{$y + 1} }
+sub eb_write9 { my $y = 7; CORE::evalbytes q{$y = 8}; $y }
+my $ebx9 = "lex-eb"; $Foo::ebx9 = "foo-eb";
+print "eb_read=",   eb_read9(),  "\n";
+print "eb_write=",  eb_write9(), "\n";
+print "eb_region=", CORE::evalbytes(q{package Foo; $ebx9}), "\n";
+print "eb_our=",    CORE::evalbytes(q{package Foo; $oa9}), "\n";
+print "eb_wide=",   (eval { CORE::evalbytes "\x{100}"; 1 } ? "ok" : $@ =~ /^Wide character/ ? "wide" : "other"), "\n";
+{ use feature 'evalbytes'; my $z9 = 4; print "eb_feature=", evalbytes(q{$z9 * 2}), "\n"; }
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -320,6 +333,12 @@ my %expect = (
     brace_eval    => 'bz-s,3,bz-v,3,1',
     brace_write   => 'bz-w/u/3',
     brace_sub     => 'bz-s,3',
+    eb_read       => '8',
+    eb_write      => '8',
+    eb_region     => 'lex-eb',
+    eb_our        => 'main-o',
+    eb_wide       => 'wide',
+    eb_feature    => '8',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',
