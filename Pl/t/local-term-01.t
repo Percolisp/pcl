@@ -231,16 +231,33 @@ PERL
 # 7g. RULED s519 #4: a local in a VOID position no lowering reaches is
 #     effect-only -- it keeps the old read (NOT localized: here the caller's
 #     $_ is clobbered, where perl restores it) and the transpile ANNOUNCES it;
-#     the program runs on.  (ExtUtils::CBuilder's Windows.pm 74, dumpvar.pl 71.)
+#     the program runs on.  The lvalue comes after a CALL here (h() runs
+#     first, so the hoist refuses); the plain `(my $x, local $_) = @_` of
+#     ExtUtils::CBuilder's Windows.pm 74 / dumpvar.pl 71 is hoisted since s543l
+#     (#5330: the list's element comma evaluates nothing) -- row 7h.
 {
     my $code = <<'PERL';
-sub sls { (my $x, local $_) = @_; print "in x=$x _=$_\n"; }
+our %H; sub h { \%H }
+sub sls { (h()->{x}, local $_) = @_; print "in x=$H{x} _=$_\n"; }
 $_ = "out"; sls(1, 2); print "ran\n";
 PERL
     my $err;
     is(run_cl($code, \$err), "in x=1 _=2\nran\n", 'void unreached local runs on, unlocalized');
-    like($err, qr/^PCL: local in an unsupported expression position at \S+ line 1 -- not localized$/m,
+    like($err, qr/^PCL: local in an unsupported expression position at \S+ line 2 -- not localized$/m,
          '... and the transpile announces it');
+}
+
+# 7h. #5330 (s543l): `(my $x, local $_) = @_` -- the lvalue list's comma
+#     separates elements and evaluates nothing, so the hoist reaches the term:
+#     the caller's $_ is restored, as perl's (it was clobbered and announced).
+{
+    my $code = <<'PERL';
+sub sls { (my $x, local $_) = @_; print "in x=$x _=$_\n"; }
+$_ = "out"; sls(1, 2); print "after _=$_\n";
+PERL
+    my $err;
+    is(run_cl($code, \$err), "in x=1 _=2\nafter _=out\n", 'a local lvalue after an element comma is hoisted and restored (#5330)');
+    unlike($err // '', qr/not localized/, '... and nothing is announced');
 }
 
 # 8. a local in a VALUE position no lowering reaches is a REFUSAL at its

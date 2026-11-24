@@ -7155,17 +7155,27 @@ sub _hoist_local_term {
   my @inv = $compound ? () : $self->_local_invocant($l, $pre);
   my %inv = map { refaddr($_) => 1 } map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @inv;
   my $owner;      # a comma separates ARGUMENTS only after the call owning them
+  my %pass;       # an earlier delete of another literal key of the term's aggregate
+  # The #5330 widening (value operators, element commas, an other-key delete)
+  # only where the restore point is the hoist's: not inside a DEREF block,
+  # which is a scope of its own in perl (#5381).
+  my $wide = 1;
+  for (my $a = $l->parent; $a && $a != $s; $a = $a->parent) {
+    $wide = 0 if $a->isa('PPI::Structure::Block');
+  }
   for my $t ($s->tokens) {
     last if $t == $l;
-    next if $inv{ refaddr $t };
+    next if $inv{ refaddr $t } || $pass{ refaddr $t };
     if ($t->isa('PPI::Token::Word')) {
+      if ($wide and my @d = _other_key_delete($t, \@op)) { $pass{ refaddr $_ } = 1 for @d; next }
       my $k = $self->_word_before_local($t, $l);
       return 0 if $k eq 'first';
       $owner = 1 if $k eq 'owner';
       next;
     }
     return 0 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/ && !$owner
-             && !_decl_list_comma($t);
+             && !_decl_list_comma($t) && !($wide && _nested_element_comma($t));
+    next if $wide && _value_operator($t);
     return 0 if !_token_inert_before_local($t, \%names);
   }
   my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
@@ -7281,6 +7291,68 @@ sub _token_inert_before_local {
   # a logical NOT applies to the value after the term is evaluated
   return 1 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:!|not)$/;
   return 0;
+}
+
+# (#5330, s543l) A VALUE operator applies after BOTH its operands are
+# evaluated, unconditionally, and evaluates nothing of its own: `1 + delete
+# local $h{k}` -- the left operand's tokens are asked one by one.  Never a
+# short-circuit / ternary / range (they decide whether the term runs), never
+# an assignment operator (it reads its left side).
+sub _value_operator {
+  my ($t) = @_;
+  return ($t->isa('PPI::Token::Operator')
+          && $t->content =~ /^(?:[-+*\/%x.&|^]|\*\*|<<|>>|==|!=|<=>|<=|>=|<|>|eq|ne|lt|gt|le|ge|cmp)$/) ? 1 : 0;
+}
+
+# (#5330, s543l) A comma or `=>` NESTED in a parenthesised list or an
+# anonymous constructor separates ELEMENTS: it evaluates nothing, and every
+# element before the term is asked token by token (`my @v = (1, delete local
+# $h{k})`, `($x, $y) = (delete local $h{b}, 5)`, `{ k => delete local $h{b}
+# }`).  The statement's own top-level comma stays the void comma list's
+# (_split_void_local_list) or a paren-less list operator's (the owner rule).
+sub _nested_element_comma {
+  my ($t) = @_;
+  return 0 unless $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/;
+  my $e = $t->parent or return 0;
+  my $box = $e->parent or return 0;
+  return ($box->isa('PPI::Structure::List') || $box->isa('PPI::Structure::Constructor')) ? 1 : 0;
+}
+
+# (#5330, s543l) `delete SYM{KEY}` / `delete SYM[KEY]` before a `delete
+# local` term of the SAME aggregate whose key is statically DIFFERENT: the
+# earlier delete cannot observe the term's element (`my @v = (delete local
+# $h{a}, delete local $h{b})`, after the first term's hoist).  Returns the
+# tokens of that delete (the word, the symbol, the subscript's) to pass, or ()
+# -- only literal keys (a bareword, a quote without a sigil, a number) on both
+# sides, so the answer is static.
+sub _other_key_delete {
+  my ($w, $op) = @_;
+  return () unless $w->isa('PPI::Token::Word') && $w->content eq 'delete';
+  my $s = $w->snext_sibling;
+  my $sub = $s && $s->snext_sibling;
+  return () unless $s && $s->isa('PPI::Token::Symbol') && $sub && $sub->isa('PPI::Structure::Subscript');
+  return () unless @$op == 2 && $op->[0]->isa('PPI::Token::Symbol')
+                && $op->[1]->isa('PPI::Structure::Subscript');
+  return () unless $s->symbol eq $op->[0]->symbol
+                && $sub->start->content eq $op->[1]->start->content;
+  my ($k1, $k2) = (_static_key($sub), _static_key($op->[1]));
+  return () unless defined $k1 && defined $k2 && $k1 ne $k2;
+  my $n = $sub->snext_sibling;
+  return () if $n && !($n->isa('PPI::Token::Operator') && $n->content =~ /^(?:,|=>)$/);
+  return ($w, $s, $sub->tokens);
+}
+
+# The one literal key of a subscript (`{a}`, `{'a'}`, `{"a"}`, `[2]`), or undef.
+sub _static_key {
+  my ($sub) = @_;
+  my @g = Pl::Stmt::subscript_key_groups($sub);
+  return undef unless @g == 1 && @{ $g[0] } == 1;
+  my $t = $g[0][0];
+  return $t->content if $t->isa('PPI::Token::Word') || $t->isa('PPI::Token::Number');
+  return $t->string if $t->isa('PPI::Token::Quote::Single') || $t->isa('PPI::Token::Quote::Literal');
+  return $t->string if ($t->isa('PPI::Token::Quote::Double') || $t->isa('PPI::Token::Quote::Interpolate'))
+                    && $t->content !~ /[\$\@\\]/;
+  return undef;
 }
 
 # THE ONE QUESTION of #3363 (rule 11): what does a WORD that precedes the

@@ -48,7 +48,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 47;
+plan tests => 48;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -809,4 +809,35 @@ my $x = 1; my $xr = \$x; print "6 ", (eval { local ${ $xr } = 2; 1 } ? "lived" :
            . "5 1\n"
            . "6 died\n",
        'N3: a real dereference under local stays one (a block, a call, a qualified name, a hard ref)');
+}
+
+# N4 (#5330, s543l): `delete local` after a VALUE operator, after an element
+# comma of a list / constructor / an assignment's left list, and after an
+# earlier `delete` of ANOTHER literal key of the same hash is hoisted (it was
+# the #3370 refusal); a read of the SAME element before the term still
+# refuses (the hoist would move the local above it).  Probed under perl 5.40.3
+# (scratch/s543l/probes/m5); rows 1-6 died on the 9fc6583b extraction.  Line
+# 7 is the BREAKING shape: perl runs it ("7 ran"); PCL keeps the LOUD #3370
+# refusal by design -- the line guards that no widening turns it silent.
+{
+    my $out = run_pl(q{
+our %h = (a => 'A', b => 'B', k => 5, j => 'J', c => 'C'); our @a = (1, 2, 3); my ($x, $y);
+sub f1 { my @v = (delete local $h{a}, delete local $h{b}); "@v " . join(",", sort keys %h) }
+sub f2 { my $n = 10 * delete local $h{k}; my $s = "s" . delete local $h{j}; "$n $s " . join(",", sort keys %h) }
+sub f3 { ($x, $y) = (delete local $h{b}, 5); my $r = { q => delete local $h{c} }; "$x $y $r->{q} " . join(",", sort keys %h) }
+sub f4 { my $s = 100 + delete local $a[2]; "$s " . scalar(@a) }
+sub f5 { 1 + delete local $h{k}; exists $h{k} ? "E" : "N" }
+sub f6 { my $t = $h{k} . delete local $h{k}; $t }
+print "1 ", f1(), "\n2 ", f2(), "\n3 ", f3(), "\n4 ", f4(), "\n5 ", f5(), "\n";
+print "6 ", join(",", map { "$_=$h{$_}" } sort keys %h), " @a\n";
+print "7 ", (eval { f6(); 1 } ? "ran" : $@ =~ /local in this expression position/ ? "refused" : "other"), "\n";
+});
+    is($out, "1 A B c,j,k\n"
+           . "2 50 sJ a,b,c\n"
+           . "3 B 5 C a,j,k\n"
+           . "4 103 2\n"
+           . "5 N\n"
+           . "6 a=A,b=B,c=C,j=J,k=5 1 2 3\n"
+           . "7 refused\n",
+       'N4: delete local after a value operator / an element comma / another key\'s delete is hoisted (#5330)');
 }
