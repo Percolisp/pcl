@@ -34550,6 +34550,14 @@ would consume, so it dies naming the stream (rule 12)."
       ;; object, which stringified as a (blessed) GLOB(0x...) reference.  A
       ;; lexical DIRHANDLE is the same glob ref (task #5082).
       ((%p-handle-payload-p inner) (%p-stream-glob inner))
+      ;; A RAW NUMBER -- no box: `${ +1 }`, `${ 1.5 }`, `${ $n - 1 }` -- is
+      ;; never a hard reference (a reference always reaches here boxed), so
+      ;; it is perl's rv2sv of a non-ref: the symbolic name of its STRING
+      ;; form, `$1` (#5353), strict refs' fatal included.  A BOX holding a
+      ;; number (`${ $one }`) stays the arm below: it is byte for byte a
+      ;; referent box out of a container (the note above p-cast-$-box, #551).
+      ((and (numberp inner) (not (p-box-p val)))
+       (p-cast-$ (to-string inner) site))
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val &optional site)
@@ -34613,6 +34621,10 @@ would consume, so it dies naming the stream (rule 12)."
       ;; here (the arm above), so this is the raw-glob operand.
       ((%p-glob-value-operand-p val inner)
        (box-set (%p-glob-scalar-box inner) new-value))
+      ;; A RAW NUMBER is a symbolic name, the reader's rule (#5353): `${ +1 }
+      ;; = 5` is perl's read-only `$1` (%p-symref-scalar-set dies so).
+      ((numberp inner)
+       (setf (p-cast-$ (to-string inner) site) new-value))
       (t (error "Cannot dereference non-reference: ~A" inner)))))
 
 (defun %p-glob-scalar-box (glob)

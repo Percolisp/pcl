@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 20;
 
 sub write_pl {
     my ($code) = @_;
@@ -419,4 +419,31 @@ sub meta { ${"$_[0]\::META"} ||= bless {}, $_[0] }
 my $m1 = meta("K"); $m1->{k} = 1; my $m2 = meta("K");
 print "7=", ref($m2), " ", ($m2->{k} // "u"), " ", ($m1 == $m2 ? "same" : "differ"), "\n";
 my $copy = ${"L::C"}; $copy = 5; print "8=", ref(${"L::C"}), "\n";
+PL
+
+# ---- #5353 (s543m): a RAW number is a symbolic name --------------------------
+# `${ +1 }` is perl's rv2sv of a non-reference: the variable named by the
+# number's STRING, `$1` -- read, read-only write, strict refs' fatal.  A number
+# never reaches p-cast-$ as a hard reference unboxed, so the raw value is the
+# safe half; a BOX holding a number (`${ $one }` with `\$one` taken) is still
+# indistinguishable from a referent box out of a container (#551) and is not
+# asserted here.  The hard-reference controls (`${ $h{k} }`, `${ \ 7 }`) and
+# the aggregate / code twins were already right.  FAILS on the base 9fc6583b.
+
+both_agree('#5353 ${ NUMBER } reads the variable the number names', <<'PL');
+no warnings; no strict 'refs';
+"abc" =~ /(b)(c)/;
+my $one = 1; my $two = 2; my $n = 9;
+@2 = (7, 8); %9 = (k => 'v'); *{"9"} = sub { "nine" };
+$0 = "zero";
+print "a ", ${ +1 }, "|", ${ "1" }, "|", ${ $one }, "|", $$one, "\n";
+print "b ", ${ 1.5 } // 'u', "|", ${ +0 }, "|", ${ \ 1 }, "\n";
+print "c ", join(",", @{ +2 }), "|", ${ +9 }{k} // 'u', "|", &{ +9 }(), "\n";
+print "d ", join(",", @{ $two }), "|", ${ $n }{k} // 'u', "|", &{ $n }(), "\n";
+print "e ", ${ $one + 1 }, "|", ${ 3 - 2 }, "\n";
+sub num { 1 } my %h = (k => \42); my @a = (\43);
+print "f ", ${ num() }, "|", ${ $h{k} }, "|", ${ $a[0] }, "\n";
+my $r = eval { ${ +1 } = 5; 1 } ? "wrote" : "died: " . ($@ =~ /read-only/ ? "read-only" : $@);
+print "g $r\n";
+{ use strict 'refs'; my $s = eval { my $x = ${ +1 }; 1 } ? "ok" : ($@ =~ /Can't use string \("1"\) as a SCALAR ref/ ? "strict-die" : "other: $@"); print "h $s\n"; }
 PL
