@@ -246,17 +246,23 @@ PL
 #    DEFAULTS reads it -- never because the name is a SUBSTRING of its text.
 #    The base offered `(bar)` for `$r` / `$ba` and `($a, $b = $a)` for its own
 #    parameter, and the binder (rightly) holds no use there: the transpile died
-#    "the binder holds no record of $r in `(bar)`" (a block region; in eval
-#    text behind `package` since s543h).  The BREAKING shape stays right: a
-#    default that reads a package variable of the region (`our` of the
-#    region, a global of it, an `our` of another package, a string eval) is
-#    requalified -- and a name read ONLY in a default is a candidate now
-#    (row 14's last line: the base read $main::g, 12).  Both rows FAIL on the
-#    base 9fc6583b (inverse-verified); perl 5.40.3's output.
-is(run_cl(<<'PL'), "a ok\nb ok\nc 8 7\nd 8 2\ne 7\nf 34\ng 104\nh 16\ni 8 13\nj 21\n",
+#    "the binder holds no record of $r in `(bar)`" (a block region, row 13,
+#    every line).  In eval text behind `package` (row 14) s543k's candidate
+#    filter (#5272: only names the binder homes AWAY from the eval's package
+#    are offered) hid the token for most names; it is still offered for a name
+#    homed away -- the text's own region `our $r` (line 1) or a region global
+#    `$a` (line 3), which died on the base too -- and a name read ONLY in a
+#    default was never a candidate (line 7: the base read $main::g, 12).  The
+#    other lines of row 14 PASS on the base: regression lines for s543k's fix
+#    (lines 8-11, the reviewing session's -110 probes) and the BREAKING shape
+#    (lines 5-6: a default that reads a package variable of the region or the
+#    site's `our` is requalified).  Both rows FAIL on the base 9fc6583b
+#    (inverse-verified); perl 5.40.3's output.
+is(run_cl(<<'PL'), "k 8\na ok\nb ok\nc 8 7\nd 8 2\ne 7\nf 34\ng 104\nh 16\ni 8 13\nj 21\n",
 no warnings;
 our $r = 7;
 our $dm = 100;
+{ package Q19; my $f = sub(r) {}; print "k ", $r + 1, "\n"; }
 { package Q; my $r = sub(bar) {}; my $ba = sub(bar) {}; print "a ok\n"; }
 package Q2 { my $r = sub(bar) {}; print "b ok\n"; }
 package main;
@@ -271,7 +277,7 @@ package main;
 PL
    '#5310: a block region offers a one-token Prototype / signature only for its defaults\' uses');
 
-is(run_cl(<<'PL'), "1\n7\n8 1\n8 7\n9\n104\n13\n",
+is(run_cl(<<'PL'), "1\n7\n8 1\n8 7\n9\n104\n13\n1\n8\n1\n8\n",
 no warnings;
 our $r = 7;
 our $dm = 100;
@@ -284,6 +290,10 @@ for my $t (
   q{package Q7; our $d = 5; use feature 'signatures'; sub n7 ($x, $y = $d) { $x + $y } n7(4)},
   q{package Q8; use feature 'signatures'; sub n8 ($x, $y = $dm) { $x + $y } n8(4)},
   q{package Q10; use feature 'signatures'; sub n10 ($x, $y = $g) { $x + $y } n10(4)},
+  q{package Q; my $r = sub(bar) {}; 1},
+  q{package Q; my $f = sub(r) {}; $r + 1},
+  q{package Q; my $f = sub(ENV) {}; scalar(@ENV) + 1},
+  q{package Q; use feature 'signatures'; sub nm3 ($a, $b = $a) { $a + $b } nm3(4)},
 ) { print eval($t) // "DIES $@", "\n" }
 PL
    '#5310: the same in eval text behind `package`; a name read only in a default is requalified');

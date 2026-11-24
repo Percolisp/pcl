@@ -249,6 +249,8 @@ print "span_early=", span_early9(), "\n";
 # inside a sub body, an in-place `package X { }`) a `my` after an `our` of the
 # same name is the LEXICAL from its declaration on (the by-name `our` registry
 # asks the binder there); the alias's own uses stay the package variable's.
+# Ten FAIL on the base 9fc6583b (inverse-verified); om_local (`local` binds
+# nothing: the `our`) and om_ab (a kept `$a` that IS the alias) are controls.
 print "om_sub=", eval(q{package Om1; our $wm = 1; sub om_n1 { my $wm = 4; $wm + 1 } om_n1() . " $wm"}), "\n";
 print "om_top=", eval(q{package Om2; our $wm = 1; my $wm = 4; $wm + 1}), "\n";
 print "om_args=", eval(q{package Om3; our $wm = 1; sub om_n3 { my ($wm, $k) = @_; $wm + $k } om_n3(4, 5) . " $wm"}), "\n";
