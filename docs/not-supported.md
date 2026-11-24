@@ -2562,6 +2562,56 @@ stays different from perl, measured s540c / s541:
 
 ---
 
+<a id="ns-dirhandle-snapshot"></a>
+## A dirhandle holds no descriptor: `fileno $dh` is undef, and the listing is read at `opendir`
+
+**Perl behaviour:** `opendir` keeps a `DIR*` open for the handle's life.
+`fileno $dh` is its dirfd (Linux), `-d $dh` / `stat $dh` fstat it, and
+`readdir` / `rewinddir` read the directory as it is NOW: a file created after
+`opendir` is seen by a later `readdir` (filesystem-dependent) and always after
+`rewinddir`.
+
+**PCL behaviour (task #5123, measured s543n):** `opendir` reads the whole
+listing with readdir(3) and closes the `DIR*` at once; the handle is a record
+holding that snapshot and the directory's path (`docs/ir-spec.md` 7.5a, task
+#5082).  So `fileno $dh` is undef (an open handle that answers like a closed
+one), a stat / filetest of the handle answers through the remembered PATH
+(the same file unless the directory was renamed or removed meanwhile; task
+#1048), and `readdir` / `telldir` / `seekdir` / `rewinddir` index the
+snapshot: an entry created after `opendir` is never listed (perl: `02 sees a
+b`, `03 after rewind a b`; PCL: `a`, `a`).  Keeping the `DIR*` would need
+`dirfd(3)` (sb-posix has none: a foreign call) and a descriptor per open
+dirhandle that a DROPPED dirhandle would leak -- the #2006 collector closes
+dropped STREAMS only.  The record gaining an fd is not enough, so it is left.
+
+**Owner:** #5123.
+
+---
+
+<a id="ns-reopen-through-copy"></a>
+## Re-opening a LEXICAL filehandle through a COPY of it re-opens the copy only
+
+**Perl behaviour:** `open my $fh` stores a reference to a GLOB, so a copy
+(`my $c = $fh`, a hash value, a `my ($h) = @_` parameter) is the SAME glob:
+`close $fh; open $c, ...` re-opens the handle every holder sees (`$c == $fh`,
+`<$fh>` reads the new file).  The same holds for a dirhandle.
+
+**PCL behaviour (task #5121, measured s543n):** a lexical handle's variable
+holds the handle (the stream, or the dirhandle record) itself, so an opener
+installs a NEW one into the variable it was given and the other holders keep
+the old, closed one (`new`, `undef` where perl says `same`, `b1`).  Right
+already, because their holder is a GLOB: `IO::File` / `IO::Handle` objects
+(`$io->close; $io->open(...)`, `->fdopen`), `Symbol::gensym`, `\*FH`, and a
+re-open through an alias (`open $_[0], ...`).  Measured s543n: no raw-copy
+re-open in the 30 board dists' 1,242 files, the everyday corpus, perl-tests
+or perl's own 755 core modules (every param-copy open there is on a glob
+object).  Making the lexical handle a shared glob is a REPRESENTATION change
+(every print would resolve through it) and is left for a ruling.
+
+**Owner:** #5121.
+
+---
+
 <a id="ns-lazy-arg-eval"></a>
 ## Lazy argument evaluation / `$SIG{__WARN__}` side effects during argument build
 

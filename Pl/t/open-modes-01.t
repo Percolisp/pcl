@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -432,4 +432,37 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'a handle USE slot given a non-handle reference dies "Not a GLOB reference" as perl does, per slot; *{} overload resolves (#4842)');
+}
+
+# #5122 (s543n): perl 5.28+ will not open one glob as a file AND a directory:
+# `opendir` on a handle open as a filehandle and `open` on one open as a
+# dirhandle die before anything is closed (a lexical, a bareword, a gensym, an
+# element); a CLOSED handle of the other kind, sysopen / pipe / socket, and a
+# reopen of the same kind are fine.  PCL replaced the handle and went on.
+{
+    my $code = <<'PERL';
+use Symbol qw(gensym); use Fcntl; use Socket;
+my $D = "/tmp/pcl-kind-$$"; mkdir $D; my $f = "$D/f"; open(my $w, ">", $f) or die; print $w "x\n"; close $w;
+sub try { my ($tag, $code) = @_; my $r = eval { $code->(); 1 }; print "$tag ", ($r ? "ok" : "DIE(" . ($@ =~ /^(.*?) at /s ? $1 : $@) . ")"), "\n" }
+try("01", sub { open my $d, "<", $f or die; opendir $d, $D or die "o2" });
+try("02", sub { opendir my $e, $D or die; open $e, "<", $f or die "o2" });
+try("03", sub { open(FH, "<", $f) or die; opendir(FH, $D) or die "o2"; close FH });
+try("04", sub { opendir(DH, $D) or die; open(DH, "<", $f) or die "o2"; closedir DH });
+try("05", sub { open my $d, "<", $f or die; close $d; opendir $d, $D or die "o2" });
+try("06", sub { opendir my $e, $D or die; closedir $e; open $e, "<", $f or die "o2" });
+try("07", sub { my $g = gensym; open($g, "<", $f) or die; opendir($g, $D) or die "o2" });
+try("08", sub { opendir my $e, $D or die; sysopen($e, $f, O_RDONLY) or die "o2" });
+try("09", sub { opendir my $e, $D or die; pipe($e, my $p) or die "o2" });
+try("10", sub { opendir my $e, $D or die; socket($e, PF_UNIX, SOCK_STREAM, 0) or die "o2" });
+try("11", sub { open my $d, "<", $f or die; open $d, "<", $f or die "o2" });
+try("12", sub { opendir my $d, $D or die; opendir $d, "/" or die "o2" });
+try("13", sub { my %h; open $h{x}, "<", $f or die; opendir $h{x}, $D or die "o2" });
+unlink $f; rmdir $D;
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'opendir on an open filehandle / open on an open dirhandle die as perl does (#5122)');
 }

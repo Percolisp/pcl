@@ -23132,6 +23132,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                (if three-arg-p
                    (list* mode filename more-args)
                    (list (concatenate 'string mode (to-string filename))))))))
+  ;; An OPEN DIRHANDLE in the place is perl's death, before anything (#5122).
+  (%p-open-kind-check fh :file)
   ;; perl closes what the handle already holds BEFORE it attempts the new
   ;; open, so a FAILED reopen still flushed and closed the old stream (task
   ;; #2006 (a), probed: `open($r,">",$f); print $r "gone"; open($r,"<",
@@ -26530,6 +26532,7 @@ would consume, so it dies naming the stream (rule 12)."
    row comparing the first entry went red when CI's runner image changed).
    DIR is the directory's own name, literally (opendir(3) takes it as is, a
    `*' in it is a character, #755); a symlink entry is its own name."
+  (%p-open-kind-check dh :dir)
   (let* ((dir-str (to-string dir))
          ;; The system's own answer (#2922): a failing opendir(3) sets $! as
          ;; perl's does (ENOENT, ENOTDIR for a plain file, EACCES) -- and the
@@ -26552,6 +26555,40 @@ would consume, so it dies naming the stream (rule 12)."
                 (%p-note-handle-name dh handle)
                 (setf (p-box-value dh) handle))))
         t))))
+
+(defun %p-handle-perl-name (designator)
+  "The NAME perl gives the glob of a handle DESIGNATOR in a diagnostic
+   (GvENAME): a lexical's `$fh' (the vivified glob's display name, #3517), a
+   bareword's own name, a glob's name; `$h{...}' perl's spelling of an element
+   target, which keeps no name here."
+  (let ((v (if (p-box-p designator) (p-box-value designator) designator)))
+    (cond ((p-typeglob-p v) (%p-glob-perl-name v))
+          ((and (symbolp designator) designator (not (eq designator *p-undef*)))
+           (let ((n (%pcl-invert-case (symbol-name designator))))
+             (subseq n (let ((sep (search "::" n :from-end t))) (if sep (+ sep 2) 0)))))
+          ((stringp v) v)
+          ((let ((nm (gethash v *p-handle-names*))) (and nm (cdr nm))))
+          (t "$h{...}"))))
+
+(defun %p-open-kind-check (designator kind)
+  "perl 5.28+: one glob cannot hold an open FILE and an open DIRECTORY (task
+   #5122): `opendir' (KIND :dir) on a handle open as a filehandle and `open'
+   (KIND :file) on one open as a dirhandle die `Cannot open NAME as a
+   dirhandle: it is already open as a filehandle' (and its twin), before
+   anything is closed or opened.  A CLOSED handle of the other kind is fine,
+   and sysopen / pipe / socket do not ask (probed 5.40.3)."
+  (ecase kind
+    (:dir
+     (let ((s (%p-resolve-fh designator)))
+       (when (or (%p-socket-p s)
+                 (and (streamp s) (open-stream-p (%p-stream-target s))))
+         (p-die (format nil "Cannot open ~A as a dirhandle: it is already open as a filehandle"
+                        (%p-handle-perl-name designator))))))
+    (:file
+     (let ((d (%p-resolve-dh designator)))
+       (when (and d (%dh-path d))
+         (p-die (format nil "Cannot open ~A as a filehandle: it is already open as a dirhandle"
+                        (%p-handle-perl-name designator))))))))
 
 (defmacro p-opendir (dh &rest args)
   "Perl opendir — bareword dirhandle is auto-quoted."
