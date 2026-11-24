@@ -250,7 +250,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-scope-close #:%p-scope-close #:p-flush-dropped-handle #:p-flush-dropped-value
+   #:p-scope-close #:%p-scope-close #:p-flush-dropped-handle #:p-flush-dropped-value #:p-flush-dropped-store
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-eof-argv #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
    #:p-use-open #:p-default-layers
@@ -22404,17 +22404,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     `(let ((,v (%p-peek-slot ,var)))
        (when (%p-may-hold-handle-p ,v) (%p-flush-dropped-value ,v)))))
 
-(defmacro p-flush-dropped-value (form)
+(defmacro p-flush-dropped-value (form &optional tail)
   "`delete $h{K};' / `delete $r->{K};' as a whole statement (task #4794 shape
    4): FORM is the delete, whose value is the dropped element as stored -- the
    flush of p-flush-dropped-handle applies to it, and FORM's value is
    returned.  Never a second read of the element, never a FETCH: a tied
-   hash's DELETE runs once, as perl runs it."
+   hash's DELETE runs once, as perl runs it.
+   TAIL (#5405): FORM is a sub's / block's LAST statement, whose value goes to
+   the caller -- it is a drop only when the caller discards it (VOID context,
+   `$obj->drop;'); `my $fh = $obj->take_fh' keeps the handle, so no flush."
   (let ((v (gensym "V")) (p (gensym "P")))
     ;; (delete's value of a handle element is the handle's own BOX: peeked)
     `(let* ((,v ,form)
             (,p (%p-peek-slot ,v)))
-       (when (%p-may-hold-handle-p ,p) (%p-flush-dropped-value ,p))
+       (when ,(if tail
+                  `(and (eq *wantarray* :void) (%p-may-hold-handle-p ,p))
+                  `(%p-may-hold-handle-p ,p))
+         (%p-flush-dropped-value ,p))
        ,v)))
 
 (defmacro %p-may-hold-handle-p (v)
@@ -22430,6 +22436,53 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "The raw payload of variable X -- a box's value, or X itself for a raw slot
    -- without FETCH or any other magic."
   (if (p-box-p x) (p-box-value x) x))
+
+(defmacro p-flush-dropped-store (form)
+  "`$h{K} = undef;' / `$r->{K} = undef;' / `$a[I] = undef;' as a whole
+   statement or a tail (#5405): the element's OLD value is dropped, so an
+   escaped output handle in it is written out first, as `delete' flushes its
+   value (docs/ir-spec.md §6.5b).  FORM is the lowered store -- `(setf
+   (p-gethash|p-aref C K) V)' or `(p-setf (p-gethash-deref|p-aref-deref C K
+   ...) V)', C a variable (Parser2::_drop_store_form_p).  K is evaluated ONCE
+   (bound here, handed to the store); the old slot is PEEKED
+   (%p-flush-dropped-elem: no FETCH, a tied container is not looked into,
+   nothing vivified).  FORM's value is returned.  Any other FORM is a compiler
+   bug and fails the expansion, naming it (rule 12)."
+  (let ((kinds '((p-gethash . :hash) (p-aref . :array)
+                 (p-gethash-deref . :hash-deref) (p-aref-deref . :array-deref))))
+    (destructuring-bind (op place val) form
+      (destructuring-bind (acc c k &rest more) place
+        (let ((kind (cdr (assoc acc kinds)))
+              (kv (gensym "K")))
+          (unless (and kind (member op '(setf p-setf)) (symbolp c))
+            (error "PCL internal: p-flush-dropped-store met ~S" form))
+          `(let ((,kv ,k))
+             (%p-flush-dropped-elem ,c ,kv ,kind)
+             (,op (,acc ,c ,kv ,@more) ,val)))))))
+
+(defun %p-flush-dropped-elem (container key kind)
+  "The drop flush of ONE element about to be overwritten (p-flush-dropped-store,
+   #5405): the slot as STORED -- a raw hash table's entry or a vector's slot,
+   the container reached through its reference for the -deref kinds -- read
+   without FETCH (a tied container is skipped) and without vivifying, then
+   flushed as p-flush-dropped-value flushes.  A missing slot or any other
+   container is nothing to flush."
+  (let* ((c (if (member kind '(:hash-deref :array-deref)) (%p-peek-slot container) container))
+         (e (case kind
+              ((:hash :hash-deref)
+               (and (hash-table-p c) (not (%p-tied c))
+                    (values (gethash (to-string key) c))))
+              ((:array :array-deref)
+               (and (vectorp c) (not (stringp c)) (not (%p-tied c))
+                    (let* ((n (length c))
+                           (i (truncate (to-number key)))
+                           (j (if (< i 0) (+ i n) i)))
+                      (and (<= 0 j) (< j n) (aref c j)))))
+              (t (error "PCL internal: %p-flush-dropped-elem kind ~S" kind)))))
+    (when e
+      (let ((p (%p-peek-slot e)))
+        (when (%p-may-hold-handle-p p) (%p-flush-dropped-value p)))))
+  (values))
 
 (defconstant +p-flush-walk-limit+ 64
   "How many direct elements of a dropped hash / array the drop flush looks at

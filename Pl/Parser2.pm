@@ -12134,11 +12134,24 @@ sub _lower_expr_stmt {
   # run-time fact), and an `eval q{ delete $h{fh} };` drops the element all
   # the same -- the wrap returns the value it flushed, so it serves the tail
   # too (k-09, #5255).
-  my $drop = $x->{drop_value} && !$mod && Pl::Passes::enabled('fh-scope-close')
-    && ($vctx eq ':void' || ($self->eval_mode && "$vctx" eq 'inherit'));
+  # A sub's (or a block's) TAIL drops the same way (#5405, s543m: `sub close_it
+  # { delete $self->{fh} }` is the ordinary spelling): the wrap returns the
+  # value it flushed, read once, in the context the tail inherits.
+  my $drop_ok = !$mod && Pl::Passes::enabled('fh-scope-close')
+    && ($vctx eq ':void' || "$vctx" eq 'inherit');
+  my $drop = $x->{drop_value} && $drop_ok;
   my $form = $self->_lower_expr($expr, $stmt,
     ($drop && $x->{drop_value} eq 'list' && $vctx eq ':void') ? 1 : $vctx);
-  $form = ['p-flush-dropped-value', $form] if $drop;
+  # (Outside eval text a TAIL flushes only when its caller discards the value:
+  # `my $fh = $o->take_fh` keeps the handle -- the macro's `:tail`.)
+  $form = ['p-flush-dropped-value', $form,
+           ("$vctx" eq 'inherit' && !$self->eval_mode) ? (':tail') : ()] if $drop;
+  # `$h{K} = undef;' / `$r->{K} = undef;' / `$a[I] = undef;' (#5405): the OLD
+  # element is flushed before the store (p-flush-dropped-store: the key once,
+  # the slot PEEKED -- no FETCH, nothing vivified).  Only the store forms the
+  # macro knows, whose container is a plain variable.
+  $form = ['p-flush-dropped-store', $form]
+    if $x->{drop_store} && $drop_ok && _drop_store_form_p($form);
   # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
   # (task #1249(7)) — rewritten IN the lowered form, so every context wrap the
   # ordinary lowering put around the call is preserved exactly.
@@ -16379,6 +16392,21 @@ sub _fh_drop_stmt_name {
   return undef if !$vi;
   my $sym = _fh_drop_stmt_sym($stmt) // return undef;
   return $vi->{ $sym->content } ? $sym->content : undef;
+}
+
+# Is the lowered element store FORM one p-flush-dropped-store knows (#5405):
+# (setf (p-gethash|p-aref C K) V) or (p-setf (p-gethash-deref|p-aref-deref C
+# K ...) V), the container C a plain variable (an atom: read again by the
+# store, never re-evaluated as an expression)?
+my %DROP_STORE_ACC = (setf => { 'p-gethash' => 1, 'p-aref' => 1 },
+                      'p-setf' => { 'p-gethash-deref' => 1, 'p-aref-deref' => 1 });
+sub _drop_store_form_p {
+  my ($form) = @_;
+  return 0 unless ref($form) eq 'ARRAY' && @$form == 3 && !ref($form->[0]);
+  my $acc = $DROP_STORE_ACC{ $form->[0] } or return 0;
+  my $place = $form->[1];
+  return 0 unless ref($place) eq 'ARRAY' && @$place >= 3 && !ref($place->[0]);
+  return ($acc->{ $place->[0] } && !ref($place->[1]) && $place->[1] =~ /^(?:[\w|]+::)?\|?[\$\@%]/) ? 1 : 0;
 }
 
 # The variable token of the statement shapes above, else undef.

@@ -950,7 +950,31 @@ sub expr_shape {
   }
   $r{bareword} = $expr->[0] if @$expr == 1 && $expr->[0]->isa('PPI::Token::Word');
   $r{drop_value} = drop_value_shape($expr);
+  $r{drop_store} = drop_store_shape($expr);
   return \%r;
+}
+
+# `$h{K} = undef' / `$r->{K} = undef' / `$a[I] = undef' / `$r->[I] = undef'
+# as a whole statement (#5405): an element OVERWRITTEN with a literal undef
+# drops what it held (the drop flush, ir-spec §6.5b) -- the element shape of
+# the `delete' arm below, one level, then `=' and the word `undef'.
+sub drop_store_shape {
+  my ($expr) = @_;
+  return 0 unless @$expr >= 4;
+  my ($eq, $u) = @$expr[-2, -1];
+  return 0 unless $eq->isa('PPI::Token::Operator') && $eq->content eq '='
+    && $u->isa('PPI::Token::Word') && $u->content eq 'undef';
+  return _one_level_elem([@$expr[0 .. $#$expr - 2]]);
+}
+
+# One element of a named aggregate or of a scalar's referent: `$x{K}' /
+# `$x[I]' / `$x->{K}' / `$x->[I]' (the shape the drop flush reads).
+sub _one_level_elem {
+  my ($t) = @_;
+  return 0 unless @$t >= 2 && $t->[0]->isa('PPI::Token::Symbol') && $t->[0]->content =~ /^\$/;
+  return 1 if @$t == 2 && $t->[1]->isa('PPI::Structure::Subscript');
+  return (@$t == 3 && $t->[1]->isa('PPI::Token::Operator') && $t->[1]->content eq '->'
+          && $t->[2]->isa('PPI::Structure::Subscript')) ? 1 : 0;
 }
 
 # An expression whose VALUE is what it DROPS from a container (the drop flush,
@@ -972,10 +996,7 @@ sub drop_value_shape {
   return ($arr && (@t == 1 || ($t[1]->isa('PPI::Token::Operator') && $t[1]->content eq ',')))
     ? 'list' : 0 if $w eq 'splice';
   return 0 unless @$expr >= 2 && $w eq 'delete';
-  return 0 unless @t >= 2 && $t[0]->isa('PPI::Token::Symbol') && $t[0]->content =~ /^\$/;
-  return 1 if @t == 2 && $t[1]->isa('PPI::Structure::Subscript');
-  return (@t == 3 && $t[1]->isa('PPI::Token::Operator') && $t[1]->content eq '->'
-          && $t[2]->isa('PPI::Structure::Subscript')) ? 1 : 0;
+  return _one_level_elem(\@t);
 }
 
 1;

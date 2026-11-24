@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -368,4 +368,37 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$cnt' '$dir");
     is($pcl_out, $perl, '#5354: a cleared / shrunk container flushes the escaped handles it held');
+}
+
+# 14. #5405 (s543m): an element OVERWRITTEN with undef (`$h{fh} = undef;`,
+# `$r->{fh} = undef;`, `$a[0] = undef;`, `$self->{fh} = undef` as a method's
+# tail) flushes the old element -- the key once, the slot peeked (l: a tied
+# hash sees one STORE and no FETCH; i: a side-effecting key runs once; j k:
+# the store still vivifies); a sub's TAIL `delete $s->{fh}` flushes when the
+# caller discards it (e) and NOT when the caller keeps it (f: perl's 0 -- the
+# handle lives on in $v); g h m: the tail's value is unchanged.  INVERSE: the
+# base 9fc6583b printed 0 for a b c d e.
+my $est = write_prog('est.pl', <<'PL');
+no warnings;
+my $f = "$ARGV[0]/est.out";
+sub sz { my $s = -s $f; unlink $f; defined $s ? $s : "none" }
+sub mk { open my $t, ">", $f or die; print $t "hdata"; $t }
+{ my %h; $h{fh} = mk(); $h{fh} = undef; print "a ", sz(), " ", (exists $h{fh} ? "e" : "-"), "\n"; }
+{ my @a; $a[0] = mk(); $a[0] = undef; print "b ", sz(), " ", scalar(@a), "\n"; }
+{ my $r = {}; $r->{fh} = mk(); $r->{fh} = undef; print "c ", sz(), "\n"; }
+{ my $r = []; push @$r, 1, mk(); $r->[-1] = undef; print "d ", sz(), " ", scalar(@$r), "\n"; }
+package Logger { sub new { my $c = shift; bless { fh => main::mk() }, $c } sub log { print { $_[0]{fh} } $_[1] } sub close_it { my $s = shift; $s->{fh} = undef } sub drop { my $s = shift; delete $s->{fh} } }
+{ my $o = Logger->new; $o->log("x"); $o->close_it; print "e ", main::sz(), "\n"; }
+{ my $o = Logger->new; $o->log("x"); my $v = $o->drop; print "f ", main::sz(), " ", (ref($v) ? "GLOB" : "no"), "\n"; }
+{ my $o = Logger->new; $o->log("x"); $o->drop; print "f2 ", main::sz(), "\n"; }
+{ my %h = (k => 7); sub dk { delete $h{k} } my $v = dk(); print "g $v\n"; my @l = (1, 2); sub pp { pop @l } print "h ", pp(), " ", scalar(@l), "\n"; }
+{ my %h; my $i = 0; $h{$i++} = undef; print "i $i ", join(",", keys %h), "\n"; }
+{ my $u; $u->{k} = undef; print "j ", ref($u), "\n"; my $w; $w->[2] = undef; print "k ", scalar(@$w), "\n"; }
+package TH { sub TIEHASH { bless {}, shift } sub FETCH { $main::fetch++; 1 } sub STORE { $main::store++ } sub EXISTS { 1 } sub DELETE { 1 } }
+{ tie my %t, 'TH'; $t{k} = undef; print "l fetch=", ($main::fetch // 0), " store=", ($main::store // 0), "\n"; }
+{ my %h = (a => 1); sub rv { $h{a} = undef } my @r = (rv()); print "m ", scalar(@r), defined $r[0] ? "d" : "u", "\n"; }
+PL
+{
+    my ($perl, $pcl_out) = run_both("$est' '$dir");
+    is($pcl_out, $perl, '#5405: an element overwritten with undef and a sub-tail delete flush the dropped handle');
 }
