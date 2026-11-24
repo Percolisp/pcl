@@ -28687,12 +28687,20 @@ would consume, so it dies naming the stream (rule 12)."
    a real exec closes every FD_CLOEXEC descriptor and hands the rest to the
    program, so a parent waiting for EOF on a pipe (IPC::Open3's exec-status
    pipe, a child's stdin) sees it when the program alone lets go.  Every
-   descriptor is closed here, then the program's status becomes this
-   process's exit status.  Never returns."
+   descriptor is closed here, then the program's WAIT STATUS becomes this
+   process's: an exit code is exited with, and a program KILLED BY A SIGNAL
+   kills this process with the same signal's default action (task #2594) --
+   the exit code SBCL reports for it is the signal NUMBER, which exited with
+   made a piped open's `close' report `$? = 2 << 8' where perl reports 2.
+   The status is read by %p-process-wait-status, the one reading system and
+   backticks use.  Never returns."
   (dotimes (fd 1024)
     (sb-unix:unix-close fd))
   (sb-ext:process-wait proc)
-  (sb-ext:exit :code (or (sb-ext:process-exit-code proc) 0) :abort t))
+  (let ((ws (%p-process-wait-status proc)))
+    (when (plusp (logand ws #x7f))
+      (%p-sig-die-by-default (logand ws #x7f)))
+    (sb-ext:exit :code (ldb (byte 8 8) ws) :abort t)))
 
 (defun p-backtick (cmd)
   "Perl backticks / qx / readpipe — run the command and capture its stdout.

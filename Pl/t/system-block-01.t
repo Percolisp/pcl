@@ -54,7 +54,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 50;
+plan tests => 51;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -447,3 +447,18 @@ close STDERR; open my $e, "<", $f or die; my $c = <$e>; close $e; unlink $f; pri
 my $z = qx(sh -c 'echo e 1>&2; echo o' 2>&1); print "3 [", join("|", split /\n/, $z), "]\n";
 system("sh -c 'echo o4; echo e4 1>&2' 2>&1"); print "4 rc=$?\n";},
             "", '#2555: a qx child writes its STDERR to the program\'s STDERR (a re-opened one: the file); system runs after close STDERR');
+
+# #2594 (s543n): a piped open's `close` -- and a waitpid on a child that
+# exec'd -- reports the program's WAIT STATUS: a program KILLED BY A SIGNAL is
+# the signal number in `$? & 127`, an exit code is `$? >> 8`.  PCL's emulated
+# exec (%p-exec-become) exited with the code SBCL reports for a signal death,
+# which IS the signal number, so every one read `0/SIG`.  Expectations probed
+# against perl 5.40.3 (a: `|-` INT; b: `-|` LIST TERM, KILL, exit 3; c: `yes`
+# killed by PIPE when the reader closes; d: fork + exec + waitpid).
+is run_cl(q{sub st { ($? & 127) . "/" . ($? >> 8) }
+open(my $w, "|-", "perl") or die; print $w '$SIG{INT} = "DEFAULT"; kill "INT", $$; sleep 1;'; close $w; print "a ", st(), "\n";
+for my $s (["sh", "-c", 'kill -TERM $$'], ["sh", "-c", 'kill -KILL $$'], ["sh", "-c", "exit 3"]) { open(my $f, "-|", @$s) or die; my @x = <$f>; close $f; print "b ", st(), "\n"; }
+open(my $y, "-|", "yes") or die; my $one = <$y>; close $y; print "c ", st(), "\n";
+my $pid = fork; if (!$pid) { exec "sh", "-c", 'kill -TERM $$' } waitpid($pid, 0); print "d ", st(), "\n";}),
+   "a 2/0\nb 15/0\nb 9/0\nb 0/3\nc 13/0\nd 15/0\n",
+   '#2594: close of a piped open (and waitpid after exec) reports a signal death as the signal, not an exit code';
