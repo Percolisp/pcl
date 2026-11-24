@@ -26160,7 +26160,9 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; to the next file we seed its line counter with the previous file's count.
 (declaim (special @ARGV $ARGV |$^I|))
 (defvar *p-argv-stream* nil "Currently-open <> input stream, or nil before/after.")
-(defvar *p-argv-started* nil "T once <> has begun consuming @ARGV (or chosen STDIN).")
+(defvar *p-argv-started* nil
+  "T once a PASS of <> has begun consuming @ARGV (or chosen STDIN); NIL again
+   when the pass ends -- perl's IOf_START, inverted (task #4846).")
 (defvar *p-argv-aliased* nil
   "T once <> began on an ALIASED ARGV glob (`*ARGV = *DATA`): perl then reads
    that handle only, never @ARGV (#2666).")
@@ -26225,7 +26227,7 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %p-argv-open-next ()
   "Shift the next filename off @ARGV, open it, set $ARGV, and return its stream.
-   Empty @ARGV on the first call yields STDIN.  Unopenable files warn and are
+   Empty @ARGV at the START of a pass yields STDIN (once per pass, #4846).  Unopenable files warn and are
    skipped (Perl behaviour).  Returns nil when the file sequence is exhausted."
   (loop
    (when (zerop (length @ARGV))
@@ -26274,8 +26276,14 @@ would consume, so it dies naming the stream (rule 12)."
   (setf *p-argv-stream* (or (%p-argv-glob-stream)
                             (and (not *p-argv-aliased*) (%p-argv-open-next))))
   ;; Every file consumed: `$.' keeps its last value, but a LATER pass of <>
-  ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).
-  (cond ((null *p-argv-stream*) (setf *p-argv-last-count* 0) nil)
+  ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).  The
+  ;; pass is OVER, too (task #4846): nextargv sets IOf_START again, so the next
+  ;; <> or eof() with @ARGV still empty reads STDIN ("-") -- once, then that
+  ;; pass ends as well -- where PCL answered undef / eof for good.
+  (cond ((null *p-argv-stream*)
+         (setf *p-argv-last-count* 0
+               *p-argv-started* nil)
+         nil)
         ;; Seed the new file's $. with the cumulative count from prior files
         ;; -- in the not-yet-answered form: perl's nextargv OPENS the file,
         ;; which clears IOf_NOLINE, so an empty file read in slurp mode is

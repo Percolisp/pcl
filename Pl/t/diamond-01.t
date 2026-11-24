@@ -68,7 +68,7 @@ sub make_file {
 my $f1 = make_file("apple\nbanana\n");
 my $f2 = make_file("cherry\ndate\n");
 
-plan tests => 12;
+plan tests => 13;
 
 # 1: <> reads across @ARGV with cumulative $. and per-file $ARGV.
 test_diamond('<> spans @ARGV files; $. cumulative, $ARGV per-file', <<"PERL");
@@ -199,4 +199,24 @@ test_diamond('local *ARGV = $fh / \*{$fh} / \*G / *G, four blocks in a row', <<"
 { open(IN2, '<', '$f1') or die; local *ARGV = \\*IN2; while (<>) { print "C:\$_" } }
 { open(IN3, '<', '$f1') or die; local *ARGV = *IN3; while (<>) { print "D:\$_" } }
 print "done\\n";
+PERL
+
+# 10 (#4846, s543n): a PASS of <> that has consumed @ARGV ENDS -- perl's
+# nextargv sets IOf_START again -- so a LATER <> / eof() with @ARGV still empty
+# falls back to STDIN ("-"), once per pass; a refilled @ARGV is read after the
+# rest of that STDIN, and `$.` restarts.  INVERSE: on the base eof() answered 1
+# and every later <> undef.
+test_diamond('after @ARGV is exhausted, the next <> / eof() pass reads STDIN', <<"PERL");
+my \$s = "/tmp/pcl_argv4846_\$\$"; open(my \$w, '>', \$s) or die; print \$w "s1\\ns2\\n"; close \$w;
+\@ARGV = ('$f1'); my \@all = <>; print "01 n=", scalar(\@all), " .=\$.\\n";
+open STDIN, "<", \$s or die; \@ARGV = ();
+print "02 eof()=", (eof() ? 1 : 0), " ARGV=\$ARGV\\n";
+my \$x = <>; print "03 ", (defined \$x ? "read \$x" : "undef\\n");
+print "04 .=\$. ARGV=\$ARGV\\n";
+\@ARGV = ('$f2'); my \@b = <>; print "05 n=", scalar(\@b), "\\n";
+\@ARGV = (); open STDIN, "<", \$s or die;
+for my \$i (6 .. 9) { my \$y = <>; print "0\$i ", (defined \$y ? "read \$y" : "undef\\n"); }
+open STDIN, "<", \$s or die; \@ARGV = (); my \@d = <<>>; print "10 n=", scalar(\@d), "\\n";
+open STDIN, "<", "/dev/null" or die; \@ARGV = (); my \$u = <>; print "11 ", (defined \$u ? "read" : "undef"), " .=\$.\\n";
+unlink \$s;
 PERL
