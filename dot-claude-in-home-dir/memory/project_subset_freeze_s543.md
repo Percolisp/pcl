@@ -49,3 +49,20 @@ marked silent wrong -- an upper bound, classified from subjects). The next brief
 silent-wrong task`s own reproducer, plus the ~40 reasons that say `verify`). The 36 `decision` tasks are the
 USER`s to rule (21 constructs proposed for section 4). A new task gets its triage field when it is filed or at
 the merge that commits it. Notes: `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`.
+
+**2026-11-24 (s543, the USER asked whether the bug cleanup will ever end; three rulings followed -- paraphrased):**
+- **Exit criterion 1 counts silent wrongs of ORDINARY code only.** Each silent-wrong task carries `frequency`
+  (`ordinary` | `rare`) + `frequency_reason` (the evidence); no field = ordinary; rare ones are listed known
+  divergences. `tools/task-triage.pl` prints both numbers (first pass from the subjects: 21 ordinary + 64 rare).
+  **Why:** every fix batch probes neighbouring spellings and files each difference, so the undivided count did
+  not converge (five batches closed 39, the count fell 86 -> 75).
+- **A neighbour found by a batch's own probes does not extend the batch unless it is ordinary**
+  (`s473/COMMON.md` "ORDINARY OR RARE"). **How to apply:** a brief names ordinary tasks; "ordinary" needs a real
+  program or a perldoc idiom as evidence; a rare fix is taken only where a batch is already in the function.
+- **The Rosetta corpus is the NEXT SESSION's main work** (plan: `docs/rosetta-plan.md`, task #2104): 652
+  perl-validated programs by other authors under `~/pcl-agent-scratch/s543/rosetta/` (GFDL: never checked in);
+  547 of 652 identical on MAIN-READY-110 (73 % in September), 43 silent, 87 of the 105 differing are in the
+  subset. Census (two agents) -> causes -> fix batches ranked by programs broken -> ONE run of a fresh sample
+  (proposed: Perl Weekly Challenge; the USER has not confirmed the source).
+- My own lesson: when the USER asks "will this end", answer with the convergence of the counted number and
+  with what real programs show, not with the queue's size.

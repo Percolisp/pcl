@@ -214,7 +214,7 @@ tools/run-dist-t.pl --rows DIST t/FILE           # one CPAN-board file
 tools/ir-host-leak.pl ; tools/ir-inventory.pl    # the IR stays in its three vocabularies
 tools/ir-conform --jobs 2                        # after any cl/ or emission change: 0 fail / 0 stale
 tools/gate-set-scan.pl ; tools/drop-census.pl    # population-wide instruments
-tools/task-triage.pl              # open tasks by triage class (docs/supported-subset.md 7); the IN silent-wrong count
+tools/task-triage.pl              # open tasks by triage class (docs/supported-subset.md 7); the IN silent wrongs, ORDINARY and rare
 tools/rebuild-pack                 # regenerates cl/pcl-pack.lisp ONLY (mro + warnings: "Generated artifacts" below)
 tools/tag-license FILE             # every new code file carries the license tag
 tools/install-pcl --prefix ~/.local   # installer; test: prove tools/t/install-pcl.t
@@ -548,6 +548,8 @@ of every entry (what it found, what it ruled) is in
 **Product, scope, plans**
 - `supported-subset.md` — THE FROZEN TARGET (USER s543; a draft): what PCL promises, IN / OUT, the exit
   criteria, the triage rule.  A brief names IN tasks only; read it before writing one.
+- `rosetta-plan.md` — THE HELD-OUT SAMPLE (USER s543: the next session's main work): the corpus, the number
+  (547 of 652 on -110), the census -> causes -> fix batches, the fresh sample.  Read it before a Rosetta brief.
 - `not-supported.md` — deliberate non-support (stable `ns-` ids).
 - `production-readiness-review-s513.md` — before quoting a production date.
 - `todo-features.md`, `v2-endgame-plan.md`, `MOO_MOOSE_DESIGN.md`,
