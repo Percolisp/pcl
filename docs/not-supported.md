@@ -1928,9 +1928,14 @@ process BY the signal (the normative contract is `docs/ir-spec.md` §8, "The
 - **`exists $SIG{NAME}` stays true after `delete $SIG{NAME}`** (perl: false).
   The value is undef and the disposition is back to the default — the magic
   slot is kept so a later store is still installed.
-- **A wholesale `%SIG = (...)` or `local %SIG` holds PLAIN slots** for its
-  extent: a handler stored through them is not installed (task #2264), except
-  ALRM, which `alarm` installs from whatever `$SIG{ALRM}` holds.
+- **A wholesale `%SIG = (...)` holds PLAIN slots** for its extent: a handler
+  stored through them is not installed (task #2264), except ALRM, which `alarm`
+  installs from whatever `$SIG{ALRM}` holds.  `local %SIG` keeps the magic
+  since s543l (#5333): the scope's %SIG is a COPY of the caller's view, so a
+  store installs and the caller's handlers and `__WARN__` / `__DIE__` stay in
+  force until a store, as perl's do; but a key the scope did not store READS
+  the caller's value (and `keys %SIG` counts it), where perl's localized hash
+  starts EMPTY and reads undef.
 - **An inherited SIG_IGN on INT TERM ALRM PIPE is invisible in SOURCE MODE
   only** (`PCL_NO_CORE=1`, a development switch): those signals start at
   perl's default there.  Every saved core (the cached one, an installed

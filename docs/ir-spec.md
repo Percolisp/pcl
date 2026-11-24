@@ -4483,6 +4483,29 @@ $h{a}{b} = 6` lowers to `(let ((pcl-local-init-0 6)) (let ((pcl-local-base-1
 (p-viv-container (p-gethash %h "a")))) (p-local-hash-elem-init
 pcl-local-base-1 "b" pcl-local-init-0 …)))`.
 
+**A brace-named `local` target is its NAME (normative, s543l / #5372 #5371).**  `${h}{k}`, `${a}[0]`,
+`@{h}{…}`, `${s}`, `@{a}`, `%{h}`, `$#{a}` and `${1}` under `local` (and `delete local`, a `local (…)` list, the
+#3370 hoist's operand) are the plain spellings `$h{k}` … `$1` -- toke.c reads `${ident}` as the identifier -- so the
+target is resolved exactly as the plain spelling's: a lexical, a renamed lexical, an eval site's `our` alias.  The
+reader is the one brace-name reader (`Parser2::brace_name_of`, which the binder, the span renamer and the region
+requalifier share); a block holding anything else (`${ $r }`, `${ f() }`, `${ \ $x }`, a qualified `${Pkg::h}`) stays
+a dereference.  Example: in eval text behind `package Bar;` at a site with `our $v`, `local ${v} = 1` lowers to
+`(p-local-cell $v …)` -- main's `$v`, as `${v}` reads -- where it was `(p-local-deref-scalar "v" …)`, Bar's.
+
+**A localized element is perl's undef, ONE element (normative, s543l / #5331).**  `local $h{k}` / `local $a[i]` /
+a slice installs a fresh box holding `*p-undef*`, never raw NIL (the runtime's empty-list marker), so the element
+read, a `delete`, a slice and a sub's list return see one undef; `local $a[N]` past the end EXTENDS the array to
+N+1 (the holes before N do not exist), and the restore trims it back.  A bare `local ELEM` / `local SLICE` ending a
+valued block is that element (the slice's elements by context: the list, else the last).  Example: `sub g { local
+$h{k}; $h{k} }` returns one undef in list context.
+
+**A modified `local` ending a valued block has perl's value in both arms (normative, s543l / #5334).**  The
+untaken `if` / `unless` modifier makes the statement's value the CONDITION's own value (the expression
+statement's rule, #920); only at a valued tail is the condition kept in a temporary of its own, the test reading
+it.  Example: `sub f { local $g = 5 if $c }` is `(let* ((pcl-local-cval-0 $c) (pcl-local-cond-0 (p-true-p
+pcl-local-cval-0))) (p-local-cell-if pcl-local-cond-0 $g (p-box-for-local 5) (if pcl-local-cond-0 $g
+pcl-local-cval-0)))`.
+
 **A PARENTHESISED element target is a LIST assignment (normative, s543g /
 #1339)**, as a parenthesised variable is (#1243 (a)): `local($a[1]) = (7,8)`
 stores 7, and the right side runs in LIST context (`= @l` stores `$l[0]`, a
@@ -4511,22 +4534,29 @@ only after the local stored undef; under a modifier it is taken only when the
 condition holds.  The operand is side-effect free (the hoist's operand rule),
 so it is read again.  A term the hoist's precondition refuses is its refusal
 (#5330), never the plain delete -- a ternary arm, an `&&` / `||` / `//`
-operand, a hash-constructor value; only a `delete local` that IS a
+operand (a hash-constructor value, a list element and the right operand of a
+value operator are hoisted since s543l); only a `delete local` that IS a
 declaration's direct operand keeps the old lowering when its operand cannot
 be hoisted.  Example: `my $v = delete local $h{d};` is
 `my $__pcl_ldel_1 = $h{d}; local $h{d} = $__pcl_ldel_1; my $v = delete
 $h{d};`.
 
-**`local %ENV` keeps the environment's magic (normative, s543j / #5210).**  It
-is not a `let` of a plain table: `(p-local-env INIT …)` evaluates the right
-side FIRST (it may read the old `%ENV`), saves the whole process environment
-(its pairs, the #1030 undef marks, the synthetic entry's flag), replaces it
-through the `%ENV = LIST` arm (a bare `local %ENV`: an EMPTY environment) and
-puts it back on every exit.  A child started inside sees the localized
-environment.  `%ENV` is selected by name -- a core variable.  Example: `{ local
-%ENV = (%ENV, K => "v"); system(...) }` lowers to `(p-local-env (let
-((*wantarray* t)) (p-flatten-args (list %ENV "K" "v"))) … (p-system …))`.
-`local %INC` and `local %SIG` still bind a plain table (#5332 #5333).
+**`local %ENV`, `local %INC` and `local %SIG` keep their magic (normative, s543j / #5210; s543l / #5332
+#5333).**  None is a `let` of a plain table: `(p-local-store STORE INIT …)` (STORE `:env` / `:inc` / `:sig`)
+evaluates the right side FIRST (it may read the old hash), saves the store, fills it THROUGH its own writer and
+puts it back on every exit.  `:env` saves the whole process environment (its pairs, the #1030 undef marks, the
+synthetic entry's flag) and replaces it through the `%ENV = LIST` arm (a bare `local %ENV`: an EMPTY environment): a
+child started inside sees the localized one.  `:inc` installs a fresh `*p-inc-table*` filled by the `%INC = LIST`
+arm: a `require` / `do FILE` in the scope records there, and a file required in the scope runs again at the next
+`require` after it (the caller's %INC never had it); `local $INC{K}` / `delete local $INC{K}` save and restore the
+entry of that store.  `:sig` makes the scope's %SIG a COPY of the caller's view -- the same stateless signal cells (a
+store installs at once), the other keys' values in fresh entries -- then stores the list through it; the exit puts
+the view back and re-applies every signal whose stored value the scope changed.  So, as in perl, the caller's
+dispositions, handlers and `__WARN__` / `__DIE__` stay in force until the scope stores one (perl's handlers change
+only by a store); unlike perl's empty hash, a key the scope did not store READS the caller's value
+(`docs/not-supported.md` "%SIG").  The three names are core variables, selected by storage name.  Example: `{ local
+%SIG = (USR1 => sub {…}); kill USR1 => $$ }` lowers to `(p-local-store :sig (let ((*wantarray* t)) (p-flatten-args
+(list "USR1" (p-anon-sub …)))) … (p-kill …))`.
 
 **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
 #541). Perl does not execute the statement at all when the condition is
@@ -4564,7 +4594,13 @@ evaluates becomes `local OPERAND;` before the statement -- behaviour-preserving
 the term is a declarator / keyword / hash key / class name, or a call whose
 ARGUMENTS hold the term (it runs after it); a comma there separates such a
 call's arguments; every other token before it is a literal, a variable other
-than the operand, a cast, `=` `->` `\` `!`; a method INVOCANT that runs calls
+than the operand, a cast, `=` `->` `\` `!`; outside a deref block also (s543l,
+#5330) a VALUE operator, which applies after both its operands (`+ - * / % **
+x . & | ^ << >>`, the comparisons -- never `&&` `||` `//` `?:` `..` or an
+assignment operator), a comma / `=>` nested in a parenthesised list or a
+constructor (an element separator: `($x, $y) = (delete local $h{b}, 5)`, `{ k
+=> delete local $h{b} }`), and a `delete` of ANOTHER literal key of the term's
+own aggregate (`(delete local $h{a}, delete local $h{b})`); a method INVOCANT that runs calls
 is first bound to a temporary (`cfg()->apply(local $X = 1)` is `my $t =
 cfg(); local $X; $t->apply($X = 1);`); and when the term is in an
 assignment's LEFT operand the right side (which perl runs first) passes the
