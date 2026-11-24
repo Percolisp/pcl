@@ -15928,14 +15928,21 @@ sub _local_fresh_bindings {
 # the temporaries (the third field) stay outside.  A `local` outside every
 # sub and block wraps the rest of the FILE: its body must not inline the
 # fast-path operators (the notinline declaration; `locally` when no `let`).
+# The core hashes whose `local` keeps their magic, by storage name, and the
+# store each one's p-local-store saves / fills / restores (the runtime's
+# %p-local-store-* dispatch; rule 12: an unknown store dies there).
+our %LOCAL_STORE = ('%ENV' => ':env', '%INC' => ':inc', '%SIG' => ':sig');
 sub _local_binding_opens {
   my ($self, $st, $stmt, $mod, $let) = @_;
-  # `local %ENV` keeps the environment's magic (#5210): not a `let` of a plain
-  # table (a child saw the OUTER environment) but p-local-env, which saves,
-  # replaces and restores the process environment itself.  %ENV is a core
-  # variable (rule 9a: the name is the language's).
-  my @env_b = grep { $_->[0] eq '%ENV' } @{ $st->{bindings} };
-  local $st->{bindings} = [grep { $_->[0] ne '%ENV' } @{ $st->{bindings} }] if @env_b;
+  # `local %ENV` / `local %INC` / `local %SIG` keep their MAGIC (#5210 #5332
+  # #5333): not a `let` of a plain table (a child saw the OUTER environment, a
+  # `require` recorded nothing in %INC, a stored handler never installed) but
+  # p-local-store, which saves the store, fills it through its own writer and
+  # restores it on every exit.  Core variables (rule 9a: the names are the
+  # language's), read off the storage name (`%main::ENV` is `main::%ENV`).
+  my $store = sub { my $n = $_[0]; return undef if ref $n; $n =~ s/^main:://; $LOCAL_STORE{$n} };
+  my @env_b = grep { defined $store->($_->[0]) } @{ $st->{bindings} };
+  local $st->{bindings} = [grep { !defined $store->($_->[0]) } @{ $st->{bindings} }] if @env_b;
   my @let_b  = grep {  Pl::GlobalPartition::is_exception_global($_->[0]) } @{ $st->{bindings} };
   my @cell_b = grep { !Pl::GlobalPartition::is_exception_global($_->[0]) } @{ $st->{bindings} };
   my @outer = $mod ne '' ? (grep { $_->[2] } @let_b) : @let_b;
@@ -15949,19 +15956,19 @@ sub _local_binding_opens {
   push @opens, ['p-local-maybe', $st->{ctmp}, ['let', $pairs->(@cond)]] if @cond;
   push @opens, map { $mod ne '' ? ['p-local-cell-if', $st->{ctmp}, @$_[0, 1]]
                                 : ['p-local-cell', @$_[0, 1]] } @cell_b;
-  push @opens, map { _local_open(['p-local-env', _local_env_init($_->[1])],
+  push @opens, map { _local_open(['p-local-store', $store->($_->[0]), _local_store_init($_->[1])],
                                  $mod ne '' ? $st->{ctmp} : undef) } @env_b;
   return @opens;
 }
 
-# The LIST a `%ENV` binding's init form fills the hash from: the solo
+# The LIST a core hash binding's init form fills the store from: the solo
 # binding's `(p-copy-hash LIST)`; a fresh (bare) binding's empty table is
-# `nil` (p-local-env: an empty environment).  Rule 12: any other form dies.
-sub _local_env_init {
+# `nil` (p-local-store: an empty list).  Rule 12: any other form dies.
+sub _local_store_init {
   my ($init) = @_;
   return $init->[1] if ref $init eq 'ARRAY' && $init->[0] eq 'p-copy-hash';
   return 'nil' if ref $init eq 'ARRAY' && $init->[0] eq 'make-hash-table';
-  die "PCL internal: an unexpected `local %ENV` initializer: " . Pl::CLForm::to_flat($init) . "\n";
+  die "PCL internal: an unexpected `local` initializer of a core hash: " . Pl::CLForm::to_flat($init) . "\n";
 }
 
 # The list assignment of a `local (…) = LIST`: an ordinary list assignment

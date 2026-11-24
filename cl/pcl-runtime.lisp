@@ -310,7 +310,7 @@
    #:p-local-glob-dynamic #:p-local-dot
    #:p-defcell #:p-local-cell #:p-local-cell-if #:p-local-maybe
    #:p-local-pipe
-   #:p-local-hash-elem #:p-local-array-elem #:p-local-env
+   #:p-local-hash-elem #:p-local-array-elem #:p-local-store
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
    #:p-local-hash-slice
@@ -37452,10 +37452,23 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; Delegating to functions keeps macro expansions compact, preventing heap
 ;;; exhaustion on large files with many local $hash{key} forms.
 
+(defun %p-inc-elem-local (kv value)
+  "`local $INC{KEY} [= V]` / `delete local $INC{KEY}` (s543l, with #5332):
+   %INC's marker has no table of its own -- its store is *p-inc-table*, whose
+   values are kept raw (p-gethash's %INC arm) -- so the entry is saved, set to
+   VALUE (undef for a bare local: perl's localized element exists and is
+   undef) and %p-lhe-restore's :inc arm puts the old entry back or removes it.
+   The element macros crashed on the marker (a Lisp type error)."
+  (multiple-value-bind (old found) (gethash kv *p-inc-table*)
+    (setf (gethash kv *p-inc-table*) value)
+    (vector :inc old found)))
+
 (defun %p-lhe-save (hv kv)
   "Save hash[key] for local. Returns saved state vector."
   (%p-when-tied (r hv)
                 (return-from %p-lhe-save (vector :tie (%p-tie-local-save r kv nil nil) r)))
+  (when (eq hv '%INC-MARKER%)
+    (return-from %p-lhe-save (%p-inc-elem-local kv *p-undef*)))
   (if (eq hv '%ENV-MARKER%)
       (let ((old (sb-posix:getenv kv))
             (old-undef (gethash kv *p-env-undef-keys*))
@@ -37489,6 +37502,11 @@ would consume, so it dies naming the stream (rule 12)."
   (when (eq (aref saved 0) :tie)
     (return-from %p-lhe-restore
       (%p-tie-local-restore (aref saved 2) kv (aref saved 1))))
+  (when (eq (aref saved 0) :inc)
+    (return-from %p-lhe-restore
+      (if (aref saved 2)
+          (setf (gethash kv *p-inc-table*) (aref saved 1))
+          (remhash kv *p-inc-table*))))
   (if (eq (aref saved 0) :env)
       (let ((old (aref saved 1)))
         (when (string= kv +p-runtime-env-key+)
@@ -37510,6 +37528,9 @@ would consume, so it dies naming the stream (rule 12)."
    = {} then $self->{captures}{$k} = ...)."
   (%p-when-tied (r hv)
                 (return-from %p-lhe-init (vector :tie (%p-tie-local-save r kv t init-val) r)))
+  (when (eq hv '%INC-MARKER%)
+    (return-from %p-lhe-init
+      (%p-inc-elem-local kv (if (null init-val) *p-undef* init-val))))
   (if (eq hv '%ENV-MARKER%)
       (let ((old (sb-posix:getenv kv))
             (old-undef (gethash kv *p-env-undef-keys*))
@@ -37541,25 +37562,108 @@ would consume, so it dies naming the stream (rule 12)."
        (unwind-protect (progn ,@body)
          (%p-lhe-restore ,hv ,kv ,sv)))))
 
-(defmacro p-local-env (init &body body)
-  "`local %ENV [= LIST]` (task #5210): perl localizes %ENV WITH its magic, so
-   inside the scope the hash is still the process environment -- a child
-   process sees the localized one -- and at the exit the old environment is
-   exported again.  INIT is the right side's LIST value, evaluated FIRST (it
-   may read the old %ENV: `local %ENV = (%ENV, K => V)`), or NIL for a bare
-   `local %ENV` (an EMPTY environment, as perl gives the child).  Then the
-   whole environment is saved (%p-env-save: the pairs, the #1030 undef marks,
-   the synthetic entry's flag), replaced through the `%ENV = LIST` arm of
-   p-hash-fill, and put back by %p-env-restore on every exit (unwind-protect:
-   a die, a goto, a return).  %ENV is a CORE variable (rule 9a): the `local`
-   lowering selects this macro by that one name, the way the element macros
-   select the %ENV value layer by its marker.  Under a modifier it is the
-   localizer of p-local-maybe."
+(defmacro p-local-store (store init &body body)
+  "`local %ENV` / `local %INC` / `local %SIG` [= LIST] (tasks #5210 #5332
+   #5333): perl localizes these hashes WITH their magic, so inside the scope
+   the hash is still the store behind it -- a child process sees the
+   localized environment, a `require` records in the localized %INC, a
+   handler stored in the localized %SIG is installed -- and at the exit the
+   old store is back.  STORE names it (:env :inc :sig).  INIT is the right
+   side's LIST value, evaluated FIRST (it may read the old hash: `local %ENV =
+   (%ENV, K => V)`), or NIL for a bare `local %H`.  Then the store is saved
+   (%p-local-store-save), filled THROUGH its own writer
+   (%p-local-store-fill) and put back (%p-local-store-restore) on every exit
+   (unwind-protect: a die, a goto, a return).  These are CORE variables (rule
+   9a): the `local` lowering selects this macro by those three names
+   (Parser2 %LOCAL_STORE), the way the element macros select a store by its
+   marker.  Under a modifier it is the localizer of p-local-maybe."
   (let ((v (gensym "INIT")) (s (gensym "SAVED")))
     `(let* ((,v ,(if init `(p-flatten-args (list ,init)) '(vector)))
-            (,s (%p-env-save)))
-       (unwind-protect (progn (p-hash-fill '%ENV-MARKER% ,v) ,@body)
-         (%p-env-restore ,s)))))
+            (,s (%p-local-store-save ,store)))
+       (unwind-protect (progn (%p-local-store-fill ,store ,v) ,@body)
+         (%p-local-store-restore ,store ,s)))))
+
+(defun %p-local-store-save (store)
+  "What `local %H` saves of STORE (p-local-store): the environment
+   (%p-env-save), the %INC table object, the %SIG view and its stored
+   values (%p-sig-local-save).  Rule 12: another store dies."
+  (ecase store
+    (:env (%p-env-save))
+    (:inc *p-inc-table*)
+    (:sig (%p-sig-local-save))))
+
+(defun %p-local-store-fill (store pairs)
+  "The localized STORE filled from PAIRS (a flat vector) through its own
+   writer: the `%ENV = LIST` arm of p-hash-fill (a bare `local %ENV`: an
+   EMPTY environment, as perl gives a child); a FRESH %INC table filled by the
+   `%INC = LIST` arm (`require` and `do FILE` write it); %SIG by
+   %p-sig-local-fill."
+  (ecase store
+    (:env (p-hash-fill '%ENV-MARKER% pairs))
+    (:inc (setf *p-inc-table* (make-hash-table :test 'equal))
+          (p-hash-fill '%INC-MARKER% pairs))
+    (:sig (%p-sig-local-fill pairs))))
+
+(defun %p-local-store-restore (store saved)
+  "Put back what %p-local-store-save took of STORE."
+  (ecase store
+    (:env (%p-env-restore saved))
+    (:inc (setf *p-inc-table* saved))
+    (:sig (%p-sig-local-restore saved))))
+
+;;; `local %SIG` (task #5333).  perl's localized %SIG is a new hash, but the
+;;; HANDLERS -- the OS dispositions, PL_psig_ptr, the __WARN__ / __DIE__
+;;; hooks -- change only when the scope STORES one (probed 5.40.3: an
+;;; IGNOREd signal stays ignored, an outer sub handler still runs, an outer
+;;; __WARN__ / __DIE__ still fires), and at the exit every signal the scope
+;;; changed is back to the caller's.  PCL's view of the scope is a COPY of the
+;;; caller's %SIG: the same signal cells (stateless: they read and write
+;;; *p-sig-stored*, so a store installs at once), the other keys' VALUES in
+;;; fresh entries (a store to $SIG{__WARN__} does not reach the caller's).
+;;; One difference stays (docs/not-supported.md "%SIG"): a key the scope did
+;;; not store reads the caller's value, where perl's empty hash reads undef.
+
+(defun %p-sig-local-save ()
+  "The caller's %SIG view and a copy of its stored signal values."
+  (let ((stored (make-hash-table :test 'equal)))
+    (maphash (lambda (k v) (setf (gethash k stored) v)) *p-sig-stored*)
+    (cons %SIG stored)))
+
+(defun %p-sig-local-fill (pairs)
+  "The scope's %SIG: a copy of the caller's view (see the section note), then
+   each pair of PAIRS stored through it -- a signal key through its cell's
+   setter (it installs), any other key as an element.  An odd trailing key
+   gets undef, as `%SIG = LIST' does."
+  (let ((view (make-hash-table :test 'equal)))
+    (maphash (lambda (k v)
+               (setf (gethash k view)
+                     (if (%p-signal-cell-box-p v)
+                         v
+                         (%p-make-hash-entry (%p-hash-unbox-elem v)))))
+             %SIG)
+    (setf %SIG view)
+    (let ((n (length pairs)))
+      (loop for i from 0 below n by 2
+            do (setf (p-gethash view (aref pairs i))
+                     (if (< (1+ i) n) (aref pairs (1+ i)) *p-undef*))))))
+
+(defun %p-sig-local-restore (saved)
+  "The caller's %SIG view back, then every signal whose stored value the
+   scope changed stored back and its OS disposition re-applied."
+  (destructuring-bind (view . stored) saved
+    (setf %SIG view)
+    (let ((names '()))
+      (maphash (lambda (k v) (unless (eq v (gethash k stored '%p-absent)) (push k names)))
+               *p-sig-stored*)
+      (maphash (lambda (k v) (declare (ignore v))
+                 (unless (nth-value 1 (gethash k *p-sig-stored*)) (push k names)))
+               stored)
+      (dolist (name names)
+        (multiple-value-bind (v found) (gethash name stored)
+          (if found
+              (setf (gethash name *p-sig-stored*) v)
+              (remhash name *p-sig-stored*)))
+        (%p-sig-apply name)))))
 
 (defmacro p-local-array-elem (arr-var idx-form &body body)
   "Save/restore one array element: local $arr[N].  A TIED array (task #155)

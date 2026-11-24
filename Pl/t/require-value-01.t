@@ -66,6 +66,8 @@ my %mods = (
   LpC => "package LpC; my \$s = ''; until (\$s) { \$s .= 'k' }\n",
   LpD => "package LpD; my \$i = 0; do { \$i++ } until \$i >= 2\n",
   LpE => "package LpE; my \$i = 3; while (\$i) { \$i-- }\n",
+  # #5332: a file whose top level counts its runs
+  LiA => "package LiA; \$main::lia++; 1;\n",
 );
 for my $m (sort keys %mods) {
   open(my $f, '>', "$workdir/mt/$m.pm") or die; print {$f} $mods{$m}; close $f;
@@ -196,5 +198,22 @@ for my $m (qw(LpA LpB LpC LpD LpE)) {
 }
 PL
 is($pcl, $perl, 'a required file ending in a while / until / do-until loop answers the condition (#4281)');
+
+# #5332 (s543l): `local %INC` keeps the store `require` writes -- a require in
+# the scope records there and the file runs again after the scope (the outer
+# %INC never had it); `local %INC = (%INC, NAME => ...)` fakes a loaded file;
+# `local $INC{NAME}` / `delete local $INC{NAME}` restore the entry (they
+# crashed: a Lisp type error on the %INC marker); a die restores the table.
+($perl, $pcl) = both('localinc', <<'PL');
+use lib 'mt';
+{ local %INC; require LiA; print "1 ", (exists $INC{"LiA.pm"} ? "Y" : "N"), " ", scalar(keys %INC), "\n"; }
+print "2 ", (exists $INC{"LiA.pm"} ? "Y" : "N"), "\n"; require LiA; require LiA; print "3 runs=$main::lia\n";
+{ local %INC = (%INC, "Fake/Mod.pm" => "x"); require Fake::Mod; print "4 $INC{'Fake/Mod.pm'}\n"; }
+print "5 ", (exists $INC{"Fake/Mod.pm"} ? "still" : "gone"), "\n";
+$INC{"Q.pm"} = "q"; { local $INC{"Q.pm"} = "L"; print "6 $INC{'Q.pm'}\n"; }
+{ delete local $INC{"Q.pm"}; print "7 ", (exists $INC{"Q.pm"} ? "E" : "N"), "\n"; } print "8 $INC{'Q.pm'}\n";
+eval { local %INC; $INC{Z} = 1; die "x\n" }; print "9 ", (exists $INC{Z} ? "Z" : "noZ"), " $INC{'Q.pm'} $@";
+PL
+is($pcl, $perl, 'local %INC / local $INC{NAME} keep the store require writes, restored on every exit (#5332)');
 
 done_testing;

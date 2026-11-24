@@ -296,7 +296,7 @@ my %FAMILY;
                          p-local-array-elem p-local-hash-elem-init
                          p-local-array-elem-init p-local-array-slice p-local-hash-slice
                          p-local-deref-scalar p-local-deref-array
-                         p-local-deref-hash %pcl-local-errno-init p-local-env)],
+                         p-local-deref-hash %pcl-local-errno-init p-local-store)],
   'pack' => [qw(p-pack p-unpack)],
   'extension' => [qw(p-load-extension)],
   'capture-io' => [qw(p-high-capture p-capture-write p-capture-fh)],

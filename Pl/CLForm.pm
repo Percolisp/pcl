@@ -347,7 +347,7 @@ my %HEADER_ARGS = (
   'p-local-glob' => 3,            'p-local-glob-if' => 4,
   'p-local-glob-dynamic' => 3,
   'p-local-deref-scalar' => 1,    'p-local-deref-array' => 1,
-  'p-local-deref-hash' => 1,
+  'p-local-deref-hash' => 1,      'p-local-store' => 2,
 );
 
 sub to_string {

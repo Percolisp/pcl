@@ -543,7 +543,6 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-local-deref-hash` | macro | `(ref-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-deref-scalar` | macro | `(ref-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-dot` | macro | `(&body body)` | — | — | — | — | — | — | — |
-| `p-local-env` | macro | `(init &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob` | macro | `(pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob-dynamic` | macro | `(name-form cond-form rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob-if` | macro | `(cond-form pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
@@ -552,6 +551,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-local-hash-slice` | macro | `(hash-var key-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-maybe` | macro | `(cond-form localizer &body body)` | — | — | — | — | — | — | — |
 | `p-local-pipe` | macro | `(&body body)` | — | — | — | — | — | — | — |
+| `p-local-store` | macro | `(store init &body body)` | — | — | — | — | — | — | — |
 
 ## env (3)
 
