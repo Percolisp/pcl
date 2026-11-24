@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543n (Opus 5.5, 2026-11-24) beside #4846 (the <> STDIN fallback).  PRE-EXISTING (base 617d66c8 = tree).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    my $s = \"/tmp/x$$\"; open(my $w, '>', $s) or die; print $w \"s1\\ns2\\n\"; close $w;\n    open STDIN, \"<\", $s or die; @ARGV = ();\n    my $a = <>; print \"1 $a\";                 # perl and PCL: 1 s1\n    open STDIN, \"<\", \"/dev/null\" or die;\n    my $b = <>; print \"2 \", $b // \"undef\\n\";  # perl: 2 s2      PCL: 2 undef\n<> holds the STDIN stream it opened for the pass; re-opening STDIN dup2s the new file onto fd 0 and REBUILDS the CL\nstream (%p-rebind-std), so the old stream object -- whose buffer holds \"s2\" -- is not what <> reads any more.  perl's\nARGV opened \"-\" on the same PerlIO, whose buffer survives the dup2.  Probe: the s543n worktree's\nscratch/s543n/probes/pN1.pl rows 1-2.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "STDIN re-opened while `<>` is reading it (first pass from the subject, the reviewing session 2026-11-24)",
+   "id" : "5422",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): STDIN re-opened while `<>` is reading it -- perl's next `<>` reads the rest of what was already buffered from the old STDIN, PCL answers undef",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of <> after STDIN is re-opened mid-pass: IN (rare)"
+}

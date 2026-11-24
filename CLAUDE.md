@@ -410,8 +410,9 @@ s543r, the round).**  Gate
 **380 files / 12,490 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **75 live IN silent wrongs** (the number `tools/task-triage.pl` prints: s543k closed six;
-#5374 filed 2026-11-24, a `my` after the text's own `our` in an eval text behind `package`);
+(95.1 %)**; **21 live IN silent wrongs of ORDINARY code + 64 of rare spellings** (the two numbers
+`tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
+rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
 PASS / 136 PARTIAL / 23 FAIL / 67 SKIP of 896 files, 111,258 ok / 1,188 not
 ok** (five load timeouts counted by their one-file runs); the companion in the

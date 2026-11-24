@@ -24,7 +24,7 @@ my %task = (
   2 => { subject => 'LOUD: a drop now', triage => 'in',
          description => "FILED as a SILENT WRONG\n=== s543c (x) ===\nLABEL: silent (old)\n"
                       . "=== s543x (y) ===\nLABEL: loud -- the newest verdict\n" },
-  3 => { subject => 'a gap', triage => 'in',
+  3 => { subject => 'a gap', triage => 'in', frequency => 'rare', frequency_reason => 'an exotic spelling',
          description => "history: LOUD\n=== s543c (x) ===\nLABEL: silent (no subject label)\n" },
   4 => { subject => 'no verdict block', triage => 'in',
          description => "this is a SILENT WRONG, filed before the verdict pass\n" },
@@ -44,8 +44,13 @@ for my $n (sort keys %task) {
 local $ENV{PCL_TASK_STORE} = $store;
 my $out = `$^X '$tool' 2>&1`;
 is($?, 0, 'the tool runs on the fixture store');
-like($out, qr/^IN and marked silent wrong \(exit criterion 1\): 3$/m,
-     'criterion 1 counts the subject (1), the newest LABEL (3) and an unlabelled description (4) -- not a loud task whose history says silent (2, 7), nor an OUT one, nor a closed one');
+like($out, qr/^IN and marked silent wrong, ORDINARY code \(exit criterion 1\): 2$/m,
+     'criterion 1 counts the subject (1) and an unlabelled description (4) -- not a loud task whose history says silent (2, 7), nor an OUT one, nor a closed one, nor a RARE one (3)');
+like($out, qr/^IN and marked silent wrong, rare spelling \(known divergences, not counted\): 1$/m,
+     'a silent wrong whose frequency field says rare (3) is listed beside the criterion, not counted by it');
+is(join(' ', `$^X '$tool' --list in-silent-ordinary 2>&1` =~ /^#(\d+)\t/mg), '1 4',
+   '--list in-silent-ordinary: a task with no frequency field counts as ordinary');
+is(join(' ', `$^X '$tool' --list in-silent-rare 2>&1` =~ /^#(\d+)\t/mg), '3', '--list in-silent-rare');
 my $in = `$^X '$tool' --list in-silent 2>&1`;
 is(join(' ', $in =~ /^#(\d+)\t/mg), '1 3 4', '--list in-silent prints the counted ids');
 my $all = `$^X '$tool' --list silent 2>&1`;

@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543n (Opus 5.5, 2026-11-24) while probing #2594 (the pipe close's wait status).  PRE-EXISTING (base 617d66c8 = tree).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    system(\"sh\", \"-c\", \"exit 6\"); print ${^CHILD_ERROR_NATIVE} // \"undef\", \"\\n\";\n    perl: 1536      PCL: undef\nThe emitter declares `(defvar |${^CHILD_ERROR_NATIVE}| (make-p-box nil))` in the program's package; the runtime has\nno such variable.  perlvar: \"the native status returned by the last pipe close, backtick command, successful call to\nwait() or waitpid(), or from the system() operator\" -- on POSIX the same number as $? at that moment, but NOT changed\nby an assignment to $? or by END.  The reaping sites all store through %p-set-status; the variable would be an\nexported magic box over a native-status cell that only those sites write.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "${^CHILD_ERROR_NATIVE} (first pass from the subject, the reviewing session 2026-11-24)",
+   "id" : "5421",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `${^CHILD_ERROR_NATIVE}` is never set -- it reads undef after system / backticks / a pipe close / waitpid (perl: the native wait status, 1536 after `system(\"sh\", \"-c\", \"exit 6\")`)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong: a documented perl variable reads undef where perl has the child's status: IN"
+}

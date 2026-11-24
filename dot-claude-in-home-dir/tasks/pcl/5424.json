@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543n (Opus 5.5, 2026-11-24) while probing the autodie shim's bareword handles (a member-1 gate find, lib/autodie.pm).  PRE-EXISTING (base 617d66c8 = tree).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    use autodie;\n    pipe(R, W); print W \"piped\\n\"; CORE::close(W); my $p = <R>; CORE::close(R); print \"3 $p\";\n    perl: 3 piped\n    PCL : Undefined subroutine &main::W called at ... line 2.\nUnder autodie `pipe` is the shim's sub `autodie::pipe (**)`, so the parser's filehandle registry -- which learns a\nbareword handle at the core builtin's `open` / `pipe` -- never hears of R and W, and `print W \"x\"` reads W as a CALL\n(`open(FH, ...)` is right: its registration does not depend on the builtin).  The registry should learn a bareword\nhandle from a `*` prototype slot of a declared sub the same way (the generic mechanism, rule 9a).  Probe: the s543n\nworktree's scratch/s543n/probes/ad4.pl.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "a bareword handle made by pipe() under use autodie: no 'use autodie' in the 30 board dists, everyday/ or the Rosetta corpus (652 programs), and no bareword pipe() there either (s543n grep); found by a probe only",
+   "id" : "5424",
+   "status" : "pending",
+   "subject" : "LOUD: under `use autodie`, a bareword handle opened by `pipe(R, W)` is not known to the parser -- `print W \"x\"` is compiled as a call of the sub W and dies \"Undefined subroutine &main::W\" (perl prints through the pipe)",
+   "triage" : "in",
+   "triage_reason" : "a perl-legal program dies at run time (a bareword pipe handle under autodie is parsed as a call): IN"
+}

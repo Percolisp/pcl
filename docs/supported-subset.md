@@ -99,8 +99,16 @@ changes, and each fails or differs as that file describes.
 
 The freeze ends, and the production wording may be written, when ALL hold:
 
-1. **Zero open tasks marked IN and silent-wrong.** Counted by the triage
-   field (section 7), printed at every merge.
+1. **Zero open tasks marked IN, silent-wrong and of ORDINARY code** (the
+   USER, s543, 2026-11-24; it read "zero IN silent wrongs" before). Counted
+   by the triage and frequency fields (section 7), printed at every merge. A
+   silent wrong of a RARE spelling stays filed and listed -- the known
+   divergences, `tools/task-triage.pl --list in-silent-rare` -- and does not
+   hold the exit. Why the rule changed: every fix batch probes the
+   neighbouring spellings against perl and files each difference, so the
+   undivided count could not converge (five batches closed 39 tasks and the
+   count fell from 86 to 75); what the claim needs is that ordinary programs
+   run right, and criterion 2 measures that on programs we did not write.
 2. **A held-out sample finds no new silent wrong.** The Rosetta corpus
    (#2104: 655 programs by other authors, 478 identical when last run) is
    re-run; its silent rows inside the subset are fixed; then a FRESH sample
@@ -148,6 +156,29 @@ One pass over the open tasks (917 on 2026-11-16), two review sessions:
   first, then dropped statements, then loud failures (the s538 order);
 * a finding outside the subset is filed and marked `out` -- it does not
   start a batch.
+
+**ORDINARY or RARE (the USER, s543, 2026-11-24).** A task marked silent
+wrong also carries `frequency` (`ordinary` | `rare`) and a one-line
+`frequency_reason` naming the evidence:
+
+* `ordinary` -- a working program meets it without its author doing anything
+  unusual: the shape occurs in a program or module we hold (the CPAN board,
+  the everyday corpus, the Rosetta corpus, `lib/`), or it is an idiom perl's
+  own documentation teaches;
+* `rare` -- an unusual spelling, an exotic variable, an experimental
+  feature, a shape known only from a probe or from perl's own tests, or a
+  case where perl itself dies or warns (only a program perl kills gets
+  there);
+* no field = `ordinary`: the criterion's number never falls by omission;
+* a brief names ORDINARY tasks; a rare one is fixed when a batch is already
+  in its function and the fix is a few lines, never as a member of its own;
+* **a neighbour found by a batch's own probes is filed with its frequency
+  and does not extend the batch unless it is ordinary**;
+* the first pass (2026-11-24, from the subjects, by the reviewing session):
+  85 open IN silent wrongs = **21 ordinary + 64 rare**. Moving a task from
+  `rare` to `ordinary` needs only the evidence -- one real program that
+  holds the shape; the Rosetta census (criterion 2) is where that evidence
+  comes from.
 
 **The first pass is done (s543, 2026-11-16)**: every open task carries a
 `triage` field (`in` / `out` / `tooling` / `decision`) and a one-line

@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543l (Opus 5.5, 2026-11-24) while widening the #3370 hoist's precondition for #5330.  PRE-EXISTING (base 9fc6583b = MAIN-READY-110's code).\n\nREPRODUCER (perl 5.40.3 | ./runpcl on 9fc6583b):\n    our $g = 1;\n    { my @t = @{[ local $g = 8 ]}; print \"in=$g t=@t\\n\" }\n    print \"out=$g\\n\";\n    { my $n = ${ \\ (local $g = 7) }; print \"in2=$g n=$n\\n\" }\n  perl: in=1 t=8 / out=1 / in2=1 n=7\n  PCL:  in=8 t=8 / out=1 / in2=7 n=7\n\nWHAT IT IS: a DEREF block (`@{ ... }`, `${ ... }`, `%{ ... }`) is a SCOPE in perl: a `local` inside it is restored when\nthe deref block is left.  The #3370 hoist treats the deref block as part of the expression (Parser2::_hoist_local_term,\n\"a DEREF block `@{local X}` is part of the expression\") and moves `local X;` before the whole statement, so the\nrestore is the ENCLOSING block's end.  Rare (an anonymous constructor holding a local inside a deref).\n\ns543l keeps its #5330 widening (value operators, element commas, an other-key delete) OUT of a deref block for this\nreason; the old first-term hoist there is unchanged.  FIX DIRECTION: a local term inside a deref block lowers through\nthe embedded-block path with its own restore at the block's exit (the deref block's statements are a block the v2\nlowering can wrap: `(let ... (p-local-* ... VALUE))`), or the hoist declines there and the term is refused (LOUD, not\nsilent) -- measure the population first (`@{[ ... local ... ]}` sites in the four populations).\n",
+   "frequency" : "rare",
+   "frequency_reason" : "a `local` inside a dereference block (first pass from the subject, the reviewing session 2026-11-24)",
+   "id" : "5381",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): a `local` inside a DEREF block (`@{[ local $g = 8 ]}`, `${ \\ (local $g = 7) }`) is restored at the ENCLOSING block's end -- perl restores it when the deref block is left (the #3370 hoist moves it before the statement)\n",
+   "triage" : "in",
+   "triage_reason" : "a local inside a deref block restores at the enclosing block"
+}

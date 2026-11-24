@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543l (Opus 5.5, 2026-11-24) from member 1's probes (#5372: a brace-named `local` target).  PRE-EXISTING (base 9fc6583b) and the same on the s543l tree.\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    our %h = (k => 1); { local ${h{k}} = 2; print \"$h{k}\\n\" } print \"$h{k}\\n\";\n  perl: 2 / 1\n  PCL:  PCL: statement dropped at x.pl line 1: local ${h{\"k\"}} = 2; -- Handle single node of unknown type. ...\n        then the run-time die \"PCL: statement not supported\".\n\nWHAT IT IS: `${name{KEY}}` / `${name[IDX]}` / `@{name{...}}` is toke.c's subscripted identifier inside a deref block\n(the element $name{KEY}, task #3864).  The READ takes it through PExpr::_block_word_subscript (the collapse); the\n`local` plan reads its target through Parser2::brace_name_of (s543l: one Word in the block), which does not claim this\nspelling, so the target stays a cast of a Block holding `h{k}` and the deref plan's lowering fails.  FIX DIRECTION:\nbrace_name_of (or Pl::Stmt::brace_names_plain) takes the subscripted spelling the read's collapse takes\n(_block_word_subscript is the ONE reader of it): the pair becomes `$h` + the subscript, as for `${h}{k}`.  Rare.\n",
+   "id" : "5382",
+   "status" : "pending",
+   "subject" : "DROP (rare): `local ${h{k}} = V` (the `${name{KEY}}` element spelling, #3864) under `local` is a dropped statement -- perl localizes $h{k}; the read of that spelling is right\n",
+   "triage" : "in",
+   "triage_reason" : "a local of the subscripted brace spelling drops"
+}

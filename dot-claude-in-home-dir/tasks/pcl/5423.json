@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543n (Opus 5.5, 2026-11-24) while probing #4842's controls (the use slots given a non-handle reference).  PRE-EXISTING (base 617d66c8 = tree).\n\nREPRODUCER (perl 5.40.3 | PCL):\n    my $r = eval { open(my $d, \">&\", [1]); 1 };  print $r ? \"ok\" : \"died: $@\";\n        perl: died: Can't use an undefined value as filehandle reference      PCL: ok\n    my $r2 = eval { open(my $d, \">&\", \\\"x\"); 1 }; print $r2 ? \"ok\" : \"died: $@\";\n        perl: died: Bad filehandle: x      PCL: ok, and stderr \"warning: Unsupported in-memory open mode: >&\"\nThe dup path never asks its source what it is; the second shape reaches the in-memory opener (a scalar ref target),\nwhose unknown-mode arm is a CL `warn` -- not perl-shaped, and a value-producing missing case (rule 12).  #4842's\n%p-non-handle-ref-p is the predicate for the first; perl's text differs per shape.  Probe: the s543n worktree's\nscratch/s543n/probes/pN1.pl rows 3-4.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "reached only where perl itself dies (a reference as a dup-open's source) (first pass from the subject, the reviewing session 2026-11-24)",
+   "id" : "5423",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (safe direction): a REFERENCE as a dup-open's source -- `open($d, \">&\", [1])` / `open($d, \">&\", \\\"x\")` -- succeeds in PCL (the second with a stray CL `warning: Unsupported in-memory open mode: >&`); perl dies \"Can't use an undefined value as filehandle reference\" / \"Bad filehandle: x\"",
+   "triage" : "in",
+   "triage_reason" : "a refusal perl makes that PCL does not (the safe direction) plus a stray CL warning: IN"
+}

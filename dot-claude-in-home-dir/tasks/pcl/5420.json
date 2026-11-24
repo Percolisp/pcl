@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543n (Opus 5.5, 2026-11-24) while measuring #513 (the fdopen alias's own buffer).  PRE-EXISTING (base 617d66c8 = the s543n tree).\n\nREPRODUCER (perl 5.40.3 | PCL; STDOUT a pipe or a file, no $|):\n    print \"1 STDOUT\\n\";\n    open(my $k, \">&\", \\*STDOUT) or die; print $k \"2 via dup\\n\"; print \"3 STDOUT\\n\";\n    open(my $j, \">&\", \\*STDOUT) or die; print $j \"4 via dup2\\n\"; print \"5 STDOUT\\n\";\n    perl: 1 3 4 2 5      PCL: 1 3 5 2 4\n(each dup open flushes STDOUT -- right in both; then perl's global destruction frees the file-scoped lexicals newest\nfirst, flushing $j then $k, and PerlIO_cleanup flushes STDOUT last; PCL's exit hook writes STDOUT before the rest.)\nAny two handles sharing a descriptor or a file show it: a `>&` dup, an `>&=` alias once it has its own buffer (#513),\ntwo `>>` opens of one log file.  Probe: the s543n worktree's scratch/s543n/probes/pF3.pl.  The exit hook's order is\nthe place (the flush of every open output stream at exit, docs/ir-spec.md 6.5b); #513's alias buffer depends on it.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "the order of two buffered handles on one descriptor at exit (first pass from the subject, the reviewing session 2026-11-24)",
+   "id" : "5420",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): at exit PCL writes STDOUT's buffer FIRST and then the other buffered handles in creation order -- perl frees the lexical handles first, newest first, then flushes STDOUT: two handles on one descriptor (a `>&` dup of STDOUT) come out in a different order",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of output ORDER at exit when two buffered handles share a descriptor or a file: IN (rare)"
+}

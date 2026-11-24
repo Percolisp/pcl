@@ -11,6 +11,7 @@
 #   tools/task-triage.pl                  the counts
 #   tools/task-triage.pl --list CLASS     the tasks of one class
 #                                         (in | out | tooling | decision | untriaged | in-silent
+#                                          | in-silent-ordinary | in-silent-rare
 #                                          | silent: every open task marked silent wrong)
 #
 # A task file carries two fields, written by the reviewing session:
@@ -25,6 +26,23 @@
 #   tooling   the project's own machinery: runners, baselines, harness,
 #             instruments, structure work no program observes
 #   decision  the USER's to rule before it can be IN or OUT
+#
+# A silent wrong also carries its FREQUENCY (the USER, s543, 2026-11-24;
+# docs/supported-subset.md sections 5 and 7), written by whoever files it and
+# reviewed by the reviewing session:
+#   "frequency"         ordinary | rare
+#   "frequency_reason"  one line: the evidence
+#   ordinary  a working program meets it without its author doing anything
+#             unusual: the shape occurs in a program or module we hold (the
+#             board, the everyday corpus, the Rosetta corpus, lib/), or it is
+#             an idiom perl's own documentation teaches
+#   rare      an unusual spelling, an exotic variable, an experimental
+#             feature, a shape known only from a probe or from perl's own
+#             tests, or a case where perl itself dies or warns
+# A task with NO frequency field counts as ORDINARY: the criterion's number
+# can never fall by omission.  Rare silent wrongs stay filed and listed (the
+# known divergences: --list in-silent-rare); exit criterion 1 counts the
+# ordinary ones.
 #
 # "Marked silent wrong" is read from the task's TEXT, so a silent wrong whose
 # task does not say so is not counted: the label is part of filing one.  The
@@ -55,8 +73,8 @@ while (@ARGV) {
     my $a = shift @ARGV;
     if ($a eq '--list') {
         $list = shift @ARGV;
-        die "task-triage.pl: --list takes in | out | tooling | decision | untriaged | in-silent | silent\n"
-            if !defined $list || !($CLASS{$list} || $list =~ /^(?:untriaged|in-silent|silent)\z/);
+        die "task-triage.pl: --list takes in | out | tooling | decision | untriaged | in-silent | in-silent-ordinary | in-silent-rare | silent\n"
+            if !defined $list || !($CLASS{$list} || $list =~ /^(?:untriaged|in-silent|in-silent-ordinary|in-silent-rare|silent)\z/);
     }
     else {
         die "task-triage.pl: unknown argument '$a'\n";
@@ -94,6 +112,12 @@ for my $n (@files) {
     if ($class eq 'in' && $silent) {
         $count{'in-silent'}++;
         push @{ $rows{'in-silent'} }, $row;
+        my $freq = $t->{frequency} // 'ordinary';
+        die "task-triage.pl: task $n has frequency '$freq' (legal: ordinary, rare)\n"
+            if $freq !~ /^(?:ordinary|rare)\z/;
+        $count{"in-silent-$freq"}++;
+        push @{ $rows{"in-silent-$freq"} },
+            [ $n, $subject, $t->{frequency_reason} // '(no frequency field: counted as ordinary)' ];
     }
 }
 
@@ -116,5 +140,6 @@ if (defined $list) {
 
 printf "TRIAGE: %d open -- in %d, out %d, tooling %d, decision %d, untriaged %d\n",
     map { $count{$_} // 0 } qw(open in out tooling decision untriaged);
-printf "IN and marked silent wrong (exit criterion 1): %d\n", $count{'in-silent'} // 0;
+printf "IN and marked silent wrong, ORDINARY code (exit criterion 1): %d\n", $count{'in-silent-ordinary'} // 0;
+printf "IN and marked silent wrong, rare spelling (known divergences, not counted): %d\n", $count{'in-silent-rare'} // 0;
 print "unreadable task files: @bad\n" if @bad;
