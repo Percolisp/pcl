@@ -20397,58 +20397,38 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ((p-typeglob-p v) (%p-resolve-fh v))
          (t nil))))
     ((streamp fh) fh)
+    ;; A BAREWORD (tasks #1423 #4844): the glob %p-bareword-handle-keys names --
+    ;; main's for `STDOUT' in any package and for `::FH', the symbol itself for
+    ;; an ordinary name -- then a glob alias made before its source opened
+    ;; (#2666).  No by-name fallback: a handle of another package is not this
+    ;; one (`open FH' in main, `<FH>' in package Q reads nothing in perl).
     ((symbolp fh)
-     (or (gethash fh *p-filehandles*)
-         ;; The standard handles STDIN/STDOUT/STDERR are registered under the
-         ;; :pcl symbols, but generated code in a user package passes that
-         ;; package's own same-named symbol (these names are not exported, so
-         ;; they are distinct symbols) — an `eq` miss.  Perl filehandles are
-         ;; by-name, so fall back to a by-name lookup; this is what makes
-         ;; `print STDERR ...` actually reach *error-output* instead of stdout.
-         (let ((canon (find-symbol (symbol-name fh) :pcl)))
-           (and canon (not (eq canon fh)) (gethash canon *p-filehandles*)))
-         ;; A glob alias made before its source opened (#2666).
-         (let ((src (gethash fh *p-fh-glob-aliases*)))
-           (and src (gethash src *p-filehandles*)))))
+     (unless (or (null fh) (eq fh *p-undef*))
+       (let* ((keys (%p-bareword-handle-keys fh))
+              (key (car keys)))
+         (or (gethash key *p-filehandles*)
+             (let ((std (cdr keys))) (and std (gethash std *p-filehandles*)))
+             (let ((src (gethash key *p-fh-glob-aliases*)))
+               (and src (gethash src *p-filehandles*)))))))
     ((%p-socket-p fh) fh)
+    ;; A handle NAME string (`print {"STDOUT"} ...', `$fh = "FOO"; <$fh>', a dup
+    ;; source "WRITE"): the glob perl's symbolic-name rule names -- its own
+    ;; package when qualified, else the package in effect or main for a forced
+    ;; name (%p-name-handle-key; the old reading stripped the qualifier and
+    ;; scanned every package by the short name).
     ((stringp fh)
-     ;; A string filehandle name — e.g. print {"STDOUT"} ..., or a scalar
-     ;; holding a handle name (my $fh = 'STDOUT'; print $fh ...).  Strip an
-     ;; optional package qualifier, then resolve by name.  Barewords reach
-     ;; *p-filehandles* under their :invert-readtable-cased symbol (STDOUT →
-     ;; |stdout|), so invert the string name the same way before find-symbol.
-     (let* ((sep (search "::" fh :from-end t))
-            (name (if sep (subseq fh (+ sep 2)) fh))
-            (inv  (%pcl-invert-case name))
-            (sym  (find-symbol inv :pcl)))
-       (or (and sym (gethash sym *p-filehandles*))
-           ;; User handles (pipe READ, WRITE; open FOO, …) are keyed by their
-           ;; USER-package symbol, which a name string can't find-symbol
-           ;; without knowing the caller's package.  Perl handles are by-name:
-           ;; fall back to a name scan of the (small) handle table (#70
-           ;; dup-open ">&WRITE" resolves its source this way).
-           (loop for k being the hash-keys of *p-filehandles*
-                 using (hash-value v)
-                 when (and (symbolp k) (string= (symbol-name k) inv))
-                 return v))))
-    ;; A typeglob is a filehandle designator (fileno(*STDOUT)): resolve by
-    ;; the glob's name.  p-make-typeglob stores the name ALREADY
-    ;; %pcl-invert-case'd (symbol case, "stdin"), so look up directly — the
-    ;; string branch would invert a second time.
-    ;; The glob's OWN package first (task #1423): `\*DATA` in main is
-    ;; main::DATA, and every module with an `__END__` section has a DATA of
-    ;; its own -- the name scan below answered whichever one the hash met
-    ;; first (TT t/filter.t read a module's one-newline section, s532c).
+     (let ((key (%p-name-handle-key fh)))
+       (and key (gethash key *p-filehandles*))))
+    ;; A GLOB (`fileno(*STDOUT)', `\*DATA', a gensym): ITS package's handle,
+    ;; never another package's of the same name -- `\*DATA' in main is main's
+    ;; DATA, not a module's `__END__' section (TT t/filter.t, s532c), and
+    ;; `*Foo::STDOUT' is not STDOUT (task #1423).  The name is already in
+    ;; symbol case (p-make-typeglob inverts it).
     ((p-typeglob-p fh)
-     (let* ((name (p-typeglob-name fh))
-            (own  (%p-typeglob-own-symbol fh))
-            (sym  (find-symbol name :pcl)))
-       (or (and own (gethash own *p-filehandles*))
-           (and sym (gethash sym *p-filehandles*))
-           (loop for k being the hash-keys of *p-filehandles*
-                 using (hash-value v)
-                 when (and (symbolp k) (string= (symbol-name k) name))
-                 return v))))
+     (let ((pkg (p-typeglob-package fh)))
+       (and (packagep pkg)
+            (let ((key (%p-handle-key pkg (p-typeglob-name fh))))
+              (and key (gethash key *p-filehandles*))))))
     (t nil)))
 
 (defun p-get-stream (fh)
@@ -21808,23 +21788,86 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    to -- the key *p-filehandles* (open) and *p-dirhandles* (opendir) hold a
    glob's handle under, the same key a bareword `FH' / `DIR' of that name is.
    A COPY of a glob ref (`my ($dh) = @_' on a gensym, `\\*FH') is another box
-   holding the SAME glob, so it reaches the same slot (task #3243)."
-  (intern (p-typeglob-name glob) (p-typeglob-package glob)))
+   holding the SAME glob, so it reaches the same slot (task #3243).  The key
+   is %p-handle-key's, created (main's standard handles: the :pcl symbol)."
+  (%p-handle-key (p-typeglob-package glob) (p-typeglob-name glob) t))
 
-(defun %p-typeglob-own-symbol (glob)
-  "The symbol GLOB's name has IN ITS OWN PACKAGE -- present there, never one
-   the package merely inherits from :pcl -- or NIL.  Nothing is interned: a
-   READ of a handle must not create one (task #1423).
-   NIL for main's standard handles (%p-main-std-handle-p, task #4623): their
-   IO lives under the :pcl symbol, and an entry under main's same-named symbol
-   is a glob-assignment's copy that `local *STDIN` neither saves nor restores
-   -- read first, it answered fd 0 inside a later `local *STDIN` (Capture::Tiny's
-   tied-STDIN captures: `fileno($dup{stdin})` came back empty)."
-  (let ((pkg (p-typeglob-package glob))
-        (name (p-typeglob-name glob)))
-    (when (and (packagep pkg) (not (%p-main-std-handle-p pkg name)))
-      (multiple-value-bind (sym status) (find-symbol name pkg)
-        (and (member status '(:internal :external)) sym)))))
+;;; WHICH GLOB A HANDLE NAME DENOTES (tasks #1423 #4844 #5081, s543n;
+;;; docs/ir-spec.md 7.5).  perl's rule is gv.c's: a QUALIFIED name is its own
+;;; package's glob, a leading `::' is main's, an UNQUALIFIED name is the
+;;; current package's -- except the names forced into main (STDIN STDOUT STDERR
+;;; ARGV ARGVOUT ENV INC SIG _), which are main's from every package.  Every
+;;; spelling of a handle reaches ONE of the three functions below, and all
+;;; three end in %p-handle-key: a BAREWORD symbol (%p-bareword-handle-keys), a
+;;; NAME string (%p-name-handle-key) and a GLOB (its package and name).  The
+;;; resolver used to answer a miss by the SHORT name -- the :pcl symbol, then a
+;;; scan of every package's handles -- so `*Foo::STDOUT' found main's STDOUT
+;;; (and `open(*Foo::STDOUT, ...)' CLOSED it), `\*FH' in package Q read main's
+;;; FH, and a symbolic open registered its handle under the :pcl symbol, which
+;;; no stash holds (`defined *{"SYM"}' was false after `open("SYM", ...)').
+(defun %p-handle-key (pkg uname &optional create)
+  "THE symbol *p-filehandles* files the IO of glob *PKG::UNAME under (UNAME in
+   symbol case, PKG a CL package), or NIL when a READ finds none.  Main's
+   standard handles (%p-main-std-handle-p: STDIN STDOUT STDERR ARGV ARGVOUT)
+   live under the :pcl symbol, where the runtime keeps their IO (task #4623);
+   every other glob under the symbol of its OWN package.  A read interns
+   nothing and never takes a symbol the package only inherits from :pcl;
+   CREATE (an opener, a select) interns."
+  (cond ((%p-main-std-handle-p pkg uname)
+         (if create (intern uname :pcl) (find-symbol uname :pcl)))
+        (create (intern uname pkg))
+        (t (multiple-value-bind (sym status) (find-symbol uname pkg)
+             (and (member status '(:internal :external)) sym)))))
+
+(defun %p-name-handle-key (name &optional create)
+  "The %p-handle-key a handle NAME string denotes -- a symbolic handle
+   (`$fh = \"FH\"; open($fh, ...)', `print {\"Foo::FH\"} ...', a dup source
+   \"WRITE\").  The package is perl's rule for a symbolic glob name, the one
+   %p-glob-dynamic-name reads (qualified: its package; a leading `::': main;
+   unqualified: the package in effect, or main for a forced name).  CREATE
+   makes the package, as perl's stash vivifies it."
+  (multiple-value-bind (pstr bare) (%p-glob-dynamic-name name)
+    (let ((pkg (or (%pcl-find-package pstr)
+                   (and create
+                        (make-package (perl-pkg-to-cl-pkg-name pstr) :use '(:cl :pcl))))))
+      (and pkg (%p-handle-key pkg (%pcl-invert-case bare) create)))))
+
+(defun %p-bareword-handle-keys-1 (sym)
+  "%p-bareword-handle-keys' answer, computed.  The emitter's spellings of a
+   bareword handle: a symbol of the CURRENT package for an unqualified name or
+   one qualified with that package; a symbol of package P for `P::FH'; the
+   whole perl name as ONE symbol for a qualified forced-main name
+   (|Foo::STDOUT|, Pl::ExprToCL::_fh_sym); a KEYWORD for `::FH' read from an
+   older emission or an eval text (the reader takes `::' as the keyword
+   package).  A forced-main name is filed under MAIN's symbol -- where a glob
+   assignment `*STDOUT = *OTHER' puts its copy (%p-glob-copy-io-slot) -- and a
+   standard one falls back to the :pcl symbol the runtime keeps its IO under."
+  (let* ((name (symbol-name sym))
+         (main (%pcl-find-package "main"))
+         (key (cond
+                ((keywordp sym) (intern name main))
+                ((search "::" name)
+                 (multiple-value-bind (pstr bare) (%p-split-symbolic-name name "main")
+                   (%p-handle-key (or (%pcl-find-package pstr)
+                                      (make-package (perl-pkg-to-cl-pkg-name pstr)
+                                                    :use '(:cl :pcl)))
+                                  (%pcl-invert-case bare) t)))
+                ((%p-forced-main-bare-p (%pcl-invert-case name)) (intern name main))
+                (t sym))))
+    (cons key (and (eq (symbol-package key) main)
+                   (%p-main-std-handle-p main (symbol-name key))
+                   (intern (symbol-name key) :pcl)))))
+
+(defun %p-bareword-handle-keys (sym)
+  "The keys a bareword handle SYMBOL denotes, (KEY . STD): KEY the symbol its
+   glob's IO is filed under -- itself for an ordinary name (the reader interned
+   it in its package), MAIN's for a forced-main name (an UNQUALIFIED `STDOUT'
+   in package Foo is main's, never Foo's own glob `*Foo::STDOUT') and for
+   `::FH' -- and STD, for main's standard handles, the :pcl symbol a lookup of
+   KEY falls back to (%p-handle-key).  Computed once per symbol and kept on
+   its property list: this is the print / readline path of every bareword."
+  (or (get sym '%p-fh-key-cache)
+      (setf (get sym '%p-fh-key-cache) (%p-bareword-handle-keys-1 sym))))
 
 (defun %p-install-fh (fh stream &optional (cloexec t))
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
@@ -21871,15 +21914,20 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; glob's own name, which is how %p-resolve-fh reaches a glob handle.
     ((and (p-box-p fh) (p-typeglob-p (p-box-value fh)))
      (%p-fh-register (%p-typeglob-handle-key (p-box-value fh)) stream))
+    ;; A NAME string: the glob perl's symbolic rule names, created in its
+    ;; stash (task #5081: `open($n, ...)' with $n = "SYM" makes *main::SYM,
+    ;; so `defined *{$n}' is true; it was filed under the :pcl symbol, which
+    ;; no stash holds and every package's `SYM' found).
     ((and (p-box-p fh)
           (stringp (p-box-value fh))
           (plusp (length (p-box-value fh))))
-     (let* ((nm  (p-box-value fh))
-            (sep (search "::" nm :from-end t))
-            (name (if sep (subseq nm (+ sep 2)) nm)))
-       (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
-             stream)))
+     (%p-fh-register (%p-name-handle-key (p-box-value fh) t) stream))
     ((p-box-p fh) (%p-note-handle-name fh stream) (box-set fh stream))
+    ;; A raw GLOB (`open(*Foo::STDOUT, ...)', `open(*FH, ...)'): its own
+    ;; package's slot (task #1423; it was filed under the glob STRUCT, which no
+    ;; later spelling of the glob is).
+    ((p-typeglob-p fh) (%p-fh-register (%p-typeglob-handle-key fh) stream))
+    ((symbolp fh) (%p-fh-register (car (%p-bareword-handle-keys fh)) stream))
     (t            (%p-fh-register fh stream))))
 
 (defun %p-fh-register (key stream)
@@ -23314,10 +23362,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ((and (p-box-p fh)
               (stringp (p-box-value fh))
               (plusp (length (p-box-value fh))))
-         (let* ((nm  (p-box-value fh))
-                (sep (search "::" nm :from-end t))
-                (name (if sep (subseq nm (+ sep 2)) nm)))
-           (remhash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)))
+         (let ((key (%p-name-handle-key (p-box-value fh))))
+           (when key (remhash key *p-filehandles*))))
         ;; A LEXICAL HANDLE KEEPS ITS GLOB (task #1233).  perl's `close $fh'
         ;; closes the handle; it does not empty the scalar — `defined $fh' is
         ;; still 1, `ref($fh)' is still GLOB, `"$fh"' is still GLOB(0x…), and a
@@ -23330,7 +23376,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ;; emptiness.  (The bareword and by-name spellings still lose their
         ;; TABLE entry above — that is what makes THEM not-open.)
         ((p-box-p fh) nil)
-        ((symbolp fh) (remhash fh *p-filehandles*))))
+        ((p-typeglob-p fh) (remhash (%p-typeglob-handle-key fh) *p-filehandles*))
+        ((symbolp fh) (remhash (car (%p-bareword-handle-keys fh)) *p-filehandles*))))
 
 (defparameter +p-close-false+ ""
   "PERL'S FALSE ANSWER FROM `close' IS A DEFINED EMPTY STRING (task #1307,
@@ -23654,6 +23701,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (when (eq call-form-is-a-handle :install)
       (setf fh-form (%p-fh-place-form fh-form)))
     (cond
+      ;; `::FH' reads as a KEYWORD: main's handle wherever it is written
+      ;; (task #4844), which the runtime's bareword key gives it -- the re-intern
+      ;; below would make it the CURRENT package's.  Self-evaluating.
+      ((and (keywordp fh-form) (not (eq fh-form :undef))) fh-form)
       ;; Bare symbol without sigil — bareword filehandle: quote it.
       ;; `_` is NOT one: it is the runtime's stat-cache VARIABLE (defvar _),
       ;; which `-f _` reads, and quoting it would look up a handle named "_".
@@ -28203,14 +28254,29 @@ would consume, so it dies naming the stream (rule 12)."
    effect, except the names perl forces into main (+p-forced-main-names+).
    Anything else (a lexical handle, a name string, a glob) is kept as given;
    %p-resolve-fh accepts every one."
-  (if (and (symbolp fh) (not (eq fh t)))
-      (let ((name (to-string fh)))
-        (cond
-          ((search "::" name) name)
-          ((member name +p-forced-main-names+ :test #'string=)
-           (concatenate 'string "main::" name))
-          (t (concatenate 'string *pcl-current-package* "::" name))))
-      fh))
+  (cond
+    ;; A BAREWORD names the glob its key is filed under (%p-bareword-handle-keys,
+    ;; task #1423): `select(Foo::OUT)' is "Foo::OUT" from any package -- the
+    ;; NAME of a symbol in package Foo is only "OUT", and qualifying it with
+    ;; the package in effect named main's glob, which only the old by-name
+    ;; scan used to find again.
+    ((and (symbolp fh) fh (not (eq fh t)) (not (eq fh *p-undef*)))
+     (let ((key (car (%p-bareword-handle-keys fh))))
+       (concatenate 'string (%pcl-cl-pkg-to-perl-name (symbol-package key))
+                    "::" (%pcl-invert-case (symbol-name key)))))
+    ;; A NAME string is a glob perl looks up NOW (task #5081): the glob is
+    ;; vivified in its stash -- `select select "SYM"' makes `defined *{"SYM"}'
+    ;; true -- and the selection is its FULL name, so a print from another
+    ;; package still reaches it.
+    ((let ((v (if (p-box-p fh) (p-box-value fh) fh)))
+       (and (stringp v) (plusp (length v))))
+     (let* ((name (if (p-box-p fh) (p-box-value fh) fh))
+            (key (%p-name-handle-key name t)))
+       (unless (nth-value 1 (gethash key *p-filehandles*))
+         (setf (gethash key *p-filehandles*) nil))
+       (multiple-value-bind (pstr bare) (%p-glob-dynamic-name name)
+         (concatenate 'string pstr "::" bare))))
+    (t fh)))
 
 (defun %p-write-impl (&optional fh)
   "Perl write - emit a report via the current `format` (stub).
@@ -28767,7 +28833,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-16000"
+(defparameter *pcl-cache-generation* "v2-16300"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -36354,7 +36420,9 @@ would consume, so it dies naming the stream (rule 12)."
    key -- an alias of main::stdout found no stream and `print O` wrote
    nothing (#3376)."
   (let ((own (intern sn sp))
-        (canon (find-symbol sn :pcl)))
+        ;; only MAIN's standard handles live under :pcl -- `*Y = *Foo::STDOUT'
+        ;; copies Foo's own glob, never STDOUT (task #1423)
+        (canon (and (%p-main-std-handle-p sp sn) (find-symbol sn :pcl))))
     (if (and canon (not (gethash own *p-filehandles*))
              (nth-value 1 (gethash canon *p-filehandles*)))
         canon

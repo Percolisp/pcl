@@ -155,4 +155,80 @@ print "@r\n";
 PL
 is($pcl, $perl, 'a standard handle\'s glob reads its own IO inside a later `local`, never a glob-assignment copy');
 
+# s543n -- WHICH GLOB A HANDLE NAME DENOTES, one rule for every spelling
+# (%p-handle-key; ir-spec 7.5): qualified = its package, `::` = main,
+# unqualified = the current package except the names forced into main.
+# #1423: `open(*Foo::STDOUT, ...)` CLOSED the real STDOUT (the resolver found
+# main's by the short name), so everything after it was lost, exit 0.
+($perl, $pcl) = both('foostd', <<'PL', '/dev/null');
+my $D = "/tmp/pcl-gd-$$"; mkdir $D;
+sub rd { open my $i, '<', $_[0] or return "none"; local $/; my $c = <$i>; close $i; $c =~ s/\n/|/g; $c }
+print "00 start\n";
+open(*Foo::STDOUT, '>', "$D/o") or die "o: $!";
+print "01 real\n";
+print {*Foo::STDOUT} "a\n";
+print Foo::STDOUT "b\n";
+{ package Foo; print STDOUT "02 Foo's unqualified STDOUT is main's\n"; print Foo::STDOUT "c\n"; }
+close *Foo::STDOUT;
+print "03 fileno=", fileno(STDOUT), " file=", rd("$D/o"), "\n";
+open(*Foo::STDERR, '>', "$D/e") or die; print {*Foo::STDERR} "e\n"; close *Foo::STDERR;
+print "04 file=", rd("$D/e"), "\n";
+open my $w, '>', "$D/i" or die; print $w "in1\n"; close $w;
+open(*Foo::STDIN, '<', "$D/i") or die; my $l = readline(*Foo::STDIN); chomp $l;
+print "05 $l fileno(STDIN)=", fileno(STDIN), " real=", (defined(scalar <STDIN>) ? "read" : "undef"), "\n";
+my $g = \*Foo::STDOUT; open($g, '>', "$D/r") or die; print $g "r\n"; close $g;
+my $s = "Foo::STDOUT"; open($s, '>', "$D/s") or die; print {"Foo::STDOUT"} "s\n"; close $s;
+print "06 ", rd("$D/r"), " ", rd("$D/s"), "\n";
+system("rm", "-rf", $D);
+print "07 end\n";
+PL
+is($pcl, $perl, '#1423: *Foo::STDOUT / *Foo::STDERR / *Foo::STDIN are Foo\'s own globs; the real handles are untouched');
+
+# #4844: a LEADING `::` is main in every slot and every package (`<::H>` globbed
+# the pattern "::H", `readline(::H)` read nothing); `main::FH` written in
+# another package is main's FH (it was re-homed in the current package).
+($perl, $pcl) = both('colon', <<'PL');
+my $D = "/tmp/pcl-gc-$$"; mkdir $D;
+sub rd { open my $i, '<', $_[0] or return "none"; local $/; my $c = <$i>; close $i; $c =~ s/\n/|/g; $c }
+open my $w, '>', "$D/in" or die; print $w "x\ny\nz\n"; close $w;
+open(::H, '<', "$D/in") or die; my $a = <::H>; chomp $a; my @r = <::H>; print "01 $a n=", scalar(@r), "\n"; close ::H;
+open(H2, '<', "$D/in") or die; my $b = readline(::H2); chomp $b; print "02 $b eof=", (eof(::H2) ? 1 : 0), "\n";
+my $c = 0; while (<::H2>) { $c++ } print "03 while n=$c\n"; close ::H2;
+open(MF, '>', "$D/o") or die;
+{ package Foo; print main::MF "m\n"; print ::MF "n\n"; open(::G, '<', "$D/in") or die; }
+close MF; print "04 ", rd("$D/o"), "\n";
+my $g = <G>; chomp $g; print "05 $g\n";
+{ package Foo; my $g3 = <::G>; chomp $g3; print "06 $g3 eof=", (eof(::G) ? 1 : 0), "\n"; close ::G; }
+{ package Bar; open(main::BF, '<', "$D/in") or die; }
+my $bf = <BF>; chomp $bf; print "07 $bf\n"; close BF;
+my @gl = <Foo::*.pm>; print "08 glob n=", scalar(@gl), "\n";
+system("rm", "-rf", $D);
+PL
+is($pcl, $perl, '#4844: `::H` and `main::H` name main\'s handle from every package and slot; `<Foo::*.pm>` still globs');
+
+# #5081 and the symbolic half: a handle NAME string is the glob of ITS package
+# (unqualified: the package in effect), created in the stash -- `defined *{$n}`
+# is true after `open($n, ...)` / `select $n` -- and another package's handle of
+# the same short name is never found (`\*FH` in package Q is Q's, not main's).
+($perl, $pcl) = both('symname', <<'PL');
+no strict 'refs';
+my $D = "/tmp/pcl-gs-$$"; mkdir $D;
+open my $w, '>', "$D/in" or die; print $w "x\ny\n"; close $w;
+open(FH, '<', "$D/in") or die;
+{ package Q; print "01 Q FH=", (defined(readline(FH)) ? "read" : "undef"), " \\*FH=", (defined(readline(\*FH)) ? "read" : "undef"), "\n"; }
+my $m = <FH>; chomp $m; print "02 main FH=$m\n"; close FH;
+my $n = "Foo::SYM"; open($n, '<', "$D/in") or die; my $s = <Foo::SYM>; chomp $s; print "03 $s\n"; close $n;
+my $p = "PLAIN"; open($p, '<', "$D/in") or die;
+{ package Q; print "04 Q PLAIN=", (defined(readline(PLAIN)) ? "read" : "undef"), "\n"; }
+my $pl = <PLAIN>; chomp $pl; print "05 $pl\n"; close PLAIN;
+my $g = "SYM000"; print "06 ", (defined *{$g} ? "def" : "undef");
+select select $g; print " ", (defined *{$g} ? "def" : "undef");
+$g++; print " ", (defined *{$g} ? "def" : "undef");
+open($g, ">&STDOUT") or die; print " ", (defined *{$g} ? "def" : "undef"), "\n"; close $g;
+open(Foo::OUT, '>', "$D/o") or die; my $old = select(Foo::OUT); print "selected\n"; select($old); close Foo::OUT;
+print "07 $old ", (-s "$D/o"), "\n";
+system("rm", "-rf", $D);
+PL
+is($pcl, $perl, '#5081: a symbolic handle name is its package\'s glob, vivified by open and select; no cross-package match');
+
 done_testing();

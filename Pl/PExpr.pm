@@ -455,7 +455,8 @@ sub parse_expr_to_tree {
 # word characters — `[^\W\d]\w*`, not `[A-Za-z_]\w*`.  An ASCII-only test reads
 # `<ＦＨ>` as a filename pattern and silently globs it.  A package QUALIFIER is
 # allowed on both: `<main::FH>` is a handle and `<$main::fh>` reads a line
-# (both probed vs perl 5.40.3).
+# (both probed vs perl 5.40.3).  So is a LEADING `::` on a handle (task #4844):
+# `<::H>` reads main's H in perl; it globbed the pattern "::H" here.
 #
 # TWO CALLERS, and they must agree: the readline/glob decision in `parse`, and
 # `_fix_ppi_glob_after_block`, which REBUILDS the token PPI split into
@@ -464,7 +465,7 @@ sub parse_expr_to_tree {
 # compiled (t/uni/readline.t, two census drops).
 sub _readline_bareword_name_p {
   my ($s) = @_;
-  return (defined $s && $s =~ /\A[^\W\d]\w*(?:::[^\W\d]\w*)*\z/) ? 1 : 0;
+  return (defined $s && $s =~ /\A(?:::)?[^\W\d]\w*(?:::[^\W\d]\w*)*\z/) ? 1 : 0;
 }
 
 sub _readline_scalar_name_p {

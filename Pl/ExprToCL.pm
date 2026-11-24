@@ -5722,9 +5722,10 @@ sub gen_filehandle_form {
 # UNICODE word-shape, not ASCII: `use utf8` source has real bareword handles
 # (perl's own t/uni/readline.t).  It asks about the perl NAME, so it looks
 # through the #418 pipe-quoting the leaf emitter already applied.
+# A LEADING `::` is main (task #4844): `print ::H`, `<::H>` -- _fh_sym spells it.
 sub _bareword_fh_p {
   my ($tok) = @_;
-  return Pl::CLForm::cl_unquote($tok) =~ /^[^\W\d]\w*(?:::[^\W\d]\w*)*$/ ? 1 : 0;
+  return Pl::CLForm::cl_unquote($tok) =~ /^(?:::)?[^\W\d]\w*(?:::[^\W\d]\w*)*$/ ? 1 : 0;
 }
 
 # The handle NAME a DUP open's SOURCE slot spells — as the quoted CL symbol
@@ -5802,6 +5803,11 @@ sub _fh_sym {
   # note).  cl_unquote only unwraps a WHOLE `|…|`, so "a pipe survived it" is
   # exactly that case.
   return $name if $perl eq $name && index($name, '|') >= 0;
+  # A LEADING `::` names main (task #4844, perl's gv.c; the runtime's
+  # %p-split-symbolic-name reads it the same way): `<::H>`, `readline(::H)`,
+  # `close ::H` in any package are main's H.  As `::H` the reader took it for
+  # a KEYWORD, and %p-fh-arg re-homed it in the CURRENT package.
+  $perl = "main$perl" if $perl =~ /\A::[^\W\d]/;
   # AFTER A RUN-TIME `package X;` the reader is still the section's package
   # (#4085: `eval "package Foo; print OUT 'a'"`, `if (…) { package Foo; print
   # OUT … }`), so an unqualified symbol would be interned in the READER's
@@ -5826,7 +5832,14 @@ sub _fh_sym {
     return cl_pkg($pkg) . '::' . cl_sym($short);
   }
   else {
-    $perl = $env->canon_filehandle_name($perl) if $env;
+    # `main::FH` written in ANOTHER package is main's FH (task #4844), not the
+    # current package's: the registry's canonical name collapses the qualifier
+    # (it keys handles by spelling, not by glob), so the emitted symbol keeps
+    # it -- `main::FH` reads as main's own symbol.  A forced-main name is main's
+    # unqualified too, and canonicalises as before.
+    my $main_q = $perl =~ /\Amain::([^:]+)\z/ && $here ne 'main'
+              && !Pl::Environment::fh_forced_main_name($1);
+    $perl = $env->canon_filehandle_name($perl) if $env && !$main_q;
   }
   if ($perl =~ /\A(.+)::([^:]+)\z/ && $1 ne 'main') {
     # `Foo::STDOUT` is NOT `STDOUT` (perl: it writes nothing and returns undef,
