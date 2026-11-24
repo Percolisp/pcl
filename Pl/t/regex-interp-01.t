@@ -59,6 +59,8 @@ my @KEYS = (
   # postfix dereference under postderef_qq (#5351)
   'pd_scalar', 'pd_array', 'pd_slice', 'pd_hslice', 'pd_lastidx', 'pd_quant',
   'pd_qr', 'pd_split', 'pd_case', 'pd_off',
+  # a qr's /u charset default under unicode_strings (#5402)
+  'qr_u_bundle', 'qr_u_nested', 'qr_u_explicit', 'qr_u_feature', 'qr_u_off',
 );
 plan tests => scalar(@KEYS) + 6;
 
@@ -157,6 +159,14 @@ t('dq', "a$x[0]-$h{k}-@arr-$#x");
   t('pd_case',   join ',', map { /^\Q$pq->$*\E$/ ? 'M' : 'N' } "b.c", "bxc");
   { no feature 'postderef_qq'; my $p = "p"; t('pd_off', ("p->" =~ /^$p->@*$/) ? 'M' : 'N') }
 }
+
+# #5402 (s543m): the unicode_strings feature is the /u charset default of a
+# qr, which shows in its STRING (an explicit charset letter wins; without the
+# feature no letter; a qr interpolated into another carries its own).
+{ use v5.12; my $q = qr/b/; t('qr_u_bundle', "$q"); t('qr_u_nested', "" . qr/a${q}c/i);
+  t('qr_u_explicit', join ' ', qr/b/a, qr/b/l, qr/b/d); }
+{ use feature 'unicode_strings'; t('qr_u_feature', "" . qr/b/x); }
+{ use v5.12; no feature 'unicode_strings'; t('qr_u_off', "" . qr/b/); }
 PERL
 
 sub outputs_of {

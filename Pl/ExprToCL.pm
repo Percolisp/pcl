@@ -940,6 +940,12 @@ sub _regex_literal_form {
   # `use re '/FLAGS'` in force here ORs its default modifiers in (#4042) --
   # before the /x reading below, so the scanner sees a pragma /x too.
   $flags = _re_default_flags($flags, $node);
+  # #5402 (s543m): the `unicode_strings` feature (a `use v5.12`+ bundle) is
+  # the default CHARSET modifier /u where no charset letter is written or
+  # defaulted -- perl's qr stringifies `(?^u:b)`.  PCL's engine matches with
+  # Unicode rules anyway, so the letter matters for the qr's STRING (printed,
+  # compared, a hash key, interpolated into another pattern): a qr only.
+  $flags .= 'u' if $is_qr && ($flags // '') !~ /[adlu]/ && $self->_unicode_strings_here($node);
   # A case escape (\Q \U \L \F \E \u \l) is applied HERE, where the literal is
   # compiled -- never by the runtime (#3510, #2501): a pattern whose escapes
   # fold away entirely stays a literal; one that quotes a run-time value is an
