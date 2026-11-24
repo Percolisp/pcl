@@ -358,8 +358,11 @@ PL
 # (%p-hash-unbox-elem hands back the referent box), so `\42` read from a hash
 # element arrives at p-cast-$ as box(42) with is-ref NIL — byte for byte what
 # `my $n = 42` is.  Answering "symbolic ref" would make `${$h{k}}` read $5
-# instead of 5 in real code, so a NUMBER keeps its old answer, the number
-# itself.  When #551 closes this row FAILS, which is the signal to update it.
+# instead of 5 in real code, so a BOXED number keeps its old answer, the
+# number itself.  When #551 closes row 3 FAILS, which is the signal to update
+# it.  Rows 1-2 (s543m, #5353): a RAW number -- `$n5` is a raw-slot lexical
+# here, never a hard reference -- is perl's symbolic name now ($5 = "e", as
+# perl prints); row 3 takes `\$b5`, which boxes it: still #551.
 {
     my $out = run_cl(<<'PL');
 no strict 'refs'; no warnings;
@@ -367,9 +370,11 @@ no strict 'refs'; no warnings;
 my $n5 = 5;
 print "1 ", (defined(${$n5}) ? "[".${$n5}."]" : "UNDEF"), "\n";
 print "2 ", (defined($$n5) ? "[".$$n5."]" : "UNDEF"), "\n";
+my $b5 = 5; my $keep = \$b5;
+print "3 ", (defined(${$b5}) ? "[".${$b5}."]" : "UNDEF"), "\n";
 PL
-    is($out, "1 [5]\n2 [5]\n",
-       '#551 canary: a NUMERIC symbolic-ref name still answers the number (perl: $5)');
+    is($out, "1 [e]\n2 [e]\n3 [5]\n",
+       '#551 canary: a BOXED numeric symbolic-ref name still answers the number (perl: $5); a raw one is $5 (#5353)');
 }
 
 # INVERSE for #505: a HARD reference — including `\5`, whose referent is a raw

@@ -3018,7 +3018,7 @@
                                   "cl/pack-impl.pl line 746"
                                   (p-esc "Mismatched brackets in template\\n")))
                               (p-line 748)
-                              (p-pop @stk))
+                              (p-flush-dropped-value (p-pop @stk)))
                             (p-if (p-str-eq $c ")")
                               (progn (p-line 751)
                                 (p-if (p-&& @stk (p-str-eq (p-aref @stk -1) "(")) (p-pop @stk))))))))))))))))))
