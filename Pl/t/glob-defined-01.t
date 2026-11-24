@@ -218,6 +218,7 @@ open(FH, '<', "$D/in") or die;
 { package Q; print "01 Q FH=", (defined(readline(FH)) ? "read" : "undef"), " \\*FH=", (defined(readline(\*FH)) ? "read" : "undef"), "\n"; }
 my $m = <FH>; chomp $m; print "02 main FH=$m\n"; close FH;
 my $n = "Foo::SYM"; open($n, '<', "$D/in") or die; my $s = <Foo::SYM>; chomp $s; print "03 $s\n"; close $n;
+print "03b closed ", (defined *{"Foo::SYM"} ? "def" : "undef"), " ", (defined(fileno($n)) ? "open" : "shut"), "\n";
 my $p = "PLAIN"; open($p, '<', "$D/in") or die;
 { package Q; print "04 Q PLAIN=", (defined(readline(PLAIN)) ? "read" : "undef"), "\n"; }
 my $pl = <PLAIN>; chomp $pl; print "05 $pl\n"; close PLAIN;

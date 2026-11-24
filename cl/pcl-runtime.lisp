@@ -23424,11 +23424,14 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ;; mirror that — drop the by-name entry, keep the string ($fh still
         ;; reads "FOO" after close in perl).  Box-clearing here wiped the name
         ;; (s327 review probe).
+        ;; The GLOB stays (s543n review, #5081): the entry keeps its key with
+        ;; no stream, so `defined *{$name}' is still true after the close, as
+        ;; in perl, and every handle reader finds no handle.
         ((and (p-box-p fh)
               (stringp (p-box-value fh))
               (plusp (length (p-box-value fh))))
          (let ((key (%p-name-handle-key (p-box-value fh))))
-           (when key (remhash key *p-filehandles*))))
+           (when key (setf (gethash key *p-filehandles*) nil))))
         ;; A LEXICAL HANDLE KEEPS ITS GLOB (task #1233).  perl's `close $fh'
         ;; closes the handle; it does not empty the scalar — `defined $fh' is
         ;; still 1, `ref($fh)' is still GLOB, `"$fh"' is still GLOB(0x…), and a
