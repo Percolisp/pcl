@@ -21805,15 +21805,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;;; (and `open(*Foo::STDOUT, ...)' CLOSED it), `\*FH' in package Q read main's
 ;;; FH, and a symbolic open registered its handle under the :pcl symbol, which
 ;;; no stash holds (`defined *{"SYM"}' was false after `open("SYM", ...)').
+(defun %p-main-std-stream-p (pkg uname)
+  "Is glob *PKG::UNAME (UNAME in symbol case) one of main's STDIN STDOUT
+   STDERR -- the three whose STREAMS the runtime keeps under the :pcl symbol
+   (%p-rebind-std, %p-std-local-enter)?  ARGV / ARGVOUT keep their <> state in
+   specials and their IO, a tie or a glob assignment's, under main's own
+   symbol (%p-main-std-handle-p is the wider set `local' uses)."
+  (and (member uname '("stdin" "stdout" "stderr") :test #'string=)
+       (eq pkg (%pcl-find-package "main"))))
+
 (defun %p-handle-key (pkg uname &optional create)
   "THE symbol *p-filehandles* files the IO of glob *PKG::UNAME under (UNAME in
    symbol case, PKG a CL package), or NIL when a READ finds none.  Main's
-   standard handles (%p-main-std-handle-p: STDIN STDOUT STDERR ARGV ARGVOUT)
-   live under the :pcl symbol, where the runtime keeps their IO (task #4623);
-   every other glob under the symbol of its OWN package.  A read interns
-   nothing and never takes a symbol the package only inherits from :pcl;
-   CREATE (an opener, a select) interns."
-  (cond ((%p-main-std-handle-p pkg uname)
+   STDIN STDOUT STDERR (%p-main-std-stream-p) live under the :pcl symbol,
+   where the runtime keeps their IO (task #4623); every other glob under the
+   symbol of its OWN package.  A read interns nothing and never takes a symbol
+   the package only inherits from :pcl; CREATE (an opener, a select) interns."
+  (cond ((%p-main-std-stream-p pkg uname)
          (if create (intern uname :pcl) (find-symbol uname :pcl)))
         (create (intern uname pkg))
         (t (multiple-value-bind (sym status) (find-symbol uname pkg)
@@ -21855,7 +21863,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                 ((%p-forced-main-bare-p (%pcl-invert-case name)) (intern name main))
                 (t sym))))
     (cons key (and (eq (symbol-package key) main)
-                   (%p-main-std-handle-p main (symbol-name key))
+                   (%p-main-std-stream-p main (symbol-name key))
                    (intern (symbol-name key) :pcl)))))
 
 (defun %p-bareword-handle-keys (sym)
@@ -36438,7 +36446,7 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((own (intern sn sp))
         ;; only MAIN's standard handles live under :pcl -- `*Y = *Foo::STDOUT'
         ;; copies Foo's own glob, never STDOUT (task #1423)
-        (canon (and (%p-main-std-handle-p sp sn) (find-symbol sn :pcl))))
+        (canon (and (%p-main-std-stream-p sp sn) (find-symbol sn :pcl))))
     (if (and canon (not (gethash own *p-filehandles*))
              (nth-value 1 (gethash canon *p-filehandles*)))
         canon
@@ -39778,10 +39786,16 @@ would consume, so it dies naming the stream (rule 12)."
     ;; (perl goes further — its handle wins even over a package of that name
     ;; that DOES exist; PCL prefers the package, which is the more useful of
     ;; the two answers and the one no program can reach by accident.)
+    ;; The INVOCANT is then the GLOB the name denotes HERE, as a glob ref
+    ;; (perl: `BW->who' and `$c = "BW"; $c->who' both pass GLOB(0x…)) -- the
+    ;; name string resolved again inside the handle class's method would name
+    ;; that package's glob (task #1423's one rule: an unqualified name is the
+    ;; package in effect), not the caller's handle.
     (when (and (null (%pcl-find-package class-name))
                (%p-resolve-fh class-name))
       (%p-ensure-handle-class)
-      (setf class-name +p-handle-class+
+      (setf resolved-obj (p-backslash (p-dynamic-typeglob class-name))
+            class-name +p-handle-class+
             raw-class  +p-handle-class+
             own-missed nil))
     ;; Auto-load the package if it doesn't exist yet.
