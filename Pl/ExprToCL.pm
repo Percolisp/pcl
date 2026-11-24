@@ -965,7 +965,7 @@ sub _regex_literal_form {
     # run-time question for a target: `:dynamic` is a declared absence, never
     # a guess (Pl::RegexTier's header).
     return [$dyn_head,
-            ':pat',   $self->_gen_interp_regex_pattern($pattern, $x),
+            ':pat',   $self->_gen_interp_regex_pattern($pattern, $x, $node),
             ':flags', _cl_string_literal_form($flags),
             ':tier',  ':dynamic'];
   }
@@ -1177,7 +1177,7 @@ sub _regex_case_mod_pattern {
     char  => sub { _rx_case_char($_[0], $_[1], $u) },
   );
   my $events = _has_regex_interpolation($pattern, $x)
-             ? Pl::InterpScan::scan($pattern, in_regex => 1, x => $x ? 1 : 0) : [];
+             ? $self->_pattern_events($pattern, $x, $tok) : [];
   my $pos = 0;
   for my $ev (@$events) {
     my ($s, $e) = @{ $ev->{span} };
@@ -1324,9 +1324,22 @@ sub _rx_undelimit {
 # never in a private walk).  This consumer only places the events: the text
 # BETWEEN them is copied verbatim, because regex escapes (\d, \b, \Q…) must
 # reach cl-ppcre unprocessed — the one way pattern text differs from dq text.
+# The interpolation events of a PATTERN, for both lowerings of one (the plain
+# one below and the case-escape one, _regex_case_mod_pattern).  #5351
+# (s543m): a postfix dereference (`$r->$*`, `$a->@*`, `->$#*`, `->@[..]`,
+# `->@{..}`) interpolates in a pattern too where `postderef_qq` is in force --
+# toke.c gates both modes on the one feature, and its ONE reader is asked at
+# the op's token (s543k, #5252).
+sub _pattern_events {
+  my ($self, $pattern, $x, $node) = @_;
+  my $pdq = $node ? Pl::PExpr::StringInterpolation::postderef_qq_active_for($node) : 0;
+  return Pl::InterpScan::scan($pattern, in_regex => 1, x => $x ? 1 : 0,
+                              postderef_qq => $pdq ? 1 : 0);
+}
+
 sub _gen_interp_regex_pattern {
-  my ($self, $pattern, $x) = @_;
-  my $events = Pl::InterpScan::scan($pattern, in_regex => 1, x => $x ? 1 : 0);
+  my ($self, $pattern, $x, $node) = @_;
+  my $events = $self->_pattern_events($pattern, $x, $node);
   my @parts;
   my $literal = '';
   my $flush = sub {
@@ -1362,7 +1375,9 @@ sub _gen_interp_regex_pattern {
 # gen_string_concat does for the same reference in dq text.
 sub _interp_ref_form {
   my ($self, $src, $ev) = @_;
-  my $list = $ev->{sigil} eq '@';
+  # `->@*` / `->@[..]` / `->@{..}` yield a list, joined with $" as in dq text.
+  my $list = $ev->{sigil} eq '@'
+          || ($ev->{postderef} && $ev->{postderef}{what} =~ /^\@/);
   if ($ev->{sigil} eq '$' && !@{ $ev->{chain} } && !$ev->{postderef}
       && ($ev->{form} eq 'plain' || $ev->{form} eq 'braced')
       && defined $ev->{name} && $ev->{name} =~ /^[A-Za-z_]\w*\z/
@@ -6527,7 +6542,7 @@ sub gen_substitution_form {
   if ($cm && ref $cm->[0]) {
     ($match_form, $tier) = ($cm->[0], ':dynamic');
   } elsif (_delim_interpolates($mdelim) && _has_regex_interpolation($match, $mods->{x})) {
-    $match_form = $self->_gen_interp_regex_pattern($match, $mods->{x});
+    $match_form = $self->_gen_interp_regex_pattern($match, $mods->{x}, $node);
     $tier = ':dynamic';
   } else {
     $match_form = _cl_string_literal_form($match);

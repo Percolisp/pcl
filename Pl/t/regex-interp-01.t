@@ -56,6 +56,9 @@ my @KEYS = (
   'Q_nl', 'Q_nl_tail', 'Q_noE', 'Q_var_noE', 'Q_subst', 'Q_split', 'Q_class',
   'Q_runtime_text', 'Q_val_E', 'L_Q', 'qr_Q', 'Q_delim', 'Q_raw_n', 'U_lit',
   'stray_E', 'Q_squote', 'dq_Q',
+  # postfix dereference under postderef_qq (#5351)
+  'pd_scalar', 'pd_array', 'pd_slice', 'pd_hslice', 'pd_lastidx', 'pd_quant',
+  'pd_qr', 'pd_split', 'pd_case', 'pd_off',
 );
 plan tests => scalar(@KEYS) + 6;
 
@@ -135,6 +138,24 @@ t('dq', "a$x[0]-$h{k}-@arr-$#x");
   t('stray_E',   join ',', map { /^a\E$/ ? 'M' : 'N' } "a", "aE");
   { no warnings; t('Q_squote', join ',', map { m'^\Qa.b\E$' ? 'M' : 'N' } "a.b", "Qa.bE"); }
   t('dq_Q',      "\Q$v\E");
+}
+
+# #5351 (s543m): a postfix dereference interpolates in a PATTERN where
+# postderef_qq is in force (toke.c gates both modes on the one feature); the
+# plain and the \Q lowering share the scan.  pd_off: without the feature the
+# arrow stays pattern text (`->@*` is `-` `>` and `@` zero-or-more times).
+{ use feature 'postderef_qq'; no strict 'refs';
+  my $pr = \"b"; my $pa = ["c", "d"]; my $ph = {k => "e", j => "f"}; my $pq = \"b.c";
+  { my $y = "abcdef"; $y =~ s/$pr->$*/X/; t('pd_scalar', $y) }
+  t('pd_array',  ("c d" =~ /^$pa->@*$/) ? 'M' : 'N');
+  t('pd_slice',  ("c d" =~ /^$pa->@[0,1]$/) ? 'M' : 'N');
+  t('pd_hslice', ("e f" =~ /^$ph->@{qw(k j)}$/) ? 'M' : 'N');
+  t('pd_lastidx',("x1" =~ /^x$pa->$#*$/) ? 'M' : 'N');
+  t('pd_quant',  ("bbb" =~ /^$pr->$*+$/) ? 'M' : 'N');
+  my $q = qr/$pr->$*/; t('pd_qr', ("abc" =~ $q) ? 'M' : 'N');
+  t('pd_split',  join '|', split /$pr->$*/, "abcbd");
+  t('pd_case',   join ',', map { /^\Q$pq->$*\E$/ ? 'M' : 'N' } "b.c", "bxc");
+  { no feature 'postderef_qq'; my $p = "p"; t('pd_off', ("p->" =~ /^$p->@*$/) ? 'M' : 'N') }
 }
 PERL
 
