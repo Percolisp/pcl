@@ -245,6 +245,24 @@ print "span_early=", span_early9(), "\n";
 { my $op9 = 2; $main::op9 = 5; print "ourt_read=", eval('our $op9; $op9'), "\n"; }
 { my $oq9 = "lex"; $main::oq9 = "pkg"; print "ourt_before=", eval(q{my $r = $oq9; our $oq9; "$r/$oq9"}), "\n"; }
 { my $VERSION = "lexv"; eval q{our $VERSION = '1.0'; 1}; print "ourt_version=$VERSION $main::VERSION\n"; }
+# #5374 (s543m): in a REGION (an eval text's leading `package X;`, a `package X;`
+# inside a sub body, an in-place `package X { }`) a `my` after an `our` of the
+# same name is the LEXICAL from its declaration on (the by-name `our` registry
+# asks the binder there); the alias's own uses stay the package variable's.
+print "om_sub=", eval(q{package Om1; our $wm = 1; sub om_n1 { my $wm = 4; $wm + 1 } om_n1() . " $wm"}), "\n";
+print "om_top=", eval(q{package Om2; our $wm = 1; my $wm = 4; $wm + 1}), "\n";
+print "om_args=", eval(q{package Om3; our $wm = 1; sub om_n3 { my ($wm, $k) = @_; $wm + $k } om_n3(4, 5) . " $wm"}), "\n";
+print "om_hash=", eval(q{package Om4; our %wm = (k => 1); sub om_n4 { my %wm = (k => 4); $wm{k} + 1 } om_n4() . " $wm{k}"}), "\n";
+print "om_interp=", eval(q{package Om5; our $wm = 1; sub om_n5 { my $wm = 4; "<$wm>" } om_n5() . " $wm"}), "\n";
+print "om_arr=", eval(q{package Om6; our @wm = (1); sub om_n6 { my @wm = (4, 5); "<@wm> $wm[1] $#wm" } om_n6() . " @wm"}), "\n";
+print "om_for=", eval(q{package Om7; our $wm = 1; for my $wm (4) { return $wm + 1 }}), "\n";
+print "om_vars=", eval(q{package Om8; use vars '$um'; $um = 1; sub om_n8 { my $um = 4; $um + 1 } om_n8() . " $um"}), "\n";
+print "om_ab=", eval(q{package Om9; our $a = 5; sub om_n9 { my $a = 6; $a } om_n9() . " $a $Om9::a"}), "\n";
+print "om_local=", eval(q{package Om10; our $wm = 1; sub om_n10 { local $wm = 4; $wm + 1 } om_n10() . " $wm"}), "\n";
+sub om_run11 { package Om11; our $wm = 1; my $wm = 4; return ($wm + 1) . " $Om11::wm <$wm>" }
+print "om_block=", om_run11(), "\n";
+sub om_run12 { package Om12 { our %wm = (k => 1); my %wm = (k => 4); return ($wm{k} + 1) . " $Om12::wm{k}" } }
+print "om_inplace=", om_run12(), "\n";
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -368,6 +386,18 @@ my %expect = (
     ourt_read     => '5',
     ourt_before   => 'lex/pkg',
     ourt_version  => 'lexv 1.0',
+    om_sub        => '5 1',
+    om_top        => '5',
+    om_args       => '9 1',
+    om_hash       => '5 1',
+    om_interp     => '<4> 1',
+    om_arr        => '<4 5> 5 1 1',
+    om_for        => '5',
+    om_vars       => '5 1',
+    om_ab         => '6 5 5',
+    om_local      => '5 1',
+    om_block      => '5 1 <4>',
+    om_inplace    => '5 1',
     reread_file   => '101 100',
     reread_init   => '8',
     reread_block  => '6 7',

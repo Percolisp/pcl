@@ -1522,7 +1522,8 @@ sub gen_symbol_form {
   if ($self->environment && $content =~ /^([\$\@\%])(\w+)$/) {
     my ($sigil, $name) = ($1, $2);
     my $pkg = $self->environment->current_package // 'main';
-    if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)) {
+    if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)
+        && $self->_our_alias_spelled_here($node, $content, $pkg)) {
       return cl_pkg($pkg) . '::' . cl_sym("${sigil}${name}");
     }
   }
@@ -1546,6 +1547,35 @@ sub gen_symbol_form {
   # name carrying a non-ASCII character (#418) — `%Ｘ` and `%X` are otherwise
   # ONE symbol, because the reader NFKC-folds the fullwidth Ｘ to X.
   return cl_sym($content);
+}
+
+# May the by-name `our` registry spell this bare token in $pkg (#5374)?  The
+# registry (Environment::is_our_variable) knows NAMES, not perl's scopes: a
+# `my $w` after `our $w` is the LEXICAL from its declaration on.  Outside a
+# REGION the question is moot -- the reader's package IS $pkg, so `Pkg::$w`
+# and `$w` are one symbol and a `let` of it shadows both spellings alike.
+# Inside one (a `package X;` in a block or leading an eval text: the reader's
+# package is not X) the requalifier, which asks the binder token by token,
+# has already spelled every use of the alias qualified (#2557, s533b); what
+# reaches here bare is a lexical, the `our` statement's own declarator
+# (`_lower_our_decl` lowers `$w = 1`), or a `$a` / `$b` the eval-text pass
+# keeps -- so the BINDER decides: an `our` binding takes the qualified
+# spelling, anything else (or a token no table holds: a re-parsed fragment,
+# whose alias uses the requalifier's interpolation rewrite already spelled)
+# is left as written.  Before this, `eval q{package T; our $w = 1; sub n {
+# my $w = 4; $w + 1 }}` read $T::w in n (2; perl 5), and so did the same
+# body in `sub run { package T; ... }`.
+sub _our_alias_spelled_here {
+  my ($self, $node, $content, $pkg) = @_;
+  my $env = $self->environment;
+  return 1 if ($env->reader_package // $pkg) eq $pkg;
+  return 0 unless ref($node) && $node->isa('PPI::Token');
+  my $xo = $self->expr_o;
+  my $parser = ($xo && $xo->can('has_parser') && $xo->has_parser) ? $xo->parser : undef;
+  my $bd = ($parser && defined &Pl::Binder::held)
+         ? Pl::Binder::held($parser->lex_home, $node) : undef;
+  my $b = $bd ? $bd->resolve($node, $content) : undef;
+  return ($b && $b->{kind} eq 'our') ? 1 : 0;
 }
 
 # THE SOURCE LOCATION of NODE as perl reports it -- ($file, $line) after any

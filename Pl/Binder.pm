@@ -1322,10 +1322,9 @@ sub _binder_for {
   my $main = $parser->{_binder} or return undef;
   my $top = $node->top;
   return undef unless $top && $top->isa('PPI::Document');
+  if (my $held = held($parser, $node)) { return $held }
   my $key = refaddr $top;
   my $b = $key == refaddr($main->{doc}) ? $main : $main->{others}{$key};
-  my $tok = $node->isa('PPI::Token') ? $node : $node->first_token;
-  return $b if $b && $tok && exists $b->{ord}{ refaddr $tok };
   my $why = !$b ? ($key == refaddr($main->{doc}) ? 'main' : 'new-document')
                 : 'inserted-token';
   my $caller = $pass // '?';
@@ -1341,6 +1340,21 @@ sub _binder_for {
   if ($key == refaddr($main->{doc})) { %$main = (%$main, %$nb, file => $main->{file}, mode => $main->{mode}, others => $main->{others}, sorted => undef, by_binding => undef, textc => undef, held => undef) }
   else { $main->{others}{$key} = $nb }
   return $key == refaddr($main->{doc}) ? $main : $nb;
+}
+
+# The binder that already HOLDS $node's token (the main one, or a rebuild of
+# its document), or undef -- never a rebuild: a caller at LOWERING asks about
+# tokens a fragment re-parse made, which no table holds and none should be
+# built for (ExprToCL::_our_alias_spelled_here, #5374).
+sub held {
+  my ($parser, $node) = @_;
+  my $main = $parser->{_binder} or return undef;
+  my $top = $node->top;
+  return undef unless $top && $top->isa('PPI::Document');
+  my $key = refaddr $top;
+  my $b = $key == refaddr($main->{doc}) ? $main : $main->{others}{$key};
+  my $tok = $node->isa('PPI::Token') ? $node : $node->first_token;
+  return ($b && $tok && exists $b->{ord}{ refaddr $tok }) ? $b : undef;
 }
 
 # The binder that answers about $node in PRODUCTION (the block-package
