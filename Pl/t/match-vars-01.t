@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 50;
+plan tests => 51;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -535,4 +535,22 @@ while (my $x = <$fh>) { push @l, $. }
 close $fh;
 unlink $f;
 print "@l\n";
+END
+
+# 51. #683's other half (s543n): an EXPLICIT close resets THAT handle's line
+# count (doio.c do_close: IoLINES = 0), open or already closed -- `$.` reads 0
+# when the closed handle was the last read, and another handle's close leaves
+# it alone; a REOPEN without close keeps counting (perl's implicit close does
+# not reset); `close ARGV if eof` (#2684) is the control.  Probed 5.40.3;
+# the base printed `a 3 3`, `b 2 1 1 1`, `c 2 1 1`.
+is run_cl(<<'END'), "a 0 0\nb 2 1 1 0\nc 2 3 0\nd 1 2 3 4 1 2 3 4\n", 'close resets $. for its handle; a reopen keeps counting (#683)';
+my $f = "/tmp/pcl-s543n-dot-$$.txt";
+open(my $w, ">", $f) or die; print $w "a\nb\nc\nd\n"; close $w;
+open(my $fh, "<", $f) or die; while (my $l = <$fh>) { last if $. >= 3 } close $fh;
+my $x = $.; my $y = $.; print "a $x $y\n";
+open(my $g, "<", $f) or die; <$g>; <$g>; my @r = ($.);
+open(my $h, "<", $f) or die; <$h>; push @r, $.; close $g; push @r, $.; close $h; push @r, $.; print "b @r\n";
+open(FH, "<", $f) or die; <FH>; <FH>; open(FH, "<", $f) or die; @r = ($.); <FH>; push @r, $.; close FH; push @r, $.; print "c @r\n";
+@ARGV = ($f, $f); @r = (); while (<>) { push @r, $.; close ARGV if eof } print "d @r\n";
+unlink $f;
 END

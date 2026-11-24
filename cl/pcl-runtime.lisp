@@ -21914,6 +21914,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; own mechanism for STDOUT/STDERR; closing *standard-output* here would
   ;; take the program's own output with it.
   (%p-close-previous-stream fh)
+  (%p-reopen-carry-to fh stream)
   (cond ;; The box holds a GLOB (Symbol::gensym, \*FH, IO::Handle->new — often
     ;; blessed).  Perl attaches the stream to the glob's IO slot and leaves
     ;; the scalar itself alone; overwriting the box with the stream
@@ -22259,6 +22260,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                 (if (and flushed (zerop status)) t nil))
             (error () (%pcl-save-errno) nil))))))
 
+(defvar *p-reopen-carry* nil
+  "(DESIGNATOR COUNT LAST-READ-P) of the stream an opener's implicit close just
+   closed (%p-close-previous-stream), for that opener's install to carry over
+   (%p-reopen-carry-to; task #683).  A failed reopen leaves it behind, and the
+   next install, for another designator, discards it.")
+
 (defun %p-close-previous-stream (fh)
   "perl's implicit close: an `open` (or `opendir`, `socket`, `accept`, `pipe`)
    into a handle that ALREADY HOLDS AN OPEN STREAM closes that stream first
@@ -22294,11 +22301,29 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               (eql (%p-fd-of-stream v) slot)))
        (unless (input-stream-p v) (ignore-errors (finish-output v))))
       ((and (streamp v) (open-stream-p (%p-stream-target v)))
+       ;; A REOPEN keeps the handle's line count (task #683, perl's io_close
+       ;; with not_implicit false leaves IoLINES): `open(FH, $a); <FH>;
+       ;; open(FH, $b); <FH>; print $.' is 2.  The count is handed to the
+       ;; opener's install (%p-reopen-carry-to) through this note.
+       (setf *p-reopen-carry*
+             (list fh (%p-fh-lines-of v) (eq v *p-last-read-handle*)))
        (let ((saved (%p-status)))
          (%p-close-maybe-pipe v)
          (%p-set-status saved))
        (%p-forget-fh fh))))
   (values))
+
+(defun %p-reopen-carry-to (fh stream)
+  "STREAM was just installed into FH: when FH's implicit close noted a count,
+   the new stream starts at it (not yet answered: an open clears IOf_NOLINE),
+   and is `$.''s handle if the closed one was."
+  (let ((c *p-reopen-carry*))
+    (when c
+      (setf *p-reopen-carry* nil)
+      (when (eq (first c) fh)
+        (unless (zerop (second c))
+          (setf (gethash stream *p-fh-lines*) (list (second c))))
+        (when (third c) (setf *p-last-read-handle* stream))))))
 
 (defun %p-scope-close (fh)
   "The SCOPE-EXIT close of a lexical handle the compiler proved does not
@@ -23411,6 +23436,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (cond
       ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh) 1)
       ((streamp v)
+       ;; An EXPLICIT close resets the handle's line count, open or already
+       ;; closed (task #683, doio.c do_close: IoLINES(io) = 0 when not
+       ;; implicit), so `close $fh; print $.' is 0 when $fh was the last read;
+       ;; another handle's close leaves `$.' alone.
+       (remhash v *p-fh-lines*)
        ;; A handle that is ALREADY CLOSED is one of perl's false answers, and
        ;; CL `close' does not distinguish it — it returns T for a stream it
        ;; closed and for one that was closed already.
