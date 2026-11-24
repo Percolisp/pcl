@@ -5541,35 +5541,44 @@ sub _eval_reach_promoted {
 # lone Word, so they are correctly not claimed.
 sub _brace_name_refs {
   my ($node) = @_;
-  my @out;
-  for my $b (@{ $node->find('PPI::Structure::Block') || [] }) {
-    my $prev = $b->sprevious_sibling or next;
-    my $sig = $prev->isa('PPI::Token::Cast') ? $prev->content
-            : ($prev->isa('PPI::Token::Magic') && $prev->content eq '$#')
-              ? '$#' : next;
-    my @kids = grep { $_->significant } $b->children;
-    next unless @kids == 1 && $kids[0]->isa('PPI::Statement');
-    my @t = grep { $_->significant } $kids[0]->children;
-    # A Word, or an all-DIGIT Number (#5370, s543k: `${1}` is `$1`, never a
-    # block -- the lowering's own predicate, PExpr::_block_sole_digits).
-    next unless @t == 1 && (($t[0]->isa('PPI::Token::Word')
-                             && $t[0]->content =~ /^\w+$/)  # a qualified name is no lexical
-                            || defined Pl::PExpr::_block_sole_digits($b));
-    next if $sig !~ /^(?:\$|\@|%|\$#)$/;         # `\{name}`, `&{name}`: not ours
-    # A SUBSCRIPT after the block names the CONTAINER, exactly as for the
-    # unbraced spelling (task #2645): `${x}[1]` is an element of @x, `${x}{k}`
-    # and `@{x}{k}` of %x, `%{x}[1]` a kv-slice of @x.  Without this, a rename
-    # of `$x` would have rewritten @x's element.
-    my $nx  = $b->snext_sibling;
-    my $sub = ($nx && $nx->isa('PPI::Structure::Subscript'))
-            ? substr($nx->content, 0, 1) : '';
-    my $kind = $sig eq '$#'  ? '@'
-             : $sub eq '['   ? '@'
-             : $sub eq '{'   ? '%'
-             : $sig;
-    push @out, [ $t[0], $kind . $t[0]->content ];
-  }
-  return \@out;
+  return [ map { brace_name_of($_) // () } @{ $node->find('PPI::Structure::Block') || [] } ];
+}
+
+# The ONE reading of a brace NAME, per block: [ $word_token, $canon, $sigil ]
+# when the Block $b is the `{name}` of a code-level `${name}` / `@{name}` /
+# `%{name}` / `$#{name}` (or an all-digit `{1}`), else undef.  $sigil is the
+# spelling's own (`$` `@` `%` `$#`), $canon the variable it names.  Every
+# consumer asks this: the binder and the span renamer (through
+# _brace_name_refs), the region requalifier, and the `local` plan
+# (Pl::Stmt::brace_names_plain, s543l #5372 #5371: `local ${h}{k}` is
+# `local $h{k}`).
+sub brace_name_of {
+  my ($b) = @_;
+  my $prev = $b->sprevious_sibling or return undef;
+  my $sig = $prev->isa('PPI::Token::Cast') ? $prev->content
+          : ($prev->isa('PPI::Token::Magic') && $prev->content eq '$#')
+            ? '$#' : return undef;
+  my @kids = grep { $_->significant } $b->children;
+  return undef unless @kids == 1 && $kids[0]->isa('PPI::Statement');
+  my @t = grep { $_->significant } $kids[0]->children;
+  # A Word, or an all-DIGIT Number (#5370, s543k: `${1}` is `$1`, never a
+  # block -- the lowering's own predicate, PExpr::_block_sole_digits).
+  return undef unless @t == 1 && (($t[0]->isa('PPI::Token::Word')
+                                   && $t[0]->content =~ /^\w+$/)  # a qualified name is no lexical
+                                  || defined Pl::PExpr::_block_sole_digits($b));
+  return undef if $sig !~ /^(?:\$|\@|%|\$#)$/;   # `\{name}`, `&{name}`: not ours
+  # A SUBSCRIPT after the block names the CONTAINER, exactly as for the
+  # unbraced spelling (task #2645): `${x}[1]` is an element of @x, `${x}{k}`
+  # and `@{x}{k}` of %x, `%{x}[1]` a kv-slice of @x.  Without this, a rename
+  # of `$x` would have rewritten @x's element.
+  my $nx  = $b->snext_sibling;
+  my $sub = ($nx && $nx->isa('PPI::Structure::Subscript'))
+          ? substr($nx->content, 0, 1) : '';
+  my $kind = $sig eq '$#'  ? '@'
+           : $sub eq '['   ? '@'
+           : $sub eq '{'   ? '%'
+           : $sig;
+  return [ $t[0], $kind . $t[0]->content, $sig ];
 }
 
 sub _has_code_brace_deref {
@@ -6896,12 +6905,16 @@ sub _local_operand {
   }
   return () if $op[-1]->isa('PPI::Token::Operator');
   return () if $plus && (@op < 3 || $op[1]->content ne '->');
+  # a brace NAME (`${h}{k}`, `@{a}[0]`: brace_name_of) is the variable, not a
+  # call of the word (#5372, s543l)
+  my %bname = map { my $bn = $_->isa('PPI::Structure::Block') ? brace_name_of($_) : undef;
+                    $bn ? (refaddr($bn->[0]) => 1) : () } @op;
   for my $el (@op) {
     for my $t ($el->isa('PPI::Node') ? $el->tokens : ($el)) {
       return () if $t->isa('PPI::Token::HereDoc');
       return () if $t->isa('PPI::Token::Operator')
         && $t->content =~ /^(?:\+\+|--|[-+*\/.x%&|^]?=|\*\*=|\/\/=|\|\|=|&&=|<<=|>>=)$/;
-      return () if $t->isa('PPI::Token::Word')
+      return () if $t->isa('PPI::Token::Word') && !$bname{ refaddr $t }
         && !($t->parent->isa('PPI::Statement::Expression') && $t->parent->schildren == 1
              && $t->parent->parent && $t->parent->parent->isa('PPI::Structure::Subscript'));
     }
@@ -7119,6 +7132,8 @@ sub _hoist_local_term {
   my @op = _local_operand($l) or return 0;
   my %names = map { $_->symbol => 1 }
               grep { $_->isa('PPI::Token::Symbol') } map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @op;
+  # ... and the variable a brace NAME in it spells (`${h}{k}` names %h, s543l)
+  $names{ $_->[1] } = 1 for map { $_->isa('PPI::Structure::Block') ? (brace_name_of($_) // ()) : () } @op;
   # The left operand of an assignment runs AFTER its right side, so the right
   # side is checked like the tokens before the term: `(local $g) = ($g + 1)`
   # reads the OLD $g (#3363); `@{local $x[0][0]} = 1` may hoist.

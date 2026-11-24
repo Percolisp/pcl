@@ -48,7 +48,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 44;
+plan tests => 47;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -746,4 +746,69 @@ print "3 ", scalar(@a), " ", join(",", map { $_ // 'u' } @a), "\n";
            . "2 c 2\n"
            . "3 5 a,b,c,u,d\n",
        'M8: delete local as a term on a TIED array returns the deleted values and restores them (#5001)');
+}
+
+# ─── Group N: a BRACE-named `local` target is the plain spelling (s543l) ─────
+# `${h}{k}` / `${a}[0]` / `@{h}{…}` / `${s}` / `$#{a}` / `${1}` under `local`
+# (and `delete local`) read the NAME through Parser2::brace_name_of, the one
+# brace-name reader (Pl::Stmt::brace_names_plain): #5372 -- the base read
+# `${h}` as a block calling h() ("Undefined subroutine &main::h"), dropped the
+# list spelling, and `delete local ${h}{k}` lost the restore silently.
+# Expected text probed under perl 5.40.3 (scratch/s543l/probes/m1, m1b); N1
+# and N2 FAIL on the 9fc6583b extraction; N3 is the breaking shapes (a real
+# dereference stays one), right on both.
+{
+    my $out = run_pl(q{
+our %h = (k => "m", a => 1, b => 2); our @a = (1, 2); my %lh = (k => 1); our $s = "S";
+sub g { (7, 8) }
+sub f { local ${h}{k} = "L"; local ${a}[0] = 9; local @{h}{qw(a b)} = (5, 6); local ${lh}{k} = 2;
+        local ${s} = "T"; "$h{k} @a $h{a}$h{b} $lh{k} $s" }
+print "1 ", f(), " | $h{k} @a $h{a}$h{b} $lh{k} $s\n";
+{ local (${h}{k}, ${s}) = (5, 6); print "2 $h{k} $s\n" } print "3 $h{k} $s\n";
+{ local(${h}{k}) = g(); print "4 $h{k}\n" }
+my $c = 0; sub mm { local ${a}[1] = 7 if $c; "@a" } print "5 ", mm(); $c = 1; print " ", mm(), " @a\n";
+{ local $#{a} = 0; print "6 ", scalar(@a) } print " ", scalar(@a), "\n";
+"ab" =~ /(b)/; { local ${1}; print "7 in\n" } print "8 $1\n";
+});
+    is($out, "1 L 9 2 56 2 T | m 1 2 12 1 S\n"
+           . "2 5 6\n"
+           . "3 m S\n"
+           . "4 7\n"
+           . "5 1 2 1 7 1 2\n"
+           . "6 1 1\n"
+           . "7 in\n"
+           . "8 b\n",
+       'N1: local of a brace-named element / slice / variable is the plain spelling (#5372)');
+}
+
+{
+    my $out = run_pl(q{
+our %h = (k => "K", j => "J", a => "A", b => "B"); our @a = (1, 2, 3);
+sub f { delete local ${h}{k}; join(",", sort keys %h) } print "1 ", f(), "|", join(",", sort keys %h), "\n";
+sub g { my $t = delete local ${h}{b}; "$t " . join(",", sort keys %h) } print "2 ", g(), "|", join(",", sort keys %h), "\n";
+sub e { delete local @{h}{qw(a j)}; join(",", sort keys %h) } print "3 ", e(), "|", join(",", sort keys %h), "\n";
+sub d { my $v = delete local ${a}[2]; "$v " . scalar(@a) } print "4 ", d(), " ", scalar(@a), "\n";
+});
+    is($out, "1 a,b,j|a,b,j,k\n"
+           . "2 B a,j,k|a,b,j,k\n"
+           . "3 b,k|a,b,j,k\n"
+           . "4 3 2 3\n",
+       'N2: delete local of a brace-named element restores it, as a statement and as a term (#5372)');
+}
+
+{
+    my $out = run_pl(q{
+our %g = (k => 1); my $r = \%g; sub f { \%g }
+{ local ${ $r }{k} = 2; local ${ f() }{a} = 3; print "1 $g{k} $g{a}\n" } print "2 $g{k} ", (exists $g{a} ? "E" : "N"), "\n";
+{ no strict 'refs'; local ${ "g" }{k} = 4; print "3 $g{k}\n" }
+%Foo::h = (k => 1); { local ${Foo::h}{k} = 5; print "4 $Foo::h{k}\n" } print "5 $Foo::h{k}\n";
+my $x = 1; my $xr = \$x; print "6 ", (eval { local ${ $xr } = 2; 1 } ? "lived" : "died"), "\n";
+});
+    is($out, "1 2 3\n"
+           . "2 1 N\n"
+           . "3 4\n"
+           . "4 5\n"
+           . "5 1\n"
+           . "6 died\n",
+       'N3: a real dereference under local stays one (a block, a call, a string, a qualified name, a hard ref)');
 }

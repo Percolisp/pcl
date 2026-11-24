@@ -262,10 +262,10 @@ sub is_local_stmt {
 # split), deref_paren (an unsubscripted cast in parens: `local($$r) = …`).
 sub local_shape {
   my ($stmt) = @_;
-  my @parts = grep {
+  my @parts = brace_names_plain([grep {
     my $r = ref $_;
     $r ne 'PPI::Token::Whitespace' && !($r eq 'PPI::Token::Structure' && $_->content eq ';')
-  } $stmt->children;
+  } $stmt->children]);
   my $w0 = $parts[0] && $parts[0]->isa('PPI::Token::Word') ? $parts[0]->content : '';
   # (a plain statement's run drops comments as well -- the expression
   # statement's filter; a `local` declaration's run keeps them, as v1's did)
@@ -353,7 +353,7 @@ sub local_shape {
 sub local_paren_unwrap {
   my ($nonws) = @_;
   return 0 unless @$nonws && ref($nonws->[0]) eq 'PPI::Structure::List';
-  my @flat = flat_children($nonws->[0]);
+  my @flat = brace_names_plain([flat_children($nonws->[0])]);
   my $has_comma = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq ',' } @flat;
   if (@flat == 1 && ref($flat[0]) eq 'PPI::Token::Symbol') {
     splice(@$nonws, 0, 1, @flat);
@@ -397,7 +397,39 @@ sub subscript_key_groups {
 # `undef` stays a group of its own -- a skip slot).
 sub local_list_groups {
   my ($list) = @_;
-  return split_groups([flat_children($list)], qr/^(?:,|=>)$/);
+  return split_groups([brace_names_plain([flat_children($list)])], qr/^(?:,|=>)$/);
+}
+
+# A `local` target run with every brace-spelled NAME read as its plain
+# spelling (s543l, #5372 #5371): `${h}{k}` is `$h{k}`, `@{a}` is `@a`, `${v}`
+# is `$v`, `$#{a}` is `$#a`, `${1}` is `$1` -- perl's toke.c reads `${ident}`
+# as the identifier, so the target IS that variable.  The Cast (or `$#`) +
+# Block pair becomes the plain spelling's token (PExpr::plain_name_token, the
+# token the read's collapse makes), so every `local` kind -- the element,
+# the whole variable, the list item, `delete local`, the #3370 hoist's
+# re-parsed `local OPERAND` -- reads the name and resolves it exactly as the
+# plain spelling (an eval site's `our` alias, a lexical, a renamed lexical).
+# The predicate is Parser2::brace_name_of, the ONE brace-name reader the
+# binder, the span renamer and the region requalifier share; a block holding
+# anything else (`${ $r }`, `${ f() }`, `${ \ $x }`, a qualified
+# `${Pkg::h}`) is left as it is.  Returns the new list; the document is not
+# touched (the plain token is a fresh, parentless one).
+sub brace_names_plain {
+  my ($toks) = @_;
+  my @out;
+  for (my $i = 0; $i < @$toks; $i++) {
+    my $b = $toks->[$i + 1];
+    my $bn = ($b && ref($b) eq 'PPI::Structure::Block' && $b->sprevious_sibling
+              && $b->sprevious_sibling == $toks->[$i])
+           ? Pl::Parser2::brace_name_of($b) : undef;
+    if ($bn) {
+      push @out, Pl::PExpr::plain_name_token($bn->[2], $bn->[0]->content);
+      $i++;
+      next;
+    }
+    push @out, $toks->[$i];
+  }
+  return @out;
 }
 
 # A token run split on top-level operators matching $sep; empty groups dropped.

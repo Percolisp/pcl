@@ -211,6 +211,14 @@ print "brace_eval=", eval(q{package Bz9; join ",", ${bs}, scalar(@{bl}), ${bh}{k
 eval q{package Bz9; ${bw} = "bz-w"; $#{bx} = 2}; print "brace_write=", ($Bz9::bw // "u"), "/", ($main::bw // "u"), "/", scalar(@Bz9::bx), "\n";
 sub brace_sub { package Bz9; return join ",", ${bs}, $#{ba} }
 print "brace_sub=", brace_sub(), "\n";
+# #5371 #5372 (s543l): a BRACE-named `local` target in eval text behind
+# `package Bar;` is the site's `our` variable, as its reads are (the scalar
+# localized Bar's, the element died "Undefined subroutine &Bar::bh9").
+our $bl9 = "mainv"; our %bh9 = (k => "m"); our @ba9 = ("m"); $Bar::bl9 = "barv";
+print "blocal_s=", eval(q{package Bar; my @o; for (1..2) { local ${bl9} = "loc$_"; push @o, ${bl9} } join(",", @o) . " " . ${bl9}}), " $bl9\n";
+print "blocal_e=", eval(q{package Bar; my @o; for (1..2) { local ${bh9}{k} = "loc$_"; push @o, ${bh9}{k} } join(",", @o) . " " . $bh9{k}}), " $bh9{k}\n";
+print "blocal_h=", eval(q{package Bar; my @o; for (1..2) { local %{bh9} = (k => "loc$_"); push @o, $bh9{k} } join(",", @o) . " " . $bh9{k}}), " $bh9{k}\n";
+print "blocal_a=", eval(q{package Bar; my @o; for (1..2) { local @{ba9} = ("loc$_"); push @o, $ba9[0] } join(",", @o) . " " . $ba9[0]}), " $ba9[0]\n";
 # #5271 (s543k): `evalbytes` is eval STRING with a byte operand -- the same site
 # inputs (the alist, the features, the `our:` aliases), and every "a string
 # eval is here" test counts its word (a sub's lexical it writes is a box, not
@@ -374,6 +382,10 @@ my %expect = (
     brace_eval    => 'bz-s,3,bz-v,3,1',
     brace_write   => 'bz-w/u/3',
     brace_sub     => 'bz-s,3',
+    blocal_s      => 'loc1,loc2 mainv mainv',
+    blocal_e      => 'loc1,loc2 m m',
+    blocal_h      => 'loc1,loc2 m m',
+    blocal_a      => 'loc1,loc2 m m',
     eb_read       => '8',
     eb_write      => '8',
     eb_region     => 'lex-eb',

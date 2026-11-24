@@ -2970,10 +2970,7 @@ sub _collapse_braced_bareword_derefs {
     # `@1` Magic, `%1` Symbol, `$#1` ArrayIndex); a subscript after it is the
     # element of @1 / %1, exactly as for `$1[0]` (#1679).
     if (!defined $bw && defined(my $dg = _block_sole_digits($blk))) {
-      my $tok = $sigil eq '$#' ? PPI::Token::ArrayIndex->new('$#' . $dg)
-              : $sigil eq '%'  ? PPI::Token::Symbol->new('%' . $dg)
-              :                  PPI::Token::Magic->new($sigil . $dg);
-      splice @$e, $i, 2, $tok;
+      splice @$e, $i, 2, plain_name_token($sigil, $dg);
       next;
     }
     # `$#{^CAPTURE}`: a CARET name in the block.  PPI lexes `${^CAPTURE}` and
@@ -2981,11 +2978,20 @@ sub _collapse_braced_bareword_derefs {
     # so it alone arrives here as Cast + Block (task #412).
     $bw = _block_caret_name($blk) if !defined $bw;
     next unless defined $bw;
-    my $tok = $sigil eq '$#'
-      ? PPI::Token::ArrayIndex->new('$#' . $bw)
-      : PPI::Token::Symbol->new($sigil . $bw);
-    splice @$e, $i, 2, $tok;
+    splice @$e, $i, 2, plain_name_token($sigil, $bw);
   }
+}
+
+# The token PPI makes for the PLAIN spelling of a brace-named variable --
+# SIGIL (`$` `@` `%` `$#`) + NAME: `$#NAME` an ArrayIndex; an all-DIGIT name
+# the Magic `$1` / `@1` (`%1` a Symbol, #5370); any other a Symbol.  The
+# collapse above and the `local` plan's reading (Pl::Stmt::brace_names_plain,
+# s543l) build it here, one rule.
+sub plain_name_token {
+  my ($sigil, $name) = @_;
+  return PPI::Token::ArrayIndex->new('$#' . $name) if $sigil eq '$#';
+  return PPI::Token::Magic->new($sigil . $name) if $name =~ /\A\d+\z/ && $sigil ne '%';
+  return PPI::Token::Symbol->new($sigil . $name);
 }
 
 

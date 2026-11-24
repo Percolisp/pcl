@@ -146,9 +146,16 @@ print $@ =~ /Can't localize through a reference/ ? "ok2\n" : "no2\n";
 }
 
 # ── transpile-level: the macro is emitted (not silently dropped) ──
+# `local ${aa}` is perl's `local $aa` (toke.c reads `${ident}` as the
+# identifier): the brace NAME is the plain spelling's target and emits its
+# localizer byte for byte (s543l, #5372 #5371 -- it was a SYMBOLIC
+# p-local-deref-scalar "aa", which localized another package's variable in an
+# eval text behind `package Bar;` with a site `our $aa`).  The symbolic and
+# reference spellings keep p-local-deref-* (the rows above and below).
 {
-        my $cl = Pl::Parser2->parse_code('$aa=1; { local ${aa}; $aa=3; }');
-    like($cl, qr/p-local-deref-scalar/, 'local ${aa} emits p-local-deref-scalar');
+    my $cl    = Pl::Parser2->parse_code('$aa=1; { local ${aa}; $aa=3; }');
+    my $plain = Pl::Parser2->parse_code('$aa=1; { local $aa; $aa=3; }');
+    is($cl, $plain, 'local ${aa} emits exactly what local $aa emits (no symbolic deref)');
 }
 {
         my $cl = Pl::Parser2->parse_code('@aa=(1); { local @{$x}; }');
