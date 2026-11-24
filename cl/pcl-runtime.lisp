@@ -20444,8 +20444,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    of being emptied), so the callers whose CL operation would SIGNAL on one ask
    %P-LIVE-STREAM instead; the rest already answer correctly without a test —
    `output-stream-p' and `input-stream-p' are both NIL for a closed stream, so
-   print's %p-writable-stream and the readers' own guards fire as they should."
-  (%p-as-stream (%p-resolve-fh fh)))
+   print's %p-writable-stream and the readers' own guards fire as they should.
+   NO HANDLE is where a non-handle REFERENCE is perl's death (task #4842,
+   %p-fh-ref-designator): the miss pays for it, a handle never does."
+  (let ((v (%p-resolve-fh fh)))
+    (if v
+        (%p-as-stream v)
+        (let ((g (%p-fh-ref-designator fh)))
+          (and g (%p-as-stream (%p-resolve-fh g)))))))
 
 ;;; TIED FILEHANDLES: the placeholder and the method dispatch (task #2590).
 ;;; The entry test is %p-stream-tie / %p-fh-tie (defined with the tie table);
@@ -23456,8 +23462,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              ;; non-zero child (probed), so no EBADF here.
              (if ok 1 +p-close-false+))
            (progn (%p-io-errno-fail 9) +p-close-false+)))   ; EBADF
-      ;; NO HANDLE AT ALL: perl sets $! = EBADF (9) and answers "" (probed).
-      (t (%p-io-errno-fail 9) +p-close-false+))))
+      ;; NO HANDLE AT ALL: perl sets $! = EBADF (9) and answers "" (probed) --
+      ;; unless FH is a non-handle reference: an object's `*{}' glob is closed,
+      ;; anything else dies `Not a GLOB reference' (task #4842).
+      (t (let ((g (%p-fh-ref-designator fh)))
+           (if g
+               (%p-close-impl g)
+               (progn (%p-io-errno-fail 9) +p-close-false+)))))))
 
 (defmacro p-close (&optional fh)
   "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
@@ -23652,13 +23663,37 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; (Text::CSV_PP's `out => \$code` then read its INPUT file name as an
   ;; array).  A handle-shaped payload (a glob, a stream, a socket, a
   ;; dirhandle), undef, a name string or a number are the other spellings.
-  (when (p-box-p designator)
-    (let ((v (p-box-value designator)))
-      (unless (or (null v) (eq v *p-undef*) (stringp v) (numberp v)
-                  (%p-stat-handle-shaped-p v))
-        (when (plusp (length (p-ref designator)))
-          (p-die "Not a GLOB reference")))))
+  (when (%p-non-handle-ref-p designator)
+    (p-die "Not a GLOB reference"))
   designator)
+
+(defun %p-non-handle-ref-p (designator)
+  "THE question perl's rv2gv asks of a handle slot's operand (tasks #3618
+   #4842): is DESIGNATOR a box holding a REFERENCE that is not a handle --
+   `\\$coderef', `[1]', `{}', `sub {}', an object?  A handle-shaped payload (a
+   glob, a stream, a socket, a dirhandle), undef, a name string and a number
+   are the other spellings, never this.  Asked only on a path that has no
+   handle already (an opener's place, a use slot's miss): it costs a handle
+   arm nothing."
+  (and (p-box-p designator)
+       (let ((v (p-box-value designator)))
+         (not (or (null v) (eq v *p-undef*) (stringp v) (numberp v)
+                  (%p-stat-handle-shaped-p v))))
+       (plusp (length (p-ref designator)))))
+
+(defun %p-fh-ref-designator (fh)
+  "A handle USE slot (print, close, readline, eof, binmode, fileno, seek,
+   tell, flock, read, sysread, syswrite, getc) found NO handle for FH: when FH
+   is a non-handle REFERENCE (%p-non-handle-ref-p) perl's rv2gv answers --
+   an object whose class overloads `*{}' is the glob that overload returns
+   (returned here, for the caller to resolve), anything else dies `Not a
+   GLOB reference' (task #4842; PCL wrote nowhere and answered).  NIL for
+   every other operand: no handle, the caller's own false answer."
+  (when (%p-non-handle-ref-p fh)
+    (let ((g (%p-deref-overload-1 fh "*{}")))
+      (if (and (not (eq g fh)) (p-box-p g) (p-typeglob-p (p-box-value g)))
+          g
+          (p-die "Not a GLOB reference")))))
 
 (defmacro %p-fh-install-arg (fh-form)
   "THE handle argument of an OPENER (open, sysopen, opendir, pipe, socket,
@@ -28322,7 +28357,9 @@ would consume, so it dies naming the stream (rule 12)."
          (setf (gethash key *p-filehandles*) nil))
        (multiple-value-bind (pstr bare) (%p-glob-dynamic-name name)
          (concatenate 'string pstr "::" bare))))
-    (t fh)))
+    ;; a non-handle reference: an object's `*{}' glob, else perl's rv2gv
+    ;; death `Not a GLOB reference' (task #4842)
+    (t (or (%p-fh-ref-designator fh) fh))))
 
 (defun %p-write-impl (&optional fh)
   "Perl write - emit a report via the current `format` (stub).

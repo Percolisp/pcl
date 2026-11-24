@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -391,4 +391,45 @@ PERL
     my $want = `perl "$pl_file"`;
     is(run_cl($code), $want,
        'a variable that held a dirhandle (closed or not) reopens; ref GLOB / REF; a closed one is EBADF (#5082)');
+}
+
+# #4842 (s543n): the handle USE slots ask #3618's question too -- a variable
+# holding a REFERENCE that is not a handle is perl's rv2gv death "Not a GLOB
+# reference" in print / printf / say / close / readline / eof / binmode /
+# fileno / seek / tell / flock / read / sysread / syswrite / getc / select,
+# where PCL wrote nowhere and answered; truncate / stat / -f read it as a PATH
+# (false, no death), and an object whose class overloads `*{}` is the glob it
+# returns.  Every answer is perl's (the program runs under both).
+{
+    my $code = <<'PERL';
+use feature 'say';
+my $d = "/tmp/pcl-useref-$$"; mkdir $d; my $f = "$d/o.txt";
+open(FH, ">", $f) or die;
+{ package OV; use overload '*{}' => sub { \*main::FH }, fallback => 1; }
+my $buf; my $c = sub { 42 };
+my @slots = ([print => sub { print {$_[0]} "x" }], [printf => sub { printf {$_[0]} "%s", "x" }],
+  [say => sub { say {$_[0]} "x" }], [close => sub { close $_[0] }], [readline => sub { my $l = readline($_[0]) }],
+  [eof => sub { eof($_[0]) }], [binmode => sub { binmode $_[0] }], [fileno => sub { fileno($_[0]) }],
+  [seek => sub { seek($_[0], 0, 0) }], [tell => sub { tell($_[0]) }], [flock => sub { flock($_[0], 8) }],
+  [read => sub { read($_[0], $buf, 1) }], [sysread => sub { sysread($_[0], $buf, 1) }],
+  [syswrite => sub { syswrite($_[0], "x") }], [getc => sub { getc($_[0]) }],
+  [select => sub { my $o = select($_[0]); select($o); 1 }], [truncate => sub { truncate($_[0], 0) }],
+  [stat => sub { my @s = stat($_[0]); scalar @s }], ['-f' => sub { -f $_[0] }]);
+for my $v (\$c, [1], {}, $c) {
+  my @r;
+  for my $s (@slots) { my $res = eval { my $r = $s->[1]->($v); defined $r ? "v" : "u" };
+    push @r, "$s->[0]=" . (defined $res ? $res : $@ =~ /^Not a GLOB reference/ ? "DIE" : "die:$@"); }
+  print ref($v), ": @r\n";
+}
+my $ov = bless {}, 'OV';
+print {$ov} "via-overload\n"; printf "ov fileno=%s\n", (defined fileno($ov) ? "fd" : "undef");
+close $ov; open(my $r, "<", $f) or die; print "file: ", scalar(<$r>); close $r;
+unlink $f; rmdir $d;
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'a handle USE slot given a non-handle reference dies "Not a GLOB reference" as perl does, per slot; *{} overload resolves (#4842)');
 }
