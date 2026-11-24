@@ -5786,7 +5786,12 @@ backtrace, and EXITS 0 on SIGTERM — a supervisor then reads success.
   signal a process sends ITSELF (`kill USR1 => $$`) is handled before `kill`
   returns.  A handler that RETURNS ends a running `sleep` early (it returns the
   seconds slept); one that DIES unwinds to the nearest `eval` from wherever the
-  program was.  A signal arriving inside a handler waits until it returns.
+  program was -- also out of the primitive the signal interrupted (a blocking
+  `readline` / `read` / `sysread` / `getc` / `eof` / `accept` / `recv`, the
+  `kill` that sent it): a primitive's own failure handler never takes the
+  handler's die for its failure (s543l, #5380 #2260, the #2062 rule; the
+  target of a `$x = <FH>` the die interrupted keeps its value, where perl's
+  is "": #5383).  A signal arriving inside a handler waits until it returns.
   Handlers run in the PROGRAM's thread, never inside a write into a stream's
   buffer: a signal arriving during `print` / `printf` / `say` is held and
   handled when that write is over — unless the write is BLOCKED (the
