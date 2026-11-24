@@ -15547,6 +15547,19 @@ sub _local_plan_elem {
   } else {
     $bind_base->() if @keys > 1 || $expr;
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
+    # A bare `local ELEM` / `local SLICE` ending a valued block is the fresh
+    # element(s) (#5331 with #2742's element value, s543l): one undef, a
+    # slice's undefs by context (the list, else the last).  Not under a
+    # modifier (#5334), and not over a cast BLOCK the plan left unbound
+    # (`local ${ f() }{k}`: the value form would evaluate it again).
+    if ($mod eq '' && !($rec->{base_expr} && !$expr && @keys == 1)) {
+      if (!$slice && @keys == 1) {
+        $value = _local_elem_place($open, $cl, \@keys);
+      } else {
+        my $sl = [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys];
+        $value = _local_ctx_value($sl, ['p-list-scalar', $sl]);
+      }
+    }
   }
   return { opens => \@opens, inner => \@inner, value => $value };
 }

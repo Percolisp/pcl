@@ -37476,8 +37476,12 @@ would consume, so it dies naming the stream (rule 12)."
             (prog1 (vector :magic (unbox old-bx) old-bx)
               (box-set old-bx *p-undef*))
             (progn
-              ;; Install fresh undef box so body assignments don't clobber saved box.
-              (setf (gethash kv hv) (make-p-box nil))
+              ;; Install a fresh box so body assignments don't clobber the saved
+              ;; one.  It holds perl's UNDEF, never raw NIL (#5331, s543l): NIL is
+              ;; the runtime's empty-list marker, so the element read
+              ;; (%p-hash-unbox-elem) handed a sub's list return, a `delete`'s
+              ;; list and an argument list NO element where perl has one undef.
+              (setf (gethash kv hv) (make-p-box *p-undef*))
               (vector :hash old-ex old-bx))))))
 
 (defun %p-lhe-restore (hv kv saved)
@@ -37586,10 +37590,24 @@ would consume, so it dies naming the stream (rule 12)."
                (unwind-protect (,bf) (%p-tie-local-restore ,r ,k ,s)))
              (%p-local-array-elem-init-plain ,arr-var ,idx-form ,iv (,bf)))))))
 
+(defun %p-local-array-fresh (arr iv)
+  "Install the FRESH element of `local $arr[IV]` (#5331, s543l): a new box
+   holding perl's UNDEF (never raw NIL, the runtime's empty-list marker: the
+   element read handed a sub's list return NO element), the array extended
+   with holes up to IV when the element did not exist -- perl's `local $a[3]`
+   on a one-element array makes it four long, element 3 existing and undef.
+   The restore (the callers' unwind arm) puts the old box back, or clears the
+   slot and trims the trailing holes back to the old length."
+  (when (>= iv (length arr))
+    (dotimes (n (1+ (- iv (length arr))))
+      (vector-push-extend nil arr)))
+  (setf (aref arr iv) (make-p-box *p-undef*)))
+
 (defmacro %p-local-array-elem-plain (arr-var idx-form &body body)
   "Save/restore one array element. Like Perl's local $arr[N].
-   For existing elements: installs a fresh undef box (isolates body from saved box).
-   For non-existing elements: does NOT extend the array; body can extend via setf p-aref.
+   The element becomes a fresh undef box (%p-local-array-fresh: it isolates
+   the body from the saved box; a non-existing element extends the array, as
+   perl's does).
    On exit: restores existing element (re-extending if body shrank array via undef @arr),
    or trims trailing nil slots if element was non-existent."
   (let ((iv       (gensym "IDX"))
@@ -37601,9 +37619,7 @@ would consume, so it dies naming the stream (rule 12)."
             (,orig-len (length ,arr-var))
             (,old-ex   (< ,iv ,orig-len))
             (,old-bx   (when ,old-ex (aref ,arr-var ,iv))))
-       ;; Only install fresh box if element existed (prevents old-box mutation by body)
-       (when ,old-ex
-         (setf (aref ,arr-var ,iv) (make-p-box nil)))
+       (%p-local-array-fresh ,arr-var ,iv)
        (unwind-protect
             (progn ,@body)
          ;; Restore on any exit path
@@ -37765,7 +37781,7 @@ would consume, so it dies naming the stream (rule 12)."
              (orig-len (length arr))
              (old-ex  (< iv orig-len))
              (old-bx  (when old-ex (aref arr iv))))
-        (when old-ex (setf (aref arr iv) (make-p-box nil)))
+        (%p-local-array-fresh arr iv)
         (unwind-protect
              (%p-local-array-slice-nested arr vec (1+ pos) thunk)
           (if old-ex

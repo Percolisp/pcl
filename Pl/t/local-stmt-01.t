@@ -34,7 +34,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 20;
 
 my $fixture = <<'PL';
 no strict 'refs';
@@ -74,6 +74,13 @@ our ($g2, $k2) = (3, 4); our @ga = (1, 2);
 sub lo1 { local $x } sub lo2 { local ($g2, $k2) } sub lo3 { local @ga }
 my @l1 = lo1(); my @l2 = lo2(); my $s3 = lo3(); my @d = do { local $x };
 print "17 ", scalar(@l1), " ", scalar(@l2), " $s3 ", scalar(@d), " $x $g2 $k2 @ga\n";
+our %h5 = (k => 1, a => 1, b => 2); our @a5 = (1, 2, 3); my %lh5 = (k => 1);
+sub le1 { local $h5{k} } sub le2 { local $h5{k}; $h5{k} } sub le3 { local $a5[0]; $a5[0] } sub le4 { local @h5{qw(a b)} }
+sub le5 { local $a5[5]; scalar(@a5) . (exists $a5[5] ? "E" : "N") . (exists $a5[4] ? "E" : "N") }
+sub le6 { local $lh5{k} } sub le7 { local $h5{k}; my @r = delete $h5{k}; scalar(@r) } sub le8 { local $h5{k}; return ($h5{k}, 1) }
+my @m1 = le1(); my @m2 = le2(); my @m3 = le3(); my @m4 = le4(); my $s4 = le4(); my @m6 = le6(); my @m8 = le8();
+print "18 ", scalar(@m1), scalar(@m2), scalar(@m3), scalar(@m4), " ", (defined $s4 ? "D" : "U"), " ", le5(), " ",
+  scalar(@a5), " ", scalar(@m6), le7(), scalar(@m8), " $h5{k} $h5{a}$h5{b} @a5\n";
 PL
 
 # Two programs, so the family rows (8-12) do not depend on the #4185 rows.
@@ -112,6 +119,7 @@ line_is(11, 'S|K|1 2', 'local in a string eval');
 line_is(12, 'x0|K|1 2', '...restored after it');
 line_is(16, '5 3 9 2 4 x0', '#4443: a block whose last statement is a local takes its value');
 line_is(17, '1 2 0 1 x0 3 4 1 2', '#2742: a bare local $x / local ($x, $y) / local @a ending a valued block is its targets by context');
+line_is(18, '1112 U 6EN 3 112 1 12 1 2 3', '#5331: a localized element is ONE undef (a list return, a slice, delete, return) and extends a short array');
 
 # -- #5005 (s543b): `local` binds TIGHTER than the comma ------------------------
 # `local $a, $b` is `(local $a), $b`; `do { local $/, <$fh> }` reads the whole
