@@ -15583,6 +15583,24 @@ create the key on a read-only call, which perl does not.
 ;;; no catch of its own here, so there is nothing to hang a copy on and
 ;;; nothing does), and p-goto-sub (the target sub runs its OWN frame, which
 ;;; copies).
+(declaim (inline %p-ref-payload-p))
+(defun %p-ref-payload-p (raw)
+  "True when RAW, a box's VALUE, is a payload that only its BOX makes a
+   REFERENCE: a hash, an array vector, a function -- or a FILEHANDLE
+   (%p-handle-payload-p: a stream, a socket, a dirhandle; #1308, the box is
+   PCL's glob ref).  A copy of such a box leaving a frame must stay a box
+   (p-return-value hands the box on, %p-leavesub-scalar copies it): the RAW
+   stream is the glob VALUE `$$fh`, whose ref() is \"\" -- `ref(eval q{$fh})`,
+   `ref(f())` and `readline(f())` read it so (#5350).  ONE reading for both
+   frame exits.  Plain strings and numbers leave at the first two tests."
+  (and raw
+       (not (stringp raw))
+       (not (numberp raw))
+       (or (hash-table-p raw)
+           (functionp raw)
+           (vectorp raw)
+           (%p-handle-payload-p raw))))
+
 (defun %p-leavesub-scalar (v)
   "perl's mortalcopy for ONE scalar leaving a sub frame.
    A PLAIN box yields its unboxed value — the raw value IS the copy, so this
@@ -15602,10 +15620,7 @@ create the key on a read-only call, which perl does not.
     ((%pcl-dualvar-p v) (%p-dualvar-copy v))
     ((or (p-box-class v)
          (p-box-is-ref v)
-         (let ((raw (p-box-value v)))
-           (or (hash-table-p raw)
-               (functionp raw)
-               (and (vectorp raw) (not (stringp raw))))))
+         (%p-ref-payload-p (p-box-value v)))
      (p-copy-scalar-arg v))
     (t (let ((x (unbox v)))
          (if (null x) *p-undef* x)))))
@@ -18593,11 +18608,9 @@ what changes is that the element is the raw counter rather than a fresh box."
     ;; of here intact only because a string answered `vectorp`.  Unboxing it
     ;; drops the numeric side (Pl/t/errno-01.t's four dualvar rows).
     ((%pcl-dualvar-p val) val)
-    ((let ((v (p-box-value val)))
-       (or (hash-table-p v)
-           (functionp v)
-           (and (vectorp v) (not (stringp v)))))
-     val)
+    ;; ... and a FILEHANDLE payload, which only its box makes a glob ref
+    ;; (#5350): the one reading %p-leavesub-scalar shares.
+    ((%p-ref-payload-p (p-box-value val)) val)
     ;; Simple scalar box - return the unboxed value.  A box is a SCALAR, so its
     ;; value contributes exactly ONE element to the returned list — but raw nil
     ;; is the runtime's "empty list" marker (%p-flatten-list drops it by
@@ -38703,6 +38716,10 @@ would consume, so it dies naming the stream (rule 12)."
       ;; `unbox` peels the ref-wrapper, so `scalar(\5)` used to answer with the
       ;; referent (ref(scalar(\5)) = "" where perl says SCALAR).
       ((and (p-box-p val) (p-box-is-ref val)) val)
+      ;; ... nor does it unwrap a FILEHANDLE's box, which IS its glob ref
+      ;; (#1308): the raw stream is the glob VALUE, ref() "" (#5350:
+      ;; `ref(scalar(f()))` once the frame exit kept the box).
+      ((and (p-box-p val) (%p-handle-payload-p v)) val)
       ;; Strings are scalars, return as-is -- except a DUALVAR (ir-spec 3.2a: a box
       ;; whose numeric half is :dual), which IS the scalar: its string half
       ;; alone loses the number (`isdual(dualvar(0, "abc"))` through a `($)`

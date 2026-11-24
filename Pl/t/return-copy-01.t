@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub run_cl {
     my ($code) = @_;
@@ -417,4 +417,33 @@ goto=3 4
 return=1 2
 our=1 5
 elem=1 6
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G — a FILEHANDLE leaves a frame as a GLOB REFERENCE (#5350, s543m).  The box
+# is what makes PCL's stream payload a glob ref (#1308); both frame exits
+# (p-return-value, %p-leavesub-scalar -- the string eval's catch included)
+# unwrapped it to the raw stream, the glob VALUE, so ref() of the value came
+# back "" while the same value through `my $g = ...` said GLOB.  `scalar()`
+# keeps the box too.  Controls: a blessed IO::File, `\*STDOUT`, a code ref,
+# a dirhandle.  Expected text probed against perl 5.40.3; FAILS on the base
+# 9fc6583b (rows a-b, k).
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('#5350: a returned / eval-returned filehandle stays a GLOB reference', <<'PL', <<'OUT');
+open(my $fh, "<", "/dev/null") or die;
+sub f { $fh }
+sub g { return $fh }
+sub h { return ($fh, 1) }
+my $g = eval q{$fh};
+print "a ", join("|", ref($fh), ref($g), ref(eval q{$fh}), ref(eval q{\*STDOUT}), ref(scalar eval q{$fh})), "\n";
+print "b ", join("|", ref(f()), ref(g()), ref((h())[0]), ref(do { $fh }), ref(scalar(f()))), "\n";
+print "c ", join("|", (defined(eval q{$fh}) ? 1 : 0), (defined(f()) ? 1 : 0), (fileno(eval q{$fh}) == fileno($fh) ? 1 : 0)), "\n";
+my $code = sub { 1 }; sub cf { $code }
+opendir(my $dh, "/") or die; sub dhf { $dh }
+print "k ", join("|", ref(eval q{$code}), ref(cf()), ref(eval q{$dh}), ref(dhf())), "\n";
+PL
+a GLOB|GLOB|GLOB|GLOB|GLOB
+b GLOB|GLOB|GLOB|GLOB|GLOB
+c 1|1|1
+k CODE|CODE|GLOB|GLOB
 OUT
