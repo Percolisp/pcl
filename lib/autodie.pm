@@ -198,11 +198,28 @@ sub _general {
 
 sub _mode_arg { sprintf '%#04o', $_[0] }
 
+# A `*` slot hands a bareword handle over as its NAME (perlsub), and a NAME a
+# built-in is given here is THIS package's glob -- perl's rule for an
+# unqualified symbolic name, which PCL's runtime follows since s543n (#1423).
+# perl's Fatal.pm qualifies the name with the CALLER's package before it calls
+# the built-in (`open(FH, ...)` under autodie opens main::FH); so does this.  A
+# reference, an undef place (`open(my $fh, ...)`, which must stay an alias)
+# and a qualified name are left alone: _qname answers undef for them, and a
+# wrapper replaces @_ ONLY when it answers a name, so `$_[0]` stays an alias
+# whenever it must be one.
+require Symbol;
+sub _qname {
+    my ($h, $pkg) = @_;
+    return (defined $h && !ref $h && $h =~ /\A[^\W\d]\w*\z/)
+        ? Symbol::qualify($h, $pkg) : undef;
+}
+
 my %OPEN_MODE = ('<' => 'reading', '>' => 'writing', '>>' => 'appending',
                  '+<' => 'reading and writing', '+>' => 'reading and writing',
                  '+>>' => 'reading and appending');
 
 sub open (*;$@) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     # One-argument open (the file named by the package scalar of the handle's
     # name) is not modelled here: it fails, loudly, as perl's does when that
     # scalar is unset.
@@ -236,17 +253,20 @@ sub open (*;$@) {
 }
 
 sub close (;*) {
+    if (@_ && defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     my $ok = @_ ? CORE::close($_[0]) : CORE::close();
     return $ok if $ok;
     _throw('close', "Can't close(" . (@_ ? "$_[0]" : '') . ") filehandle: '$!'", [@_]);
 }
 
 sub opendir (*$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     return 1 if CORE::opendir($_[0], $_[1]);
     _throw('opendir', "Can't opendir(\$fh, " . _fmt_arg($_[1]) . "): $!", [@_]);
 }
 
 sub closedir (*) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     return 1 if CORE::closedir($_[0]);
     _throw('closedir', "Can't closedir(\$fh): $!", [@_]);
 }
@@ -282,12 +302,16 @@ sub chdir (;$) {
 }
 
 sub binmode (*;$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     my $ok = @_ > 1 ? CORE::binmode($_[0], $_[1]) : CORE::binmode($_[0]);
     return $ok if $ok;
     _general('binmode', [@_]);
 }
 
 sub read (*\$$;$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) {
+        @_ = ($q, (ref($_[1]) eq 'SCALAR' ? $_[1] : \$_[1]), @_[2 .. $#_]);
+    }
     # The `\$` slot arrives as a reference where the call site applied the
     # prototype, and as the (aliased) scalar itself where it did not.
     # (Through a copy of the reference: `${$_[1]}` as read's buffer does not
@@ -307,6 +331,7 @@ sub read (*\$$;$) {
 }
 
 sub seek (*$$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     return 1 if CORE::seek($_[0], $_[1], $_[2]);
     _throw('seek', "Can't seek(\$fh, " . _fmt_arg($_[1]) . ", " . _fmt_arg($_[2]) . "): $!", [@_]);
 }
@@ -361,6 +386,7 @@ sub umask (;$) {
 }
 
 sub flock (*$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     return 1 if CORE::flock($_[0], $_[1]);
     # A NON-BLOCKING lock that would block is an answer, not a failure: perl's
     # autodie returns false for it (LOCK_NB = 4).
@@ -369,6 +395,7 @@ sub flock (*$) {
 }
 
 sub sysopen (*$$;$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     my $ok = @_ > 3 ? CORE::sysopen($_[0], $_[1], $_[2], $_[3])
                     : CORE::sysopen($_[0], $_[1], $_[2]);
     return $ok if $ok;
@@ -377,6 +404,9 @@ sub sysopen (*$$;$) {
 }
 
 sub sysread (*\$$;$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) {
+        @_ = ($q, (ref($_[1]) eq 'SCALAR' ? $_[1] : \$_[1]), @_[2 .. $#_]);
+    }
     my $n;
     if (ref($_[1]) eq 'SCALAR') {
         my $buf = $_[1];
@@ -392,6 +422,7 @@ sub sysread (*\$$;$) {
 }
 
 sub syswrite (*$;$$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     my $n = @_ > 3 ? CORE::syswrite($_[0], $_[1], $_[2], $_[3])
           : @_ > 2 ? CORE::syswrite($_[0], $_[1], $_[2])
           :          CORE::syswrite($_[0], $_[1]);
@@ -400,12 +431,15 @@ sub syswrite (*$;$$) {
 }
 
 sub sysseek (*$$) {
+    if (defined(my $q = _qname($_[0], scalar caller))) { @_ = ($q, @_[1 .. $#_]) }
     my $r = CORE::sysseek($_[0], $_[1], $_[2]);
     return $r if $r;
     _throw('sysseek', "Can't sysseek(\$fh, " . _fmt_arg($_[1]) . ", " . _fmt_arg($_[2]) . "): $!", [@_]);
 }
 
 sub pipe (**) {
+    my @q = (_qname($_[0], scalar caller), _qname($_[1], scalar caller));
+    if (defined $q[0] || defined $q[1]) { @_ = ($q[0] // $_[0], $q[1] // $_[1]) }
     return 1 if CORE::pipe($_[0], $_[1]);
     _throw('pipe', "Can't pipe(\$fh, \$fh): $!", [@_]);
 }

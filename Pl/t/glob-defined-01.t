@@ -227,6 +227,8 @@ $g++; print " ", (defined *{$g} ? "def" : "undef");
 open($g, ">&STDOUT") or die; print " ", (defined *{$g} ? "def" : "undef"), "\n"; close $g;
 open(Foo::OUT, '>', "$D/o") or die; my $old = select(Foo::OUT); print "selected\n"; select($old); close Foo::OUT;
 print "07 $old ", (-s "$D/o"), "\n";
+my $dn = "DH8"; opendir($dn, $D) or die; my @dd = sort grep { !/^\./ } readdir DH8; closedir($dn) or die "cd";
+print "08 dir @dd\n";
 system("rm", "-rf", $D);
 PL
 is($pcl, $perl, '#5081: a symbolic handle name is its package\'s glob, vivified by open and select; no cross-package match');

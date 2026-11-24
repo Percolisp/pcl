@@ -25318,8 +25318,13 @@ would consume, so it dies naming the stream (rule 12)."
    `opendir' on a COPY of a glob ref opens the GLOB the caller holds, as
    `open' does (task #3243: core IO::Dir->new(DIR)->read returned nothing)."
   (let ((v (if (p-box-p dh) (p-box-value dh) dh)))
-    (cond ((symbolp dh) dh)
-          ((p-typeglob-p v) (%p-typeglob-handle-key v)))))
+    (cond ((symbolp dh)
+           (if (or (null dh) (eq dh *p-undef*)) dh (car (%p-bareword-handle-keys dh))))
+          ((p-typeglob-p v) (%p-typeglob-handle-key v))
+          ;; a NAME string (`$d = "DH"; opendir($d, ...)', autodie's
+          ;; caller-qualified "main::DH"): the glob perl's symbolic rule names,
+          ;; as a filehandle's (%p-name-handle-key, s543n)
+          ((and (stringp v) (plusp (length v))) (%p-name-handle-key v t)))))
 
 (defun %p-dirhandle-path (v)
   "The directory an open DIRHANDLE operand was opened on, or nil when V is not
