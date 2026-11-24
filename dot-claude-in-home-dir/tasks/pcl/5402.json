@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-24), found by member 6's probes (#5351).  PRE-EXISTING: base 9fc6583b the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p6/qr.pl):\n    use v5.24;\n    my $s = \"b\"; my $r = \\\"b\"; my $q = qr/$s/; my $q2 = qr/$$r/; my $q3 = qr/b/; print \"$q $q2 $q3\\n\";\n  perl  (?^u:b) (?^u:b) (?^u:b)        PCL  (?^:b) (?^:b) (?^:b)\n\nWHAT IT IS (suspect, not measured): under the `unicode_strings` feature (a `use v5.12`+ bundle) perl compiles a pattern with the /u charset and the qr stringification shows it; PCL's qr stringification does not add `u` from the feature (the site's unicode_strings is known: #2092's pseudo-feature for string evals, `_unicode_strings_here` for case mods).  Any code that compares or prints a qr// under `use v5.12`+ (Test::More `is($re, ...)`, a hash key built from a qr) reads a different string.  Measure: `use feature 'unicode_strings'` alone, `use utf8` alone, a /u /a /l flag written explicitly, `qr/b/u`.\n",
+   "id" : "5402",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a qr// under `use v5.24` (unicode_strings) stringifies without the /u flag -- \"(?^:b)\" where perl prints \"(?^u:b)\"",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong in qr stringification under a v5.12+ bundle: IN"
+}

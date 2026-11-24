@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-24), found by member 4's probe (#5350).  PRE-EXISTING: base 9fc6583b (MAIN-READY-110) the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p4/call-slot.pl in the s543m worktree):\n    sub so { \\*STDOUT }\n    open(my $fh, \"<\", \"/etc/hostname\") or die; sub f { $fh }\n    print fileno(so()), \"\\n\";                          # perl 1     PCL \"\"\n    my $l = readline(f()); print defined $l ? \"line\\n\" : \"undef\\n\";   # perl line  PCL undef\n    print tell(f()), \"\\n\";                             # perl 8 (after the read) PCL -1\n    { my $old = select(f()); ... }                     # perl selects $fh; PCL a bareword handle `f`\n\nWHAT IT IS: a glob-slot builtin's operand spelled as an explicit CALL with parentheses, `NAME()`, is emitted as `(pl-NAME)` and %p-fh-arg's bareword arm (the T slot kind: \"the bareword is ALWAYS the handle\") reads it as the handle named NAME -- `readline(f())` is even lowered `(p-readline 'f)`.  perl calls the sub: the parentheses make it a call, never a bareword.  The emission loses the difference between `fileno(f)` (a bareword; perl's #1044 rules) and `fileno(f())`.  Same for `fileno(so)` here (perl 1: a declared sub, measure before ruling).  FIX DIRECTION (not designed): the call form must reach the slot as a call (a marker the bareword arm does not take), at the PExpr/ExprToCL emission of a glob slot, not in the runtime.\n",
+   "id" : "5400",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a glob-slot builtin whose operand is an explicit CALL `NAME()` reads the bareword handle NAME -- `fileno(f())`, `readline(f())`, `tell(f())`, `select(f())` (perl calls f)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong in a glob slot with an explicit call operand; rare: IN, LOW"
+}

@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-24), found by member 1's probes (#5310).  PRE-EXISTING: base 9fc6583b (MAIN-READY-110) the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p1/m15c.pl):\n    $main::g = 8;\n    print \"g2 \", eval(q{use feature 'signatures';\n    sub n16 ($x, $y = eval '$g') { $x + $y } n16(4)}) // \"DIES $@\", \"\\n\";     # perl 12\n    print \"h2 \", eval(q{use feature 'signatures';\n    sub n17 ($x, $y = eval('7')) { $x + $y } n17(4)}) // \"DIES $@\", \"\\n\";     # perl 11\n  PCL: DIES The variable %p-eval-env% is unbound. at (eval 1) line 2.  (both; also with the one-token signature on one line)\n  RIGHT: the same subs at FILE level; `sub n18 { my $y = eval('7'); $y }` inside the eval text; an anonymous sub's signature default `sub ($x, $y = eval('7'))` inside the eval text.\n\nWHAT IT IS (suspect, not measured): a string eval inside a NAMED sub's signature DEFAULT, the sub defined in eval text: the default's eval site appends %p-eval-env% (_eval_lexical_alist), which _assemble_eval_mode binds with a `let` around the eval body -- the named sub's signature defaults are emitted outside that `let` (the sub definition is hoisted).  An internal error, not perl's behaviour: LOUD.\n",
+   "id" : "5401",
+   "status" : "pending",
+   "subject" : "LOUD: a string eval inside a named sub`s signature DEFAULT, the sub defined in eval text, dies \"The variable %p-eval-env% is unbound\" -- `eval q{use feature \"signatures\"; sub n ($x, $y = eval(q(7))) {...} n(4)}` (perl 11)",
+   "triage" : "in",
+   "triage_reason" : "an internal error from a legal signature default in eval text; rare: IN, LOW"
+}

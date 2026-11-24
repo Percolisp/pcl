@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-24), found by member 2's probes (#5374).  PRE-EXISTING: base 9fc6583b the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p2/f.pl line f9):\n    { package Q9; our $w9 = 1; my $w9 = 4; print \"f9 \", $w9 + 1, \" $Q9::w9\\n\"; }\n  perl  f9 5 1        PCL  f9 5 4\n\nWHAT IT IS (suspect, not measured): a FILE-LEVEL bare block that opens with `package Q9;` is flattened into its own section (read in-package Q9), so the lexical `my $w9` is a `let` of the symbol `$w9` interned in Q9 -- and the qualified spelling `$Q9::w9` IS that symbol: the `let` shadows the package variable for every spelling of it (the my-shadow mechanism).  #470's rule (a file that spells the package variable qualified takes the mangle for the lexical) covers a PROMOTED file lexical; this one is an ordinary `let` in the section.  Also check `package Q9; my $v = 4; print $Q9::v` at the top level (no block) and `$main::x` beside a top-level `my $x` in main.\n",
+   "id" : "5404",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: in a file-level `{ package Q9; our $w9 = 1; my $w9 = 4; ... }` the qualified `$Q9::w9` reads the LEXICAL (perl 1, PCL 4)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong: a qualified read shadowed by a same-named lexical in a flattened block section: IN"
+}

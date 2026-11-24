@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-24), found writing member 1's guard row (#5310).  PRE-EXISTING: base 9fc6583b the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p1/fs.pl):\n    no warnings;\n    { use feature \"signatures\"; }\n    my $f = sub(r) {}; print \"ok\\n\";\n  perl: ok        PCL: PCL: statement dropped at fs.pl line 3: my $f = sub(r) {}; -- Bug. Fell through. Missing case: [funcall, Structure::Block<{}>]\n\nWHAT IT IS (suspect, not measured): the `signatures` feature enabled INSIDE a closed block is read as still in force after it, so the anonymous sub's prototype of letters `(r)` is taken for a signature and the statement is not lowered (a counted drop).  perl scopes `use feature` to the block.  Check which reader answers \"is the feature in force here\" for an anonymous sub head (the vendored PPI's presumed_features or Parser's head_is_signature) and whether a named sub / a `($$)` prototype shows the same leak.  Rare (a prototype of letters is perl's \"Illegal character in prototype\" warning), but a statement drop.\n",
+   "id" : "5403",
+   "status" : "pending",
+   "subject" : "DROP: `use feature \"signatures\"` inside a closed block leaks to a later anonymous `sub(r) {}` (a prototype of letters) -- the statement is dropped (perl: ok)",
+   "triage" : "in",
+   "triage_reason" : "a statement drop from a block-scoped feature leaking; rare: IN, LOW"
+}
