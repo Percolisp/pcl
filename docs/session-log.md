@@ -132,7 +132,7 @@ The PPI / parser queue was the parser program (#3694) on both halves: the PPI ha
 
 **Gate at the end:** 346 files / 11,660 rows PASS; sweep 18,761 +0; EVERYDAY 116 of 122; CI green on every push.
 
-## Session s543m (Opus agent, 2026-11-24) -- a regression and six live silent wrongs around the string eval and its neighbours: a one-token Prototype offered by its text (#5310), the by-name `our` registry in a region (#5374), a filehandle out of a frame (#5350), a raw number's symbolic deref (#5353), postderef_qq in a pattern (#5351), the drop flush of a cleared / shrunk container (#5354, in part); #5352 measured and stopped; #5400-#5405 filed; generation v2-16200
+## Session s543m (Opus agent, 2026-11-24) -- a regression and six live silent wrongs around the string eval and its neighbours: a one-token Prototype offered by its text (#5310), the by-name `our` registry in a region (#5374), a filehandle out of a frame (#5350), a raw number's symbolic deref (#5353), postderef_qq in a pattern (#5351), the drop flush of a cleared / shrunk container, an element overwritten with undef and a sub-tail drop (#5354 #5405), a qr's /u charset (#5402) -- the last two after the USER's ORDINARY-or-RARE ruling; #5352 measured and stopped; #5400-#5405 filed; generation v2-16200
 
 Base = main `9fc6583b` (code MAIN-READY-110 `26d0dac4`, v2-16000), its `git archive` in `scratch/s543m/base`; rebased onto `c5c87f33` (the round's records: no code) before the end bars.  Beside s543l and, from 22:2x, s543n.
 
@@ -148,7 +148,9 @@ Base = main `9fc6583b` (code MAIN-READY-110 `26d0dac4`, v2-16000), its `git arch
 
 **#5351 (Pl/).**  `_pattern_events`: one scan for both pattern lowerings, `postderef_qq` asked at the op's token; a `->@` form joins with `$"`.  11 probe lines: base 0, tree 10 (#5402, qr's `/u`).  `-raw-slot` / `none` identical.  Guard regex-interp-01.t `pd_*` (10).
 
-**#5354 (Pl/, in part).**  Census of the wide list: `%h|@a = ()` 396 statements / 144 files, `undef %h|@a` 37 / 28, `$h{K} = undef` 135 / 38, void pop / shift 175 / 72, splice 89 / 37, a block-tail `delete` 106 / 75.  Taken: the container clears (`_fh_drop_stmt_sym`) and the value-returning drops (`Pl::Stmt::drop_value_shape`, pop / shift / splice beside delete).  Not taken: `ELEM = undef` and the sub tail (#5405).  15 probe lines: base 3, tree 13.  Guard fh-collect-01.t row 13.
+**#5354 + #5405 (Pl/ + cl/; ORDINARY by the USER's ruling of 2026-11-24, so taken in full).**  Census of the wide list: `%h|@a = ()` 396 statements / 144 files, `undef %h|@a` 37 / 28, `$h{K} = undef` 135 / 38, void pop / shift 175 / 72, splice 89 / 37, a block-tail `delete` 106 / 75.  The container clears (`_fh_drop_stmt_sym`) and the value-returning drops (`Pl::Stmt::drop_value_shape`, pop / shift / splice beside delete) first; then (WIP 9) an element overwritten with undef -- `p-flush-dropped-store` around the lowered store: the key once, the old slot peeked (`%p-flush-dropped-elem`: no FETCH, nothing vivified) -- and a TAIL drop, `p-flush-dropped-value ... :tail`, flushed only when the caller's context is VOID: the first cut flushed `my $v = $o->drop` too, where perl keeps the handle (probed: 0 bytes in perl).  28 probe lines: base 3, tree 28.  Guard fh-collect-01.t rows 13-14.
+
+**#5402 (Pl/; ORDINARY, taken after the ruling).**  Measured first (14 rows): a qr under a `use v5.12`+ bundle / `use feature 'unicode_strings'` stringifies `(?^u:...)`, an explicit charset letter wins (PCL was right there), `no feature` gives none, a nested qr carries its own.  `_regex_literal_form` adds `u` to a qr's flags where no charset letter is written or defaulted and `_unicode_strings_here` answers; m// / s/// keep theirs (a /d site's /i over chars 128-255 is not-supported's "Regex classes are NOT regime-dependent yet").  14 rows: base 8, tree 13.  Guard regex-interp-01.t `qr_u_*` (5).
 
 **Bars** BARS_LINE
 

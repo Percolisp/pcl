@@ -2523,13 +2523,16 @@ stays different from perl, measured s540c / s541:
   $Foo::fh`, a `use vars` or `local`ized global; #5254); since s543m a
   container CLEARED or SHRUNK (`%h = ();`, `@a = ();`, `undef %h;`, `undef
   @a;`: the old contents, one level; a void `pop @a;` / `shift;` / `splice(@a,
-  ...);`: what it takes off; #5354).  NOT flushed at a
+  ...);`: what it takes off; #5354), an element overwritten with `undef`
+  (`$h{fh} = undef;`, `$self->{fh} = undef` as a method's tail) and a sub's
+  TAIL `delete $h{fh}` / `pop` / `shift` whose caller discards the value
+  (#5405).  NOT flushed at a
   statement: a handle let go at a BLOCK EXIT (`{ my $fh = $f->openw; print
   $fh ...; }`, a method's returned handle, a `local`ized global's handle at
   its scope's end -- the moment above), a handle two levels down
   (`$o->{inner}{fh}`, a scalar ref `\$fh` in an object), a string eval's
-  `undef $g` on an unqualified name (#5255), an element overwritten with
-  `undef` (`$h{fh} = undef;`) and a sub's TAIL `delete $h{fh}` (#5405); and
+  `undef $g` on an unqualified name (#5255), an element two levels down
+  overwritten (`$o->{a}{fh} = undef`); and
   the flush never releases a lock or a descriptor;
 * a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
   until one of the triggers or exit; only a blocking `flock` on the same file

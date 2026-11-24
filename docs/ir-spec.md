@@ -4266,8 +4266,17 @@ being a run-time fact; the wrap returns the value it flushed: s543k, #5255).
 before the store, `(p-flush-dropped-handle %h)` (the same one-level, 64-element
 walk), and a void `pop @a;` / `shift;` / `splice(@a, ...);` takes the wrap on
 its own value (`Pl::Stmt::drop_value_shape`; a void splice is lowered in list
-context so its value is every removed element).  Not covered: an element
-overwritten with `undef` and a sub's tail `delete` (#5405).  The inline gate costs
+context so its value is every removed element).  **An element overwritten
+with `undef` and a TAIL drop (normative, s543m, #5405)**: `$h{K} = undef;` /
+`$r->{K} = undef;` / `$a[I] = undef;` (a statement or a sub's tail) is
+`(p-flush-dropped-store (setf (p-gethash %h K) (p-undef)))` -- the key
+evaluated once, the OLD slot peeked (no FETCH, a tied container skipped,
+nothing vivified) and flushed before the store; a sub's / block's TAIL
+`delete` / `pop` / `shift` (its value goes to the caller) takes
+`(p-flush-dropped-value FORM :tail)`, flushed only when the caller's context
+is VOID -- `my $fh = $o->take_fh` keeps the handle, `$o->drop;` drops it.
+Example: `sub close_it { $_[0]{fh} = undef }` writes the logger's buffered
+bytes out.  The inline gate costs
 one `typep` of five types at an `undef` statement; a 10-key object 0.1 µs, a
 10,000-key one is bounded by the 64.
 Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5
@@ -7217,6 +7226,16 @@ flags, so a pragma `/x` comment is not interpolated either.  The flags are
 never a run-time state: a sub DEFINED outside the scope keeps its own.
 
     { use re '/i'; print "Q" =~ /q/ ? "ok" : "no" }   # ok -- (p-regex :pat "q" :flags "i" ...)
+
+**The `unicode_strings` feature is a qr's default charset `u` (normative,
+s543m, #5402):** where no charset letter is written or defaulted by `use re`,
+a qr// at a site under the feature (a `use v5.12`+ bundle, `use feature
+'unicode_strings'`, a string eval inheriting it) carries `u` in its `:flags`,
+so its string is perl's `(?^u:...)`; m// and s/// are unchanged (PCL matches
+with Unicode rules at every site; the /d regime of a match is not-supported's
+"Regex classes are NOT regime-dependent yet").
+
+    { use v5.12; print qr/b/ }   # (?^u:b) -- (pcl::p-qr :pat "b" :flags "u" ...)
 
 **A STRING eval inherits them (normative, s531c, task #4101):** perl compiles
 the eval text with its site's hints, so the defaults (and `use re 'eval'`) in
