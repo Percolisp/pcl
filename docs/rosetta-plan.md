@@ -129,8 +129,8 @@ pass, less what s543l / s543m / s543n close).
 program inside the subset is SILENTLY wrong and every other differing one
 carries a cause, Rosetta has stopped being held out -- we will have tuned on
 it.  Criterion 2 then asks for a FRESH sample, run ONCE: programs by other
-authors that nobody here has looked at.  Proposed source, **for the USER to
-confirm**: the Perl solutions of the Perl Weekly Challenge
+authors that nobody here has looked at.  The source, **accepted by the USER
+(2026-11-24)**: the Perl solutions of the Perl Weekly Challenge
 (`github.com/manwar/perlweeklychallenge-club`: thousands of small programs by
 hundreds of authors, many of which read arguments and files, so it covers
 what Rosetta's filter threw out), selected by the same recipe.  It is fetched

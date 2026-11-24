@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-24",
+   "description" : "FILED s543l (Opus 5.5, 2026-11-24): the residue of #2260 after s543l made a handler's die leave a blocking read (the reviewing session's ruling of 2026-11-24, option (b)).\n\nREPRODUCER (perl 5.40.3 | ./runpcl on the s543l tree):\n    my ($in, $out); pipe $in, $out; my $line = 'untouched';\n    eval { local $SIG{ALRM} = sub { die \"abort\\n\" }; alarm 1; $line = readline $in; alarm 0 };\n    print \"line=[$line]\\n\";\n  perl: line=[]           (pp_readline has set the TARGET to \"\" before the read blocks)\n  PCL:  line=[untouched]  (the die leaves the read before the assignment; on the base the die was SWALLOWED and the\n                           read returned undef, which printed like perl's \"\")\n\nWHY RARE: the idiom's contract is the control flow and $@ (perlfunc alarm), which are right since s543l; the target's\nvalue after a timed-out read is \"\" (DEFINED) in perl, so `defined $line` cannot tell a timeout from an empty read --\nno program relies on it.  Pinned by the CANARY row 12b of Pl/t/fileio-02.t (it asserts today's 'untouched' and fails\nthe day this is fixed: then put `line=` back into row 12 and delete the canary).\n\nDIRECTION (option (c) of #2260): a readline that knows its target -- the emission of `$x = <FH>` / `$x = readline FH`\npasses the target so the read sets it to \"\" before it blocks, as pp_readline does.  It changes the emission of every\nsuch site for a value read only after a timed-out read: measure the cost before building.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "the value a timed-out read leaves in its target: perl gives \"\" (defined), so no program can use it to detect the timeout -- programs test $@ (perlfunc alarm); known only from Pl/t/fileio-02.t row 12 and probes",
+   "id" : "5383",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): a readline interrupted by a dying signal handler leaves its TARGET as it was (`$line = <$fh>` under alarm: PCL 'untouched', perl \"\") -- the residue of #2260 after s543l\n",
+   "triage" : "in",
+   "triage_reason" : "the target of a timed-out readline"
+}

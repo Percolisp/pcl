@@ -63,6 +63,6 @@ the merge that commits it. Notes: `briefs-and-rules-for-claude-subagents/s543/PA
   perl-validated programs by other authors under `~/pcl-agent-scratch/s543/rosetta/` (GFDL: never checked in);
   547 of 652 identical on MAIN-READY-110 (73 % in September), 43 silent, 87 of the 105 differing are in the
   subset. Census (two agents) -> causes -> fix batches ranked by programs broken -> ONE run of a fresh sample
-  (proposed: Perl Weekly Challenge; the USER has not confirmed the source).
+  (Perl Weekly Challenge solutions: accepted by the USER 2026-11-24; fetched only then, so it stays unseen).
 - My own lesson: when the USER asks "will this end", answer with the convergence of the counted number and
   with what real programs show, not with the queue's size.
