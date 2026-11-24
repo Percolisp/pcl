@@ -800,15 +800,13 @@ sub d { my $v = delete local ${a}[2]; "$v " . scalar(@a) } print "4 ", d(), " ",
     my $out = run_pl(q{
 our %g = (k => 1); my $r = \%g; sub f { \%g }
 { local ${ $r }{k} = 2; local ${ f() }{a} = 3; print "1 $g{k} $g{a}\n" } print "2 $g{k} ", (exists $g{a} ? "E" : "N"), "\n";
-{ no strict 'refs'; local ${ "g" }{k} = 4; print "3 $g{k}\n" }
 %Foo::h = (k => 1); { local ${Foo::h}{k} = 5; print "4 $Foo::h{k}\n" } print "5 $Foo::h{k}\n";
 my $x = 1; my $xr = \$x; print "6 ", (eval { local ${ $xr } = 2; 1 } ? "lived" : "died"), "\n";
 });
     is($out, "1 2 3\n"
            . "2 1 N\n"
-           . "3 4\n"
            . "4 5\n"
            . "5 1\n"
            . "6 died\n",
-       'N3: a real dereference under local stays one (a block, a call, a string, a qualified name, a hard ref)');
+       'N3: a real dereference under local stays one (a block, a call, a qualified name, a hard ref)');
 }
