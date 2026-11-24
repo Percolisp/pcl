@@ -277,3 +277,11 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 
 ## 2026-11-25 00:0x -- THE USER: start NO MORE subtasks after these three
 * s543l, s543m and s543n run to their MERGE-READY (or to a stop order) and are merged; **nothing new is launched in this session** -- no fourth batch, no census, no tooling agent.  The Rosetta census (`docs/rosetta-plan.md` step 1) starts NEXT session, and a launch there is asked for first unless the USER has said otherwise by then.
+
+## 2026-11-25 00:2x -- THE USER ENDS THE SESSION; s543n, s543m and s543l STOPPED ON ORDER
+* Stop order 00:1x; all three reported by 00:2x: worktrees clean, WIP committed, STOP.md current (each carries the reviewing session's messages that changed its brief), no leg, no loop, `HEAVY.holder` empty.
+* **s543n** `572a46dc` (`agent-a1fb5119fa665c62c`, v2-16300): seven tasks fixed (#1423 #4844 #5081 #4846 #2594 #683 #4842 #5122 #3451), #5121 / #513 / #5123 measured; gate 380 / 12,499 PASS, sweep 18,808 +0; reviewed (22 of 24).  OWED: the rebase, the timing leg, `--record`.
+* **s543m** `bfa405a5` (`agent-ac39a725d1d338842`, v2-16200): #5310 #5374 #5350 #5351 #5353 (half) #5354 #5405 #5402 fixed, #5352 measured and FLAGGED; a full gate on the final tree OWED (two stale-inventory rows on `c782fca7`, regenerated since); unreviewed.
+* **s543l** `e3591625` (`agent-a7d0dcd17f38738f0`, v2-16100): its seven tasks and #5380 + #2260 fixed; gate 380 / 12,507 PASS, sweep 18,808 +0; companion AFTER void; unreviewed.
+* Merge order n -> m -> l.  The count at the stop: 20 ordinary + 66 rare.
+* NEXT ACTION = `s543/resume-after-stop.md` (ask the USER before any launch; then the three merges; then ROSETTA, `docs/rosetta-plan.md`).

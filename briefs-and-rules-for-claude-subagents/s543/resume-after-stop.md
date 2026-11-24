@@ -1,40 +1,65 @@
-# s543 -- HAND-OVER at the session's end (2026-11-23 ~01:50; the USER ended the session) -- NEXT ACTION for the next reviewing session
+# s543 -- HAND-OVER at the session's end (2026-11-25 00:2x; the USER ended the session) -- NEXT ACTION for the next reviewing session
 
-Nothing runs.  `HEAVY.holder` is empty, no SBCL, no lane or watch loop.  Main = `origin/main` = MAIN-READY-109 `cbcc9165` + record commits (generation v2-15900).
-Numbers = CLAUDE.md "Test Status".  Read `s543/PAUSE-s543.md` bottom-up for the night (the sections from "2026-11-22 19:3x" on).
-(The hand-over of 2026-11-22 17:25 that stood in this file is in git: `git show f2873358:briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`.)
+Nothing runs.  `HEAVY.holder` is empty, no SBCL, no lane or watch loop.  Main = `origin/main` = MAIN-READY-110 `26d0dac4`
+(CODE, generation v2-16000) + record commits.  Numbers = CLAUDE.md "Test Status".  Read `s543/PAUSE-s543.md` bottom-up for the
+evening (the sections from "2026-11-24 20:1x" on).  (The hand-over of 2026-11-23 that stood in this file is in git:
+`git show 8ee15299:briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`.)
 
-**THE USER's last standing word (23:3x, repeated 00:2x): START NO MORE SUBTASKS.**  Ask before launching anything -- also before resuming the two stopped batches.
+**THE USER's standing words at the end:** (1) **start NO MORE subtasks after the three that ran -- ask before launching
+anything, also before resuming the three stopped batches**; (2) **the Rosetta corpus is the next session's MAIN work, to be
+started seriously** (`docs/rosetta-plan.md`, accepted, its fresh sample included); (3) exit criterion 1 counts silent wrongs of
+ORDINARY code, a probe-found neighbour does not extend a batch unless it is ordinary (`docs/supported-subset.md` 5 and 7,
+`s473/COMMON.md` "ORDINARY OR RARE").
 
-## What merged in the evening and night of 2026-11-22 / -23
+## What merged on 2026-11-24
 | MAIN-READY | sha | batch | what | gate on merged main |
 |---|---|---|---|---|
-| 106 | `b58114ca` | s543g | nine live silent wrongs: a `local` element target is its last subscript, a dereference in interpolating text, the dropped-handle flush | 380 / 12,418 |
-| 107 | `0eb941e3` | s543h | string-eval name resolution: a captured lexical is published per eval word, the site's `our` aliases reach the text, only a capture is a parameter, a `state` variable is read by a later eval | 380 / 12,450 |
-| 108 | `4a0fd0ec` | s543i | PPI batch 12, THE LAST: `@1x 2`, `$12[1]` is the array's element, `print STDOUT /x/` is a match; fork pushed `7fd02b75`, pull request #459 = 61 groups / 149 commits | 380 / 12,458 |
-| 109 | `cbcc9165` | s543j | ten live silent wrongs: `delete local` in an expression, a bare `local` as a sub's value, `local %ENV`, the flush on a package variable, a comma list in the caller's context, an aggregate in a scalar slot, `return (LIST), MORE` | 380 / 12,471 |
+| 110 | `26d0dac4` | s543k | six live silent wrongs: `evalbytes` is a string eval, a span-promoted lexical's eval reach, the eval text's own `our`, the drop flush inside an eval text, `postderef_qq` in a replacement, `${1}` in code; #5272's compile cost 83.5 -> 45.9 s | 380 / 12,490 |
+| (records) | `c5c87f33` | s543s, THE ROUND | board on -108: 670 PASS / 136 PARTIAL / 23 FAIL / 67 SKIP, 111,258 ok / 1,188 not ok; companion `--all --quick` on -108: 130 OK / 103 XDIFF / 237 DIFF; the FULL companion run on -110: 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST | 380 / 12,490 at the SECOND run (tap-assert-01.t row 39 flaked under load: #4904) |
 
-Sweep TOTAL 18,808, GATE clean; EVERYDAY 116 of 122; 80 live IN silent wrongs (`tools/task-triage.pl`).  CI green through the s543i merge; check the run of `f2873358` and of the hand-over push (both workflows).
+Sweep TOTAL 18,808, GATE clean; EVERYDAY 116 of 122; `tools/task-triage.pl` at the stop: **20 ordinary + 67 rare** live IN
+silent wrongs (21 + 64 at the first pass; the batches moved #5121 to rare and filed new rare ones).  CI green through the
+s543k merge push; **check the runs of the later record pushes (both workflows)**.
 
-## TWO batches are STOPPED ON ORDER at clean checkpoints (worktrees clean, WIP committed, STOP.md current with the owed list)
-| label | worktree (under `.claude/worktrees/`) | HEAD | base | generation | state |
-|---|---|---|---|---|---|
-| s543k | `agent-adecfff7d8bd8bed7` | `3b20d5ab` | rebased onto `cbcc9165` (-109) | v2-16000 | ALL members done (#5271 #5270 #5126 #5255 #5252 #5370 + #5272's two-line perf fix + the k-09 review residue).  TAKEN on the rebased tree: the full gate on `3851af89` 380 / 12,490 with rows 2-3 of `Pl/t/ir-inventory-01.t` failing (inventory docs stale for `p-evalbytes`' argument list; regenerated in `3b20d5ab`, the file passes alone); sweep 18,808 +0 GATE clean; wide A/B 51 DIFF / RCDIFF 0, attributed; gate-set scan identical; corpus-diff 12 of 111, silent drops 5; ir-host-leak 31.  OWED, in order: the records rebase onto main; drop census + ir-conform (the leg was killed: VOID); **a SECOND full gate** (the first is not green); the companion BEFORE / AFTER; everyday BEFORE / AFTER; the timing leg (#5272's row ONCE per side); the session-log section; `--record`; MERGE-READY.  Filed: #5350-#5354. |
-| s543s (THE ROUND) | `agent-a4c3c56a4ac05669b` | `7cc32739` = main `f2873358` + 2 baseline commits | measured tree `4a0fd0ec` (-108); -109 and -110 are NOT in the round | none | TAKEN: the board (six chunks, oracle refreshed) and the companion `--all --quick`; their rows edited with causes (`200f13a7`, `7cc32739`).  OWED: six NEW rows of `op/decl-refs.t` (74/151 -> 68/157, moved at s543h, NOT reduced, NOT edited); the FULL companion run `--bless-stamps` (`~/pcl-agent-scratch/s543/round2/comp-full.sh` is ready; exclusive, long); the bars of its brief; the records; MERGE-READY.  Filed: #5310. |
+## THREE batches are STOPPED ON ORDER at clean checkpoints (worktrees clean, WIP committed, STOP.md current, all Opus 5.5)
+All three sit on main's CODE `26d0dac4`; each owes a records rebase onto main.  **MERGE ORDER: s543n, then s543m, then s543l**
+-- the two later ones rebase onto each merge before them, keep their generation, regenerate the three artifacts and re-take
+the full gate, the sweep and the wide A/B (their other instruments stand when the A/B's DIFF set is unchanged).
 
-* **RESUME** = a new Opus 5.5 / xhigh agent IN THE SAME WORKTREE per batch (no new worktree), started from the main checkout, as `s543/resume-1122b.md` did: "read `scratch/<label>/STOP.md`, the brief `s543/<label>-prompt.md`, the WIP commits; finish the OWED list"; MODEL.txt gets a `resumed` line -- check it.  Or continue the old agent with one message if the session still has it.
-* **Order:** s543k first (it is near: two short exclusive legs and bounded legs), the round's full companion run LAST (nothing may wait behind it).  s543k's merge = MAIN-READY-110; the round's baselines merge after it (records only: `git rebase main`, both sides' rows kept).
-* **The round's numbers, as measured on `4a0fd0ec` (unmerged):** board 670 PASS / 136 PARTIAL / 23 FAIL / 67 SKIP of 896, 111,258 ok / 1,188 not ok (five load timeouts counted by their one-file runs; raw 668 / 133 / 28 / 67, 108,678 / 1,181); `--diff` 6 NEW / 4 FIXED, all attributed.  Companion `--all --quick` 130 OK / 31 NOTAP / 103 XDIFF / 1 FIXTURE / 263 UNEXPLAINED (237 DIFF), row diff 7 NEW / 4 FIXED / 2 LOST.  #5163: 266 -> 265.
+| label | worktree (under `.claude/worktrees/`) | HEAD | generation | state |
+|---|---|---|---|---|
+| **s543n** (the filehandle family) | `agent-a1fb5119fa665c62c` | `572a46dc` (code `0d5a13e9`), 14 over `617d66c8` | v2-16300 | FIXED: #1423 (with #4844 #5081: one name resolver), #4846, #2594, #683, #4842, #5122, #3451 (through the path the handle was opened on; no foreign call).  MEASURED, not fixed: #5121 (0 re-opens through a copy in 30 dists + everyday + perl-tests + Rosetta + 755 core modules: now `rare`), #513 (filed #5420), #5123 (documented not-supported).  TAKEN: full gate 380 / 12,499 PASS on `a7364c75` and on `0d5a13e9`; sweep 18,808 +0 GATE clean; corpus-diff identical, wide A/B 1 DIFF / RCDIFF 0; ir-conform 337 / 0; companion 23 files, four movers (io/argv.t 30/23 -> 32/21, io/pipe.t 21/6 -> 23/4, op/fh.t 6/2 -> 8/0, op/magic.t 178/30 -> 179/29), seven fails rows out by edit; board six files unchanged; EVERYDAY 116 -> 116.  **OWED: the rebase, the timing leg (`legs/bench.sh`), the bench line in the session-log, `--record`, MERGE-READY.**  REVIEWED: 24 probes, the tree = perl on 22 (`~/pcl-agent-scratch/s543/review/probes-1124/rn/`; re-run `leg.sh` on the final tree: n-08 was fixed after the run).  Filed #5420-#5424 (rare).  A flag for the reviewing session: is #3451's remembered-path route "platform-touching" (the install matrix + a macOS leg)? |
+| **s543m** (#5310 + the string-eval residue) | `agent-ac39a725d1d338842` | `bfa405a5` (code `d6b84d2f`), 14 over `36e872cc` | v2-16200 | FIXED: #5310 (the file-level face; the Prototype candidate test), #5374, #5350, #5351, #5353 (the raw-number half; a boxed number stays #551), **#5354 + #5405 in full** (a cleared container, a void `pop` / `shift` / `splice`, `ELEM = undef`, a sub-tail `delete` in a void caller), **#5402** (a qr's `u` flag under `unicode_strings`).  MEASURED, not fixed, FLAGGED: #5352 (the cure would move 105 identity cells in 40 files).  TAKEN on `c782fca7`: full gate 380 / 12,523 with `ir-inventory-01.t` rows 2-3 (the inventory regenerated in `bfa405a5`; **a full gate on the final tree is OWED**), sweep 18,808 +0 GATE clean, wide A/B 304 DIFF / RCDIFF 0 (all member 7's flush forms and #5402's flag), corpus-diff 31 of 111, census identical, ir-conform 337 / 0, gate-set scan identical, companion 23 files (re/pat.t 219/86 -> 279/14, spliced).  **OWED: the rebase onto s543n's merge + artifacts, the gate / sweep / A/B again, everyday, the timing leg (member 7's and #5402's cost numbers: FLAG them), the session-log's BARS_LINE, `--record`, MERGE-READY.**  NOT REVIEWED YET.  Review points: the #551 canary of `Pl/t/prefix-incr-deref-01.t` was REWRITTEN (read the diff: strengthened or weakened?); the sub-tail flush "only in a void caller" (`:tail`); 304 A/B sites for member 7 -- sample them.  Filed #5400-#5405. |
+| **s543l** (the `local` residue + the signal member) | `agent-a7d0dcd17f38738f0` | `e3591625`, 12 over `36e872cc` | v2-16100 | FIXED: #5372 #5371 #5331 #5334 #5332 #5333 #5330 (its ternary / short-circuit arm stays a loud refusal, designed in the task) and **#5380 + #2260** (a `die` from a signal handler is no longer swallowed in `kill`, `readline`, `read`, `sysread`, `getc`, `eof`, `accept`, `recv`: 18 of 18 blocking primitives = perl, base 8).  THE RULING APPLIED (told to the USER, no objection): `Pl/t/fileio-02.t` row 12 rewritten to the control flow and `$@`, canary row 12b pins the read target's old value (#5383, rare).  Its own regression caught by the companion and fixed (`local %INC = %INC` and a failed load's undef entry).  TAKEN on the final code: full gate 380 / 12,507 PASS, sweep 18,808 +0 GATE clean, ir-conform 337 / 0, wide A/B 16 DIFF / RCDIFF 0, gate-set scan and census identical; companion BEFORE.  **OWED: the rebase onto the merges before it (expect meetings in `%p-read-record` and the read helpers with s543n) + artifacts, the gate / sweep / A/B again, companion AFTER (VOID), everyday, the timing leg, the session-log section (draft in its scratch), `--record`, MERGE-READY.**  NOT REVIEWED YET.  Review points: the eight re-signalling arms (rule 12 read in its STOP.md); row 12 and 12b; `local %SIG` under a real signal; `local %INC` + a second `require`.  Filed #5380-#5383. |
 
-## Found by the round against MAIN-READY-107 (s543h) -- FIRST in the next fix brief
-1. **#5310, a REGRESSION (loud):** `eval 'package Q; my $a = sub(bar) {}; 1'` dies "PCL internal: the binder holds no record of $a ..." in the block-package requalifier; perl and MAIN-READY-106 return 1; companion `op/attrproto.t` row 39.
-2. **Six NEW failing rows of `op/decl-refs.t`** (state-declared refs), moved at s543h, cause not reduced.  One-file runs per merge sha are in `~/pcl-agent-scratch/s543/round2/comp1/`.
+* **RESUME** = a new Opus 5.5 / xhigh agent IN THE SAME WORKTREE per batch (no new worktree), started from the main checkout,
+  as `s543/resume-1124.md` did: "read `scratch/<label>/STOP.md`, the brief `s543/<label>-prompt.md`, the WIP commits; finish
+  the OWED list"; MODEL.txt gets a `resumed` line -- check it.  Each STOP.md carries the reviewing session's messages that
+  changed its brief.  At each merge: probes perl -> main -> tree, fast-forward, the FULL gate on merged main through
+  `heavy.sh` (a flaked row is re-run alone AND the gate re-run: it must end PASS), records, CLOSE-WITH-ROWS, ONE message to
+  each other batch.
+* **Closes at the merges** (the ordinary count goes 20 -> about 12): s543n #1423 #4844 #5081 #4846 #2594 #683 #4842 #5122
+  #3451; s543m #5310 #5374 #5350 #5351 #5354 #5405 #5402 (#5353 narrowed, #5352 stays); s543l #5372 #5371 #5331 #5334 #5332
+  #5333 #5380 #2260 (#5330 narrowed).
 
-## Owed by the reviewing session
-1. Ask the USER before any launch.  Then resume and merge s543k and the round (above); at a merge: probes perl -> main -> tree, fast-forward, the FULL gate on merged main through `heavy.sh`, records, CLOSE-WITH-ROWS, ONE message to the other.  s543k closes #5271 #5270 #5126 #5255 #5252 #5370 #5272 (the count goes to about 74).
-2. The review of s543k is DONE on its pre-rebase tree (`~/pcl-agent-scratch/s543/review/probes-1122/rk/`: 17 of 18, the one fixed since); re-run `rk/leg.sh` against the final tree at its merge.
-3. **The next FIX brief (not written):** #5310 + the decl-refs rows (s543h's regressions), then the review and batch finds of the night: #5371 (`local ${v}` in an eval text behind a `package`), #5372 (`local ${h}{k}` dies), #5330 (the refused `delete local` positions), #5331-#5334 (`local %INC` / `%SIG`, a localized element returned by a sub, `local X if C` as a tail), #5350-#5354 (s543k's finds; #5354 = the flush at file level for `%h = ()`, `$h{fh} = undef`, `undef %h`, a sub's tail `delete`).
-4. Rules written tonight, all in `s473/COMMON.md` HEAVY SLOTS and `docs/DECIDED.md`: (6) an exclusive TIMING leg is at most ten minutes; (7) an exclusive leg is queued only when every running bounded leg is within about ten minutes of its end; a stacked batch's other instruments stand when the wide A/B's DIFF set is unchanged against the new base; an independent batch is launched early and holds its end-of-batch bars; the reviewing session does not commit on main between a batch's last rebase and its MERGE-READY (or replays its unpushed commits onto the batch's tip).
-5. Tooling debts: #5163 (265 rows keyed on closed tasks), #5164, #5190, #5291 (the version string outside a checkout), #5335 (`parse_code` and a leading package block); `heavy.sh`: an exclusive leg that holds the locks while it waits for the load shows an EMPTY holder file (confusing, not wrong); a targeted gate whose FILE ARGUMENTS mention an exclusive runner's name is read as exclusive (s543k's list-file form avoids it).
-6. For the USER, open: **#1876 (`extra_paired_delimiters`): designed, not built; s543i proposes OUT**; **the two PPI branch items left, #1686 and #650 -- a batch 13 or the ordinary queue** (#3697 stays open until answered); the 39 `decision` tasks (`tools/task-triage.pl --list decision`); 6c / 6d / 6e of `docs/supported-subset.md`; whether the PPI fork's default branch becomes `pcl`; whether pull request #459 is split; the cost flags (s543g's two, s543j's `local` slice tail +58 % a call; #5272 is fixed in s543k).
-7. After a crash: remove every `~/.pcl-cache` file written in the last minutes and every zero-size one (not the `.lock` files) BEFORE any leg (`s543/resume-s543.md`).
+## THE NEXT SESSION, in this order
+1. **Ask the USER before any launch** (the three resumes and the census alike).
+2. Resume and merge s543n, s543m, s543l (above).
+3. **ROSETTA -- `docs/rosetta-plan.md`**, step 0: re-run the corpus on the merged main
+   (`~/pcl-agent-scratch/s543/rosetta/run.sh`; 547 of 652 on -110: 43 silent, 87 of the 105 differing inside the subset),
+   then write the two census briefs (A the silent programs, B the rest; one task per CAUSE, `frequency: ordinary` with the
+   program as evidence, the cause table `baselines/rosetta-causes.tsv`) and the small instrument brief; then the fix batches
+   ranked by programs broken.  The fresh sample (Perl Weekly Challenge) is fetched only at the plan's step 5.
+4. The ordinary silent wrongs no batch holds (first pass): #971 #1040 #1494 #1956 #2440 #2500 #2560 #3101 #3616 #3695 #4843
+   #4941 -- one slot beside the census, a brief not written.  The first-pass split was made from SUBJECTS: a task moves from
+   `rare` to `ordinary` on the evidence of one real program.
+
+## Owed by the reviewing session beside that
+* Tooling debts: #5163 (265 rows keyed on 16 closed tasks: about 300 baseline rows whose cause is unverified), #5164, #5190,
+  #5291, #5335; #4904 (the gate flake: make `run_cl` in `Pl/t/tap-assert-01.t` keep pl2cl's stderr and exit status).
+* For the USER, open: #1876 (`extra_paired_delimiters`: s543i proposes OUT); the PPI branch items #1686 #650; the 39
+  `decision` tasks -- three of them hold 955 failing rows (#3670 a stash alias, 388 board rows in one file; #1664 the typeglob
+  model, 342 rows; #332 refaliasing, 193); 6c / 6d / 6e of `docs/supported-subset.md`; the cost flags (s543g's two, s543j's
+  `local` slice tail; s543m's member 7 is unmeasured until its timing leg).
+* After a crash: remove every `~/.pcl-cache` file written in the last minutes and every zero-size one (not the `.lock`
+  files) BEFORE any leg (`s543/resume-s543.md`).

@@ -410,7 +410,7 @@ s543r, the round).**  Gate
 **380 files / 12,490 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **21 live IN silent wrongs of ORDINARY code + 64 of rare spellings** (the two numbers
+(95.1 %)**; **20 live IN silent wrongs of ORDINARY code + 66 of rare spellings** (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -423,11 +423,13 @@ MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second ru
 round's one regression find, is fixed in eval text by s543k -- its file-level face is left; PPI `pcl` =
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
-program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **STATE
-AND NEXT ACTION = the LAST section of `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`: THREE fix
-batches RUN since 2026-11-24 21:2x / 22:2x (the USER: three subtasks, the box is ours alone) -- s543l
-(`s543/s543l-prompt.md`: the `local` residue, v2-16100), s543m (`s543/s543m-prompt.md`: the string-eval
-residue, v2-16200) and s543n (`s543/s543n-prompt.md`: the filehandle family, v2-16300).**  Line tracking costs a median
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **NOTHING
+RUNS (the USER ended the session 2026-11-25 00:2x; the standing word: start NO MORE subtasks -- ask before launching).
+NEXT ACTION = `briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`: THREE fix batches are STOPPED ON
+ORDER, clean, to be resumed and merged in the order s543n (the filehandle family, v2-16300: every bar but the timing
+leg taken, reviewed 22 of 24), s543m (#5310 + the string-eval residue + the container drop flush, v2-16200), s543l (the
+`local` residue + a signal handler's `die` no longer swallowed, v2-16100); THEN ROSETTA, the next session's MAIN work
+(`docs/rosetta-plan.md`: 547 of 652 programs identical to perl on -110, 43 silent; the census first).**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
