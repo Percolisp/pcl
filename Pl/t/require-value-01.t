@@ -213,6 +213,10 @@ print "5 ", (exists $INC{"Fake/Mod.pm"} ? "still" : "gone"), "\n";
 $INC{"Q.pm"} = "q"; { local $INC{"Q.pm"} = "L"; print "6 $INC{'Q.pm'}\n"; }
 { delete local $INC{"Q.pm"}; print "7 ", (exists $INC{"Q.pm"} ? "E" : "N"), "\n"; } print "8 $INC{'Q.pm'}\n";
 eval { local %INC; $INC{Z} = 1; die "x\n" }; print "9 ", (exists $INC{Z} ? "Z" : "noZ"), " $INC{'Q.pm'} $@";
+eval { require DiesMod }; { local %INC = %INC; my $r = eval { require DiesMod; 1 };
+  print "10 ", ($r ? "loaded" : $@ =~ /Attempt to reload/ ? "reload" : "other"), " ",
+    (exists $INC{"DiesMod.pm"} ? "E" : "N"), (defined $INC{"DiesMod.pm"} ? "D" : "U"), "\n"; }
+{ local %INC = ("Odd.pm"); print "11 ", (exists $INC{"Odd.pm"} ? "E" : "N"), (defined $INC{"Odd.pm"} ? "D" : "U"), "\n"; }
 PL
 is($pcl, $perl, 'local %INC / local $INC{NAME} keep the store require writes, restored on every exit (#5332)');
 

@@ -10985,13 +10985,16 @@ per element."
     (cond
       ;; %INC = (...): the marker's backing store; values stay raw strings
       ;; (p-gethash's %INC arm returns them unboxed).
+      ;; An UNDEF value stays undef (s543l): `local %INC = %INC` copies a
+      ;; failed load's undef entry, and the next require must still die
+      ;; "Attempt to reload" (perl's t/op/require_errors.t, GH #17428) -- the
+      ;; stringified "" read as loaded.  An odd trailing key is undef too.
       ((eq place '%INC-MARKER%)
        (clrhash *p-inc-table*)
        (loop for i from 0 below cnt by 2
              do (setf (gethash (%p-hash-key (aref flat i)) *p-inc-table*)
-                      (if (< (1+ i) cnt)
-                          (to-string (aref flat (1+ i)))
-                          ""))))
+                      (let ((v (if (< (1+ i) cnt) (unbox (aref flat (1+ i))) *p-undef*)))
+                        (if (or (null v) (eq v *p-undef*)) *p-undef* (to-string v))))))
       ;; %ENV = (...): clear the process environment, then set the pairs.
       ;; The SYNTHETIC $ENV{_PCL_RUNTIME_} is cleared with it (task #1529) —
       ;; it is an entry of %ENV, and a wholesale replacement removes every
