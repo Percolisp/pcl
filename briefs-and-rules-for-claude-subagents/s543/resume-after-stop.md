@@ -5,8 +5,9 @@ Nothing runs.  `HEAVY.holder` is empty, no SBCL, no lane or watch loop.  Main = 
 evening (the sections from "2026-11-24 20:1x" on).  (The hand-over of 2026-11-23 that stood in this file is in git:
 `git show 8ee15299:briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`.)
 
-**THE USER's standing words at the end:** (1) **start NO MORE subtasks after the three that ran -- ask before launching
-anything, also before resuming the three stopped batches**; (2) **the Rosetta corpus is the next session's MAIN work, to be
+**THE USER's standing words at the end:** (1) **"no more subtasks" was meant for THAT session only (the USER's
+correction, 2026-11-25 00:3x): the next session resumes the three stopped batches and launches the Rosetta census WITHOUT
+asking; after Rosetta the work goes on, perhaps with other task priorities**; (2) **the Rosetta corpus is the next session's MAIN work, to be
 started seriously** (`docs/rosetta-plan.md`, accepted, its fresh sample included); (3) exit criterion 1 counts silent wrongs of
 ORDINARY code, a probe-found neighbour does not extend a batch unless it is ordinary (`docs/supported-subset.md` 5 and 7,
 `s473/COMMON.md` "ORDINARY OR RARE").
@@ -43,7 +44,8 @@ the full gate, the sweep and the wide A/B (their other instruments stand when th
   #5333 #5380 #2260 (#5330 narrowed).
 
 ## THE NEXT SESSION, in this order
-1. **Ask the USER before any launch** (the three resumes and the census alike).
+1. No launch question is owed (the USER's correction above).  The standing default is TWO subtasks at a time; three ran on
+   2026-11-24 on the USER's word for that day, with the box otherwise idle -- a third again needs the USER's word.
 2. Resume and merge s543n, s543m, s543l (above).
 3. **ROSETTA -- `docs/rosetta-plan.md`**, step 0: re-run the corpus on the merged main
    (`~/pcl-agent-scratch/s543/rosetta/run.sh`; 547 of 652 on -110: 43 silent, 87 of the 105 differing inside the subset),

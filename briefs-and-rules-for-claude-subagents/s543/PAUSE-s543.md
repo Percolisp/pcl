@@ -284,4 +284,5 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * **s543m** `bfa405a5` (`agent-ac39a725d1d338842`, v2-16200): #5310 #5374 #5350 #5351 #5353 (half) #5354 #5405 #5402 fixed, #5352 measured and FLAGGED; a full gate on the final tree OWED (two stale-inventory rows on `c782fca7`, regenerated since); unreviewed.
 * **s543l** `e3591625` (`agent-a7d0dcd17f38738f0`, v2-16100): its seven tasks and #5380 + #2260 fixed; gate 380 / 12,507 PASS, sweep 18,808 +0; companion AFTER void; unreviewed.
 * Merge order n -> m -> l.  The count at the stop: 20 ordinary + 66 rare.
-* NEXT ACTION = `s543/resume-after-stop.md` (ask the USER before any launch; then the three merges; then ROSETTA, `docs/rosetta-plan.md`).
+* NEXT ACTION = `s543/resume-after-stop.md` (the three merges; then ROSETTA, `docs/rosetta-plan.md`).
+* **CORRECTION by the USER (00:3x): "no more subtasks" was for this session only.**  The next session resumes the three batches and launches the Rosetta census without asking (the section "2026-11-25 00:0x" above read it as a standing word: wrong).  After Rosetta the work goes on, perhaps with other task priorities.

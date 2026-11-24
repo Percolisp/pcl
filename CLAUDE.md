@@ -424,7 +424,8 @@ round's one regression find, is fixed in eval text by s543k -- its file-level fa
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **NOTHING
-RUNS (the USER ended the session 2026-11-25 00:2x; the standing word: start NO MORE subtasks -- ask before launching).
+RUNS (the USER ended the session 2026-11-25 00:2x; "no more subtasks" was for THAT session only: the next one resumes
+and launches without asking).
 NEXT ACTION = `briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`: THREE fix batches are STOPPED ON
 ORDER, clean, to be resumed and merged in the order s543n (the filehandle family, v2-16300: every bar but the timing
 leg taken, reviewed 22 of 24), s543m (#5310 + the string-eval residue + the container drop flush, v2-16200), s543l (the
