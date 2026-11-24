@@ -4998,13 +4998,31 @@ spelling as written will make two handles out of one:
   collapse in the second bullet therefore does not apply to the eight names
   in the first.
 
+**One rule names the glob, whatever the spelling** (normative, s543n, tasks
+#1423 #4844 #5081; gv.c): a QUALIFIED name is its own package's glob, a
+LEADING `::` is main's (`<::H>`, `print ::H`, `readline(::H)` read main's H
+from any package), an UNQUALIFIED name is the package in effect's -- except
+the names forced into main (`STDIN STDOUT STDERR ARGV ARGVOUT ENV INC SIG _`,
+`+p-forced-main-names+`) -- and a `main::NAME` written in another package
+stays main's.  A bareword, a NAME string (`$fh = "Foo::FH"; open($fh, ...)`,
+`print {"FH"} ...`, a dup source) and a glob all reach ONE key per glob; a
+name is never matched by its short name in another package (`open FH` in
+main, `<FH>` or `\*FH` in package Q reads nothing).  A handle opened or
+`select`ed through a NAME string CREATES that glob in its stash, so
+`defined *{$name}` is then true, and `select` keeps the glob's FULL name.  A
+bareword handle NAME used as a method invocant (`FH->print`) passes the
+glob's REFERENCE, as perl does.  Example: `open(*Foo::STDOUT, '>', $f); print
+"x"; print {*Foo::STDOUT} "y"` writes `x` to the program's STDOUT and `y` to
+$f -- the real STDOUT is never closed.
+
 A qualifier PCL cannot collapse stays in the name. Since a host symbol
 `Foo::H1` needs the namespace `Foo` to exist at read time, the emitter
 registers that namespace (the same `p-defpackage` a qualified call emits)
 and quotes the designator so the reader's namespace choice survives
 `%p-fh-arg`; a qualified spelling of one of the eight is emitted as a single
-`|Foo::STDOUT|` symbol instead, so it cannot be found by the runtime's
-resolve-by-short-name fallback. Perl's stash autovivifies, so `Foo::H1` is a
+`|Foo::STDOUT|` symbol instead (the symbol `STDOUT` read in package Foo is the
+UNQUALIFIED name, main's), which the runtime splits back into Foo's own glob
+(s543n: there is no resolve-by-short-name fallback any more). Perl's stash autovivifies, so `Foo::H1` is a
 usable handle whether or not the program contains `package Foo`.
 
 **After `print` / `printf` / `say`, `WORD (LIST)` -- whitespace before the
@@ -5170,6 +5188,21 @@ child's status, an implicit one leaves `$?` as it was (the child is still
 reaped).  A half-(b) rule — closing a non-escaping lexical handle at scope
 exit — is NOT part of this: a handle still lives until the program exits or
 the collector reclaims it.
+
+**A handle slot given a REFERENCE that is not a handle refuses** (normative,
+s543n, tasks #4842 #5122 #3451).  An opener's place (#3618) and every USE
+slot -- print, printf, say, close, readline, eof, binmode, fileno, seek, tell,
+flock, read, sysread, syswrite, getc, select -- die `Not a GLOB reference`
+for a `\$x`, `[...]`, `{...}`, a code ref or an object, unless the object's
+class overloads `*{}`, whose glob is then the handle; truncate, stat and the
+filetests read such a value as a PATH (false, no death).  `opendir` on a
+handle open as a FILE and `open` on one open as a DIRECTORY die `Cannot open
+NAME as a dirhandle: it is already open as a filehandle` (and its twin)
+before anything is closed; a closed handle of the other kind, sysopen, pipe
+and socket do not ask.  A filehandle in `utime`'s LIST is its descriptor's
+file (perl's futimes; PCL sets it through the path it was opened on while
+that path is the same file -- `docs/not-supported.md` ns-utime-handle-path).
+Example: `my $o = \my $x; print $o "hi"` dies `Not a GLOB reference`.
 
 **`close` does NOT empty the scalar.**  perl closes the handle; the glob stays.
 So after `close $fh`:
@@ -5609,9 +5642,10 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `$!` | last OS error (dualvar: numifies to errno, stringifies to message).  **Also a CANONICAL MAGIC BOX** — see the rule below. |
 | `%!` | the errno hash: one key per platform errno NAME, each value magic.  `$!{NAME}` is the errno NUMBER when `$!` holds that errno and `0` otherwise — never `1`, and always defined; a STORE is fatal (`ERRNO hash is read only!`), as Errno's tied hash is.  `keys`/`values`/`each`/`exists` are ordinary hash reads of a REAL table. |
 | `%SIG` | signal handlers. **A `__WARN__` handler is NOT RE-ENTERED** (task #1223): perl calls it once and a `warn` raised INSIDE it takes the default action — without that rule the commonest handler idiom in perl's own suite, `… else { warn $_[0] }`, is an infinite loop. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators, and its NUMBERS are the platform's (sb-unix constants by name).  **A signal key's value is MAGIC: storing into it installs the OS disposition** — the contract is "The %SIG contract" below. |
-| `$.` | line number of the last-read filehandle (per-handle).  Under `<>` it runs ON across the @ARGV files; an explicit `close ARGV` resets it, and a later pass of `<>` over a refilled @ARGV counts from 1 again (normative, s507b / #2684): `while (<>) { print "$.\n"; close ARGV if eof }` numbers each file from 1.  With NO handle current `$.` is its own value: `$. = N` keeps N and a read returns it (s521d, #3518): `$. = 7; print $.` prints 7 before any read |
+| `$.` | line number of the last-read filehandle (per-handle).  Under `<>` it runs ON across the @ARGV files; an explicit `close ARGV` resets it, and a later pass of `<>` over a refilled @ARGV counts from 1 again (normative, s507b / #2684): `while (<>) { print "$.\n"; close ARGV if eof }` numbers each file from 1.  With NO handle current `$.` is its own value: `$. = N` keeps N and a read returns it (s521d, #3518): `$. = 7; print $.` prints 7 before any read.  **An EXPLICIT `close` resets THAT handle's count; a reopen does not** (normative, s543n, task #683; doio.c do_close): after `close $fh` the handle's count is 0, open or already closed, so `$.` reads 0 when `$fh` was the last read and another handle's close leaves `$.` alone; an `open` into a handle that is still open closes it IMPLICITLY and the new file keeps counting from the old count.  Example: `open FH, $a; <FH>; <FH>; open FH, $b; <FH>; print $.; close FH; print $.` prints `30` |
+| `<>` with @ARGV empty | (normative, s543n, task #4846) a PASS of `<>` ends when it has consumed @ARGV (perl's nextargv sets IOf_START again): the NEXT `<>` or `eof()` with @ARGV still empty opens `-` (STDIN), once per pass, with `$.` from 0 and `$ARGV` `-`; a refilled @ARGV is read after the rest of that STDIN.  Example: `@ARGV = ($f); my @a = <>; open STDIN, "<", $g; @ARGV = (); print scalar <>` prints $g's first line |
 | `eof()`, `*ARGV`, `local *ARGV` | (normative, s507c, tasks #2703 #2666 #2669) `eof()` WITH EMPTY PARENS is `(p-eof-argv)`: the end of the pseudo-file of every `<>` file, true only at the end of the LAST one -- it opens the next file to look, as perl's nextargv does (so `$ARGV` moves), and bare `eof`, `eof(ARGV)` and `eof ARGV` test the current `<>` file.  The ARGV GLOB is what `<>` reads first: `*ARGV = *DATA` (in a BEGIN block too, where DATA opens later -- a glob alias to a handle not yet open follows it when it opens) makes `<>` read DATA and only DATA, and so does `*ARGV = $fh` with a lexical handle; an explicit `open(ARGV, ...)` is read first and then `@ARGV`.  `local *ARGV` / `local *ARGVOUT` localize the `<>` state and the in-place edit with the glob, so an inner `while (<>)` under them leaves the outer in-place edit running.  Example: `BEGIN { *ARGV = *DATA } print while <>;` prints the DATA section. |
-| `$?` | the RAW WAIT STATUS of the last child: `exit << 8`, or the signal number in the low byte when it was killed -- perl's own encoding, never a bare exit code (normative, s492c, task #2101).  **Every path that reaps a child writes it**: `system`, a pipe-handle `close`, `wait`/`waitpid` AND ``` `cmd` ``` / `qx` / `readpipe` in BOTH contexts.  A host that leaves it untouched after a command capture is SILENT-WRONG in the commonest failure check a script has (`my $out = `cmd`; die if $?;`) -- the value then belongs to some earlier `system`, or to nothing.  A shell that cannot be STARTED gives perl's `-1` with `$!` set (see 7.5b).  **`$?` is a WRITABLE INTEGER variable** (normative, s495f, tasks #2009/#2031): `$? = N`, compound and list assignment and a write through `\$?` all store, and a store keeps perl's integer (`$? = "7abc"` reads 7, `$? = 3.7` reads 3).  The runtime's own writers store into whatever `$?` is BOUND to, so inside `local $?` a child's status lands in the local value and the outer one returns at scope exit.  **The END phase reads and sets it**: END blocks see the status the program is leaving with (`exit N`'s N, an uncaught die's status, 0 at the natural end even after a failed `system`), each (LIFO) sees the previous block's assignment, and the process then exits with `$? & 255` -- `END { $? = 5 } exit 3` exits 5. |
+| `$?` | the RAW WAIT STATUS of the last child: `exit << 8`, or the signal number in the low byte when it was killed -- perl's own encoding, never a bare exit code (normative, s492c, task #2101).  **Every path that reaps a child writes it**: `system`, a pipe-handle `close`, `wait`/`waitpid` AND ``` `cmd` ``` / `qx` / `readpipe` in BOTH contexts.  A host that leaves it untouched after a command capture is SILENT-WRONG in the commonest failure check a script has (`my $out = `cmd`; die if $?;`) -- the value then belongs to some earlier `system`, or to nothing.  A shell that cannot be STARTED gives perl's `-1` with `$!` set (see 7.5b).  **A program run by an EMULATED exec passes its wait status on whole** (normative, s543n, task #2594): a host that cannot replace its own image (SBCL) runs the exec'd program as a child and waits -- the child of a LIST or command pipe open, of `fork` + `exec`, and `exec` itself; when the program is killed by a signal, the waiting process must die by the SAME signal (its default action), never exit with the signal number as a code, or the parent's `$?` reads `SIG << 8`.  Example: `open(my $f, "-|", "sh", "-c", 'kill -TERM $$'); my @x = <$f>; close $f; print $? & 127` prints 15.  **`$?` is a WRITABLE INTEGER variable** (normative, s495f, tasks #2009/#2031): `$? = N`, compound and list assignment and a write through `\$?` all store, and a store keeps perl's integer (`$? = "7abc"` reads 7, `$? = 3.7` reads 3).  The runtime's own writers store into whatever `$?` is BOUND to, so inside `local $?` a child's status lands in the local value and the outer one returns at scope exit.  **The END phase reads and sets it**: END blocks see the status the program is leaving with (`exit N`'s N, an uncaught die's status, 0 at the natural end even after a failed `system`), each (LIFO) sees the previous block's assignment, and the process then exits with `$? & 255` -- `END { $? = 5 } exit 3` exits 5. |
 | `$$` | the CURRENT process id, REFRESHED in a forked child (normative, s492c, task #2094).  A host that copies it at image start leaves the parent's pid in the child, where `kill SIG, $$` then signals the PARENT and `"/tmp/x.$$"` collides between the two -- silent, and the sort of bug a program only meets in production.  Both fork paths (the bare `fork` and the pipe-open fork) write it. |
 | `${^GLOBAL_PHASE}` | (normative, s507c, task #2761) `START` while the main program compiles (its BEGIN blocks, UNITCHECK, a `use`d module), `CHECK`, `INIT`, `RUN`, `END` while END blocks run, `DESTRUCT` after them; set at the two boundaries the runtime owns (`p-run-compile-phase-blocks`, `%p-run-end-phase`).  A module required at run time, and a BEGIN inside a run-time eval, sees `RUN`. |
 | `$^X` | the perl a child process should run: `$PERL`, else the first executable `perl` on `$PATH`, else `perl` — read when the process STARTS (normative, s507c, task #2689), never a value baked into a saved core.  Example: `PERL=/opt/perl pcl -e 'print $^X'` prints `/opt/perl`. |
