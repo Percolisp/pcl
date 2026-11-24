@@ -12122,18 +12122,23 @@ sub _lower_expr_stmt {
   # Statement position: the value is discarded (void) — except for a block
   # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
   my $vctx = $tail_ctx // ':void';
-  my $form = $self->_lower_expr($expr, $stmt, $vctx);
-  # `delete $h{K};' / `delete $r->{K};' as a whole VOID statement: the dropped
-  # element is flushed when it holds an escaped output handle, as `undef $x;'
-  # flushes the variable's (task #4794 shape 4; ir-spec §6.5b) -- the delete's
-  # own value, read once.  Gated with that flush (`fh-scope-close').  In EVAL
-  # text the statement's value may be the eval's own (its last statement is
-  # lowered `inherit`: the eval site's context is a run-time fact), and an
-  # `eval q{ delete $h{fh} };` drops the element all the same -- the wrap
-  # returns the value it flushed, so it serves the tail too (k-09, #5255).
-  $form = ['p-flush-dropped-value', $form]
-    if $x->{drop_delete} && !$mod && Pl::Passes::enabled('fh-scope-close')
-       && ($vctx eq ':void' || ($self->eval_mode && "$vctx" eq 'inherit'));
+  # `delete $h{K};' / `delete $r->{K};' / `pop @a;' / `shift;' / `splice(@a,
+  # ...);' as a whole VOID statement (Pl::Stmt::drop_value_shape): the
+  # dropped element(s) are flushed when one holds an escaped output handle, as
+  # `undef $x;' flushes the variable's (task #4794 shape 4, #5354; ir-spec
+  # §6.5b) -- the statement's own value, read once.  A void `splice' is
+  # lowered in LIST context there, so its value is every removed element (the
+  # value is discarded: nothing else reads the context).  Gated with that flush
+  # (`fh-scope-close').  In EVAL text the statement's value may be the eval's
+  # own (its last statement is lowered `inherit`: the eval site's context is a
+  # run-time fact), and an `eval q{ delete $h{fh} };` drops the element all
+  # the same -- the wrap returns the value it flushed, so it serves the tail
+  # too (k-09, #5255).
+  my $drop = $x->{drop_value} && !$mod && Pl::Passes::enabled('fh-scope-close')
+    && ($vctx eq ':void' || ($self->eval_mode && "$vctx" eq 'inherit'));
+  my $form = $self->_lower_expr($expr, $stmt,
+    ($drop && $x->{drop_value} eq 'list' && $vctx eq ':void') ? 1 : $vctx);
+  $form = ['p-flush-dropped-value', $form] if $drop;
   # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
   # (task #1249(7)) — rewritten IN the lowered form, so every context wrap the
   # ordinary lowering put around the call is preserved exactly.
@@ -16314,7 +16319,9 @@ sub _fh_drop_flush_var {
   my ($self, $stmt, $vi) = @_;
   my $sym = _fh_drop_stmt_sym($stmt) // return undef;
   my $name = $sym->content;
-  return undef if substr($name, 0, 1) ne '$';
+  # A scalar, or (#5354) a whole HASH / ARRAY dropped by `undef` / `= ()`:
+  # the flush walks its direct elements (%p-flush-dropped-value).
+  return undef if $name !~ /^[\$\@%]/ || $name eq '@_';
   return undef if !($vi && Pl::Passes::enabled('fh-scope-close'));
   return cl_sym($name) if $vi->{$name};
   # A lexical this unit does not declare -- a file-level (or enclosing sub's)
@@ -16390,6 +16397,14 @@ sub _fh_drop_stmt_sym {
   if (@k == 3 && $k[0]->isa('PPI::Token::Symbol')
       && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '='
       && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
+    return $k[0];
+  }
+  # `%h = ();' / `@a = ();' -- a container CLEARED (#5354): the flush reads
+  # the old contents (one level, +p-flush-walk-limit+ elements) before the
+  # store; `undef %h;' / `undef @a;' are the first shape above.
+  if (@k == 3 && $k[0]->isa('PPI::Token::Symbol') && $k[0]->content =~ /^[\@%]/
+      && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '='
+      && $k[2]->isa('PPI::Structure::List') && !$k[2]->schildren) {
     return $k[0];
   }
   return undef;

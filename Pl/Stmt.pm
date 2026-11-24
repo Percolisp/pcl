@@ -949,20 +949,29 @@ sub expr_shape {
       if defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--');
   }
   $r{bareword} = $expr->[0] if @$expr == 1 && $expr->[0]->isa('PPI::Token::Word');
-  $r{drop_delete} = 1 if drop_delete_shape($expr);
+  $r{drop_value} = drop_value_shape($expr);
   return \%r;
 }
 
-# `delete $h{K}' / `delete $r->{K}' / `delete $a[I]' / `delete $r->[I]', the
-# parenthesised spelling too: an expression that DROPS one element of a named
-# aggregate or of a scalar's referent (task #4794 shape 4: the drop flush).
-# A slice, a chain, `delete local' and any other container are not this shape.
-sub drop_delete_shape {
+# An expression whose VALUE is what it DROPS from a container (the drop flush,
+# ir-spec §6.5b): 1, 'list' (the dropped values are its LIST value), or 0.
+#   `delete $h{K}' / `delete $r->{K}' / `delete $a[I]' / `delete $r->[I]', the
+#     parenthesised spelling too (task #4794 shape 4) -- a slice, a chain,
+#     `delete local' and any other container are not this shape;
+#   `pop @a' / `shift @a' / `pop' / `shift' (@_ or @ARGV) and `pop(@a)' --
+#     the element taken off (#5354);
+#   `splice(@a, ...)' / `splice @a, ...' -- the elements removed: 'list'.
+sub drop_value_shape {
   my ($expr) = @_;
-  return 0 unless @$expr >= 2 && $expr->[0]->isa('PPI::Token::Word')
-    && $expr->[0]->content eq 'delete';
+  return 0 unless @$expr >= 1 && $expr->[0]->isa('PPI::Token::Word');
+  my $w = $expr->[0]->content;
   my @t = @$expr[1 .. $#$expr];
   @t = flat_children($t[0]) if @t == 1 && $t[0]->isa('PPI::Structure::List');
+  my $arr = @t && $t[0]->isa('PPI::Token::Symbol') && $t[0]->content =~ /^\@/;
+  return (!@t || (@t == 1 && $arr)) ? 1 : 0 if $w eq 'pop' || $w eq 'shift';
+  return ($arr && (@t == 1 || ($t[1]->isa('PPI::Token::Operator') && $t[1]->content eq ',')))
+    ? 'list' : 0 if $w eq 'splice';
+  return 0 unless @$expr >= 2 && $w eq 'delete';
   return 0 unless @t >= 2 && $t[0]->isa('PPI::Token::Symbol') && $t[0]->content =~ /^\$/;
   return 1 if @t == 2 && $t[1]->isa('PPI::Structure::Subscript');
   return (@t == 3 && $t[1]->isa('PPI::Token::Operator') && $t[1]->content eq '->'

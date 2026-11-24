@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -338,4 +338,34 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$evs' '$dir");
     is($pcl_out, $perl, '#5255: undef / = undef inside a string eval of the SITE\'s lexical flushes the escaped handle');
+}
+
+# 13. #5354 (s543m): a CONTAINER cleared or shrunk drops the handles it held:
+# `%h = ()` / `undef %h` / `@a = ()` / `undef @a` read the old contents (one
+# level, +p-flush-walk-limit+ elements) before the store; a void `pop` /
+# `shift` / `splice` flushes the element(s) it takes off (its value, read
+# once; a void splice is lowered in list context).  l m: the values are
+# unchanged.  NOT taken (#5354's residue): an element overwritten with
+# `undef`, a sub's tail `delete`.  INVERSE: the base 9fc6583b printed 0 for
+# a .. j.
+my $cnt = write_prog('cnt.pl', <<'PL');
+no warnings;
+my $f = "$ARGV[0]/cnt.out";
+sub sz { my $s = -s $f; unlink $f; defined $s ? $s : "none" }
+{ my %h; { open my $t, ">", $f or die; print $t "hdata"; $h{fh} = $t; } %h = (); print "a ", sz(), "\n"; }
+{ my %h; { open my $t, ">", $f or die; print $t "hdata"; $h{fh} = $t; } undef %h; print "b ", sz(), "\n"; }
+{ my @a; { open my $t, ">", $f or die; print $t "hdata"; $a[0] = $t; } @a = (); print "c ", sz(), "\n"; }
+{ my @a; { open my $t, ">", $f or die; print $t "hdata"; $a[0] = $t; } undef @a; print "d ", sz(), "\n"; }
+{ my @a; { open my $t, ">", $f or die; print $t "hdata"; push @a, 1, $t; } splice(@a, 0, 2); print "e ", sz(), "\n"; }
+{ my @a; { open my $t, ">", $f or die; print $t "hdata"; $a[0] = $t; } pop @a; print "f ", sz(), "\n"; }
+{ my @a; { open my $t, ">", $f or die; print $t "hdata"; $a[0] = $t; } shift @a; print "g ", sz(), "\n"; }
+{ my @a; { open my $t, ">", $f or die; print $t "hdata"; @a = ($t); } splice @a, 0; print "h ", sz(), "\n"; }
+our %G; { open my $t, ">", $f or die; print $t "hdata"; $G{fh} = $t; } %G = (); print "i ", sz(), "\n";
+sub dropper { my @q = @_; { open my $t, ">", $f or die; print $t "hdata"; push @q, $t; } shift @q for 1 .. 2; return scalar @q } print "j ", dropper(1), " ", sz(), "\n";
+{ my %h = (a => 1, b => 2); %h = (); print "k ", scalar(keys %h), "\n"; my @a = (1, 2, 3); my $p = pop @a; my $s = shift @a; my @r = splice(@a, 0); print "l $p $s @r ", scalar(@a), "\n"; }
+{ my @a = (5, 6, 7); sub tailpop { pop @{$_[0]} } print "m ", tailpop(\@a), "\n"; }
+PL
+{
+    my ($perl, $pcl_out) = run_both("$cnt' '$dir");
+    is($pcl_out, $perl, '#5354: a cleared / shrunk container flushes the escaped handles it held');
 }
