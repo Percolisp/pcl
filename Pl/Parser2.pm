@@ -15126,6 +15126,11 @@ sub _fallback_stmt {
 sub _lower_local {
   my ($self, $stmt, $rest, $vi, $tail_ctx, $rec) = @_;
   $rec //= Pl::Stmt::classify($stmt);
+  # The plan is told when the statement ENDS a valued block (nothing but
+  # empty statements after it): a MODIFIED `local` then has a value in both
+  # arms (#5334, _local_valued_cond); everywhere else its emission is fixed.
+  local $self->{_local_valued} = (defined $tail_ctx
+    && !grep { !(ref $_ && $_->isa('PPI::Statement::Null')) } @$rest) ? 1 : 0;
   my $plan = $self->_local_plan($stmt, $rec);
   if (!$plan) {
     my ($text, $opens) = $self->_fallback_stmt_capture($stmt);
@@ -15168,7 +15173,11 @@ sub _lower_local {
     # A value by context (_local_ctx_value) reads a SUB's caller context under
     # the body's :void regime, as every implicit-return leaf does.
     my $v = $plan->{value};
-    push @rest_forms, _is_local_ctx_value($v) ? $self->_restore_caller_wa($tail_ctx, $v) : $v;
+    ($v) = $self->_restore_caller_wa($tail_ctx, $v) if _is_local_ctx_value($v);
+    # under an if / unless modifier: the target's value when the condition
+    # held, the condition's own value when it did not (#5334)
+    $v = ['if', @{ $plan->{value_if} }[0], $v, $plan->{value_if}[1]] if $plan->{value_if};
+    push @rest_forms, $v;
   }
   return _local_nest($plan, \@rest_forms);
 }
@@ -15494,8 +15503,15 @@ sub _local_plan_elem {
   # perl's order -- into a temporary (the element macros read their container
   # more than once); a condition is then read more than once too.
   my $expr = $rec->{ebase} eq 'expr';
-  my (@opens, @inner, $test, $value);
-  if ($mod ne '') {
+  my (@opens, @inner, $test, $value, $craw);
+  if ($mod ne '' && $self->{_local_valued}) {
+    # a valued tail (#5334): the raw condition, then the test over it
+    my $ct = $self->_local_tmp('pcl-local-cond-');
+    my ($raw, $raw_form, $ctest) = $self->_local_valued_cond($mod, $rec->{cond}, $stmt, $ct)
+      or die "PCL internal: no valued condition for a modified `local` element: " . $stmt->content . "\n";
+    push @opens, _local_let1($raw, $raw_form), _local_let1($ct, $ctest);
+    ($test, $craw) = ($ct, $raw);
+  } elsif ($mod ne '') {
     $test = $self->_local_cond_form($mod, $rec->{cond}, $stmt);
     if (@keys > 1 || $slice || $expr) {
       my $ct = $self->_local_tmp('pcl-local-cond-');
@@ -15503,6 +15519,7 @@ sub _local_plan_elem {
       $test = $ct;
     }
   }
+  my $valued_mod = ($mod eq '' || defined $craw);
   my $bind_base = sub {
     return unless $rec->{base_expr} || $expr;
     my $bt = $self->_local_tmp('pcl-local-base-');
@@ -15518,7 +15535,7 @@ sub _local_plan_elem {
       $bind_base->();
     }
     push @opens, _local_open([$mi, $cl, $keys[0], $init], $test);
-    $value = _local_elem_place($open, $cl, \@keys) if $mod eq '';
+    $value = _local_elem_place($open, $cl, \@keys) if $valued_mod;
     # a PARENTHESISED element's assignment is a list assignment (#1339): as a
     # valued tail in scalar context its value is the right side's count, 1 (#5253)
     $value = _local_ctx_value($value, 1) if defined $value && $rec->{paren};
@@ -15532,7 +15549,7 @@ sub _local_plan_elem {
       # the list `local` items' assignment: its value is perl's by context
       # (the element in list context, the right side's count in scalar)
       push @inner, _local_list_assign([{ place => _local_elem_place($open, $cl, \@keys) }],
-                                      $tmp, $test);
+                                      $tmp, $test, $craw);
     } else {
       my $sl = [($open eq '{' ? 'p-hslice' : 'p-aslice'), $cl, @keys];
       my $assign = _local_list_ctx(['p-setf', $sl, $tmp]);
@@ -15542,17 +15559,17 @@ sub _local_plan_elem {
       # value -- the slice's elements in list context, the right side's count
       # in scalar (#5253: it was the right side itself, `(5,6,7)` / ARRAY(0x1)).
       $value = _local_ctx_value($sl, ['make-p-box', ['length', ['p-flatten-args', ['list', 'list', $tmp]]]])
-        if $mod eq '';
+        if $valued_mod;
     }
   } else {
     $bind_base->() if @keys > 1 || $expr;
     push @opens, _local_open([$macros[$_], $cl, $keys[$_]], $test) for 0 .. $#keys;
     # A bare `local ELEM` / `local SLICE` ending a valued block is the fresh
     # element(s) (#5331 with #2742's element value, s543l): one undef, a
-    # slice's undefs by context (the list, else the last).  Not under a
-    # modifier (#5334), and not over a cast BLOCK the plan left unbound
-    # (`local ${ f() }{k}`: the value form would evaluate it again).
-    if ($mod eq '' && !($rec->{base_expr} && !$expr && @keys == 1)) {
+    # slice's undefs by context (the list, else the last).  Under a modifier
+    # only at a valued tail (#5334); not over a cast BLOCK the plan left
+    # unbound (`local ${ f() }{k}`: the value form would evaluate it again).
+    if ($valued_mod && !($rec->{base_expr} && !$expr && @keys == 1)) {
       if (!$slice && @keys == 1) {
         $value = _local_elem_place($open, $cl, \@keys);
       } else {
@@ -15561,7 +15578,9 @@ sub _local_plan_elem {
       }
     }
   }
-  return { opens => \@opens, inner => \@inner, value => $value };
+  # (a valued tail's untaken modifier: the condition's own value, #5334)
+  return { opens => \@opens, inner => \@inner, value => $value,
+           (defined $craw && defined $value ? (value_if => [$test, $craw]) : ()) };
 }
 
 # A valued tail's value by the block's context: LIST in list context, else
@@ -15730,6 +15749,8 @@ sub _local_plan_items {
   }
   my %st = (bindings => [], let_star => 0,
             ctmp => ($mod ne '' ? $self->_local_tmp('pcl-local-cond-') : undef));
+  # A modified `local` ending a valued block (#5334): the raw condition.
+  my ($craw, $craw_form, $ctest) = $self->_local_valued_cond($mod, $rec->{cond}, $stmt, $st{ctmp});
   if ($init_idx >= 0 && $solo) {
     $self->_local_solo_binding(\%st, $items[0], [@$parts[$init_idx + 1 .. $#$parts]], $mod, $stmt);
   } else {
@@ -15750,7 +15771,8 @@ sub _local_plan_items {
     $st{let_star} = 1;
   }
   if (defined $st{ctmp}) {
-    unshift @{ $st{bindings} }, [$st{ctmp}, $self->_local_cond_form($mod, $rec->{cond}, $stmt), 1];
+    unshift @{ $st{bindings} }, [$st{ctmp}, $ctest // $self->_local_cond_form($mod, $rec->{cond}, $stmt), 1];
+    unshift @{ $st{bindings} }, [$craw, $craw_form, 1] if defined $craw;
     $st{let_star} = 1;
   }
   my @opens = $self->_local_binding_opens(\%st, $stmt, $mod, ($rhs_tmp || $st{let_star}) ? 'let*' : 'let');
@@ -15761,22 +15783,41 @@ sub _local_plan_items {
   push @opens, _local_glob_opens(\@items, $rhs_tmp, $st{ctmp});
   my @inner;
   if ($rhs_tmp) {
-    push @inner, _local_list_assign(\@items, $rhs_tmp, $mod ne '' ? $st{ctmp} : undef)
+    push @inner, _local_list_assign(\@items, $rhs_tmp, $mod ne '' ? $st{ctmp} : undef, $craw)
       if grep { $_->{kind} ne 'glob' } @items;
   } elsif ($init_idx >= 0 && $solo && _local_sigil($v0) =~ /^[\@%]$/) {
-    push @inner, $v0;   # `local @a = L` as a sub's last statement returns the list
+    # `local @a = L` as a sub's last statement returns the list
+    push @inner, defined $craw ? ['if', $st{ctmp}, $v0, $craw] : $v0;
   }
   # `local $x = V` as a block's last statement: its value is $x (#4443).
-  # (Not under a modifier: a false one makes the statement's value the
-  # condition's, which is the expression statement's rule, not this.)
-  my $value = ($init_idx >= 0 && $solo && $mod eq '' && ($items[0]{kind} // '') eq 'var'
+  # Under a modifier only at a valued tail (#5334): there the untaken arm is
+  # the CONDITION's value (_local_valued_cond).
+  my $value = ($init_idx >= 0 && $solo && ($mod eq '' || defined $craw)
+               && ($items[0]{kind} // '') eq 'var'
                && _local_sigil($v0) eq '$') ? $items[0]{place} : undef;
   # A bare `local $x` / `local ($x)` / `local @a` (no assignment) is the
   # localized variable too (#2742: `sub f { local $g }` returned NO element in
   # list context, perl one undef); a list `local ($x, $y)` its targets by
   # context -- the list, or the last one in scalar context (the comma's rule).
-  $value //= $self->_local_bare_value(\@items, $rec, $stmt) if $init_idx < 0 && $mod eq '';
-  return { opens => \@opens, inner => \@inner, value => $value };
+  $value //= $self->_local_bare_value(\@items, $rec, $stmt) if $init_idx < 0 && ($mod eq '' || defined $craw);
+  return { opens => \@opens, inner => \@inner, value => $value,
+           (defined $craw && defined $value ? (value_if => [$st{ctmp}, $craw]) : ()) };
+}
+
+# A modified `local` that ENDS A VALUED BLOCK (#5334): an untaken if / unless
+# modifier makes the statement's value the CONDITION's own value -- the
+# expression statement's rule (_modifier_ret_form, #920) -- so there, and
+# only there, the condition is evaluated ONCE into a temporary of its own
+# (named after the plan's condition temporary CTMP: no other temporary is
+# renumbered) and the test reads it.  Returns (RAW-TMP, RAW-FORM,
+# TEST-OVER-RAW), or () -- every other modified `local` keeps its emission
+# byte for byte.  $self->{_local_valued} is _lower_local's fact.
+sub _local_valued_cond {
+  my ($self, $mod, $cond, $stmt, $ctmp) = @_;
+  return () unless $self->{_local_valued} && defined $ctmp && $mod =~ /^(?:if|unless)$/;
+  (my $raw = $ctmp) =~ s/-cond-/-cval-/ or die "PCL internal: a `local` condition temporary $ctmp\n";
+  my $t = ['p-true-p', $raw];
+  return ($raw, $self->_lower_expr($cond, $stmt, undef, 1), $mod eq 'unless' ? ['not', $t] : $t);
 }
 
 # The VALUE of a bare `local TARGETS` (no assignment, no modifier) that ends a
@@ -15928,13 +15969,15 @@ sub _local_env_init {
 # solo deref target takes its symbolic assignment (p-list-= reads its LHS
 # syntactically and cannot take a resolver CALL, task #700).
 sub _local_list_assign {
-  my ($items, $rhs_tmp, $ctmp) = @_;
+  my ($items, $rhs_tmp, $ctmp, $craw) = @_;
   my $assign = ['p-list-=', ['vector', map { $_->{place} } @$items], $rhs_tmp];
   if (@$items == 1 && ($items->[0]{kind} // '') eq 'deref') {
     my $sig = substr($items->[0]{macro}, length('p-local-deref-'), 1);
     my $fn = $sig eq 'h' ? 'p-hash-deref-=' : $sig eq 'a' ? 'p-array-deref-=' : 'p-setf';
     $assign = [$fn, $items->[0]{place}, $rhs_tmp];
   }
+  # a valued tail's untaken modifier: the condition's own value (#5334)
+  return ['if', $ctmp, $assign, $craw] if defined $craw;
   return defined $ctmp ? ['when', $ctmp, $assign] : $assign;
 }
 
