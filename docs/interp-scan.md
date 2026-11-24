@@ -221,14 +221,14 @@ Cache note for every wiring commit that changes emission: bump
 
 ## Residue after consumer 1 (s382f)
 
-- **`postderef_qq` is off in pattern mode** (`_gen_interp_regex_pattern` does
-  not pass it): the regex path never supported `->@*` and still does not, so
-  `/$r->@*/` leaves the arrow literal exactly as before.  The dq side computes
-  it lexically from the token (`_postderef_qq_active_for`); the pattern side
-  would need the NODE, not just the pattern text, to do the same.  Unchanged
-  behavior, recorded so it is a decision and not an oversight.  **Probed
-  (s543k): perl DOES interpolate it in a pattern** (`use v5.24; my $r =
-  \"b"; "abc" =~ s/$r->$*/X/` substitutes) -- a silent wrong, task #5351.
+- **`postderef_qq` in pattern mode: DONE (s543m, #5351).**  Perl interpolates
+  a postfix deref in a pattern under the feature (`use v5.24; my $r = \"b";
+  "abc" =~ s/$r->$*/X/` substitutes).  Both pattern lowerings (the plain
+  `_gen_interp_regex_pattern` and the `\Q` path `_regex_case_mod_pattern`)
+  take their events from ONE call, `ExprToCL::_pattern_events`, which passes
+  `postderef_qq => postderef_qq_active_for(<the op's token>)` to
+  `scan(in_regex => 1)`; `_interp_ref_form` joins a `->@` form with `$"`.
+  Without the feature the arrow stays pattern text, as before.
 - **The feature reader is ONE function (s543k, #5252)**:
   `StringInterpolation::postderef_qq_active_for($tok)`.  The s/// REPLACEMENT
   is compiled through a manufactured `"…"` token with no position, so

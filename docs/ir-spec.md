@@ -156,6 +156,28 @@ itself carries no host-specific semantics beyond them.
   in a LATER top-level section of another package is spelled in the
   declaring package (#475: `our $t = "m"; package A; $t .= "A"` appends to
   `$main::t`) — the binder's spans, kind `our`.
+  **A one-token Prototype / signature is a use of a name only where one of
+  its DEFAULTS reads it (normative, s543m, #5310).**  PPI hands a prototype
+  and a same-line signature over as ONE token; every rename pass (the
+  requalifier, the span and capture renamers) offers it to its scope
+  question only when `Parser2::_proto_defaults_renamed` finds the name in a
+  default -- never because the name is a substring of its text (`(bar)`
+  names no `$r`; in `($a, $b = $a)` both `$a` are the parameter) -- and a
+  name read ONLY in a default is a requalifier candidate (the binder's refs
+  at the token, `Binder::use_canons`).  Example: `{ package Q; my $r =
+  sub(bar) {}; }` transpiles (was "the binder holds no record of $r in
+  `(bar)`"); `eval q{package Q10; use feature 'signatures'; sub n ($x, $y =
+  $g) { $x + $y } n(4)}` reads `$Q10::g`.
+  **In a region the by-name `our` registry yields to the binder (normative,
+  s543m, #5374).**  ExprToCL spells a bare name the Environment registered
+  as an `our` of the current package `Pkg::NAME`; where the READER's package
+  is not the current one (a region: a block's, an eval text's leading
+  `package X;`) only a token the binder resolves to an `our` binding (the
+  `our` statement's own declarator, a kept `$a`/`$b`) takes it -- every
+  other use of the alias was requalified token by token above, and a lexical
+  of that name is the lexical.  Example: `sub run { package Q; our $w = 1;
+  my $w = 4; $w + 1 }` returns 5 (was 2), and so does the same text as an
+  eval.
 
 ## 2. The data model
 
@@ -1852,8 +1874,12 @@ these rules (every one probed on perl 5.40.3):
   pseudo-feature `postderef_qq` -- the eval text's document level answers it,
   its own `use` / `no feature` still decide from where they stand.  Example:
   `use v5.24; my $r = [1,2]; (my $x = "mAn") =~ s/A/$r->@*/` gives `m1 2n`
-  (was `mARRAY(0x…)->@*n`).  The PATTERN side does not interpolate a postfix
-  deref (#5351: perl does).
+  (was `mARRAY(0x…)->@*n`).  **A PATTERN interpolates a postfix deref under
+  the same feature (normative, s543m, #5351)**: one scan for both pattern
+  lowerings (`ExprToCL::_pattern_events`, the plain and the `\Q` one) asks
+  the reader at the m// / s/// / qr// token; a `->@` form is a list joined
+  with `$"`.  Example: `use v5.24; my $r = \"b"; (my $y = "abc") =~
+  s/$r->$*/X/` gives `aXc`; without the feature the arrow stays pattern text.
 - A DEREF base continues the same way: `"$$r[1]"` is `$r->[1]`, `"@$r[0,1]"`
   is a slice, `"$$h{k}"` an element, `"${$r}[1]"` is `$r->[1]`.
 - **In CODE the brace spelling of a NAME is the variable, an all-digit name
@@ -3310,7 +3336,13 @@ flattens before the frame sees it.
 Notes a translator needs:
 - **A plain box costs nothing** — the unboxed raw value *is* the copy.  Only a
   reference/blessed/dualvar box allocates, which is exactly `pp_leavesub`'s
-  own per-SV `mortalcopy`.
+  own per-SV `mortalcopy`.  **"A reference box" includes a FILEHANDLE's
+  (normative, s543m, #5350)**: a payload only its box makes a reference -- a
+  hash, an array vector, a function, a stream / socket / dirhandle (#1308)
+  -- leaves either frame exit (`p-return-value`, `%p-leavesub-scalar`: ONE
+  predicate, `%p-ref-payload-p`) as a box, and `scalar()` keeps it; the raw
+  stream is the glob VALUE.  Example: `open my $fh, ...; sub f { $fh }
+  ref(f())` and `ref(eval q{$fh})` are `GLOB` (were `""`).
 - **A vector's SHAPE is semantic and the copy preserves it.**  An *array* is
   adjustable with a fill pointer and its slots are the values; a *list temp*
   is the simple vector the emitter builds for a comma list, and its aggregate
@@ -4228,7 +4260,14 @@ never deeper, never through a tie.  `delete $h{K};` / `delete $r->{K};` as a
 whole void statement is the same flush on the delete's own value,
 `(p-flush-dropped-value (p-delete %h "K"))`, read once -- in eval text also
 as the text's LAST statement (lowered `inherit`, the eval site's context
-being a run-time fact; the wrap returns the value it flushed: s543k, #5255).  The inline gate costs
+being a run-time fact; the wrap returns the value it flushed: s543k, #5255).
+**A container cleared or shrunk is a drop too (normative, s543m, #5354)**:
+`%h = ();` / `@a = ();` / `undef %h;` / `undef @a;` flush the OLD contents
+before the store, `(p-flush-dropped-handle %h)` (the same one-level, 64-element
+walk), and a void `pop @a;` / `shift;` / `splice(@a, ...);` takes the wrap on
+its own value (`Pl::Stmt::drop_value_shape`; a void splice is lowered in list
+context so its value is every removed element).  Not covered: an element
+overwritten with `undef` and a sub's tail `delete` (#5405).  The inline gate costs
 one `typep` of five types at an `undef` statement; a 10-key object 0.1 µs, a
 10,000-key one is bounded by the 64.
 Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5
@@ -5767,8 +5806,13 @@ leading zero, plus `&`, `` ` ``, `'`, `+` — *even for a group the last match
 never had* (`${"7"} = 1` dies with no match at all, probed); `${"0"}` (the
 program name) and `${"007"}` (an ordinary variable — a capture name has no
 leading zero) are writable.  A NUMERIC-valued name (`my $n = 5; ${$n}`) is
-perl's same rule, but PCL cannot implement it while the box model drops the
-reference wrapper on a container read — task #551 has the measurement.
+perl's same rule.  **A RAW number is a symbolic name (normative, s543m,
+#5353)**: a hard reference never reaches `p-cast-$` unboxed, so a raw number
+(a literal, an arithmetic result, a sub's value, a raw-slot lexical) reads and
+writes the variable its STRING names -- `${ +1 }` is `$1`, `${ +1 } = 5` dies
+read-only.  A BOXED number stays the value: the box model drops the reference
+wrapper on a container read, so it is indistinguishable from a referent box
+-- task #551 has the measurement.
 
 **A COMPUTED MAGIC GETS A CANONICAL BOX** (normative, s450t / task #561).  A
 magic scalar whose *emission* is an ACCESSOR CALL rather than a variable

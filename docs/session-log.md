@@ -132,6 +132,26 @@ The PPI / parser queue was the parser program (#3694) on both halves: the PPI ha
 
 **Gate at the end:** 346 files / 11,660 rows PASS; sweep 18,761 +0; EVERYDAY 116 of 122; CI green on every push.
 
+## Session s543m (Opus agent, 2026-11-24) -- a regression and six live silent wrongs around the string eval and its neighbours: a one-token Prototype offered by its text (#5310), the by-name `our` registry in a region (#5374), a filehandle out of a frame (#5350), a raw number's symbolic deref (#5353), postderef_qq in a pattern (#5351), the drop flush of a cleared / shrunk container (#5354, in part); #5352 measured and stopped; #5400-#5405 filed; generation v2-16200
+
+Base = main `9fc6583b` (code MAIN-READY-110 `26d0dac4`, v2-16000), its `git archive` in `scratch/s543m/base`; rebased onto `c5c87f33` (the round's records: no code) before the end bars.  Beside s543l and, from 22:2x, s543n.
+
+**#5310 (Pl/).**  Every rename pass offered a Token::Prototype to its scope question when the name was a SUBSTRING of its text (three sites: the requalifier's `_rewrite_var_uses`, the span and container span rewriters); the requalifier's question died on a token the binder holds no use of.  ONE test now, `_proto_defaults_renamed` (the text the default rename would store, or undef); a name read only in a default is a requalifier candidate (`Binder::use_canons`: `eval q{package Q10; sub n ($x, $y = $g) ...}` read $main::g on the base).  The reviewing session's -110 note: the eval faces passed there only through s543k's #5272 filter -- a name homed AWAY from the eval's package (the text's region `our`, a region global) still died on the base (inverse log).  29 probe lines: base 11, tree 27 (#5401, a documented refusal).  Guard requalify-binder-01.t 13-14.
+
+**#5374 (Pl/).**  The measurement: the binder answers `my` at the lexical's use and the requalifier leaves it; ExprToCL's by-name `our` arm (`Environment::is_our_variable`) rewrote it at lowering -- wherever the reader's package is not the current one, i.e. an eval text's leading `package` AND a sub-body / in-place region at file level (`sub run { package Q; our $w = 1; my $w = 4; $w + 1 }` was 2).  In a region the arm now asks the binder (`_our_alias_spelled_here`; `Binder::held`, the non-rebuilding half of `_binder_for`); outside one it is unchanged (one symbol).  `$w++` was right: a lexical's incf never reaches the arm.  25 probe lines: base 9, tree 23 (#328's refusal).  Guard eval-capture-01.t `om_*` (12).
+
+**#5352 (measured, NOT fixed; FLAGGED).**  An instrumented snapshot over the 2,047-file wide list: 1,432 identity decisions in 466 files; the brief's cure (mangle where an eval word that does not see the declaration may name it) moves 105 cells in 40 files (16 test programs, 24 modules read as programs) -- every one through a DYNAMIC operand; a literal-only rule moves 0.  The symbolic face (`${"main::x"}` in a sub above, no eval) is #2642's.  Stopped per the brief.
+
+**#5350 (cl/).**  The measurement: p-eval's / a sub's value for a handle-holding box is the RAW fd-stream -- PCL's glob VALUE, ref "".  ONE predicate `%p-ref-payload-p` (hash, vector, function, + `%p-handle-payload-p`) for both frame exits (p-return-value, %p-leavesub-scalar), and p-scalar keeps a handle's box.  12 probe lines: base 8, tree 10 (#5400: `fileno(f())` / `readline(f())` read the bareword `f`).  Guard return-copy-01.t row 10.
+
+**#5353 (cl/).**  The `(t inner)` arm keeps a number by design (#505 / #551: a boxed number is a referent box out of a container); a RAW number never is a hard ref -- it is now the symbolic name of its string, read and write (`${ +1 } = 5` dies read-only).  A boxed `${ $one }` stays #551.  12 probe lines: base 4, tree 11.  Guard symref-package-01.t row 20.
+
+**#5351 (Pl/).**  `_pattern_events`: one scan for both pattern lowerings, `postderef_qq` asked at the op's token; a `->@` form joins with `$"`.  11 probe lines: base 0, tree 10 (#5402, qr's `/u`).  `-raw-slot` / `none` identical.  Guard regex-interp-01.t `pd_*` (10).
+
+**#5354 (Pl/, in part).**  Census of the wide list: `%h|@a = ()` 396 statements / 144 files, `undef %h|@a` 37 / 28, `$h{K} = undef` 135 / 38, void pop / shift 175 / 72, splice 89 / 37, a block-tail `delete` 106 / 75.  Taken: the container clears (`_fh_drop_stmt_sym`) and the value-returning drops (`Pl::Stmt::drop_value_shape`, pop / shift / splice beside delete).  Not taken: `ELEM = undef` and the sub tail (#5405).  15 probe lines: base 3, tree 13.  Guard fh-collect-01.t row 13.
+
+**Bars** BARS_LINE
+
 ## Session s543o (Opus agent, 2026-11-27) -- THE ROSETTA INSTRUMENT: `tools/rosetta-corpus` rebuilds the held-out corpus from the pinned commit and checks it against a manifest of names and digests; `tools/everyday-smoke.pl` runs it as a NAMED corpus (`ROSETTA: N of M`) with the cause table as its baseline and a history of its own; the corpus is 650 (two broken probes out); #5440 filed; tooling only
 
 The brief: `briefs-and-rules-for-claude-subagents/s543/s543o-prompt.md` (docs/rosetta-plan.md step 2); base = main `0be2848a` (CODE MAIN-READY-111 `0ab08642`, v2-16300).  Beside it: s543m and s543l finishing.  No Pl/ cl/ lib/ change, no generation.
