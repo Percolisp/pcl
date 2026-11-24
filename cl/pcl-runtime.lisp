@@ -28858,8 +28858,15 @@ would consume, so it dies naming the stream (rule 12)."
                 ;; rather than round the relay thread, which would let the
                 ;; statements after the kill run first.
                 (progn (%p-sig-deliver sig) (incf n))
+                ;; A signal to THIS process runs its Perl handler before
+                ;; pthread_kill returns, i.e. INSIDE this form: a handler that
+                ;; DIES is the program's die, never kill's failure (#5380, s543l:
+                ;; `local $SIG{HUP} = sub { die }; kill HUP => $$` went on as if
+                ;; the handler had returned) -- the #2062 rule, re-signalled.
                 (handler-case (progn (%p-kill-one p sig) (incf n))
-                  (error () (%pcl-save-errno))))))
+                  (error (c)
+                    (when (%p-perl-die-p c) (error c))
+                    (%pcl-save-errno))))))
     n))
 
 (defun %p-kill-one (pid sig)

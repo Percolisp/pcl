@@ -37,7 +37,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 23;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -206,7 +206,25 @@ print "4 $@"; kill USR1 => $$; kill HUP => $$; select(undef, undef, undef, 0.2);
 kill USR1 => $$; print "6 ignored\n"; $SIG{USR1} = "DEFAULT"; kill USR1 => $$; sleep 1; print "NOT REACHED\n";
 PERL
 
-# 4-5: sleep and alarm.
+# #5380 (s543l): a handler that DIES on a self-kill of a signal SBCL runs
+# directly (HUP INT TERM WINCH) unwinds to the enclosing eval with its $@ --
+# it ran inside kill's own error handler, which took the die for kill's
+# failure and went on (USR1, relayed, was right: the control line); outside
+# any eval the program dies by it (exit 255).  Every die line failed on the base.
+same_as_perl('kill-die', <<'PERL', 'a handler that dies on a self-kill unwinds to the enclosing eval; outside any eval the program dies (#5380)');
+$| = 1;
+for my $s (qw(HUP INT TERM WINCH USR1)) {
+  my $r = eval { local $SIG{$s} = sub { die "died-$s\n" }; kill $s => $$; "survived" };
+  print "$s: ", ($r // "caught $@"); print "\n" if $r;
+}
+my $r = eval { my $i = eval { 1 }; local $SIG{TERM} = sub { die "outer\n" }; kill TERM => $$; "survived" };
+print "nested: ", ($r // "caught $@");
+eval { local $SIG{HUP} = sub { die "lineful" }; kill HUP => $$; 1 };
+print "line: ", ($@ =~ /^lineful at \S+ line \d+\.$/ ? "has-line" : "[$@]"), "\n";
+$SIG{HUP} = sub { die "bye\n" }; kill HUP => $$; print "NOT REACHED\n";
+PERL
+
+# 5-6: sleep and alarm.
 same_as_perl('alarm-sleep', <<'PERL', 'a handler that returns ends sleep early; one that dies leaves an eval');
 $| = 1; $SIG{ALRM} = sub { print "alrm $_[0]\n" }; alarm 1; my $s = sleep 5;
 print "sleep ", ($s <= 2 ? "early" : "late"), "\n";
@@ -218,7 +236,7 @@ same_as_perl('alarm-default', <<'PERL', 'alarm with no handler kills the process
 $| = 1; print "before\n"; alarm 1; sleep 3; print "NOT REACHED\n";
 PERL
 
-# 6-11: EXTERNAL signals, sent after "ready".
+# 7-12: EXTERNAL signals, sent after "ready".
 my $loop = '$| = 1; print "ready\n"; while (1) { select(undef, undef, undef, 0.05) }';
 same_as_perl('ext-int', $loop, 'INT with no handler: death by the signal, quietly', sig => 'INT');
 same_as_perl('ext-term', $loop, 'TERM with no handler: death by the signal (it used to EXIT 0)', sig => 'TERM');
@@ -233,7 +251,7 @@ same_as_perl('ext-h-sleep',
              '$| = 1; $SIG{HUP} = sub { print "caught HUP\n"; exit 3 }; print "ready\n"; while (1) { sleep 1 }',
              'an external HUP interrupts a sleep and runs $SIG{HUP}', sig => 'HUP');
 
-# 12-13: SIGPIPE.
+# 13-14: SIGPIPE.
 same_as_perl('pipe-default', 'print "line $_\n" for 1 .. 200000; print STDERR "reached the end\n";',
              'print into a closed pipe kills the producer by SIGPIPE (`| head -1`)', head => 1);
 same_as_perl('pipe-ignore', <<'PERL', q{with $SIG{PIPE} = "IGNORE" print returns false and $! is EPIPE}, head => 1);
@@ -242,7 +260,7 @@ for (1 .. 200000) { if (!print "line $_\n") { $n++; last } }
 exit($n && $!{EPIPE} ? 42 : 1);
 PERL
 
-# 14-15: children.
+# 15-16: children.
 # qx and a command pipe open are left out on purpose: perl lets a reaping
 # handler take THEIR child's status ($? = -1); PCL cannot (SBCL reaps a
 # run-program child before any Perl handler runs) -- docs/not-supported.md
@@ -265,7 +283,7 @@ my $pp = $$; my $k = fork; if (!$k) { kill USR1 => $pp; exit 0 } waitpid($k, 0);
 print "after external: $got\n";
 PERL
 
-# 16: the runtime-owned signal, PCL's own answer (docs/not-supported.md "%SIG").
+# 17: the runtime-owned signal, PCL's own answer (docs/not-supported.md "%SIG").
 {
     my (undef, $pcl) = prepare('usr2', '$SIG{USR2} = sub { print "x\n" }; $SIG{USR2} = sub { 1 }; print "ok\n";');
     my ($o, $e, $s) = run_one($pcl);
@@ -275,7 +293,7 @@ PERL
         or diag("stdout=[$o] status=$s stderr=[$e]");
 }
 
-# 17: ./runpcl stands in for perl: a signal death is re-raised, not exit 128+N.
+# 18: ./runpcl stands in for perl: a signal death is re-raised, not exit 128+N.
 {
     my $src = "$workdir/runpcl-term.pl";
     open(my $s, '>', $src) or die; print {$s} 'kill "TERM", $$; sleep 2; print "NOT REACHED\n";'; close $s;
@@ -283,11 +301,11 @@ PERL
     is("$st|$o", 'signal 15|', './runpcl reports a signal death as one (PCLSbcl::exit_like)');
 }
 
-# 18-22: INHERITED ignores (task #2263).  A signal ignored when the process
+# 19-23: INHERITED ignores (task #2263).  A signal ignored when the process
 # started stays ignored and reads back 'IGNORE'; any store into its slot
 # replaces the ignore.  SBCL resets INT TERM ALRM CHLD PIPE at start-up, so
 # PCL captures the dispositions BEFORE that (cl/pcl-runtime.lisp, "Boot").
-# Row 18 is CI run 36192024430's row 11: the GitHub runner is a .NET process,
+# Row 19 is CI run 36192024430's row 11: the GitHub runner is a .NET process,
 # and .NET ignores SIGPIPE for every child it starts.
 same_as_perl('inh-pipe', 'print "line $_\n" for 1 .. 200000; print STDERR "reached the end\n";',
              'SIGPIPE ignored by the parent: print into a closed pipe fails, the program runs on, "Unable to flush stdout" exits 1',
