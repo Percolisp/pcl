@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 50;
+plan tests => 51;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -949,3 +949,21 @@ unlink $path;
 PERL
    '#2081: flock locks, unlocks, blocks a contending process, and answers '
  . 'FALSE (never a silent success) on a closed handle');
+
+# #3451 (s543n): `utime ATIME, MTIME, LIST` takes a FILEHANDLE in the list --
+# a lexical, a glob, a glob ref -- as perl's futimes on its descriptor; PCL
+# stringified the handle into a file name nothing had and answered 0.  The
+# times are set through the path the handle was opened on (a closed handle is
+# EBADF; buffered output written later still moves the time, as in perl).
+# Expected = perl at test time.
+test_io('#3451: utime on a filehandle sets its file\'s times', <<'PERL');
+my $d = "/tmp/pcl_utime_fh_$$"; mkdir $d;
+open my $fh, '>', "$d/a" or die;
+print "01 ", utime(10, 20, $fh), " ", (stat "$d/a")[9], "\n";
+open(FH, '>', "$d/b") or die; print "02 glob ", utime(50, 60, *FH), " ", (stat "$d/b")[9], "\n";
+print "03 globref ", utime(70, 80, \*FH), " ", (stat "$d/b")[9], "\n";
+print "04 mixed ", utime(90, 100, $fh, "$d/b", "$d/none"), " ", (stat "$d/a")[9], " ", (stat "$d/b")[9], "\n";
+close $fh; $! = 0; print "05 closed ", utime(1, 2, $fh), " err=", ($!+0), "\n";
+open my $w, '>', "$d/f" or die; print $w "data\n"; utime(7, 8, $w); close $w; print "06 moved=", ((stat "$d/f")[9] > 100 ? 1 : 0), "\n";
+close FH; unlink glob("$d/*"); rmdir $d;
+PERL

@@ -27277,15 +27277,53 @@ would consume, so it dies naming the stream (rule 12)."
         (count 0))
     (loop for f across (p-flatten-args files) do
           (handler-case
-              (progn
-                (if (and a m)
-                    (sb-posix:utime (%p-path-string f) a m)
-                    (sb-posix:utime (%p-path-string f)))
-                (incf count))
+              (let ((path (%p-utime-target f)))
+                (when path
+                  (if (and a m)
+                      (sb-posix:utime path a m)
+                      (sb-posix:utime path))
+                  (incf count)))
             (sb-posix:syscall-error (e)
               (setf *p-stored-errno* (sb-posix:syscall-errno e)))
             (error () (%pcl-save-errno))))
     count))
+
+(defun %p-utime-target (f)
+  "The PATH utime's list element F names, or NIL with `$!' set when F is a
+   handle whose time cannot be set.  A FILEHANDLE (a lexical, a glob or a glob
+   reference; perl's MAYBE_DEREF_GV -- a bareword NAME is a path) is perl's
+   futimes(2) on its descriptor (task #3451: the handle stringified to a file
+   name nothing had, and nothing was touched).  sb-posix has no futimes, so
+   the time goes through the PATH the stream was opened on -- only while that
+   path still names the descriptor's file (stat's device and inode = fstat's):
+   a file renamed, removed or replaced since the open is not touched and that
+   is said on stderr (an effect PCL cannot take, rule 12;
+   docs/not-supported.md ns-utime-handle-path).  A closed handle is EBADF."
+  (let ((v (if (p-box-p f) (p-box-value f) f)))
+    (if (not (or (streamp v) (p-typeglob-p v) (%p-socket-p v)))
+        (%p-path-string f)
+        (let* ((s (%p-resolve-fh f))
+               (tg (and (streamp s) (%p-stream-target s))))
+          (if (not (and (sb-sys:fd-stream-p tg) (open-stream-p tg)))
+              (progn (setf *p-stored-errno* 9) nil)              ; EBADF
+              (let* ((fd (sb-sys:fd-stream-fd tg))
+                     (path (or (sb-impl::fd-stream-file tg)
+                               (sb-impl::fd-stream-name tg)))
+                     (same (and (stringp path)
+                                (ignore-errors
+                                  (let ((a (sb-posix:fstat fd))
+                                        (b (sb-posix:stat path)))
+                                    (and (= (sb-posix:stat-dev a) (sb-posix:stat-dev b))
+                                         (= (sb-posix:stat-ino a) (sb-posix:stat-ino b))))))))
+                ;; NOT flushed first: perl's futimes leaves the buffer alone,
+                ;; so a later flush moves the time on in both
+                (or (and same path)
+                    (progn
+                      (%p-announce-unsupported
+                       "utime" "a filehandle whose file was renamed, removed or replaced since its open"
+                       "its times are set through its path; nothing was touched (docs/not-supported.md ns-utime-handle-path)")
+                      (setf *p-stored-errno* 2)                  ; ENOENT
+                      nil))))))))
 
 ;;; ============================================================
 ;;; Time Functions

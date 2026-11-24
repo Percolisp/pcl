@@ -2588,6 +2588,29 @@ dropped STREAMS only.  The record gaining an fd is not enough, so it is left.
 
 ---
 
+<a id="ns-utime-handle-path"></a>
+## `utime` on a filehandle whose file was renamed or removed since its open
+
+**Perl behaviour:** a FILEHANDLE in `utime`'s list (a lexical, a glob, a glob
+reference) is futimes(2) on its descriptor, so it sets the times of the open
+file whatever has happened to its name since.
+
+**PCL behaviour (task #3451, s543n):** sb-posix has no futimes, so PCL sets
+the times through the PATH the handle was opened on -- and only while that
+path still names the descriptor's file (stat's device and inode equal
+fstat's).  A file renamed, removed or replaced since the open is not touched:
+the element counts as a failure (`$!` ENOENT) and `PCL: utime: a filehandle
+whose file was renamed, removed or replaced since its open is not
+implemented` is said on stderr once.  Every other answer is perl's (the
+count, a closed handle's EBADF, a later flush moving the time on).  The full
+fix is a foreign call (`futimens(fd, times)` on Linux and macOS 10.13+; the
+`timespec` pair with `UTIME_NOW` for `utime undef, undef`), a platform change
+that ships only with the install matrix and a macOS leg.
+
+**Owner:** #3451.
+
+---
+
 <a id="ns-reopen-through-copy"></a>
 ## Re-opening a LEXICAL filehandle through a COPY of it re-opens the copy only
 
