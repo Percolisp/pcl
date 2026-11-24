@@ -423,10 +423,10 @@ round's one regression find, is fixed in eval text by s543k -- its file-level fa
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **STATE
-AND NEXT ACTION = the LAST section of `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`: TWO fix
-batches RUN since 2026-11-24 21:2x (the USER: three subtasks, the box is ours alone) -- s543l
-(`s543/s543l-prompt.md`: the `local` residue, v2-16100) and s543m (`s543/s543m-prompt.md`: the string-eval
-residue, v2-16200).**  Line tracking costs a median
+AND NEXT ACTION = the LAST section of `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`: THREE fix
+batches RUN since 2026-11-24 21:2x / 22:2x (the USER: three subtasks, the box is ours alone) -- s543l
+(`s543/s543l-prompt.md`: the `local` residue, v2-16100), s543m (`s543/s543m-prompt.md`: the string-eval
+residue, v2-16200) and s543n (`s543/s543n-prompt.md`: the filehandle family, v2-16300).**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
