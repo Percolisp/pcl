@@ -412,23 +412,21 @@ sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
 (95.1 %)**; **75 live IN silent wrongs** (the number `tools/task-triage.pl` prints: s543k closed six;
 #5374 filed 2026-11-24, a `my` after the text's own `our` in an eval text behind `package`);
-CPAN board (round of s543, on MAIN-READY-100, the oracle refreshed): **668
-PASS / 137 PARTIAL / 24 FAIL / 67 SKIP of 896 files, 109,191 ok / 1,190 not
-ok**; the companion in the
-same round: `--all --quick` 128 OK / 103 XDIFF / 239 DIFF of 528, the full
-run 0 NEW / 0 FIXED / 0 LOST against the edited baselines; **the ROUND s543s is NOT merged yet**: its board
-(670 PASS / 136 PARTIAL / 23 FAIL / 67 SKIP, 111,258 ok / 1,188 not ok) and `--all --quick` (130 OK / 103 XDIFF /
-237 DIFF) stand as taken on -108 with their rows edited; the six `op/decl-refs.t` rows that moved at -107 had
-PASSED ON NOTHING (keyed on #1648); its FULL companion run is taken on merged main -110 (ruling 2026-11-24).
-The round found ONE regression of -107, #5310 (the requalifier offers a Prototype / Signature token by its
-text: first in the next brief); PPI `pcl` =
+CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
+PASS / 136 PARTIAL / 23 FAIL / 67 SKIP of 896 files, 111,258 ok / 1,188 not
+ok** (five load timeouts counted by their one-file runs); the companion in the
+same round: `--all --quick` on -108 130 OK / 103 XDIFF / 237 DIFF of 528, the full
+run on -110 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST against the edited baselines (the round
+MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second run: one row flaked under load,
+#4904); six `op/decl-refs.t` rows that moved at -107 had PASSED ON NOTHING (keyed on #1648); #5310, the
+round's one regression find, is fixed in eval text by s543k -- its file-level face is left; PPI `pcl` =
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **STATE
-AND NEXT ACTION = the LAST section of `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`: the round's
-phase 2 (the full companion run) runs or is owed; the two next fix briefs `s543/s543l-prompt.md` (the `local`
-residue) and `s543/s543m-prompt.md` (#5310, the string-eval residue) are WRITTEN and launched only on the
-USER's word.**  Line tracking costs a median
+AND NEXT ACTION = the LAST section of `briefs-and-rules-for-claude-subagents/s543/PAUSE-s543.md`: TWO fix
+batches RUN since 2026-11-24 21:2x (the USER: three subtasks, the box is ours alone) -- s543l
+(`s543/s543l-prompt.md`: the `local` residue, v2-16100) and s543m (`s543/s543m-prompt.md`: the string-eval
+residue, v2-16200).**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
