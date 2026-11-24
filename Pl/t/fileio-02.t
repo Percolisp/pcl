@@ -228,20 +228,46 @@ PERL
 }
 
 # --- Test 12: alarm fires $SIG{ALRM} and interrupts a blocking readline ---
+# The idiom's contract (perlfunc alarm): the handler's die LEAVES the read and
+# the eval, $@ is the die, nothing after the read in the eval runs.  s543l
+# (#2260 / #5380, the ruling of 2026-11-24): this row used to print the
+# TARGET (`line=$line`) and passed only because the die was SWALLOWED (the
+# read went on, undef printed like perl's ""); it now asserts the control
+# flow and $@, and the target's half is the canary row 12b below (#5383).
 {
     test_io('alarm interrupts blocking readline via $SIG{ALRM}', <<'PERL');
 my ($in, $out);
 pipe $in, $out;
 my $timed_out = 0;
+my $after = 0;
 my $line = 'untouched';
 eval {
     local $SIG{ALRM} = sub { $timed_out = 1; die "abort\n" };
     alarm 1;
     $line = readline $in;   # blocks forever; SIGALRM aborts it
+    $after = 1;
     alarm 0;
 };
-print "timed_out=$timed_out line=$line\n";
+print "timed_out=$timed_out after=$after err=$@";
+print "alarm-left=", alarm(0), "\n";
 PERL
+}
+
+# --- Test 12b: CANARY (#5383, rare) -- the read's TARGET after the timeout ---
+# perl's pp_readline has set the target to "" before the handler's die, so
+# perl prints `line=[]`; PCL never reaches the assignment and the target
+# keeps its old value.  This row asserts TODAY's answer: it FAILS the day the
+# target half is fixed (option (c) of #2260: a readline that knows its
+# target) -- then put `line=` back into row 12 and delete this row.
+{
+    my $code = <<'PERL';
+my ($in, $out);
+pipe $in, $out;
+my $line = 'untouched';
+eval { local $SIG{ALRM} = sub { die "abort\n" }; alarm 1; $line = readline $in; alarm 0 };
+print "line=[$line]\n";
+PERL
+    is(run_cl($code), "line=[untouched]\n", 'CANARY #5383: a timed-out readline leaves its target as it was (perl: line=[])');
 }
 
 # --- Test 13: system() sets $? to the child's wait status ---

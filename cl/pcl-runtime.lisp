@@ -23630,7 +23630,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                (if (eq ch :eof) t nil))
            ;; A perl-level die passing through is the caller's (rule 11 — the
            ;; same re-raise %p-read-impl and %p-getc-impl do).
-           (p-exception (e) (error e))
+           ((or p-exception p-die-error) (e) (error e))  ; a perl die (#2062 #5380)
            ;; A read that FAILS reads as EOF too, and for the same reason a
            ;; closed handle does: perl answers TRUE for a handle it cannot read
            ;; from.  `eof` on a DIRECTORY handle is the case that costs — the
@@ -24311,7 +24311,7 @@ would consume, so it dies naming the stream (rule 12)."
                   (box-set buf (concatenate 'string head data)))
                 (box-set buf data)))
           got)
-      (p-exception (e) (error e))
+      ((or p-exception p-die-error) (e) (error e))  ; a perl die (#2062 #5380)
       (error () (%p-read-fail (p-get-stream fh)) *p-undef*))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -24641,6 +24641,7 @@ would consume, so it dies naming the stream (rule 12)."
                             (%p-install-fh newfh new)
                             (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername new)
                               (%p-pack-sockaddr-in addr port)))
+                        ((or p-exception p-die-error) (e) (error e))  ; a perl die (#2062 #5380)
                         (error () (%pcl-save-errno) "")))))
 
 (defmacro p-accept (newfh serverfh)
@@ -24704,6 +24705,7 @@ would consume, so it dies naming the stream (rule 12)."
           (if (and addr (not (every #'zerop addr)))
               (%p-pack-sockaddr-in addr port)
               ""))
+      ((or p-exception p-die-error) (e) (error e))  ; a perl die (#2062 #5380)
       (error () (%pcl-save-errno) ""))))
 
 (defmacro p-recv (fh buf len flags)
@@ -26146,7 +26148,7 @@ would consume, so it dies naming the stream (rule 12)."
         ;; A perl-level die passing through (a tied handle, an overload) is
         ;; the caller's, not a read failure — %p-read-impl re-raises it the
         ;; same way (rule 11).
-        (p-exception (e) (error e))
+        ((or p-exception p-die-error) (e) (error e))  ; a perl die (#2062 #5380)
         (error () (%p-read-fail stream sb-posix:ebadf))))))
 
 (defmacro p-getc (&rest args)
@@ -26215,6 +26217,11 @@ would consume, so it dies naming the stream (rule 12)."
     ;; The second value T says the nil is a FAILURE, not end of file: slurp
     ;; mode's empty first record is an EOF answer only (task #660; perl's
     ;; PerlIO_error test in do_readline).
+    ;; A PERL die passing through is the program's (#2062): above all a
+    ;; signal handler's while the read BLOCKS -- the `alarm` + `die` read
+    ;; timeout of perlfunc (#2260 / #5380, s543l: it was swallowed, the read
+    ;; went on and the eval completed with $@ empty).
+    ((or p-exception p-die-error) (e) (error e))
     (stream-error () (values (%p-read-fail stream) t))
     (error () (values (%p-read-fail stream) t))))
 
