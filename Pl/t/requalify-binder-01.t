@@ -46,7 +46,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 12;
+plan tests => 14;
 
 sub write_pl {
     my ($code) = @_;
@@ -239,3 +239,51 @@ PL
     like($err, qr/^PCL internal: the binder holds no record of \$q .*`\$z`/,
          'rule 12: the requalifier dies on a token the binder does not record');
 }
+
+# ── 13-14. #5310 (s543m): a one-token Prototype / signature (PPI's
+#    Token::Prototype: `sub(bar)`, or a signature with the feature pragma on
+#    the sub's own line, #455) is a use of a name only where one of its
+#    DEFAULTS reads it -- never because the name is a SUBSTRING of its text.
+#    The base offered `(bar)` for `$r` / `$ba` and `($a, $b = $a)` for its own
+#    parameter, and the binder (rightly) holds no use there: the transpile died
+#    "the binder holds no record of $r in `(bar)`" (a block region; in eval
+#    text behind `package` since s543h).  The BREAKING shape stays right: a
+#    default that reads a package variable of the region (`our` of the
+#    region, a global of it, an `our` of another package, a string eval) is
+#    requalified -- and a name read ONLY in a default is a candidate now
+#    (row 14's last line: the base read $main::g, 12).  Both rows FAIL on the
+#    base 9fc6583b (inverse-verified); perl 5.40.3's output.
+is(run_cl(<<'PL'), "a ok\nb ok\nc 8 7\nd 8 2\ne 7\nf 34\ng 104\nh 16\ni 8 13\nj 21\n",
+no warnings;
+our $r = 7;
+our $dm = 100;
+{ package Q; my $r = sub(bar) {}; my $ba = sub(bar) {}; print "a ok\n"; }
+package Q2 { my $r = sub(bar) {}; print "b ok\n"; }
+package main;
+{ package Q3; use feature 'signatures'; sub nm3 ($r, $s = $r) { $r + $s } print "c ", nm3(4), " $r\n"; }
+{ package Q4; use feature 'signatures'; sub nm4 ($a, $b = $a) { $a + $b } $a = 2; print "d ", nm4(4), " $a\n"; }
+{ package Q5; our $d = 3; use feature 'signatures'; sub n5 ($x, $y = $d) { $x + $y } print "e ", n5(4), "\n"; }
+{ package Q6; $d6 = 30; use feature 'signatures'; sub n6 ($x, $y = $d6) { $x + $y } print "f ", n6(4), "\n"; }
+{ package Q9; use feature 'signatures'; sub n9 ($x, $y = $dm) { $x + $y } print "g ", n9(4), "\n"; }
+{ package Q12; $h12 = 12; use feature 'signatures'; sub n12 ($x, $y = eval '$h12') { $x + $y } print "h ", n12(4), "\n"; }
+{ package Q13; our $d13 = 13; use feature 'signatures'; sub n13 ($d13, $y = $d13) { $d13 + $y } print "i ", n13(4), " $d13\n"; }
+{ package Q17; our $o17 = 17; package Q18; use feature 'signatures'; sub n18 ($x, $y = $o17) { $x + $y } print "j ", n18(4), "\n"; }
+PL
+   '#5310: a block region offers a one-token Prototype / signature only for its defaults\' uses');
+
+is(run_cl(<<'PL'), "1\n7\n8 1\n8 7\n9\n104\n13\n",
+no warnings;
+our $r = 7;
+our $dm = 100;
+$Q10::g = 9; $main::g = 8;
+for my $t (
+  q{package Q; our $r = 1; my $f = sub(bar) {}; $r},
+  q{package Q; my $f = sub(bar) {}; $r},
+  q{package Q; use feature 'signatures'; sub nm ($a, $b = $a) { $a + $b } $a = 1; nm(4) . " $a"},
+  q{package Q; use feature 'signatures'; sub nm2 ($r, $s = $r) { $r + $s } nm2(4) . " $r"},
+  q{package Q7; our $d = 5; use feature 'signatures'; sub n7 ($x, $y = $d) { $x + $y } n7(4)},
+  q{package Q8; use feature 'signatures'; sub n8 ($x, $y = $dm) { $x + $y } n8(4)},
+  q{package Q10; use feature 'signatures'; sub n10 ($x, $y = $g) { $x + $y } n10(4)},
+) { print eval($t) // "DIES $@", "\n" }
+PL
+   '#5310: the same in eval text behind `package`; a name read only in a default is requalified');

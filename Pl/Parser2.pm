@@ -825,6 +825,13 @@ sub _requalify_region {
     }
     $cand{ $_->[1] } = 1 for @{ _brace_name_refs($stmt) };
     _interp_canon($stmt, undef, undef, \%cand);   # undef $live = collect all
+    # #5310: a one-token signature's DEFAULTS are code the binder records as
+    # uses at the token -- `package Q; sub n ($x, $y = $g)` reads $Q::g, and
+    # a name read only there was never offered.  Its text is not matched.
+    for my $p (@{ $stmt->find('PPI::Token::Prototype') || [] }) {
+      my $bd = Pl::Binder::for_node($self, $p) or next;
+      $cand{$_} = 1 for $bd->use_canons($p);
+    }
   }
   for my $canon (sort keys %cand) {
     next if $only && !$only->{$canon};
@@ -3602,14 +3609,32 @@ sub _signature_part_defaults {
 # text follow the rename and a single-quoted string does not.  Only a token
 # that IS a signature where it stands (the binder's reading, head_is_signature);
 # the caller decides that the default's name is the binding it renames.
-# Returns the number of tokens rewritten (0 = the text is unchanged).
+# Returns 1 when the token was rewritten (0 = the text is unchanged).
 sub _rename_in_proto_defaults {
   my ($self, $proto, $old, $new) = @_;
+  my $text = $self->_proto_defaults_renamed($proto, $old, $new);
+  return 0 unless defined $text;
+  $proto->set_content($text);
+  return 1;
+}
+
+# The reading above WITHOUT the store: the token's text with every use of
+# $old in its defaults renamed to $new, or undef when no default uses $old.
+# It is also THE test of whether a Prototype token is a use of $old at all
+# (#5310): a rename pass offers the token to its scope predicate only when
+# this answers, never because the name is a SUBSTRING of the text -- `(bar)`
+# names no `$r` (a prototype of letters names no variable), and in
+# `($a, $b = $a)` both `$a` are the PARAMETER (its declaration, and a later
+# default that sees it): the binder records neither as a use of an outer
+# `$a` (Binder::_proto_default_refs' `%left`), so the requalifier's question
+# about them had no answer and died.
+sub _proto_defaults_renamed {
+  my ($self, $proto, $old, $new) = @_;
   my $text = $proto->content;
-  return 0 unless index($text, substr($old, 1)) >= 0;
-  return 0 unless $proto->parent && $proto->parent->isa('PPI::Statement::Sub')
+  return undef unless index($text, substr($old, 1)) >= 0;
+  return undef unless $proto->parent && $proto->parent->isa('PPI::Statement::Sub')
     && $self->fallback_parser->head_is_signature($text, $proto->parent);
-  my ($open, $close) = $text =~ /\A(\s*\(\s*).*?(\s*\)\s*)\z/s or return 0;
+  my ($open, $close) = $text =~ /\A(\s*\(\s*).*?(\s*\)\s*)\z/s or return undef;
   my $interp_fix = _interp_fixer($old, substr($new, 1));
   my $none = sub { 0 };
   my ($n, @out) = (0);
@@ -3630,8 +3655,7 @@ sub _rename_in_proto_defaults {
     $mine = 0 if $part =~ /\A\s*\Q$old\E\b/;
     push @out, $part;
   }
-  $proto->set_content($open . join(',', @out) . $close) if $n;
-  return $n;
+  return $n ? $open . join(',', @out) . $close : undef;
 }
 
 sub _is_signature_node {
@@ -4310,9 +4334,10 @@ sub _span_rewrite_stmt {
     next unless $p->[1] eq "\$$bare" && $mine->($p->[0]);
     $p->[0]->set_content($brace_new);
   }
-  for my $p (@toks) {                                    # #4545
-    next unless $p->isa('PPI::Token::Prototype') && index($p->content, $bare) >= 0;
-    $self->_rename_in_proto_defaults($p, "\$$bare", $sym_new) if $mine->($p);
+  for my $p (@toks) {                                    # #4545, #5310
+    next unless $p->isa('PPI::Token::Prototype');
+    my $text = $self->_proto_defaults_renamed($p, "\$$bare", $sym_new);
+    $p->set_content($text) if defined $text && $mine->($p);
   }
   return unless $fix;
   my $skip = sub { !$mine->($_[0]) };
@@ -4470,9 +4495,10 @@ sub _span_rewrite_container_stmt {
       $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1$new/;
     }
   }
-  for my $p (@toks) {                                    # #4545
-    next unless $p->isa('PPI::Token::Prototype') && index($p->content, $bare) >= 0;
-    $self->_rename_in_proto_defaults($p, $csym, substr($csym, 0, 1) . $new) if $mine->($p);
+  for my $p (@toks) {                                    # #4545, #5310
+    next unless $p->isa('PPI::Token::Prototype');
+    my $text = $self->_proto_defaults_renamed($p, $csym, substr($csym, 0, 1) . $new);
+    $p->set_content($text) if defined $text && $mine->($p);
   }
   return unless $fix;
   my $skip = sub { !$mine->($_[0]) };
@@ -4767,13 +4793,16 @@ sub _rewrite_var_uses {
       _fix_interp_token($t, $interp_fix, $skip);
     }
     # A default inside a one-token signature (Token::Prototype, #455): code in
-    # the token's text (#4545).
+    # the token's text (#4545).  The token is offered to $skip only when a
+    # default USES $canon (#5310: never by its text -- the requalifier's
+    # $skip dies on a token the binder holds no use of).
     for my $p (@toks) {
       next unless $p->isa('PPI::Token::Prototype');
       next if $within && !_elem_within($p, $within);
-      next if index($p->content, $bare) < 0;
+      my $text = $self->_proto_defaults_renamed($p, $canon, $sigil . $newbare);
+      next unless defined $text;
       next if $skip && $skip->($p);
-      $self->_rename_in_proto_defaults($p, $canon, $sigil . $newbare);
+      $p->set_content($text);
     }
     # The same use spelled `${x}` / `@{x}` / `%{x}` / `$#{x}` in CODE: a Word
     # inside a Cast's Block, invisible to the Symbol loop -- the ONE helper the

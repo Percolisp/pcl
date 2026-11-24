@@ -872,6 +872,17 @@ sub _leads_our_stmt {
   return ($st && $st->isa('PPI::Statement::Variable') && refaddr($st->schild(0)) == refaddr($w)) ? 1 : 0;
 }
 
+# The canons $tok's CURRENT text uses (its refs; a declaration excluded) --
+# for a one-token signature (Token::Prototype) the names its DEFAULTS read,
+# the requalifier's candidates there (#5310: the token's text is never
+# matched by name).
+sub use_canons {
+  my ($self, $tok) = @_;
+  return () unless defined $self->{ord}{ refaddr $tok };
+  my %c = map { ($_->{canon} => 1) } grep { $_->{via} ne 'decl' } @{ $self->_cur_refs($tok) };
+  return sort keys %c;
+}
+
 sub binding_of {
   my ($self, $tok, $canon) = @_;
   my $list = $self->{refs}{ refaddr $tok } or return undef;
