@@ -1101,12 +1101,12 @@ my %FORCED_MAIN_HANDLE = map { $_ => 1 } grep { $_ ne 'SIG' } @FORCED_MAIN;
 
 True when C<$name> (unqualified) is one of the handles perl resolves in
 C<main::> from every package.  The same fact C<canon_filehandle_name> uses,
-asked separately by C<Pl::ExprToCL::_fh_sym>: these are the only handle names
-the RUNTIME can find by their short name (they are the ones interned in the
-C<:pcl> package, which is what C<%p-resolve-fh>'s by-name fallback searches),
-so a qualified spelling of one must not be emitted as a symbol carrying that
-short name — or C<print Foo::STDOUT "x"> silently reaches main's STDOUT where
-perl writes nothing.
+asked separately by C<Pl::ExprToCL::_fh_sym>: the runtime reads a bareword of
+one of these names as MAIN's handle whatever package the symbol is in
+(C<%p-bareword-handle-keys>, s543n), so a qualified spelling of one must not be
+emitted as a symbol carrying that short name — or C<print Foo::STDOUT "x">
+silently reaches main's STDOUT where perl writes Foo's own glob.  It is
+emitted as one whole-name symbol, which the runtime splits.
 
 =cut
 

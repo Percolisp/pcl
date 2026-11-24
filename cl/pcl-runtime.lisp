@@ -20417,7 +20417,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; name (%p-name-handle-key; the old reading stripped the qualifier and
     ;; scanned every package by the short name).
     ((stringp fh)
-     (let ((key (%p-name-handle-key fh)))
+     (let ((key (%p-name-handle-key-memo fh)))
        (and key (gethash key *p-filehandles*))))
     ;; A GLOB (`fileno(*STDOUT)', `\*DATA', a gensym): ITS package's handle,
     ;; never another package's of the same name -- `\*DATA' in main is main's
@@ -21845,6 +21845,30 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                    (and create
                         (make-package (perl-pkg-to-cl-pkg-name pstr) :use '(:cl :pcl))))))
       (and pkg (%p-handle-key pkg (%pcl-invert-case bare) create)))))
+
+(defvar *p-name-key-memo* (vector nil nil nil nil)
+  "%p-name-handle-key-memo's one entry: #(NAME PACKAGE COPY KEY) -- the last
+   name string resolved, the package in effect then (the same STRING object),
+   a copy of the name as it was, and its key.")
+
+(defun %p-name-handle-key-memo (name)
+  "%p-name-handle-key for a READ, remembered for the last NAME: a select()ed
+   handle is a name STRING (\"main::STDOUT\" after the common
+   `select((select($fh), $| = 1)[0])'), resolved again by every plain `print'
+   -- the split and the package lookup doubled that print's cost (s543n
+   bench).  The entry holds while the same name string (EQ, and still
+   STRING= -- a name is a value the program can change) is asked in the same
+   package (an unqualified name's package is the one in effect); a name with
+   no handle yet is not remembered, so a later open is seen."
+  (let ((m *p-name-key-memo*))
+    (if (and (eq name (svref m 0)) (eq *pcl-current-package* (svref m 1))
+             (string= name (the simple-string (svref m 2))))
+        (svref m 3)
+        (let ((key (%p-name-handle-key name)))
+          (when key
+            (setf *p-name-key-memo*
+                  (vector name *pcl-current-package* (copy-seq name) key)))
+          key))))
 
 (defun %p-bareword-handle-keys-1 (sym)
   "%p-bareword-handle-keys' answer, computed.  The emitter's spellings of a
@@ -28417,8 +28441,9 @@ would consume, so it dies naming the stream (rule 12)."
     ;; the package in effect named main's glob, which only the old by-name
     ;; scan used to find again.
     ((and (symbolp fh) fh (not (eq fh t)) (not (eq fh *p-undef*)))
-     (let ((key (car (%p-bareword-handle-keys fh))))
-       (concatenate 'string (%pcl-cl-pkg-to-perl-name (symbol-package key))
+     (let* ((key (car (%p-bareword-handle-keys fh)))
+            (pkg (symbol-package key)))
+       (concatenate 'string (if pkg (%pcl-cl-pkg-to-perl-name pkg) *pcl-current-package*)
                     "::" (%pcl-invert-case (symbol-name key)))))
     ;; A NAME string is a glob perl looks up NOW (task #5081): the glob is
     ;; vivified in its stash -- `select select "SYM"' makes `defined *{"SYM"}'
