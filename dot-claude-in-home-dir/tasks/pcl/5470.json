@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543p (Opus 5.5, 2026-11-27, CODE 496df8b1 = MAIN-READY-113 caf9c693, v2-16400) by the Rosetta census (docs/rosetta-plan.md step 1; #2104).\n\nTHE SHAPE (neutral reproducer, a UTF-8 file WITHOUT `use utf8`, run on the tree, perl 5.40.3 vs PCL; bytes shown in hex):\n\n    my $x = 5;\n    print \"$x\\xB2|\\n\";        # both: 35 B2 7C            (an escape ends the name)\n    print \"$x²|\\n\";           # perl: 35 C2 B2 7C          PCL: B2 7C       ($xÂ is undef)\n    print \"$x°C|\\n\";          # perl: 35 C2 B0 43 7C       PCL: B0 43 7C\n    my $s = \"$xé\";\n    print length($s), \"\\n\";   # perl 3                     PCL 1\n\nperl: in a source without `use utf8` an identifier is ASCII `\\w` only, so the name ends at the first byte >= 0x80.  PCL's interpolation scanner takes the byte C2 / C3 (a Latin-1 LETTER as a character) as an identifier character; the emitted Lisp is `(p-string-concat |$xÂ| (p-esc \"²|\\n\"))`.  Under `use utf8` the source is decoded and `²` is not a word character, so it is the non-utf8 source only.  WHERE: the identifier scan of `Pl/InterpScan.pm` (docs/interp-scan.md: interpolation is scanned there or nowhere) -- its word-character test needs the source's regime: ASCII without `use utf8`, Unicode `\\w` with it.  The same test in the code-side tokenizer (PPI) should be probed with the fix (`$x²` outside a string is a syntax error in perl, so only strings and heredocs matter).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): writing the variable as `${a}²` makes 1336 identical to perl -- its only cause; and the `\\xB2` escape row is right, so it is the name scan, not the byte's output.\n\nTHE PROGRAM: 1336-Special-pythagorean-triplet prints `$a² + $b² = $c²` from a UTF-8 file without `use utf8`: PCL prints three lone bytes in place of the numbers.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1336-Special-pythagorean-triplet",
+   "id" : "5470",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: WITHOUT `use utf8`, a high byte right after an interpolated variable is read as part of its NAME -- in a UTF-8 source `\"$x²\"` interpolates the undeclared `$xÂ` (byte C2 as a Latin-1 letter) and prints a lone B2 byte where perl prints 5 followed by the two bytes; also `\"$x°C\"`, `\"$xé\"` (Rosetta 1336)",
+   "triage" : "in",
+   "triage_reason" : "interpolation of an ASCII identifier followed by non-ASCII text in a source without `use utf8` (perl: identifiers are ASCII there); IN by docs/supported-subset.md section 3"
+}

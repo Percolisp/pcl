@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543p (Opus 5.5, 2026-11-27, CODE 496df8b1 = MAIN-READY-113 caf9c693, v2-16400) by the Rosetta census (docs/rosetta-plan.md step 1; #2104).\n\nTHE SHAPE (neutral reproducer, no strict, run on the tree, perl 5.40.3 vs PCL):\n\n    %h = (a => 1); @a = (1); $x = 1; my %mh = (b => 2);\n    $r1 = \\%h;  print \"1 \", ref(\\$r1), \"\\n\";      # perl REF   PCL SCALAR\n    $r2 = \\@a;  print \"2 \", ref(\\$r2), \"\\n\";      # perl REF   PCL SCALAR\n    $r3 = \\$x;  print \"3 \", ref(\\$r3), \"\\n\";      # both REF\n    $r4 = \\%mh; print \"4 \", ref(\\$r4), \"\\n\";      # perl REF   PCL SCALAR  (a lexical hash, a package scalar)\n    $r5 = {};   print \"5 \", ref(\\$r5), \"\\n\";      # both REF\n    my $r6 = \\%h; print \"6 \", ref(\\$r6), \"\\n\";    # both REF   (a lexical scalar is right)\n    $r7 = \\%h;  my $rr = \\$r7; print \"7 \", ref($rr), \" \", ref($$rr), \"\\n\";   # perl REF HASH   PCL SCALAR HASH\n\nSo the deref is right (`ref($$rr)` is HASH); only the kind of the outer reference is wrong, and only for a PACKAGE scalar whose value is a reference to a NAMED aggregate.  Suspect: the package scalar stores the aggregate itself as its value (docs/boxed-aggregates-design-s455.md: a reference to a named array / hash is the container object), and `p-ref` of `(p-backslash $r1)` classifies the box by its value's type, where a container value is not recognised as \"a reference\" -- `{}` goes through a different value shape and is.  The lexical path (`my $r6`) answers REF, so the classifier has a second reading somewhere (CLAUDE.md: look for the second copy first).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): rows 4-6 -- the named-aggregate referent with a package scalar is the only failing combination (`my` scalar right, anon referent right, scalar referent right).\n\nTHE PROGRAM: 1480-Type-detection prints `ref` of a reference to each kind of variable, written without `strict` (package variables); the \"reference to a reference\" line says SCALAR.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1480-Type-detection",
+   "id" : 5471,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `ref(\\$s)` is SCALAR where perl says REF when the PACKAGE scalar $s holds a reference to a NAMED array or hash (`$s = \\%h; ref(\\$s)`); a `my` scalar, an anonymous `{}` / `[]`, or `\\$x` are right (Rosetta 1480)",
+   "triage" : "in",
+   "triage_reason" : "ref() of a reference to a reference is core (perlfunc ref: \"REF\"); IN by docs/supported-subset.md section 3"
+}

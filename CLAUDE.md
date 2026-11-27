@@ -400,18 +400,14 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-27: main = MAIN-READY-113 `caf9c693` (generation
-v2-16400; fifteen batches merged in this session, MAIN-READY-99 .. -113, each with its
-sha in `docs/session-log.md` s543: s543a, line tracking ON by default; five batches of live silent
-wrongs, s543b, s543e, s543g, s543j, s543k; s543n (-111), the filehandle family (one rule names a handle's glob, a pass of `<>` ends,
-an emulated exec passes a signal death on, `close` resets `$.`); s543o (-112), the Rosetta instrument; s543m (-113: #5310's file-level face, a `my` after the text's `our`,
-a handle leaving a frame, a raw number under `${ }`, `postderef_qq` in a pattern, the drop flush for a cleared container, a qr's `u`); s543h, string-eval name
-resolution; the PPI batches 10-12, s543d, s543f, s543i (the last); s543c, the verification batch;
-s543r, the round).**  Gate
-**380 files / 12,540 rows `Result: PASS`** (measured on merged main); full
+**s543, 2026-11-27 (night): main = MAIN-READY-114 `2f85209e` (generation v2-16500; sixteen batches merged in
+this session, MAIN-READY-99 .. -114, each with its sha and content in `docs/session-log.md` s543; the four of 2026-11-27:
+s543n the filehandle family, s543o the Rosetta instrument, s543m the string-eval residue + the container drop flush,
+s543l the `local` residue + a signal handler's `die` no longer swallowed by a blocking read).**  Gate
+**380 files / 12,558 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **ROSETTA 547 of 650 (84.2 %; the held-out corpus, `tools/rosetta-corpus run`, on -112)**; **24 live IN silent wrongs of ORDINARY code + 67 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
+(95.1 %)**; **ROSETTA 547 of 650 (84.2 %; the held-out corpus, `tools/rosetta-corpus run`, on -113)**; **30 live IN silent wrongs of ORDINARY code + 61 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -423,10 +419,9 @@ MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second ru
 #4904); PPI `pcl` =
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
-program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **RUNNING (2026-11-27 23:3x; three at a time FOR THIS SESSION on the USER's word, the default is two):
-s543l (the `local` residue + a signal handler's `die`, v2-16500; on its end bars, merges next) and THE ROSETTA CENSUS,
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **RUNNING (three at a time FOR THIS SESSION on the USER's word; the default is two): THE ROSETTA CENSUS,
 s543p (the 42 silent programs) + s543q (the loud / dropped / resource ones), brief `s543/s543pq-prompt.md`; then the fix
-batches by PROGRAMS BROKEN (`docs/rosetta-plan.md` 3-4; state: `s543/PAUSE-s543.md`, last section).**  Line tracking costs a median
+batches by PROGRAMS BROKEN (`docs/rosetta-plan.md` 3-4).  State and next action: `s543/PAUSE-s543.md`, last section.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
@@ -445,7 +440,8 @@ s543j, a sub ending in a valued
 the 2,047-file list); s543h's flag is GONE (#5272 fixed in s543k: the first compile of a large eval text
 behind `package`, 83.5 -> 45.9 s); s543n, a bareword `print OUT` +9.5 % (6.5 ns a print) and `<IN>` +6.7 % (the name's key is read
 from the symbol first; `print STDOUT` -19 %, a print after the select idiom -56 %); s543m, the drop flush's test: `@a = ()` +81 % (0.14 us a clear of 20 elements), `%h = ()` +12 %,
-`$h{k} = undef` +36..47 % (10 ns a store), a store or `pop` under a modifier +17 % (#5540).
+`$h{k} = undef` +36..47 % (10 ns a store), a store or `pop` under a modifier +17 % (#5540); s543l, `local $a[1]` +12 %, a bare `local $h{k}` as a sub's list value +23 %,
+`local %INC` +23 %, `local %SIG` 0.2 -> 0.3 us a scope.
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
 moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only

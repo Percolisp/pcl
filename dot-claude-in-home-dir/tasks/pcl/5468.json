@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543p (Opus 5.5, 2026-11-27, CODE 496df8b1 = MAIN-READY-113 caf9c693, v2-16400) by the Rosetta census (docs/rosetta-plan.md step 1; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    package Num;\n    use overload '-' => sub { my ($x, $y, $swap) = @_; \"minus(\" . ($swap ? \"$y,$x->{v}\" : \"$x->{v},$y\") . \")\" },\n                 '+' => sub { my ($x, $y) = @_; \"plus($x->{v},$y)\" };\n    sub new { bless { v => $_[1] }, $_[0] }\n    package main;\n    my @a = (7, 8, 9);\n    my $n = Num->new(1);\n    print @a - $n, \"\\n\";                 # perl minus(3,1)   PCL minus(7,1)\n    print $n + @a, \"\\n\";                 # perl plus(1,3)    PCL plus(1,7)\n    use Math::BigInt;\n    my $one = Math::BigInt->new(1);\n    print @a - $one, \"\\n\";               # perl 2            PCL 6\n    my @e = ();\n    print scalar(@e) + $one, \" \", @e + $one, \"\\n\";   # perl 1 1   PCL 1 2\n\n    and under `use bigint` (the program's spelling): my @i = (3, 5, 4, 2, 1); my $k = @i - 1;   # perl 4   PCL 2\n\nWHERE (emitted Lisp): `(p-- @a $one)` -- the raw array vector is the operand; with a plain number on the other side the arithmetic takes the count (right), but when the other operand is overloaded the dispatch hands the handler the vector itself, which then numifies as its first element (`@e + $one` = 2 shows it is not the count either).  The scalar-context coercion of an array operand has to happen before the overload dispatch, at the same place the plain arm does it.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): spelling the count `scalar(@i) - 1` makes 0904 identical to perl -- its only cause; and the plain-number rows (`@a - 1` without bigint) are right, so it is the overloaded arm only.\n\nTHE PROGRAM: 0904-Next-highest-int-from-digits runs under `use bigint` and computes an index as `@digits - 1 - (...)`: every literal is a Math::BigInt, so the count becomes the first digit and the answers are wrong.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0904-Next-highest-int-from-digits",
+   "id" : 5468,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a bare ARRAY operand of an OVERLOADED binary operator reaches the handler as its FIRST ELEMENT, not its count -- `@a - $obj` with @a = (7, 8, 9) hands 7 where perl hands 3, so under `use bigint` `@a - 1` (every literal an object) is $a[0] - 1; an empty array gives a wrong value too (Rosetta 0904)",
+   "triage" : "in",
+   "triage_reason" : "an array in numeric (scalar) context is its count (perldata); overload and bigint / Math::BigInt are IN by docs/supported-subset.md section 3"
+}
