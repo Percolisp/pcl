@@ -41618,12 +41618,31 @@ would consume, so it dies naming the stream (rule 12)."
           (t (concatenate 'string "[\\p{" name "}]")))))
 
 (defun %pcl-has-hv-escape (pat)
-  "Does PAT contain a backslash followed by h H v V R X N p or P?  A cheap
+  "Does PAT contain a backslash followed by h H v V R X N p P or K?  A cheap
    pre-test: almost no pattern does, and the rewrite below is a full copying
    scan."
   (loop for i from 0 below (max 0 (1- (length pat)))
         thereis (and (char= (char pat i) #\\)
-                     (find (char pat (1+ i)) "hHvVRXNpP") t)))
+                     (find (char pat (1+ i)) "hHvVRXNpPK") t)))
+
+;;; \K (keep) has no cl-ppcre counterpart, so the rewrite scan spells it as a
+;;; MARK that cl-ppcre parses and nothing a perl program can write produces:
+;;; a named back-reference to the name `0K' (a perl group name cannot start
+;;; with a digit, and the scan's own name rewrite maps `_' to `-', never to a
+;;; digit).  %pcl-scanner-tree finds the mark in the parse tree and makes it
+;;; the keep register (%pcl-mark-tree, task #5560); a pattern without one is
+;;; never parsed for it.
+(defparameter +p-keep-mark+ "\\k<0K>"
+  "The rewrite scan's spelling of `\\K' (see the comment above).")
+
+(defun %pcl-unmark-text (text)
+  "TEXT with the rewrite scan's marks spelled back as perl wrote them, for a
+   message that shows the pattern (%pcl-regex-compile-die)."
+  (let ((i (search +p-keep-mark+ text)))
+    (if i
+        (%pcl-unmark-text (concatenate 'string (subseq text 0 i) "\\K"
+                                       (subseq text (+ i (length +p-keep-mark+)))))
+        text)))
 
 (defun %pcl-rx-x-blank-p (c)
   "Is C whitespace that /x makes insignificant in a pattern?  The one set
@@ -41757,6 +41776,9 @@ would consume, so it dies naming the stream (rule 12)."
           ((and nx (char= nx #\N) (not in-class)
                 (or (not (%pcl-rx-at pat (+ i 2) #\{)) (%pcl-rx-counted-end pat (+ i 2))))
            (values "[^\\n]" (+ i 2)))
+          ;; \K outside a class is the keep MARK (#5560); inside one it is
+          ;; the letter K, as in perl (`[\\K]' matches \"K\"), and is copied.
+          ((and nx (char= nx #\K) (not in-class)) (values +p-keep-mark+ (+ i 2)))
           (t (let ((e (%pcl-rx-escape-end pat i))) (values (subseq pat i e) e))))))
 
 (defun %pcl-rx-counted-end (pat i)
@@ -43033,25 +43055,147 @@ would consume, so it dies naming the stream (rule 12)."
       (eq tree sym)
       (or (%pcl-tree-has-p (car tree) sym) (%pcl-tree-has-p (cdr tree) sym))))
 
+;;; THE KEEP POSITION (task #5560, ir-spec §10-keep).  perl's `\K' moves the
+;;; match's reported START to where it stands: $&, $`, @-[0], the span s///
+;;; replaces, what a list-context //g without groups returns and the
+;;; separator split removes all begin there; the groups, their numbers and
+;;; the match's END do not move.  cl-ppcre has no such operator, so the
+;;; rewrite scan writes \K as +p-keep-mark+ and the parse tree gets, in its
+;;; place, an EMPTY REGISTER -- a group whose register records the position
+;;; and which the engine restores when it backtracks out of it, so after a
+;;; successful match the registers set are exactly those on the successful
+;;; path.  Those registers are the program's INVISIBLE groups: every numeric
+;;; back-reference and conditional test is renumbered past them, and the
+;;; scanner is wrapped (%pcl-keep-scanner) so that its caller sees the
+;;; program's own registers and the keep position as the match start.  Every
+;;; consumer of a match's start -- the eleven scan sites of m//, s/// and
+;;; split -- reads it from a scanner %pcl-create-scanner made, so none of
+;;; them changes; a pattern without \K is never parsed for it and its scanner
+;;; is not wrapped.
+
+(defun %pcl-rx-mark-p (node name)
+  "Is parse-tree NODE a rewrite-scan mark with the name NAME (\"0K\" for
+   +p-keep-mark+)?  cl-ppcre parses a mark as a back-reference to its name."
+  (and (consp node) (eq (car node) :back-reference)
+       (equal (second node) name)))
+
+(defun %pcl-keep-in-lookaround ()
+  "perl refuses a \\K inside a lookaround at compile time (5.32+); so does
+   PCL, through the one compile-error path (%pcl-regex-compile-die)."
+  (%pcl-uniprop-signal "\\K not permitted in lookahead/lookbehind"))
+
+(defun %pcl-mark-walk (tree)
+  "Replace each keep mark of parse TREE by an empty register.  Returns
+   (values NEW-TREE MARKERS PROG): the register index (0-based, in
+   cl-ppcre's preorder numbering) of each keep register and of each
+   program group, as simple-vectors."
+  (let ((reg 0) (markers '()) (prog '()))
+    (labels ((walk (node look)
+               (cond ((%pcl-rx-mark-p node "0K")
+                      (when look (%pcl-keep-in-lookaround))
+                      (push reg markers)
+                      (incf reg)
+                      (list :register :void))
+                     ((atom node) node)
+                     (t (case (car node)
+                          ((:register :named-register)
+                           (push reg prog)
+                           (incf reg)
+                           (cons (car node) (mapcar (lambda (x) (walk x look)) (cdr node))))
+                          ((:positive-lookahead :negative-lookahead
+                                                :positive-lookbehind :negative-lookbehind)
+                           (list (car node) (walk (second node) t)))
+                          ((:char-class :inverted-char-class :property :inverted-property
+                                        :filter :flags :back-reference)
+                           node)
+                          (t (cons (car node) (mapcar (lambda (x) (walk x look)) (cdr node)))))))))
+      (let ((new (walk tree nil)))
+        (values new
+                (coerce (nreverse markers) 'simple-vector)
+                (coerce (nreverse prog) 'simple-vector))))))
+
+(defun %pcl-renumber-backrefs (tree prog nmarks)
+  "TREE with every NUMERIC back-reference and conditional test renamed from
+   the program's group number to the register PROG says that group is (the
+   keep registers in between shifted it).  A number past the program's
+   groups keeps its distance, so cl-ppcre refuses it as before."
+  (labels ((num (n)
+             (if (<= 1 n (length prog)) (1+ (svref prog (1- n))) (+ n nmarks)))
+           (walk (node)
+             (cond ((atom node) node)
+                   ((eq (car node) :back-reference)
+                    (if (integerp (second node)) (list :back-reference (num (second node))) node))
+                   ((and (eq (car node) :branch) (integerp (second node)))
+                    (list* :branch (num (second node)) (mapcar #'walk (cddr node))))
+                   ((member (car node) '(:char-class :inverted-char-class :property
+                                         :inverted-property :filter))
+                    node)
+                   (t (cons (car node) (mapcar #'walk (cdr node)))))))
+    (walk tree)))
+
+(defun %pcl-mark-tree (tree)
+  "TREE with its keep marks made registers and its back-references
+   renumbered past them.  Returns (values NEW-TREE MARKERS PROG); MARKERS is
+   NIL when TREE holds no keep mark."
+  (multiple-value-bind (new markers prog) (%pcl-mark-walk tree)
+    (if (zerop (length markers))
+        (values new nil prog)
+        (values (%pcl-renumber-backrefs new prog (length markers)) markers prog))))
+
+(defun %pcl-keep-scanner (scanner markers prog)
+  "SCANNER, whose registers include the keep registers MARKERS, as the
+   program sees it: the match START is the keep position -- the rightmost
+   keep register set inside the match, which on a successful path is the
+   last \\K executed (positions only grow along it; perl refuses \\K in a
+   lookaround) -- and the registers are the program's own, PROG's.  A fifth
+   value is the match's REAL start, which the \\G anchor test reads."
+  (declare (function scanner) (simple-vector markers prog))
+  (let ((n (length prog)))
+    (lambda (string start end)
+      (multiple-value-bind (ms me rs re) (funcall scanner string start end)
+        (if (null ms)
+            nil
+            (let ((keep ms) (nrs (make-array n)) (nre (make-array n)))
+              (declare (fixnum keep))
+              (loop for k across markers
+                    for p = (svref rs k)
+                    when (and p (> p keep) (<= p me)) do (setf keep p))
+              (dotimes (i n)
+                (setf (svref nrs i) (svref rs (svref prog i))
+                      (svref nre i) (svref re (svref prog i))))
+              (values keep me nrs nre ms)))))))
+
+(defun %pcl-prog-reg-names (reg-names prog)
+  "cl-ppcre's register-name list REG-NAMES restricted to the program's
+   registers PROG (the keep registers have no name).  NIL stays NIL: cl-ppcre
+   answers NIL for a pattern without named groups."
+  (and reg-names (loop for i across prog collect (nth i reg-names))))
+
 (defun %pcl-scanner-tree (pattern options)
   "PATTERN's rewritten parse tree for create-scanner, or NIL when no rewrite
    applies (the pattern is then compiled from its text): perl's MBOL
-   (%pcl-mbol-tree's rule) and the 256-bit class table (#3121).  Parsed
-   ONCE, the way create-scanner's own string method parses it."
+   (%pcl-mbol-tree's rule), the 256-bit class table (#3121) and the keep
+   registers of \\K (%pcl-mark-tree, #5560).  Parsed ONCE, the way
+   create-scanner's own string method parses it.  Second and third values:
+   the keep registers and the program's registers (%pcl-keep-scanner), NIL
+   when the pattern holds no \\K."
   (let ((mbol (and (find #\^ pattern)
                    (or (getf options :multi-line-mode) (find #\m pattern))))
         (cc (and (find #\[ pattern)
                  (not (getf options :case-insensitive-mode))
-                 (not cl-ppcre:*allow-quoting*))))
-    (when (or mbol cc)
+                 (not cl-ppcre:*allow-quoting*)))
+        (marks (search +p-keep-mark+ pattern)))
+    (when (or mbol cc marks)
       (let* ((tree (let ((cl-ppcre::*extended-mode-p* (getf options :extended-mode))
                          (cl-ppcre::*syntax-error-string* (copy-seq pattern)))
                      (cl-ppcre:parse-string pattern)))
              (new (if mbol (%pcl-mbol-node tree (getf options :multi-line-mode)) tree)))
         (when (and cc (not (%pcl-tree-has-p new :case-insensitive-p)))
           (setf new (%pcl-cc-table-node new)))
-        (unless (equal new tree)
-          (list :group new))))))
+        (multiple-value-bind (new markers prog)
+            (if marks (%pcl-mark-tree new) (values new nil nil))
+          (values (unless (equal new tree) (list :group new))
+                  markers prog))))))
 
 (defun %pcl-build-scanner (pattern options)
   "cl-ppcre:create-scanner wrapper.  Why this exists (yes, it looks stupid):
@@ -43085,21 +43229,26 @@ would consume, so it dies naming the stream (rule 12)."
                      unless (or (member k '(:pcl-xx-mode :pcl-minend-mode))
                                 (and self-x (eq k :extended-mode)))
                      nconc (list k v))))
-    (multiple-value-bind (scanner reg-names)
-        (let* ((tree (%pcl-scanner-tree pat opts))
-               (src (or tree pat))
-               (copts (if tree
-                          (loop for (k v) on opts by #'cddr
-                                unless (eq k :extended-mode) nconc (list k v))
-                          opts)))
-          (if minend
-              (%pcl-build-minend-scanner src copts)
-              (apply #'cl-ppcre:create-scanner src copts)))
-      ;; FOURTH (task #2723): an END-ANCHORED pattern of bounded length
-      ;; starts its scan at the tail -- see %pcl-tail-start-scanner.
-      (let ((reach (%pcl-tail-reach pat opts)))
-        (values (if reach (%pcl-tail-start-scanner scanner reach) scanner)
-                reg-names)))))
+    (multiple-value-bind (tree markers prog) (%pcl-scanner-tree pat opts)
+      (multiple-value-bind (scanner reg-names)
+          (let ((src (or tree pat))
+                (copts (if tree
+                           (loop for (k v) on opts by #'cddr
+                                 unless (eq k :extended-mode) nconc (list k v))
+                           opts)))
+            (if minend
+                (%pcl-build-minend-scanner src copts)
+                (apply #'cl-ppcre:create-scanner src copts)))
+        ;; FOURTH (task #2723): an END-ANCHORED pattern of bounded length
+        ;; starts its scan at the tail -- see %pcl-tail-start-scanner.
+        ;; FIFTH (task #5560): a \K pattern's scanner reports the keep
+        ;; position as its start and the program's registers only.
+        (let* ((reach (%pcl-tail-reach pat opts))
+               (scanner (if reach (%pcl-tail-start-scanner scanner reach) scanner)))
+          (if markers
+              (values (%pcl-keep-scanner scanner markers prog)
+                      (%pcl-prog-reg-names reg-names prog))
+              (values scanner reg-names)))))))
 
 (defvar *p-match-end-floor* -1
   "The position a MINEND scan attempt must END PAST (see %p-global-scan).
@@ -43208,8 +43357,9 @@ would consume, so it dies naming the stream (rule 12)."
                   "."
                   (apply #'format nil (simple-condition-format-control e)
                          (simple-condition-format-arguments e))))
-         (str (let ((s (cl-ppcre:ppcre-syntax-error-string e)))
-                (if (and (stringp s) (plusp (length s))) s pattern)))
+         (str (%pcl-unmark-text
+               (let ((s (cl-ppcre:ppcre-syntax-error-string e)))
+                 (if (and (stringp s) (plusp (length s))) s pattern))))
          (pos (cl-ppcre:ppcre-syntax-error-pos e))
          (cut (if (and (integerp pos) (<= 0 pos (length str))) pos (length str))))
     (%p-die-error nil "~A in regex; marked by <-- HERE in m/~A <-- HERE ~A/"
@@ -43344,15 +43494,17 @@ would consume, so it dies naming the stream (rule 12)."
    plain scan returns the first match the engine finds at the leftmost
    position that has one, and any such match that is non-empty, or that starts
    past POS, already satisfies minend."
-  (multiple-value-bind (ms me rs re) (funcall (the function scanner) str pos end)
-    (if (and ms (= ms me) (= ms pos))
+  (multiple-value-bind (ms me rs re real) (funcall (the function scanner) str pos end)
+    ;; ME = POS is the empty-at-POS case: a \K match's reported start can
+    ;; lie past its real one (#5560), but neither lies past its end.
+    (if (and ms (= me pos))
         (let ((*p-match-end-floor* pos))
           (funcall (the function
                         (%pcl-create-scanner (car minend-key)
                                              (list* :pcl-minend-mode t
                                                     (cdr minend-key))))
                    str pos end))
-        (values ms me rs re))))
+        (values ms me rs re real))))
 
 (declaim (inline %p-global-scan))
 (defun %p-global-scan (scanner minend-key str pos end minend)
@@ -43790,6 +43942,14 @@ would consume, so it dies naming the stream (rule 12)."
     (%p-store-match str match-start match-end reg-starts reg-ends n
                     closers reg-names)))
 
+(declaim (inline %p-starts-at-p))
+(defun %p-starts-at-p (ms real pos)
+  "Does a scan's match BEGIN at POS -- the \\G anchor's one test (the single
+   match, the scalar and the list //g)?  MS is the scan's first value; REAL
+   its fifth, the real start of a \\K match, whose reported start is the keep
+   position (%pcl-keep-scanner, #5560); NIL for every other scanner."
+  (eql (or real ms) pos))
+
 (defun %pcl-strip-gpos (pattern)
   "Remove \\G anchors from PATTERN.  cl-ppcre has no \\G; \\G is zero-width and
    means 'match at the current pos', so PCL drops it and anchors the whole match
@@ -43829,9 +43989,9 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((items nil) (pos start) (slen (length str)) (empty nil)
         (last-rs nil) (last-re nil) (last-ms nil) (last-me nil) (any nil))
     (loop
-     (multiple-value-bind (ms me rs re)
+     (multiple-value-bind (ms me rs re real)
          (%p-global-scan scanner minend-key str pos slen empty)
-       (unless (and ms (= ms pos)) (return))
+       (unless (and ms (%p-starts-at-p ms real pos)) (return))
        (setf any t last-rs rs last-re re last-ms ms last-me me)
        (if (> (length rs) 0)
            (dotimes (i (length rs))
@@ -43885,9 +44045,9 @@ would consume, so it dies naming the stream (rule 12)."
         (closers (svref c 2))
         (anchored-g (svref c 3)))
     (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
-      (multiple-value-bind (match-start match-end reg-starts reg-ends)
+      (multiple-value-bind (match-start match-end reg-starts reg-ends real)
           (%p-ppcre-scan scanner scan start end)
-        (when (and anchored-g match-start (/= match-start start))
+        (when (and anchored-g match-start (not (%p-starts-at-p match-start real start)))
           (setf match-start nil))
         (if match-start
             (progn
@@ -44037,7 +44197,7 @@ would consume, so it dies naming the stream (rule 12)."
         ((and global-p (not (eq *wantarray* t)))
          (multiple-value-bind (pos0 empty) (%p-match-pos-state string)
            (let ((start (or pos0 0)))
-             (multiple-value-bind (match-start match-end reg-starts reg-ends)
+             (multiple-value-bind (match-start match-end reg-starts reg-ends real)
                  ;; The iterator's state is pos() PLUS whether the match that
                  ;; set it was zero-length — perl's MGf_MINMATCH (task #1719).
                  ;; Without the second half this loop repeated the same empty
@@ -44045,7 +44205,8 @@ would consume, so it dies naming the stream (rule 12)."
                  (%p-global-scan scanner minend-key str start (length str)
                                  empty)
                ;; \G: the match must begin exactly at the start position.
-               (when (and anchored-g match-start (/= match-start start))
+               (when (and anchored-g match-start
+                          (not (%p-starts-at-p match-start real start)))
                  (setf match-start nil))
                (if match-start
                    (progn
@@ -44061,23 +44222,29 @@ would consume, so it dies naming the stream (rule 12)."
         ;; No /g: single match.  With \G, anchor at the current pos.
         (t (%p-single-match string str (length str) str c))))))
 
-(defun perl-to-ppcre-replacement (str)
-  "Convert Perl-style backreferences ($1, $2, ...) to CL-PPCRE style (\\1, \\2, ...)"
+(defun perl-to-ppcre-replacement (str ngroups)
+  "Convert Perl-style backreferences ($1, $2, ...) to CL-PPCRE style (\\1, \\2, ...).
+   NGROUPS is the pattern's group count: a $N past it is perl's undef, the
+   empty string, and is written as nothing -- cl-ppcre's template refused
+   it with a Lisp error (`s/ab/<$1>/', found s543u).  N is every digit after
+   the `$', as perl reads `$12'."
   (with-output-to-string (out)
     (loop with i = 0
           while (< i (length str))
           do (let ((c (char str i)))
                (cond
-                 ;; Look for $N where N is 1-9
+                 ;; Look for $N, N a number not starting with 0
                  ((and (char= c #\$)
                        (< (1+ i) (length str))
                        (let ((next (char str (1+ i))))
                          (and (digit-char-p next)
                               (not (char= next #\0)))))
-                  ;; Convert $N to \N
-                  (write-char #\\ out)
-                  (write-char (char str (1+ i)) out)
-                  (incf i 2))
+                  (let ((e (or (position-if-not #'digit-char-p str :start (1+ i)) (length str))))
+                    ;; Convert $N to \N
+                    (when (<= (parse-integer str :start (1+ i) :end e) ngroups)
+                      (write-char #\\ out)
+                      (write-string str out :start (1+ i) :end e))
+                    (setf i e)))
                  (t
                   (write-char c out)
                   (incf i)))))))
@@ -44141,9 +44308,6 @@ would consume, so it dies naming the stream (rule 12)."
                (raw-replacement (p-subst-op-replacement op))
                (modifiers (p-subst-op-modifiers op))
                (eval-p (and (or (member :e modifiers) (functionp raw-replacement)) t))
-               (replacement (unless eval-p
-                              (perl-to-ppcre-replacement (if (stringp raw-replacement)
-                                                             raw-replacement ""))))
                (options (append (when (member :i modifiers) '(:case-insensitive-mode t))
                                 (when (member :s modifiers) '(:single-line-mode t))
                                 (when (member :m modifiers) '(:multi-line-mode t))
@@ -44151,7 +44315,14 @@ would consume, so it dies naming the stream (rule 12)."
           (multiple-value-bind (scanner reg-names closers)
               (%pcl-create-scanner pattern options)
             (setf (car holder)
-                  (vector pattern replacement scanner eval-p
+                  (vector pattern
+                          ;; CLOSERS has one entry per capturing group the
+                          ;; program wrote: the template's group count.
+                          (unless eval-p
+                            (perl-to-ppcre-replacement (if (stringp raw-replacement)
+                                                           raw-replacement "")
+                                                       (length closers)))
+                          scanner eval-p
                           (and (member :g modifiers) t)
                           (and (member :r modifiers) t)
                           reg-names closers

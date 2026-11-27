@@ -794,5 +794,36 @@ subst_agrees(q{my $r = [1,2]; my $x = "mAn"; $x =~ s/A/$r->@*/; $x =~ s/ARRAY\(0
 { use v5.24; no feature "postderef_qq"; my $y = "mAn"; $y =~ s/A/$r->@*/; $y =~ s/ARRAY\(0x[0-9a-f]+\)/REF/; print "$x $y\n"; }},
   "#5252 breaking shape: without postderef_qq `->\@*` stays text after the reference");
 
+# #5560 (s543u): `\K` (keep) moves the match's reported START to where it
+# stands -- $&, $`, @-[0], the span s/// replaces, what a list-context //g
+# without groups returns, the separator split removes -- and leaves the
+# groups, their numbers and the match's end alone.  The rewrite scan spells it
+# as a mark that the parse tree makes an invisible register (renumbering the
+# back-references past it); every row FAILS on the 5d511ff8 extraction, where
+# cl-ppcre read `\K` as the letter K and the pattern never matched.
+subst_agrees(<<'PL', "#5560: \\K moves the match start: \$& \$` \@- \@+, list //g, a quantified / alternated / unmatched \\K, back-references, split, pos");
+my $s = "key=val; k2=v2";
+if ($s =~ /key=\Kval/) { print "1 [$&] [$`] [$'] $-[0] $+[0]\n" }
+my @a = $s =~ /=\K\w+/g; my @b = $s =~ /(\w+)=\K(\w+)/g; print "2 @a | @b\n";
+if ("xaybz" =~ /(a)y\K(b)z/) { print "3 [$&] @- | @+ [$1$2] $+\n" }
+print "4 ", join(",", map { "pq" =~ $_ ? "[$&]" : "no" } qr/(?:p\K)+q/, qr/p\Kq|r\Ks/, qr/(z\K)?q/), "\n";
+print "5 ", ("aab" =~ /(a)\K\1b/ ? "[$&][$1]" : "no"), " ", ("abb" =~ /(a)\K(b)\2/ ? "[$&][$2]" : "no"), "\n";
+print "6 ", join("|", split /,\K/, "a,b,c"), " ", join("|", split /x\K|;\K /, "axb; c"), "\n";
+my $n = 0; $n++ while "aaa" =~ /a\K/g; my @p; my $t = "a1a2"; while ($t =~ /a\K\d/g) { push @p, "$&@" . pos($t) } print "7 $n @p\n";
+my $k = '\K'; print "8 ", ("ab" =~ /a${k}b/ ? "[$&]" : "no"), ("a\\Kb" =~ /a\\K/ ? " y[$&]" : " n"), ("K" =~ /[\K]/ ? " y" : " n"), "\n";
+PL
+subst_agrees(q{my $s = "key=val; k2=v2";
+(my $a = $s) =~ s/key=\Kval/X/; (my $b = $s) =~ s/\w+=\K\w+/V/g; print "1 $a | $b\n";
+my $w = "abcdefgh"; my $m = 3; print "2 ", $w =~ s/.{1,$m}\K/-/gr, " ", $w =~ s/.{3}\K/-/gr, "\n";
+print "3 ", join(",", map { (my $x = "aaa") =~ s/$_/-/g; $x } 'a\K', '\K', '^\K'), "\n";
+print "4 ", "aXbXc" =~ s/X\K(?=b)/-/r, " ", "ab ab ab cd" =~ s!(\w\w)\K(( \1)+)!"<" . length($2) . ">"!ger, "\n";
+(my $c = "ab") =~ s/a\Kb/[$&]/; (my $e = "a1b2") =~ s/[a-z]\K(\d)/$1*2/ge; print "5 $c $e\n";
+(my $f = "xyxy") =~ s/(?:x\K|y)/-/g; my $g = "zazbzzc"; my $cnt = ($g =~ s/z\K/-/g); print "6 $f $cnt $g\n";
+(my $h = "AB") =~ s/a\Kb/c/i; (my $i = "ab") =~ s/ a \K b /X/x; print "7 $h $i\n";},
+  "#5560: s/// with \\K replaces from the keep position: /g with a zero-length kept match, /r /e, groups, \$& in the replacement, /i /x");
+subst_agrees(q{for my $p ('(?<=a\K)b', 'a(?=b\K)') { my $r = eval { "ab" =~ /$p/; 1 }; print $r ? "lived" : ($@ =~ /not permitted/ ? "died" : "other"), "\n" }
+(my $x = "ab") =~ s/ab/<$1>/; (my $y = "ab") =~ s/(a)(b)/[$3$2]/g; print "$x $y\n";},
+  "#5560: \\K in a lookaround dies trappably (perl 5.32+); a template \$N past the pattern's groups is empty, never a Lisp error");
+
 
 done_testing();
