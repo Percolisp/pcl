@@ -212,3 +212,48 @@ subset.
 * The 18 out-of-subset programs are the cheapest evidence there is for the
   USER's open boundary questions (`docs/supported-subset.md` section 6):
   eleven of them are regex code blocks.
+
+## 6. The census (step 1)
+
+### 6a. The silent programs (s543p, 2026-11-27, CODE `496df8b1` = MAIN-READY-113)
+
+**42 programs, 21 causes, 10 of them known before the census** (8 open tasks
+and 2 not-supported ids); **0 FIXED-BY a merge** since the -111 run (all 42
+re-run after s543m's merge: unchanged).  Every program was re-run, reduced to
+a neutral reproducer that still differs, and its cause confirmed by a
+perl-equivalent rewrite in a scratch copy that makes the program identical to
+perl (two programs hold two causes: 0071, 0195).  No program is UNREDUCED.
+Program names only (GFDL: no text, no output); the reproducers are in the
+tasks.
+
+| cause | class | programs | names | task | known before | IN / OUT | with |
+|---|---|---:|---|---|---|---|---|
+| `\K` (11) and `\b{wb}` (1) never match: escapes passed to cl-ppcre untranslated | SILENT | 12 | 0107 0774 0818 0838 0923 0925 0927 0933 1050 1298 1306 1561 | `NS:ns-regex-escapes` | yes (ns) | OUT as written -- **a boundary question for the USER** (28 % of the silent programs; `\K` is common in substitutions) | #2381 #2440 #1494 |
+| an overloaded operator's handler runs in the caller's (dynamic) LIST context: Math::BigInt/BigRat `/` returns quotient and remainder | SILENT | 3 | 0195 0567 1473 | #5465 | new | IN | #5468 #5467 #2560 |
+| a slice as the operand of a modifying scalar op (`@h{LIST}++`, `undef @h{LIST}`, `@$r[$i] += x`) does nothing | SILENT | 3 | 0243 0808 0887 | #5466 | new | IN | #5464 #5469 |
+| `\X` is base + combining marks, not UAX #29 (flags, ZWJ emoji, Hangul jamo) | SILENT | 3 | 1178 1342 1376 | #2381 | yes (moved to ordinary) | IN | ns-regex-escapes |
+| integers are unbounded: no 64-bit wrap, no NV past 2**64, `%d` of a UV | SILENT | 3 | 0477 0672 1479 | `NS:ns-integers-unbounded` | yes (ns, by design #1513) | OUT (by design) | -- |
+| `Math::BigRat->new("N/D")` is 1 | SILENT | 2 | 0195 0545 | #2560 | yes (ordinary) | IN | #5465 |
+| `\G` in a substitution is a literal `G` | SILENT | 2 | 0071 0996 | #5461 | new | IN | #5462 (rare) #5460 |
+| `int($obj)` ignores the class's `int` overload (BigInt becomes a plain number) | SILENT | 2 | 0351 1122 | #5467 | new (#1005 left `int` out) | IN | #5465 #5468 |
+| `\N{NAME}` is not implemented (literal text) | SILENT | 2 | 0670 1436 | #1494 | yes (ordinary) | IN | ns-regex-escapes |
+| a non-last comma operand in void / scalar context runs in LIST context | SILENT | 1 | 0071 | #5460 | new | IN | #5462 (rare) |
+| a bare builtin (`length`) as an array subscript is autoquoted to index 0 | SILENT | 1 | 0129 | #5463 | new | IN | #246, #1285 |
+| an ELEMENT `+=` a slice adds the slice's count | SILENT | 1 | 0190 | #5464 | new | IN | #5466 |
+| printf float conversions drop the sign of `-0.0` | SILENT | 1 | 0442 | #1475 | yes (moved to ordinary; #2532 item 1 is the same) | IN | -- |
+| POSIX bracket classes `[[:lower:]]` etc. are ASCII ranges | SILENT | 1 | 0641 | #2440 | yes (ordinary) | IN | ns-regex-escapes |
+| `f { 'key' => ... }` with a no-prototype sub passes the block's value, not an anon hash | SILENT | 1 | 0903 | #1285 | yes (moved rare -> ordinary) | IN | #5463 |
+| an ARRAY operand of an overloaded op is its first element, not its count (`use bigint`) | SILENT | 1 | 0904 | #5468 | new | IN | #5465 |
+| `seek DATA, 0, 0` rewinds to the data section, not the source file | SILENT | 1 | 1118 | #1716 | yes (moved to ordinary) | IN | -- |
+| a slice assignment from the same whole array reads it while writing | SILENT | 1 | 1198 | #5469 | new | IN | #5466 |
+| without `use utf8`, a high byte after an interpolated `$name` is read into the name | SILENT | 1 | 1336 | #5470 | new | IN | -- |
+| a no-initialiser `my` captured by a `my sub` keeps the first call's value | SILENT | 1 | 1432 | #2644 | yes (moved to ordinary) | IN | -- |
+| `ref(\$s)` is SCALAR (perl REF) for a package `$s` holding a ref to a named aggregate | SILENT | 1 | 1480 | #5471 | new | IN | -- |
+
+Found on the way and filed as `rare` (no program depends on it alone):
+#5462, a list-context `\G` match ignores `/c` (0071 reaches it only through
+#5460).  The fix batches this table suggests, largest first: **overload
+dispatch** (#5465 #5468 #5467, with #2560: 7 programs), **the slice family**
+(#5466 #5464 #5469: 5), **regex escapes and Unicode** (#2381 #2440 #1494 and
+the `\K` / `\b{wb}` decision: 6 IN + 12 if `\K` comes in), **`\G` and
+context** (#5461 #5460 #5462: 2), then the singles.
