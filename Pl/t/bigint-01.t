@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 21;
 
 sub write_pl {
     my ($code) = @_;
@@ -152,6 +152,13 @@ both_agree(q{use bigint accuracy => 5; print 3**50, "\n";},
 
 both_agree(q{use bigint qw(inf); print "ran\n";},
            '#5500: an unknown import word dies at the use (inf is exported only by default)');
+
+# #5501 (s543t): Math::BigInt's `++' / `+=' are MUTATORS (binc / badd in
+# place); perl copies a SHARED object first through its `=' copy
+# constructor, so the values pushed in a C-style loop stay distinct.
+both_agree(q{use bigint; my @a; for (my $i = 0; $i < 5; $i++) { push @a, $i } print "@a\n";
+my $x = 5; my $y = $x; $x += 1; $x--; --$y; print "$x $y\n";},
+           '#5501: `use bigint` -- a shared object is copied before ++ / +=');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,

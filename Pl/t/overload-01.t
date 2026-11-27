@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 54;
+plan tests => 55;
 
 sub run_cl {
     my ($code) = @_;
@@ -1144,4 +1144,38 @@ PL
     print $fh $prog; close $fh;
     my $want = `perl $pl_file 2>/dev/null`;
     is(run_cl($prog), $want, '#5467: int() calls the class\'s own `int` handler; without one it truncates the `0+` value and never asks nomethod; plain values unchanged (perl oracle)');
+}
+
+# #5501 + #1001(b)'s dedicated key (s543t): `$obj OP= $x' calls the class's
+# own OP= handler as a MUTATOR (third argument undef) and assigns what it
+# returns -- before, the base operator (or the numification) ran and the
+# object was gone.  The `=' copy constructor runs before a mutator so a
+# SHARED object's other holder keeps its value (own `++' too).
+{
+    my $prog = <<'PL';
+package Tally;
+use overload
+    '+=' => sub { my ($t, $n, $s) = @_; $t->{log} .= "+$n" . (defined $s ? "D" : "U"); $t },
+    '-=' => sub { my ($t, $n) = @_; $t->{log} .= "-$n"; $t },
+    '.=' => sub { my ($t, $s) = @_; $t->{log} .= ".$s"; $t },
+    '*=' => sub { Tally->new("fresh") },
+    '+'  => sub { "plus" },
+    '""' => sub { "Tally[" . $_[0]{log} . "]" };
+sub new { bless { log => $_[1] // "" }, $_[0] }
+package Cnt;
+use overload '++' => sub { $_[0]{n}++; $_[0] }, '+=' => sub { $_[0]{n} += $_[1]; $_[0] },
+             '=' => sub { bless { n => $_[0]{n} }, ref $_[0] }, '""' => sub { "C" . $_[0]{n} };
+sub new { bless { n => $_[1] }, $_[0] }
+package main;
+my $t = Tally->new;
+$t += 3; $t -= 1; $t .= "x";
+print ref($t) || "plain", " $t\n";
+my %h = (k => Tally->new); $h{k} += 2; $h{k} *= 9; print ref($h{k}), " $h{k}\n";
+my $c = Cnt->new(5); my $c2 = $c; $c++; $c += 10; print "$c $c2\n";
+my @a; for (my $i = Cnt->new(0); $i->{n} < 3; $i++) { push @a, $i } print "@a\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want, '#5501: an overloaded assignment key is called as a mutator and its result assigned; the `=` copy constructor keeps a shared object\'s other holder (perl oracle)');
 }

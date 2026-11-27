@@ -5144,10 +5144,11 @@
    perl's convention is three-valued and a handler can read all three:
    FALSE-but-DEFINED (`\"\"') = ordinary, TRUE (1) = operands swapped, UNDEF =
    the handler is being called as a MUTATOR (`$x += 2' reaching a `+=' key).
-   PCL never produces the mutator call — it autogenerates every compound form
-   from its base op — so `undef' here made a handler asking `defined $_[2]'
-   see every call as a mutator call.  Probed 5.40.3: `$o + 1' gives the
-   handler an empty string, `1 + $o' gives 1.
+   REVERSEDP :MUTATOR asks for that undef -- %p-assign-op's call of an
+   assignment key (task #5501); every other call passes `\"\"' or 1, so a
+   handler asking `defined $_[2]' does not see an ordinary call as a mutator
+   call.  Probed 5.40.3: `$o + 1' gives the handler an empty string, `1 + $o'
+   gives 1, `$o += 1' on a `+=' key undef.
 
    THE HANDLER RUNS IN SCALAR CONTEXT, whatever the operator's surroundings
    (task #5465, s543t; docs/ir-spec.md section 3.4 \"Overload protocol\").
@@ -5179,7 +5180,9 @@
    passes untouched (`$aref + $obj' hands the handler the reference)."
   ;; use overload: build the args Perl overload handlers expect
   (let ((other-val    (if (null other) *p-undef* (%p-overload-scalar-value other)))
-        (reversed-val (if reversedp (make-p-box 1) (make-p-box "")))
+        (reversed-val (cond ((eq reversedp :mutator) *p-undef*)
+                            (reversedp (make-p-box 1))
+                            (t (make-p-box ""))))
         (*wantarray*  nil))
     (flet ((call3 (fn) (funcall fn self other-val reversed-val))
            (call4 (fn) (funcall fn self other-val reversed-val (make-p-box op-str))))
@@ -12680,15 +12683,49 @@ per element."
          (destructuring-bind ,lambda-list %args
            (list 'setf var (let ((cur var)) ,@new-value)))))))
 
+;;; THE ASSIGNMENT KEYS AND THE COPY CONSTRUCTOR (task #5501 + #1001(b)'s
+;;; dedicated-key half, s543t; docs/ir-spec.md section 3.4).  perl's
+;;; `$a OP= $b' on an object asks the LEFT operand's class for its own `OP='
+;;; handler first, calls it as a MUTATOR -- handler($a, $b, undef) -- and
+;;; assigns what it returns; only without one does it autogenerate from `OP'
+;;; ($a = $a OP $b).  Before a mutator (an `OP=' handler, or an own `++' /
+;;; `--') perl runs the `=' COPY CONSTRUCTOR when the object is SHARED, so the
+;;; other holders keep the old value: Math::BigInt's `++' is binc in place,
+;;; and `for (my $i = 0; $i < 5; $i++) { push @a, $i }' under `use bigint'
+;;; keeps 0 1 2 3 4 in perl.  PCL has no reference counts, so it copies
+;;; whenever the class HAS a `=' handler (the value is perl's either way; an
+;;; unshared object gets one extra `=' call and a new identity) and mutates
+;;; in place when it has none (perl dies there if the object is shared and
+;;; not a plain scalar -- not a working program).
+(defun %p-mutator-operand (val)
+  "The object a MUTATOR handler runs on: VAL copied through its class's `='
+   copy constructor -- handler(VAL, undef, '') -- when the class has one,
+   else VAL itself.  See the section comment above."
+  (let ((cp (p-find-overload val "=")))
+    (if cp (p-call-overload cp val nil nil) val)))
+
+(defun %p-assign-op (key c d base)
+  "The new value of `C KEY D' (KEY one of \"+=\" .. \"^=\") when an operand is
+   blessed: the class's own KEY handler on the LEFT operand, called as a
+   mutator on its copy (%p-mutator-operand), else BASE -- the operator
+   function that owns the autogeneration from the base key.  THE ONE PLACE an
+   assignment key is consulted: every compound slow path and every guarded
+   delegation (%compound-key-form) comes here."
+  (let ((h (and (p-box-p c) (p-box-class c) (p-find-overload c key))))
+    (if h
+        (p-call-overload h (%p-mutator-operand c) d :mutator)
+        (funcall base c d))))
+
 (defun %p-compound-+-slow (c d)
-  "`+=`'s new value when an operand IS a blessed box: perl's `+` overload if the
-   class has one (perl autogenerates `+=` from it), else the numeric coercion.
-   OUT OF LINE on purpose — see %compound-arith-form."
-  (p-+ c d))
+  "`+=`'s new value when an operand IS a blessed box: the class's `+=' handler
+   (%p-assign-op), else perl's `+` overload (perl autogenerates `+=` from it),
+   else the numeric coercion.  OUT OF LINE on purpose — see
+   %compound-arith-form."
+  (%p-assign-op "+=" c d #'p-+))
 
 (defun %p-compound---slow (c d)
   "`-=`'s new value, `%p-compound-+-slow`'s twin."
-  (p-- c d))
+  (%p-assign-op "-=" c d #'p--))
 
 ;;; THE OTHER FOUR (task #1001 half (a), s470bk).  `*=` `%=` `.=` `x=` used to
 ;;; INLINE their arithmetic and so reached NO overload dispatch at all — a
@@ -12702,23 +12739,23 @@ per element."
 ;;; operand must not pay a call the old form did not.
 (defun %p-compound-*-slow (c d)
   "`*=`'s new value when an operand IS a blessed box — perl's `*` overload."
-  (p-* c d))
+  (%p-assign-op "*=" c d #'p-*))
 
 (defun %p-compound-%-slow (c d)
   "`%=`'s new value when an operand IS a blessed box — perl's `%` overload."
-  (p-% c d))
+  (%p-assign-op "%=" c d #'p-%))
 
 (defun %p-compound-.-slow (c d)
   "`.=`'s new value when an operand IS a blessed box — perl's `.` overload,
    which perl AUTOGENERATES from `\"\"` when the class has no `.` handler, so
    the old `to-string` answer survives for such a class (p-. owns that rule)."
-  (p-. c d))
+  (%p-assign-op ".=" c d #'p-.))
 
 (defun %p-compound-x-slow (c d)
   "`x=`'s new value when an operand IS a blessed box — perl's `x` overload,
    which perl autogenerates from `\"\"`; p-str-x owns that rule (task #1005's
    `x` half, shipped with this)."
-  (p-str-x c d))
+  (%p-assign-op "x=" c d #'p-str-x))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %compound-arith-form (slow-fn cl-op cur delta &optional incdecp numericp)
@@ -12824,6 +12861,21 @@ per element."
       (if constp
           `(let ((,c ,cur)) ,form)
           `(let ((,c ,cur) (,d ,delta)) ,form)))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %compound-key-form (key fn cur value &optional extra)
+    "The new-value form of a compound op that DELEGATES to its base operator
+     FN (`/=' `**=' `x=' `&=' `|=' `^=' `<<=' `>>='): (FN CUR VALUE . EXTRA)
+     as ever, except that a blessed LEFT operand asks its class's own KEY
+     handler first (%p-assign-op, task #5501) -- behind the same one-load
+     program-level guard %compound-arith-form measured, so a program that
+     never says `use overload' runs the old form plus one memory load.  CUR is
+     evaluated before VALUE, as the delegation did."
+    (let ((c (gensym "CUR")) (d (gensym "VAL")) (a (gensym "A")) (b (gensym "B")))
+      `(let ((,c ,cur) (,d ,value))
+         (if (and *p-any-overload-registered* (p-box-p ,c) (p-box-class ,c))
+             (%p-assign-op ,key ,c ,d (lambda (,a ,b) (,fn ,a ,b ,@extra)))
+             (,fn ,c ,d ,@extra))))))
 
 (%define-compound-pair p-incf p-incf-raw (&optional (delta 1 delta-p))
                        "Perl += - works on boxed values, hash/array elements, and derefs.
@@ -12935,7 +12987,13 @@ per element."
             ;; What must NOT discard is the AUTOGENERATED `++'-from-`+'
             ;; (%p-incdec-autogen's `gen' arm): there the result really is
             ;; `$x = $x + 1' and REPLACES the place.  That arm is untouched.
-            (progn (p-call-overload own val nil nil) (values val t))
+            ;; It runs on the `=' copy when the class has a copy constructor
+            ;; (%p-mutator-operand, task #5501): a SHARED object's other
+            ;; holders keep the old value, as perl's copy-before-mutate does
+            ;; -- Math::BigInt's `++' is binc in place.
+            (let ((m (%p-mutator-operand val)))
+              (p-call-overload own m nil nil)
+              (values m t))
             (%p-incdec-autogen val op-str gen-op)))))
 
 (defun %p-incdec-autogen (val op-str gen-op)
@@ -13240,7 +13298,7 @@ per element."
 (%define-compound-pair p-/= p-/=-raw (value)
                        "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
   a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
-                       `(p-/ ,cur ,value))
+                       (%compound-key-form "/=" 'p-/ cur value))
 
 (%define-compound-pair p-%= p-%=-raw (value)
                        "Perl %= (modulo-assign).  Overload `%` through
@@ -13256,7 +13314,7 @@ per element."
 (%define-compound-pair p-**= p-**=-raw (value)
                        "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
-                       `(p-** ,cur ,value))
+                       (%compound-key-form "**=" 'p-** cur value))
 
 (%define-compound-pair %p-.=-store p-.=-raw (value)
                        "Perl .= (concat-assign), the ordinary concatenate-and-store: the raw twin's, and the boxed p-.= macro's (below) for a `$$r` place.  Overload `.` through
@@ -13547,19 +13605,19 @@ per element."
 ;;; hot-loop operator and its old body already allocated an N-element list.
 (%define-compound-pair p-str-x= p-str-x=-raw (value)
                        "Perl x= (repeat-assign).  Delegates to p-str-x."
-                       `(p-str-x ,cur ,value))
+                       (%compound-key-form "x=" 'p-str-x cur value))
 
 (%define-compound-pair p-bit-and= p-bit-and=-raw (value)
                        "Perl &= (bitwise-and-assign)"
-                       `(p-bit-and ,cur ,value))
+                       (%compound-key-form "&=" 'p-bit-and cur value))
 
 (%define-compound-pair p-bit-or= p-bit-or=-raw (value)
                        "Perl |= (bitwise-or-assign)"
-                       `(p-bit-or ,cur ,value))
+                       (%compound-key-form "|=" 'p-bit-or cur value))
 
 (%define-compound-pair p-bit-xor= p-bit-xor=-raw (value)
                        "Perl ^= (bitwise-xor-assign)"
-                       `(p-bit-xor ,cur ,value))
+                       (%compound-key-form "^=" 'p-bit-xor cur value))
 
 ;;; `<<=' / `>>=' DELEGATE to `p-<<' / `p->>''s body (task #972).  They used
 ;;; to spell a SECOND copy of the shift, and the copies disagreed: this one had
@@ -13571,11 +13629,11 @@ per element."
 ;;; (task #3781), so these two are only ever OUTSIDE the pragma.
 (%define-compound-pair p-<<= p-<<=-raw (value)
                        "Perl <<= (left-shift-assign)"
-                       `(%p-shift ,cur ,value 1 "<<"))
+                       (%compound-key-form "<<=" '%p-shift cur value '(1 "<<")))
 
 (%define-compound-pair p->>= p->>=-raw (value)
                        "Perl >>= (right-shift-assign)"
-                       `(%p-shift ,cur ,value -1 ">>"))
+                       (%compound-key-form ">>=" '%p-shift cur value '(-1 ">>")))
 
 ;;; A COMPOUND ASSIGNMENT WHOSE NEW VALUE THE COMPILER SPELLED (task #3781).
 ;;; `use integer' changes what `+= -= *= /= %= &= |= ^= <<= >>=' compute --

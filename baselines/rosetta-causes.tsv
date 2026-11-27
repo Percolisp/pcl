@@ -104,7 +104,6 @@ rosetta/1169-Rep-string	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{.
 rosetta/1178-Reverse-a-string	DIFF	3	SILENT	#2381 -- \X is base+marks, not UAX 29 (flag pairs and ZWJ emoji split)
 rosetta/1188-Roman-numerals-Decode	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1198-Round-robin-tournament-schedule	DIFF	1	SILENT	#5469 -- a slice assignment from the same whole array reads it while writing it
-rosetta/1253-Set	DIFF	1	LOUD	#5501 -- the class's overloaded `+=` is never called, the object becomes a number
 rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	#5512 -- a `local` in a ternary arm is refused
 rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	#5517 -- a modifier foreach over `1..Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/1297-Solve-a-Hopido-puzzle	DIFF	1	LOUD	#5461 -- `s/\G00/$new/r` never anchors, the solver never places a step and dies with its own message
