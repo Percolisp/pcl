@@ -42,18 +42,18 @@
 # area/name<TAB>verdict<TAB>first-diff-line<TAB>class<TAB>cause
 rosetta/0033-Ackermann-function	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0047-Amb	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/0071-Arithmetic-evaluation	DIFF	2	SILENT	UNREDUCED #2104
-rosetta/0107-Base-16-numbers-needing-a-to-f	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0071-Arithmetic-evaluation	DIFF	2	SILENT	#5460 + #5461 -- a void comma operand runs as a list //g (pos lost, the visible half #5462); \G in s/// is a literal G
+rosetta/0107-Base-16-numbers-needing-a-to-f	DIFF	1	SILENT	NS:ns-regex-escapes -- \K never matches (silent; the only cause: a capture spelling runs identical)
 rosetta/0110-Bell-numbers	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0119-Bifid-cipher	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	UNREDUCED #2104
+rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	#5463 -- a bare builtin (length) as an array subscript is autoquoted to index 0
 rosetta/0161-Calculating-the-value-of-e	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	#5464 -- an element += a slice adds the slice count, not its last element
 rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
-rosetta/0195-Check-Machin-like-formulas	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0195-Check-Machin-like-formulas	DIFF	1	SILENT	#2560 + #5465 -- a BigRat "N/D" string is 1; an overloaded / handler runs in list context (bdiv gives quotient and remainder)
 rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0243-Common-sorted-list	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0243-Common-sorted-list	DIFF	1	SILENT	#5466 -- a slice ++ (the seen-set idiom) vivifies no key
 rosetta/0266-Consistent-overhead-byte-stuffing	DIFF	33	NOTICE	UNREDUCED #2104
 rosetta/0293-Count-the-coins	DIFF	1	EXHAUSTED	UNREDUCED #2104
 rosetta/0294-Countdown	DIFF	3	LOUD	UNREDUCED #2104
@@ -63,18 +63,18 @@ rosetta/0316-Damm-algorithm	DIFF	1	DROPPED	UNREDUCED #2104
 rosetta/0333-Demings-funnel	DIFF	2	DROPPED	UNREDUCED #2104
 rosetta/0337-Department-numbers	DIFF	3	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0346-Determine-if-a-string-is-squeezable	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
-rosetta/0351-Digital-root	DIFF	6	SILENT	UNREDUCED #2104
+rosetta/0351-Digital-root	DIFF	6	SILENT	#5467 -- int() of a Math::BigInt ignores its int overload (a plain number, then doubles)
 rosetta/0399-Environment-variables	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0422-Exactly-three-adjacent-3-in-lists	DIFF	1	DROPPED	UNREDUCED #2104
-rosetta/0442-Extreme-floating-point-values	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0442-Extreme-floating-point-values	DIFF	1	SILENT	#1475 -- printf float conversions drop the sign of -0.0 (also #2532 item 1)
 rosetta/0445-FASTA-format	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0466-Fast-Fourier-transform	DIFF	2	NOTICE	UNREDUCED #2104
 rosetta/0473-Fibonacci-n-step-number-sequences	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0477-Fibonacci-sequence	DIFF	24	SILENT	UNREDUCED #2104
+rosetta/0477-Fibonacci-sequence	DIFF	24	SILENT	NS:ns-integers-unbounded -- integer + past 2**64 stays exact where perl turns to a double (by design, #1513)
 rosetta/0478-Fibonacci-word	DIFF	1	EXHAUSTED	UNREDUCED #2104
 rosetta/0493-Find-first-missing-positive	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0523-FizzBuzz	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0545-Fractran	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0545-Fractran	DIFF	1	SILENT	#2560 -- a Math::BigRat "N/D" string constructor is 1
 rosetta/0556-Gamma-function	DIFF	3	DROPPED	UNREDUCED #2104
 rosetta/0557-Gapful-numbers	DIFF	3	LOUD	UNREDUCED #2104
 rosetta/0567-Getting-the-number-of-decimal-places	DIFF	5	SILENT	UNREDUCED #2104
