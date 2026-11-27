@@ -77,22 +77,22 @@ rosetta/0523-FizzBuzz	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0545-Fractran	DIFF	1	SILENT	#2560 -- a Math::BigRat "N/D" string constructor is 1
 rosetta/0556-Gamma-function	DIFF	3	DROPPED	UNREDUCED #2104
 rosetta/0557-Gapful-numbers	DIFF	3	LOUD	UNREDUCED #2104
-rosetta/0567-Getting-the-number-of-decimal-places	DIFF	5	SILENT	UNREDUCED #2104
+rosetta/0567-Getting-the-number-of-decimal-places	DIFF	5	SILENT	#5465 -- under bignum a literal division in a for list runs its overload handler in list context (quotient and remainder)
 rosetta/0632-Host-introspection	DIFF	1	DROPPED	NS:ns-given-when -- refused, announced
-rosetta/0641-Idiomatically-determine-all-the-lowercas	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0641-Idiomatically-determine-all-the-lowercas	DIFF	1	SILENT	#2440 -- POSIX bracket classes [[:lower:]] [[:upper:]] are ASCII ranges (perl: Unicode under unicode_strings)
 rosetta/0649-Inconsummate-numbers-in-base-10	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0670-Integer-long-division	DIFF	4	SILENT	UNREDUCED #2104
-rosetta/0672-Integer-overflow	DIFF	2	SILENT	UNREDUCED #2104
+rosetta/0670-Integer-long-division	DIFF	4	SILENT	#1494 -- the \N{NAME} named-character escape is not implemented (literal text)
+rosetta/0672-Integer-overflow	DIFF	2	SILENT	NS:ns-integers-unbounded -- use integer arithmetic does not wrap at 64 bits (by design, #1513)
 rosetta/0710-Klarner-Rado-sequence	DIFF	2	LOUD	UNREDUCED #2104
 rosetta/0715-Knuths-power-tree	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/0768-Longest-common-substring	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/0774-Longest-substrings-without-repeating-cha	DIFF	1	SILENT	UNREDUCED #2104
-rosetta/0808-Ludic-numbers	DIFF	4	SILENT	UNREDUCED #2104
-rosetta/0818-Magic-constant	DIFF	1	SILENT	UNREDUCED #2104
-rosetta/0838-McNuggets-problem	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0774-Longest-substrings-without-repeating-cha	DIFF	1	SILENT	NS:ns-regex-escapes -- \K never matches (a substitution with \K; $+ itself is right)
+rosetta/0808-Ludic-numbers	DIFF	4	SILENT	#5466 -- undef of a hash slice (the key-set idiom) vivifies no key
+rosetta/0818-Magic-constant	DIFF	1	SILENT	NS:ns-regex-escapes -- \K never matches (the only cause: a capture spelling runs identical)
+rosetta/0838-McNuggets-problem	DIFF	1	SILENT	NS:ns-regex-escapes -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	UNREDUCED #2104
-rosetta/0887-N-body-problem	DIFF	3	SILENT	UNREDUCED #2104
-rosetta/0903-Nested-templated-data	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0887-N-body-problem	DIFF	3	SILENT	#5466 -- a one-element slice as the left side of += / -= (the updates are lost)
+rosetta/0903-Nested-templated-data	DIFF	1	SILENT	#1285 -- a paren-less call of a no-prototype sub with { "key" => ... } passes the block value, not an anon hash
 rosetta/0904-Next-highest-int-from-digits	DIFF	6	SILENT	UNREDUCED #2104
 rosetta/0923-Numbers-divisible-by-their-individual-di	DIFF	3	SILENT	UNREDUCED #2104
 rosetta/0925-Numbers-in-base-16-representation-that-c	DIFF	1	SILENT	UNREDUCED #2104
