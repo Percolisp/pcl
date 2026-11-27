@@ -4285,8 +4285,11 @@ aggregate, a file-level `my` a named sub uses (a promoted cell) and a
 qualified global take `p-setf` and are flushed like a let-bound one; a
 `-deref` store's container is the scalar holding the reference (`$_->{fh} =
 undef;` is flushed).  An `if` / `unless` modifier wraps the flushing form of
-every drop shape of the expression statement (`(p-if C (p-flush-dropped-store
-...))`): the flush runs exactly when the statement does.  Example: `our %g;
+the element store and of the void `delete` / `pop` / `shift` / `splice`
+(`(p-if C (p-flush-dropped-store ...))`): the flush runs exactly when the
+statement does.  The variable shapes (`undef $x;` `$x = undef;` `%h = ();`
+`undef %h;`) take their flush as a separate form BEFORE the statement and are
+not flushed under a modifier (#5412).  Example: `our %g;
 ... $g{fh} = undef if $done;` writes the handle's bytes when `$done` is true.
 Every drop flush is a FLUSH, never a close: a handle another holder still
 has (`my $dup = $x[0]; shift @x;`) is written EARLY when one holder drops it
