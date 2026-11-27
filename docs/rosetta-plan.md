@@ -228,7 +228,7 @@ tasks.
 
 | cause | class | programs | names | task | known before | IN / OUT | with |
 |---|---|---:|---|---|---|---|---|
-| `\K` (11) and `\b{wb}` (1) never match: escapes passed to cl-ppcre untranslated | SILENT | 12 | 0107 0774 0818 0838 0923 0925 0927 0933 1050 1298 1306 1561 | `NS:ns-regex-escapes` | yes (ns) | OUT as written -- **a boundary question for the USER** (28 % of the silent programs; `\K` is common in substitutions) | #2381 #2440 #1494 |
+| `\K` (11) and `\b{wb}` (1) never match: escapes passed to cl-ppcre untranslated | SILENT | 12 | 0107 0774 0818 0838 0923 0925 0927 0933 1050 1298 1306 1561 | #5560 (`\K`, 11) #5561 (`\b{wb}`, 1); was `NS:ns-regex-escapes` | yes (ns) | **IN (ruled by the reviewing session 2026-11-28, DECIDED s543: the subset's "regexes within cl-ppcre's reach"; the ns row was an audit, not a ruling; flagged to the USER)** | #2381 #2440 #1494 |
 | an overloaded operator's handler runs in the caller's (dynamic) LIST context: Math::BigInt/BigRat `/` returns quotient and remainder | SILENT | 3 | 0195 0567 1473 | #5465 | new | IN | #5468 #5467 #2560 |
 | a slice as the operand of a modifying scalar op (`@h{LIST}++`, `undef @h{LIST}`, `@$r[$i] += x`) does nothing | SILENT | 3 | 0243 0808 0887 | #5466 | new | IN | #5464 #5469 |
 | `\X` is base + combining marks, not UAX #29 (flags, ZWJ emoji, Hangul jamo) | SILENT | 3 | 1178 1342 1376 | #2381 | yes (moved to ordinary) | IN | ns-regex-escapes |

@@ -407,7 +407,7 @@ s543l the `local` residue + a signal handler's `die` no longer swallowed by a bl
 **380 files / 12,558 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **ROSETTA 547 of 650 (84.2 %; the held-out corpus, `tools/rosetta-corpus run`, on -113)**; **30 live IN silent wrongs of ORDINARY code + 61 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
+(95.1 %)**; **ROSETTA 547 of 650 (84.2 %; the held-out corpus, `tools/rosetta-corpus run`, on -113)**; **33 live IN silent wrongs of ORDINARY code + 62 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -419,9 +419,10 @@ MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second ru
 #4904); PPI `pcl` =
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
-program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **RUNNING (three at a time FOR THIS SESSION on the USER's word; the default is two): THE ROSETTA CENSUS,
-s543p (the 42 silent programs) + s543q (the loud / dropped / resource ones), brief `s543/s543pq-prompt.md`; then the fix
-batches by PROGRAMS BROKEN (`docs/rosetta-plan.md` 3-4).  State and next action: `s543/PAUSE-s543.md`, last section.**  Line tracking costs a median
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **RUNNING (three at a time FOR THIS SESSION on the USER's word; the default is two): census A is MERGED (42 silent
+programs, 21 causes: `docs/rosetta-plan.md` 6a); census B s543q; the ROSETTA FIX BATCHES s543t (overloading as the big-number
+classes use it, 14 programs) and s543u (`\K`, `\G` in s///, `\b{wb}`, 14 programs).  State and the next briefs:
+`s543/PAUSE-s543.md`, last section.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that

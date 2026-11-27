@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED by the reviewing session (2026-11-28) with #5560 / #5561, from the audit table of docs/not-supported.md ns-regex-escapes (escapes that silently never match).\n\nTHE SHAPE (probe, perl 5.40.3 vs main cababb9d):\n    print ((\"aa\" =~ /(a)\\g{-1}/ ? \"m\" : \"n\"), \" \", (\"abab\" =~ /(a)(b)\\g{-2}\\g{-1}/ ? \"m\" : \"n\"), \"\\n\");   # perl m m    PCL n n\n\nSEMANTICS: `\\g{-N}` is the N-th group OPENED before this point, counted backwards; `\\g{N}` / `\\gN` are absolute (measure: right today?), `\\g{name}` = `\\k<name>`.  The rewriter knows the count of groups opened so far, so the translation to an absolute `\\N` is static.\n\nRARE, so by the ruling of 2026-11-24 it is taken only where it falls out of the same arm as an ordinary member (#5560 / #5561 edit the same dispatch).",
+   "frequency" : "rare",
+   "frequency_reason" : "the reviewing session, 2026-11-28: no program of the Rosetta corpus, the everyday battery or the board is known to hold it; listed in docs/not-supported.md ns-regex-escapes' audit",
+   "id" : "5562",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a RELATIVE backreference `\\g{-1}` (`\\g{-N}`, `\\g-1`) never matches -- `\"aa\" =~ /(a)\\g{-1}/` is false (perl true); handed to cl-ppcre untranslated",
+   "triage" : "in",
+   "triage_reason" : "the reviewing session, 2026-11-28: a regex escape within the rewriter's reach (docs/supported-subset.md section 3); silently never matching today"
+}

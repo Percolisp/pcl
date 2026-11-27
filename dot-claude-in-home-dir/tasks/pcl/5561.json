@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED by the reviewing session (2026-11-28) at the merge of the Rosetta census A (s543p), which keyed the program on `NS:ns-regex-escapes`: with `\\b` in place of `\\b{wb}` it runs identical to perl -- its only cause.  RULED IN with #5560 (DECIDED s543, 2026-11-28).\n\nTHE SHAPE (probe, perl 5.40.3 vs main cababb9d):\n    print join(\"|\", \"ab cd\" =~ /\\b{wb}(\\w+)/g), \"\\n\";    # perl ab|cd     PCL (empty)\n\nSEMANTICS (perlrebackslash): `\\b{wb}` is a Unicode WORD boundary (UAX #29: it does not break inside `don't` or `1,000`, it breaks between a letter and a space and around punctuation), `\\b{gcb}` a grapheme-cluster boundary (\\X's), `\\b{sb}` a sentence boundary, `\\b{lb}` a line-break opportunity; `\\B{...}` negates.  For the program's ASCII words `\\b{wb}` and `\\b` differ only at apostrophes and digit separators.\n\nA DIRECTION, not designed: `\\b{wb}` as a lookaround built from the word-break classes the property tables (docs/regex-unicode-properties.md) already hold, exact for the rules a table lookup can express, and the three others either the same way or LOUD -- an escape the rewriter cannot translate must die naming it (rule 12), never silently fail to match.\n\nTHE CHEAP DISCRIMINATING MEASUREMENT (not taken): the ten-row table perl gives for `\\b{wb}` on `don't stop`, `1,000`, `a.b`, `a  b`, `x-y`, an empty string, a combining mark -- it says which UAX #29 rules a lookaround of two classes cannot express.",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1561-XXXX-redacted",
+   "id" : "5561",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: the boundary variants `\\b{wb}` (also `\\b{gcb}` `\\b{sb}` `\\b{lb}`, `\\B{...}`) NEVER MATCH -- `\"ab cd\" =~ /\\b{wb}(\\w+)/g` returns nothing (perl: ab, cd); handed to cl-ppcre untranslated (Rosetta 1561)",
+   "triage" : "in",
+   "triage_reason" : "the reviewing session, 2026-11-28: a regex escape within the rewriter's reach (docs/supported-subset.md section 3); silently never matching today"
+}

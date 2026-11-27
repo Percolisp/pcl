@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 496df8b1 = MAIN-READY-113 caf9c693, v2-16400) by the Rosetta census B (docs/rosetta-plan.md step 1, section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    package Tally;\n    use overload\n        '+=' => sub { my ($t, $n) = @_; $t->{log} .= \"+$n\"; $t },\n        '-=' => sub { my ($t, $n) = @_; $t->{log} .= \"-$n\"; $t },\n        '.=' => sub { my ($t, $s) = @_; $t->{log} .= \".$s\"; $t },\n        '\"\"' => sub { \"Tally[\" . $_[0]{log} . \"]\" };\n    sub new { bless { log => \"\" }, shift }\n    package main;\n    my $t = Tally->new;\n    $t += 3;\n    $t -= 1;\n    $t .= \"x\";\n    print ref($t) || \"plain\", \" $t\\n\";\n\n    perl: Tally Tally[+3-1.x]\n    PCL : plain 2x          (exit 0, nothing on stderr)\n\n    With BOTH `+=` and `+` defined (`'+' => sub { \"plus\" }`): perl calls `+=` (the object stays a Tally), PCL calls `+` and $t becomes the string \"plus\".\n\nWHERE (emitted Lisp): the handlers ARE registered -- `(p-register-overloads \"Tally\" (... \"+=\" ... \"-=\" ... \".=\" ...))` -- but the statements compile to `(p-incf $t 3)`, `(p-decf $t 1)`, `(p-.= $t \"x\")`, and the compound family never asks for the assignment key: #900 (done) taught it to AUTOGENERATE `+=` from a `+` handler, the explicit `+=` key is not looked up before that.  perl's rule (perldoc overload, \"Assignments\" and \"Minimal Set\"): `$a += $b` calls the `+=` handler when there is one and assigns its result to $a; only without it does it fall back to `+`.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1253-Set with its two `+=` sites spelled as method calls (`$x->add($_)`, `$s->add(...)`) is byte-identical to perl -- this is the program's only cause; its LOUD face (a die \"Can't use string (\\\"18\\\") as a HASH ref\") is the number the object became.\n\nPROGRAMS: 1253-Set.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1253-Set (a set class whose += / -= add and delete members)",
+   "id" : 5501,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an overloaded ASSIGNMENT operator (`+=`, `-=`, `.=`, ...) is never called -- `$obj += 3` runs the `+` handler instead (or numifies when there is none), so the object is replaced by the handler's or the arithmetic's value; perl calls the `+=` handler and keeps what it returns (Rosetta 1253)",
+   "triage" : "in",
+   "triage_reason" : "overload is IN by docs/supported-subset.md section 3; the assignment variants are perl's documented overload keys (perldoc overload, \"Assignments\")"
+}
