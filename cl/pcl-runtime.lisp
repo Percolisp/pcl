@@ -5121,6 +5121,16 @@
             ;; Walk @ISA for inherited overloads (subclass of overloaded parent)
             (%p-find-overload-mro cls op-str nil))))))
 
+(declaim (inline %p-overload-scalar-value))
+(defun %p-overload-scalar-value (r)
+  "The SCALAR value of a handler's result R (task #5465): a box, a number, a
+   string, a function or NIL is one already -- the common answers leave at
+   these tests; a raw array / hash (a handler whose last statement is `@l' or
+   `%h') is counted, exactly as a scalar-context call site counts it."
+  (if (or (p-box-p r) (numberp r) (stringp r) (null r) (functionp r))
+      r
+      (p-scalar r)))
+
 (defun p-call-overload (handler self other reversedp &optional op-str)
   "Call a use overload handler with Perl's three-argument convention:
    handler(self, other, reversed).  REVERSEDP is true when the blessed
@@ -5137,30 +5147,50 @@
    PCL never produces the mutator call — it autogenerates every compound form
    from its base op — so `undef' here made a handler asking `defined $_[2]'
    see every call as a mutator call.  Probed 5.40.3: `$o + 1' gives the
-   handler an empty string, `1 + $o' gives 1."
+   handler an empty string, `1 + $o' gives 1.
+
+   THE HANDLER RUNS IN SCALAR CONTEXT, whatever the operator's surroundings
+   (task #5465, s543t; docs/ir-spec.md section 3.4 \"Overload protocol\").
+   An operator yields ONE value, and perl's amagic_call calls every key's
+   handler with G_SCALAR -- probed 5.40.3 with a `wantarray'-printing
+   handler per key, the operator in a list assignment: every binary,
+   unary, math, conversion, dereference, `-X' and assignment key answers
+   scalar.  perl's one exception is `<>' in list context (AMGf_want_list),
+   and PCL has no `<>' dispatch at all.  PCL's context is the DYNAMIC
+   *wantarray*, which only a CALL site binds, so without this binding a
+   handler saw whatever call was outermost: Math::BigInt's `/' (bdiv)
+   returned (quotient, remainder) in `my @r = ($x / 2)', in a sub's tail
+   called in list context, in a `map' body, even under a scalar
+   assignment inside that body.  Every handler call in the runtime comes
+   through this function -- the ONE place.  The value is the handler's
+   SCALAR value: a sub frame leaves a raw array or hash as it is and its
+   CALL SITE counts it (p-scalar), and here this function is the call site
+   -- `sub { my @l = (1, 2, 3); @l }' as a handler answers 3 (probed)."
   ;; use overload: build the args Perl overload handlers expect
   (let ((other-val    (or other *p-undef*))
-        (reversed-val (if reversedp (make-p-box 1) (make-p-box ""))))
+        (reversed-val (if reversedp (make-p-box 1) (make-p-box "")))
+        (*wantarray*  nil))
     (flet ((call3 (fn) (funcall fn self other-val reversed-val))
            (call4 (fn) (funcall fn self other-val reversed-val (make-p-box op-str))))
-      (cond
-        ((functionp handler)
-         ;; Direct CL function: lambda or #'pl-name from \&sub
-         (if op-str (call4 handler) (call3 handler)))
-        ((p-box-p handler)
-         ;; Boxed code ref (e.g. stored in a variable before use overload)
-         (let ((inner (unbox handler)))
-           (cond
-             ((not (functionp inner))
-              (error "use overload: boxed handler is not a function: ~S" inner))
-             (op-str (call4 inner))
-             (t      (call3 inner)))))
-        ((stringp handler)
-         ;; Method-name form: '+' => 'add' — call $self->add($other, $reversed)
-         (if op-str
-             (p-method-call self handler other-val reversed-val (make-p-box op-str))
-             (p-method-call self handler other-val reversed-val)))
-        (t (error "use overload: invalid handler ~S for ~S" handler self))))))
+      (%p-overload-scalar-value
+       (cond
+         ((functionp handler)
+          ;; Direct CL function: lambda or #'pl-name from \&sub
+          (if op-str (call4 handler) (call3 handler)))
+         ((p-box-p handler)
+          ;; Boxed code ref (e.g. stored in a variable before use overload)
+          (let ((inner (unbox handler)))
+            (cond
+              ((not (functionp inner))
+               (error "use overload: boxed handler is not a function: ~S" inner))
+              (op-str (call4 inner))
+              (t      (call3 inner)))))
+         ((stringp handler)
+          ;; Method-name form: '+' => 'add' — call $self->add($other, $reversed)
+          (if op-str
+              (p-method-call self handler other-val reversed-val (make-p-box op-str))
+              (p-method-call self handler other-val reversed-val)))
+         (t (error "use overload: invalid handler ~S for ~S" handler self)))))))
 
 ;;; ------------------------------------------------------------
 ;;; THE DEREFERENCE OVERLOADS `@{}' / `%{}' (task #4305)

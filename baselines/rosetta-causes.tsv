@@ -77,7 +77,6 @@ rosetta/0523-FizzBuzz	DIFF	1	LOUD	#1594 -- `(Bareword)[i]` in a list is called, 
 rosetta/0545-Fractran	DIFF	1	SILENT	#2560 -- a Math::BigRat "N/D" string constructor is 1
 rosetta/0556-Gamma-function	DIFF	3	DROPPED	#5509 -- `CONST*$var` without spaces is lexed as a glob cast, the statement drops
 rosetta/0557-Gapful-numbers	DIFF	3	LOUD	#5517 -- a modifier foreach over `$start .. Inf` (a constant) is materialized: out of memory (raw: #1427)
-rosetta/0567-Getting-the-number-of-decimal-places	DIFF	5	SILENT	#5465 -- under bignum a literal division in a for list runs its overload handler in list context (quotient and remainder)
 rosetta/0632-Host-introspection	DIFF	1	DROPPED	NS:ns-given-when -- refused, announced
 rosetta/0641-Idiomatically-determine-all-the-lowercas	DIFF	1	SILENT	#2440 -- POSIX bracket classes [[:lower:]] [[:upper:]] are ASCII ranges (perl: Unicode under unicode_strings)
 rosetta/0649-Inconsummate-numbers-in-base-10	DIFF	1	LOUD	#650 + #5560 -- `use List::Util <sum max>` imports nothing; then `\K` in the table helper
@@ -132,7 +131,6 @@ rosetta/1376-String-length	DIFF	1	SILENT	#2381 -- \X is base+marks, not UAX 29 (
 rosetta/1390-Substring-primes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1432-Tarjan	DIFF	8	SILENT	#2644 -- a no-initialiser my in a sub, captured by a my sub, keeps the first call contents
 rosetta/1436-Terminal-control-Display-an-extended-cha	DIFF	2	SILENT	#1494 -- the \N{NAME} named-character escape is not implemented (literal text)
-rosetta/1473-Tuppers-self-referential-formula	DIFF	1	SILENT	#5465 -- Math::BigInt / inside a map block runs its overload handler in list context (quotient and remainder)
 rosetta/1479-Twos-complement	DIFF	6	SILENT	NS:ns-integers-unbounded -- sprintf %d of a UV above IV_MAX is not reinterpreted as an IV (by design, #1513)
 rosetta/1480-Type-detection	DIFF	5	SILENT	#5471 -- ref of a reference to a package scalar holding a ref to a named hash is SCALAR, not REF
 rosetta/1488-UTF-8-encode-and-decode	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS

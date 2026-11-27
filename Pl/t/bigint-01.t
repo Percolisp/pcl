@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -102,6 +102,19 @@ both_agree(q{use bignum; print ref(1), " ", ref(1.5), " ", 1/3, " ", 0.1 + 0.2, 
 
 both_agree(q{use bigint (); print 2**70, "\n"; use bigint; print 2**70, "\n";},
            '`use bigint ()` (an EMPTY import list) converts nothing');
+
+# #5465 (s543t): Math::BigInt's `/' handler (bdiv) answers (quotient,
+# remainder) in LIST context; perl calls every overload handler in scalar
+# context, so a division in a list slot is ONE value.
+both_agree(q{use Math::BigInt; my $y = Math::BigInt->new(7);
+my @q = ($y / 2); print scalar(@q), " [@q]\n";
+sub half { my $v = shift; $v / 2 } my @t = half($y); print scalar(@t), " [@t]\n";
+my @m = map { my $q; $q = $_ / 7; $q } Math::BigInt->new(1000); print "[@m]\n";
+my @bd = $y->copy->bdiv(2); print scalar(@bd), " [@bd]\n";},
+           '#5465: a Math::BigInt division in list context is one value; the bdiv METHOD keeps (quo, rem)');
+
+both_agree(q{use bignum; print "[$_]\n" for 9, do { my $q = 1/3; $q }; my @l = (1/3, 10/4); print scalar(@l), "\n";},
+           '#5465: `use bignum` literal divisions in a for list and a list assignment');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,

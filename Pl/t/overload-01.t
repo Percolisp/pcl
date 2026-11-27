@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 51;
+plan tests => 52;
 
 sub run_cl {
     my ($code) = @_;
@@ -1062,4 +1062,38 @@ PL
     print $fh $prog; close $fh;
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want, '#1003: the same overloaded object interpolated twice adjacently stringifies twice (perl oracle)');
+}
+
+# #5465 (s543t): an overload HANDLER runs in SCALAR context whatever the
+# operator's surroundings -- perl's amagic_call is G_SCALAR.  PCL's context is
+# the dynamic *wantarray*, so a handler answering by `wantarray' (Math::BigInt's
+# `/' returns quotient AND remainder in list context) leaked a list into a list
+# assignment, a sub's tail called in list context, a `map' body -- even under a
+# scalar assignment inside that body.  A handler whose last statement is an
+# array or a hash answers its count.  A METHOD call keeps the caller's context.
+{
+    my $prog = <<'PL';
+package Num;
+use overload
+  '/' => sub { wantarray ? ("L1", "L2") : "scalar" },
+  '*' => sub { my @l = (1, 2, 3); @l },
+  '-' => sub { return reverse("ab", "cd") },
+  'neg' => sub { wantarray ? "negL" : "negS" };
+sub new { bless {}, shift }
+sub div { wantarray ? "mL" : "mS" }
+package main;
+my $x = Num->new;
+my @r = ($x / 2);                      print scalar(@r), " [@r]\n";
+sub tail { my $v = shift; $v / 2 }
+my @t = tail($x);                      print scalar(@t), " [@t]\n";
+my @m = map { my $q; $q = $x / 7; $q } 1, 2;  print "[@m]\n";
+my $n = 0; $n++ for $x / 2;            print "$n\n";
+my @s = (scalar($x / 2));              print "[@s]\n";
+my @a = ($x * 1, $x - 1, -$x);         print "[@a]\n";
+my @mc = $x->div(2);                   print "[@mc]\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want, '#5465: an overload handler runs in scalar context in a list assignment, a sub tail, a map body, a for list; an array-valued handler answers its count; a method call keeps list context (perl oracle)');
 }
