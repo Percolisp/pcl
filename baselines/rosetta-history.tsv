@@ -7,3 +7,4 @@
 # date: baselines/rosetta-corpus.tsv's header), both differing then, so M is 650 from row 2 on -- read N/M.
 # date	sha	gen	same	total	by-area
 2026-11-24T21:31:51Z	26d0dac4	v2-16000	547	652	rosetta=547/652
+2026-11-27T20:53:00Z	503f7165	v2-16300	547	650	rosetta=547/650
