@@ -4276,7 +4276,22 @@ nothing vivified) and flushed before the store; a sub's / block's TAIL
 `(p-flush-dropped-value FORM :tail)`, flushed only when the caller's context
 is VOID -- `my $fh = $o->take_fh` keeps the handle, `$o->drop;` drops it.
 Example: `sub close_it { $_[0]{fh} = undef }` writes the logger's buffered
-bytes out.  The inline gate costs
+bytes out.  **Which holder (normative, s543m, the review's F1)**: the
+element store asks the holder question the clear asks
+(`Parser2::_drop_holder_cl_p`: a plain variable that is no core special of
+the partition's exception set -- `%ENV` `%SIG` `%INC` `@ARGV` `@_` keep
+their emission), whatever store operator the lowering chose: an `our`
+aggregate, a file-level `my` a named sub uses (a promoted cell) and a
+qualified global take `p-setf` and are flushed like a let-bound one; a
+`-deref` store's container is the scalar holding the reference (`$_->{fh} =
+undef;` is flushed).  An `if` / `unless` modifier wraps the flushing form of
+every drop shape of the expression statement (`(p-if C (p-flush-dropped-store
+...))`): the flush runs exactly when the statement does.  Example: `our %g;
+... $g{fh} = undef if $done;` writes the handle's bytes when `$done` is true.
+Every drop flush is a FLUSH, never a close: a handle another holder still
+has (`my $dup = $x[0]; shift @x;`) is written EARLY when one holder drops it
+(perl keeps the bytes buffered while a reference lives) -- never lost, never
+reordered within the handle.  The inline gate costs
 one `typep` of five types at an `undef` statement; a 10-key object 0.1 µs, a
 10,000-key one is bounded by the 64.
 Example: `my $fh = mk(); print $fh "hello"; undef $fh; print -s $f` prints 5

@@ -2526,13 +2526,27 @@ stays different from perl, measured s540c / s541:
   ...);`: what it takes off; #5354), an element overwritten with `undef`
   (`$h{fh} = undef;`, `$self->{fh} = undef` as a method's tail) and a sub's
   TAIL `delete $h{fh}` / `pop` / `shift` whose caller discards the value
-  (#5405).  NOT flushed at a
+  (#5405); the element store on any holder the clear reads (an `our`
+  aggregate, a promoted file lexical, a qualified global) and under an `if` /
+  `unless` modifier (the s543m review's F1).  A handle another holder still
+  has is written EARLY when one holder drops it (`my $dup = $x[0]; shift
+  @x;`: perl keeps the bytes buffered until `$dup` lets go) -- a flush,
+  never a loss.  NOT flushed at a
   statement: a handle let go at a BLOCK EXIT (`{ my $fh = $f->openw; print
   $fh ...; }`, a method's returned handle, a `local`ized global's handle at
   its scope's end -- the moment above), a handle two levels down
-  (`$o->{inner}{fh}`, a scalar ref `\$fh` in an object), a string eval's
-  `undef $g` on an unqualified name (#5255), an element two levels down
-  overwritten (`$o->{a}{fh} = undef`); and
+  (`$o->{inner}{fh}`, a scalar ref `\$fh` in an object, a handle one level
+  inside an element of a CLEARED container: `%h = (o => {fh => $fh}); %h =
+  ()`, #5408), a string eval's `undef $g` on an unqualified name (#5255), an
+  element two levels down overwritten (`$o->{a}{fh} = undef`,
+  `$self->{list}[0] = undef`, #5406), a DEREFERENCED container cleared
+  (`%$self = ();`, `@$ar = ();`, `@{$self->{l}} = ();`, #5407), an explicit
+  `return delete $h{fh};` (#5409), a handle that is only a temporary of its
+  statement (`print { take() } ...;`, `my $n = () = take();`, #5410), a
+  holder OVERWRITTEN BY ANOTHER VALUE than a literal `undef` (`$self->{fh} =
+  open_next();`, `$fh = $other;`: perl closes the old handle there, #5411),
+  `undef $fh if C;` / `%h = () if C;` with a modifier and a TAIL drop with a
+  modifier (#5412), `$_[0] = undef;` on a caller's variable (#5412); and
   the flush never releases a lock or a descriptor;
 * a dropped handle's DESCRIPTOR (and a lock held through it) stays in use
   until one of the triggers or exit; only a blocking `flock` on the same file
