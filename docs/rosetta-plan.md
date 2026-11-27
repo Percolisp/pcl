@@ -19,7 +19,7 @@ differences can we find" to **"does a program somebody else wrote run right"**:
 * a neighbour found by a batch's own probes does not extend the batch unless
   it is ordinary;
 * **the evidence for "ordinary" is a real program that holds the shape** --
-  and the Rosetta corpus is 652 such programs that PCL was never tuned on.
+  and the Rosetta corpus is 650 such programs (652 until s543o) that PCL was never tuned on.
 
 So the corpus does two jobs: it is the measurement of criterion 2, and it is
 the source of the next briefs -- a cause that breaks a Rosetta program is
@@ -33,10 +33,11 @@ ordinary by definition.
   runs them to completion, deterministically, with output, in under 8 s (the
   s493 selection): 655.  Re-admitted on 2026-11-24 by
   `tools/everyday-smoke.pl --bless-expect` (three perl runs each, one from
-  another path): **652** (three refused: two whose output depends on where the
-  file is, one perl itself exits 255 on under `LC_ALL=C`).  Since s543o both
-  steps are one recipe, `tools/rosetta-corpus build`, and it reproduces the 652
-  byte for byte (below).
+  another path): 652 (three refused: two hash-order nondeterministic -- the
+  bless said "depends on where the file is" because its third run was the one
+  that differed -- and one perl itself exits 255 on under `LC_ALL=C`).  Since
+  s543o both steps are one recipe, `tools/rosetta-corpus build`, and the corpus
+  is **650**: two of the 652 were broken probes (section 3).
 * **Where:** outside every checkout, in `PCLPaths::rosetta_dir` --
   `$PCL_ROSETTA_DIR` when set, else `~/.pcl-cache/rosetta` (beside the module
   cache; `pcl --clear-cache` leaves it alone, a hand `rm -rf ~/.pcl-cache/*`
@@ -45,8 +46,8 @@ ordinary by definition.
   `refused/` what the admission refused, with `REASONS.tsv`; `work/` the clone;
   `BUILD-INFO` and `build.log`.  Until s543o the corpus existed only as
   scratch files built by hand (`~/pcl-agent-scratch/s493/angles/rosetta/select.pl`,
-  then `~/pcl-agent-scratch/s543/rosetta/`); that directory is still a valid
-  `--dir` on the machine that made it.
+  then `~/pcl-agent-scratch/s543/rosetta/`, which holds the 652 and so fails
+  `verify` by the two broken probes of section 3).
 * **The recipe -- `tools/rosetta-corpus`** (s543o; the rules in
   `tools/lib/PCLRosetta.pm`):
   `build` fetches the pinned commit (`1d475861d7141ef2fafff293d9339f56e4b0f5db`;
@@ -55,7 +56,16 @@ ordinary by definition.
   the candidates in sorted path order), and admits through
   `tools/everyday-smoke.pl --bless-expect --timeout 8` under `ulimit -v 4000000`
   (three perl runs, one a copy at another path from another cwd), refusing
-  what printed nothing or more than 200,000 bytes; `verify` compares a corpus
+  what printed nothing or more than 200,000 bytes, then re-runs every admitted
+  program once, minutes later (the runner's `--verify-with-perl`): a DRIFT is an
+  answer that holds the clock or chance, and is refused.  A REBUILD (the
+  manifest describes the commit) decides two things the definition decided
+  once: the programs the manifest names get the runner's 60 s, not 8 (the 8 s
+  rule is a wall clock: 0478 runs 7.8 s here and timed out at load 15), and a
+  program admitted here that the manifest does not name is refused with that
+  reason (three URL programs use URI, installed here after s493; 1107 runs
+  8.03 s, inside the runner's whole-second timeout) -- THE MANIFEST IS THE
+  CORPUS.  `verify` compares a corpus
   with the MANIFEST `baselines/rosetta-corpus.tsv` (one row per program: name,
   sha256 of the `.pl`, sha256 of the `.expect`, the exit status -- names and
   digests only); `classify` reads a run's outdir and prints each differing
@@ -68,7 +78,7 @@ ordinary by definition.
   baselines/rosetta-history.tsv`, `--jobs 2 --timeout 60 --outdir <root>/.rosetta`;
   runner options after it win (`--record`, `--jobs`, a program).  The line a
   batch quotes, BEFORE -> AFTER beside `EVERYDAY:`, is the last one:
-  `ROSETTA: N of 652 identical to perl (P %) -- <sha> gen <generation>`, and
+  `ROSETTA: N of 650 identical to perl (P %) -- <sha> gen <generation>`, and
   the buckets are the battery's (NEW = a regression; FIXED = the row leaves by
   edit).  `--record` on a clean tree appends a row to the history.
 * **What it is NOT:** it has no I/O, no processes, no modules beyond the core
@@ -104,6 +114,17 @@ narrowing starts, not a cause):
 code blocks, 2 `given` / `when`, 4 XS, 1 `bigrat`), which leaves **87 programs
 that are ours**, 43 of them silent.  Those two numbers are the starting line.
 
+**s543o (2026-11-27): THE CORPUS IS 650.**  Rebuilding it found two of the
+105 to be broken probes, not PCL's: `0359-Distinct-palindromes-within-decimal-numb`
+prints one of two outputs, half and half (hash order; its five admission runs
+agreed by chance), and `1442-Text-to-HTML`'s expected output holds the date of
+its bless (its three runs fell inside one second) -- a SILENT row no fix could
+ever clear.  Both left the manifest and the cause table by edit.  On
+MAIN-READY-111 the corpus reads **547 of 650**; the starting line is **86
+programs that are ours, 42 of them silent** (17 out of the subset: 10 regex
+code blocks, 2 `given` / `when`, 4 XS, 1 `bigrat`), each a row of
+`baselines/rosetta-causes.tsv` with its class.
+
 ## 4. The work, in order (next session)
 
 **Step 0 -- before anything else:** merge whatever of s543l / s543m / s543n is
@@ -113,7 +134,8 @@ this file's table.
 
 **Step 1 -- THE CENSUS (measurement; no fix).  Two agents, the classes split
 between them:** agent A takes the 43 SILENT programs, agent B the 44 LOUD /
-dropped / notice / timeout / heap ones.  For every program:
+dropped / notice / timeout / heap ones (42 and 44 since s543o: 1442 left the
+corpus).  For every program:
 
 1. reduce it to the smallest reproducer that still differs, perl against PCL
    (the program's own text shrunk; never a guess from the diff);
@@ -145,13 +167,16 @@ run.  A COUNT is not a finding: each row was re-run for its cause.
 takes the cause table as its `--baseline`, so a run reports NEW / FIXED
 against it like the everyday battery does; a history file
 `baselines/rosetta-history.tsv` (date, sha, generation, N of M) -- `--record`
-refuses a non-default corpus today.
+refuses a non-default corpus today.  **DONE (s543o, 2026-11-27; the tool landed
+in `25b73daf`)**: section 2 is the recipe as built; the cause table is seeded
+(103 rows, the census edits its cause column); `tools/rosetta-corpus run
+--record` writes the history.
 
 **Step 3 -- THE FIX BATCHES, by cause, largest first.**  Rank the causes by
 the number of programs each one breaks; silent before dropped before loud
 (the s538 order).  A brief takes a cluster of causes that share a mechanism,
 exactly as today's briefs do, with two changes: the members are chosen by
-PROGRAMS BROKEN, and every batch quotes `ROSETTA: N of 652` BEFORE -> AFTER
+PROGRAMS BROKEN, and every batch quotes `ROSETTA: N of 650` BEFORE -> AFTER
 beside its `EVERYDAY:` line.  The probe discipline stays (perl -> base ->
 tree, the shape the fix would break), but under the new rule a probe-found
 neighbour is filed with its frequency and left unless it is ordinary.

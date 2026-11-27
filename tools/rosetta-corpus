@@ -270,7 +270,7 @@ sub fetch {
         die "rosetta-corpus: $work holds " . ($ok ? "commit $head" : 'no commit') . ", not $commit: remove it\n";
     }
     make_path($work);
-    system({ 'git' } 'git', 'init', '-q', $work) == 0 or die "rosetta-corpus: git init $work failed\n";
+    git($work, 'init', '-q');   # GIT_DIR names $work/.git: the init goes there, whatever the caller's env says
     git($work, 'remote', 'add', 'origin', $repo);
     git($work, 'config', 'remote.origin.promisor', 'true');
     git($work, 'config', 'remote.origin.partialclonefilter', 'blob:none');
