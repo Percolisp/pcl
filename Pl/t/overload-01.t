@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 53;
+plan tests => 54;
 
 sub run_cl {
     my ($code) = @_;
@@ -1122,4 +1122,26 @@ PL
     print $fh $prog; close $fh;
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want, '#5468: an array / hash operand beside an overloaded one reaches the handler as its count, on either side, in a comparison, `x`, a compound assignment and `/ @_`; a reference stays a reference (perl oracle)');
+}
+
+# #5467 (s543t): `int' is an overload key -- the class's OWN handler runs;
+# without one perl autogenerates int from `0+' and never asks nomethod.
+{
+    my $prog = <<'PL';
+package Num;
+use overload 'int' => sub { "INT" }, 'abs' => sub { "ABS" }, '0+' => sub { 42.7 },
+             'neg' => sub { Num->new }, fallback => 1;
+sub new { bless {}, shift }
+package OnlyNum; use overload '0+' => sub { 42.7 }, fallback => 1; sub new { bless {}, shift }
+package NoMeth;  use overload 'nomethod' => sub { "NM" }, '0+' => sub { 9.5 }; sub new { bless {}, shift }
+package main;
+my $x = Num->new;
+print int($x), " ", abs($x), " ", int(-$x), " ", int(OnlyNum->new), " ", int(NoMeth->new), "\n";
+my @l = (int($x)); print scalar(@l), "\n";
+print int(7.9), " ", int("12.5abc"), " ", int(-3.7), "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>/dev/null`;
+    is(run_cl($prog), $want, '#5467: int() calls the class\'s own `int` handler; without one it truncates the `0+` value and never asks nomethod; plain values unchanged (perl oracle)');
 }

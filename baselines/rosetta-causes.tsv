@@ -62,7 +62,6 @@ rosetta/0316-Damm-algorithm	DIFF	1	DROPPED	#650 -- a spaced `[< w w >]` word lis
 rosetta/0333-Demings-funnel	DIFF	2	DROPPED	#4807 -- `&$_(ARGS)` is dropped
 rosetta/0337-Department-numbers	DIFF	3	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0346-Determine-if-a-string-is-squeezable	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
-rosetta/0351-Digital-root	DIFF	6	SILENT	#5467 -- int() of a Math::BigInt ignores its int overload (a plain number, then doubles)
 rosetta/0399-Environment-variables	DIFF	1	LOUD	#5506 -- lib/POSIX.pm lacks getenv
 rosetta/0422-Exactly-three-adjacent-3-in-lists	DIFF	1	DROPPED	#650 -- a spaced `[< w w >]` word list right after `[` (PPI: an operator) drops the table statement
 rosetta/0442-Extreme-floating-point-values	DIFF	1	SILENT	#1475 -- printf float conversions drop the sign of -0.0 (also #2532 item 1)
@@ -105,7 +104,6 @@ rosetta/1050-Positive-decimal-integers-with-the-digit	DIFF	1	SILENT	#5560 -- \K 
 rosetta/1053-Power-set	TIMEOUT	-	TIMEOUT	#5516 -- `++vec(...)` answers the untruncated value, the byte counter never carries: an endless redo
 rosetta/1093-Priority-queue	DIFF	1	LOUD	#5511 + #5463 -- `@{ $x[-1] // [] }` fetches the element as an lvalue (dies on an empty array); `$bins[shift]` is autoquoted
 rosetta/1118-Quine	DIFF	1	SILENT	#1716 -- seek DATA, 0, 0 rewinds to the data section, not the source file
-rosetta/1122-RSA-code	DIFF	4	SILENT	#5467 -- int() of a Math::BigInt (use bigint) ignores its int overload: a plain number, then doubles
 rosetta/1139-Range-modifications	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1168-Remove-vowels-from-a-string	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
 rosetta/1169-Rep-string	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced

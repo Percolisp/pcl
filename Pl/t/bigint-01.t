@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -122,6 +122,14 @@ both_agree(q{use bignum; print "[$_]\n" for 9, do { my $q = 1/3; $q }; my @l = (
 both_agree(q{use bigint; my @i = (3, 5, 4, 2, 1); my $k = @i - 1; print "$k\n";
 my @rows = ([4], [5]); print "two\n" if @rows == 2; my @e; print @e + 1, " ", 10 - @i, "\n";},
            '#5468: `use bigint` -- an array operand of an overloaded operator is its count');
+
+# #5467 (s543t): `int' of a Math::BigInt / BigFloat calls the class's `int'
+# handler and stays an OBJECT, so the arithmetic after it stays exact.
+both_agree(q{use Math::BigInt; use Math::BigFloat; my $b = Math::BigInt->new("12345678901234567890123");
+print ref(int($b)), " ", int($b) / 7, " ", int(Math::BigFloat->new("-2.5")), "\n";
+my $n = Math::BigInt->new("98765432109876543210"); my @d;
+while ($n > 0) { push @d, $n % 7; $n = int($n / 7) } print "@d\n";},
+           '#5467: int() of a big-number object is the class\'s int (an object)');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,
