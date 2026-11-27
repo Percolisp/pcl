@@ -150,7 +150,7 @@ The brief: `briefs-and-rules-for-claude-subagents/s543/s543pq-prompt.md` (the ro
 
 **TIMEOUT (2) and EXHAUSTED (2).**  Both timeouts are endless loops of correctness causes (#5514, #5516), so no `SLOW:` task.  The exhausted ones, sized by one bounded `heavy.sh` leg (`scratch/s543q/legs/heavy1.log`): 0293's memoized recursion dies at depth ~10,000 already (amounts 10,000 / 20,000 / 100,000 all exhaust the binding stack; perl 0.04-0.43 s) -> #1929; 0478 dies at SBCL's fixed 1 GB heap -- perl itself needs 2.1 GB, and a foreach over `split //` of 3.5 M / 9.2 M characters costs PCL 903 MB / >1 GB where perl needs 316 / 817 MB -> #5518 (MEMORY).
 
-**Bars:** BARS-PLACEHOLDER
+**Bars:** the targeted gate (`prove Pl/t/verdict-register-01.t tools/t/rosetta-corpus.t Pl/t/claude-md-size-01.t`, strict, the live store) PASS; `tools/rosetta-corpus run` on the census tree `d58263a1` (one bounded leg, `scratch/s543q/legs/rosetta-run.log`): `ROSETTA: 547 of 650 identical to perl (84.2 %) -- d58263a1 gen v2-16500`, NEW 0 / FIXED 0 / MOVED 0 / UNEXPLAINED 0 / STALE 0; the full gate on the same tree (`scratch/s543q/legs/gate.log`) 380 files / 12,558 rows `Result: PASS`; `tools/task-triage.pl` on the live store 33 ordinary + 62 rare -> 41 + 61.
 
 ## Session s543p (Opus agent, 2026-11-27) -- THE ROSETTA CENSUS, census A: the 42 SILENT programs reduced to 21 causes (docs/rosetta-plan.md section 6a); #5460-#5471 filed, eight known tasks appended, five moved to ordinary; measurement only
 
