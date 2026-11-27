@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543p (Opus 5.5, 2026-11-27, CODE 0ab08642 = MAIN-READY-111, v2-16300) by the Rosetta census (docs/rosetta-plan.md step 1; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    my @v = (4, 5, 6);\n    my @C = (0);\n    $C[0] += @v[1];            print \"a=@C\\n\";     # perl a=5    PCL a=1\n    my %h = (k => 0);\n    $h{k} += @v[2];            print \"b=$h{k}\\n\";  # perl b=6    PCL b=1\n    my $r = [4, 5, 6];\n    $C[0] = 0;\n    $C[0] += $r->@[1];         print \"c=@C\\n\";     # perl c=5    PCL c=1   (the postfix slice, the program's spelling)\n    my $s = 0;\n    $s += @v[1];               print \"d=$s\\n\";     # perl d=5    PCL d=5   (a scalar target is right)\n    $C[0] = 100;\n    $C[0] -= @v[0, 1];         print \"e=@C\\n\";     # perl e=95   PCL e=98  (count 2, not the last element 5)\n    $C[0] = \"\";\n    $C[0] .= @v[1];            print \"f=@C\\n\";     # perl f=5    PCL f=5   (.= is right)\n\nWHERE (emitted Lisp): the scalar target is `(p-incf-raw $s (p-list-scalar (p-aslice @v 1)))` -- the slice's last element; the element target is `(p-incf (p-aref @C 0) (p-aslice @v 1))` -- the raw slice vector, which numifies as its length.  The numeric compound-assignment lowering for an element lvalue does not impose scalar context on its right operand (the scalar-target path does; `.=` does).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): the d=/a= pair above -- the same right side, a scalar target right and an element target wrong, so it is the element arm of the compound-assignment lowering, not the slice.  A one-element slice in scalar context is common in programs written as `@a[$i]` (a classic beginner spelling) and in postfix `->@[$i]`.\n\nTHE PROGRAM: 0190-Centroid-of-a-set-of-N-dimensional-point sums coordinates into an array element with `+=` from a postfix one-element slice; every sum counts 1 per point.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0190-Centroid-of-a-set-of-N-dimensional-point",
+   "id" : 5464,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `+=` / `-=` on an ELEMENT (`$a[i]`, `$h{k}`) whose right side is a SLICE adds the slice's COUNT -- `$C[0] += @v[1]` adds 1 where perl adds the element (`$s += @v[1]` on a scalar is right); the emission is `(p-incf (p-aref @C 0) (p-aslice @v 1))` without the scalar wrapper (Rosetta 0190)",
+   "triage" : "in",
+   "triage_reason" : "a slice in scalar context is its last element (perldata); compound assignment to an element is core language; IN by docs/supported-subset.md section 3"
+}

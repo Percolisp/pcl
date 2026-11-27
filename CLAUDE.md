@@ -400,17 +400,18 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-27: main = MAIN-READY-111 `0ab08642` (generation
-v2-16300; thirteen batches merged in this session, MAIN-READY-99 .. -111, each with its
+**s543, 2026-11-27: main = MAIN-READY-113 `caf9c693` (generation
+v2-16400; fifteen batches merged in this session, MAIN-READY-99 .. -113, each with its
 sha in `docs/session-log.md` s543: s543a, line tracking ON by default; five batches of live silent
 wrongs, s543b, s543e, s543g, s543j, s543k; s543n (-111), the filehandle family (one rule names a handle's glob, a pass of `<>` ends,
-an emulated exec passes a signal death on, `close` resets `$.`); s543h, string-eval name
+an emulated exec passes a signal death on, `close` resets `$.`); s543o (-112), the Rosetta instrument; s543m (-113: #5310's file-level face, a `my` after the text's `our`,
+a handle leaving a frame, a raw number under `${ }`, `postderef_qq` in a pattern, the drop flush for a cleared container, a qr's `u`); s543h, string-eval name
 resolution; the PPI batches 10-12, s543d, s543f, s543i (the last); s543c, the verification batch;
 s543r, the round).**  Gate
-**380 files / 12,499 rows `Result: PASS`** (measured on merged main); full
+**380 files / 12,540 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,808**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **17 live IN silent wrongs of ORDINARY code + 60 of rare spellings** (the two numbers
+(95.1 %)**; **ROSETTA 547 of 650 (84.2 %; the held-out corpus, `tools/rosetta-corpus run`, on -112)**; **24 live IN silent wrongs of ORDINARY code + 67 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -419,24 +420,23 @@ ok** (five load timeouts counted by their one-file runs); the companion in the
 same round: `--all --quick` on -108 130 OK / 103 XDIFF / 237 DIFF of 528, the full
 run on -110 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST against the edited baselines (the round
 MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second run: one row flaked under load,
-#4904); six `op/decl-refs.t` rows that moved at -107 had PASSED ON NOTHING (keyed on #1648); #5310, the
-round's one regression find, is fixed in eval text by s543k -- its file-level face is left; PPI `pcl` =
+#4904); PPI `pcl` =
 `7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
-program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **RUNNING (2026-11-27; three at a time FOR THIS SESSION on the USER's word, the default is two):
-s543m (#5310 + the string-eval residue + the container drop flush, v2-16400) and s543l (the `local` residue + a signal
-handler's `die` no longer swallowed, v2-16500), resumed and STACKED m -> l by
-`briefs-and-rules-for-claude-subagents/s543/resume-1127.md`, each with one review fix owed; THEN ROSETTA, the MAIN work
-(`docs/rosetta-plan.md`: 547 of 652 programs identical to perl on -110, 43 silent; the census first).**  Line tracking costs a median
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **RUNNING (2026-11-27 23:3x; three at a time FOR THIS SESSION on the USER's word, the default is two):
+s543l (the `local` residue + a signal handler's `die`, v2-16500; on its end bars, merges next) and THE ROSETTA CENSUS,
+s543p (the 42 silent programs) + s543q (the loud / dropped / resource ones), brief `s543/s543pq-prompt.md`; then the fix
+batches by PROGRAMS BROKEN (`docs/rosetta-plan.md` 3-4; state: `s543/PAUSE-s543.md`, last section).**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
 leaves its opening block is written out before the next child process, at a
 `flock` / descriptor trigger, at an explicit `undef $fh` / `undef $obj` /
 `delete $h{fh}` (a lexical, also a captured one or one named in an eval text; an IO::File object; a
-handle one level inside the dropped value) or at exit, never at the block's
+handle one level inside the dropped value), at a container cleared / an element set to undef / a void `pop` `shift`
+`splice` (s543m) or at exit, never at the block's
 end (`docs/not-supported.md` ns-escaping-filehandle; the open half is
-#5354); `caller`, `croak` and a runtime die name perl's file and line since
+#5407 #5412); `caller`, `croak` and a runtime die name perl's file and line since
 s543a, except from a BEGIN / END / `use` body (#5101).  Cost flags kept by
 the s536 rule: s543g, `local($h{k}) = g(...)` +28.6 % (the call now
 runs in list context, as in perl) and a chained `local $h{a}{b}` +13.1 %;
@@ -444,7 +444,8 @@ s543j, a sub ending in a valued
 `local` slice assignment +58 % a call (0.19 us: the right side is counted as perl counts it; no such sub in
 the 2,047-file list); s543h's flag is GONE (#5272 fixed in s543k: the first compile of a large eval text
 behind `package`, 83.5 -> 45.9 s); s543n, a bareword `print OUT` +9.5 % (6.5 ns a print) and `<IN>` +6.7 % (the name's key is read
-from the symbol first; `print STDOUT` -19 %, a print after the select idiom -56 %).
+from the symbol first; `print STDOUT` -19 %, a print after the select idiom -56 %); s543m, the drop flush's test: `@a = ()` +81 % (0.14 us a clear of 20 elements), `%h = ()` +12 %,
+`$h{k} = undef` +36..47 % (10 ns a store), a store or `pop` under a modifier +17 % (#5540).
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
 moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only

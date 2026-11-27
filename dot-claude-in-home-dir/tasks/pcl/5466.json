@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543p (Opus 5.5, 2026-11-27, CODE 0ab08642 = MAIN-READY-111, v2-16300) by the Rosetta census (docs/rosetta-plan.md step 1; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    my %c;\n    @c{qw(b a c)}++;\n    print join(' ', map { \"$_=\" . ($c{$_} // 'u') } sort keys %c), \"\\n\";   # perl a=u b=u c=1   PCL (empty line)\n    my @a = (1, 1, 1);\n    @a[0, 2]++;\n    print \"@a\\n\";                                                           # perl 1 1 2         PCL 1 1 1\n    my %e;\n    @e{qw(p q)} += 5;\n    print join(' ', map { \"$_=\" . ($e{$_} // 'u') } sort keys %e), \"\\n\";   # perl p=u q=5       PCL (empty line)\n    my %f;\n    ++@f{qw(m n)};\n    print join(' ', map { \"$_=\" . ($f{$_} // 'u') } sort keys %f), \"\\n\";   # perl m=u n=1       PCL (empty line)\n\nperl: the slice is an lvalue (every element is vivified, as for any lvalue slice) and the scalar operator applies to its LAST element.  The everyday idiom is `@seen{@list}++` / `@count{LIST}++` to make a set of keys (the values do not matter, `keys` does): PCL leaves the hash EMPTY, silently.\n\nWHERE (emitted Lisp): `(p-post++ (p-hslice %c @k))` -- the increment is applied to the rvalue slice's result, so neither the vivification nor the write reaches the hash.  Expected: vivify every element of the slice as an lvalue, then modify the last element's place.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): the program becomes identical to perl when the slice increment is spelled `$c{$_}++ for @$_` (the per-key loop), so it is the only cause.\n\nTHE PROGRAM: 0243-Common-sorted-list collects the union of several lists as hash keys with a slice increment and prints the sorted keys: PCL prints nothing.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0243-Common-sorted-list",
+   "id" : 5466,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `++` / `--` / `+=` on a SLICE does nothing -- `@h{@keys}++` creates no key (perl vivifies every key of the slice and increments the LAST one), `@a[0,2]++` leaves @a alone; the emission is `(p-post++ (p-hslice %h @k))`, a modify of the rvalue slice (Rosetta 0243)",
+   "triage" : "in",
+   "triage_reason" : "a slice as the operand of ++ / op= is core lvalue semantics (the slice is an lvalue list; scalar ops act on its last element); IN by docs/supported-subset.md section 3"
+}
