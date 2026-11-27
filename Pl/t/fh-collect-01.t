@@ -34,7 +34,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  if !-x $pcl;
 plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -401,4 +401,43 @@ PL
 {
     my ($perl, $pcl_out) = run_both("$est' '$dir");
     is($pcl_out, $perl, '#5405: an element overwritten with undef and a sub-tail delete flush the dropped handle');
+}
+
+# 15. The s543m review (F1): the element store's flush asks the HOLDER question
+# the clear's flush asks (Parser2::_drop_holder_cl_p), not which store operator
+# the lowering chose -- an `our` hash / array (a b), a file-level `my` a NAMED
+# sub uses (c d: a promoted cell), a qualified global (e), a package block's
+# `our` (f) take `p-setf` and were not flushed; an `if` / `unless` modifier
+# wraps the flushing form (g i j k), an untaken one flushes nothing (h: the
+# handle is still open and writes).  l: a -deref store through `$_` (no
+# special holder question); m: `%ENV` keeps its emission; o: a tied `our` hash
+# sees one STORE and no FETCH; p: a side-effecting key runs once; r: a
+# modifier that reads the element.  INVERSE: the base 9a3ce86f printed 0 for
+# a .. g and i .. l; the stop sha bfa405a5 printed 0 for a .. g and i .. k.
+my $f1 = write_prog('f1.pl', <<'PL');
+no warnings;
+my $f = "$ARGV[0]/f1.out";
+sub sz { my $s = -s $f; unlink $f; defined $s ? $s : "none" }
+sub mk { open my $t, ">", $f or die; print $t "hdata"; $t }
+our %g; $g{fh} = mk(); $g{fh} = undef; print "a ", sz(), "\n";
+our @ga; $ga[1] = mk(); $ga[1] = undef; print "b ", sz(), " ", scalar(@ga), "\n";
+my %c; sub usec { scalar keys %c } $c{fh} = mk(); $c{fh} = undef; print "c ", sz(), " ", (exists $c{fh} ? "e" : "-"), "\n";
+my @ca; sub useca { scalar @ca } $ca[0] = mk(); $ca[0] = undef; print "d ", sz(), "\n";
+$Q::h{fh} = mk(); $Q::h{fh} = undef; print "e ", sz(), "\n";
+package Q { our %q; sub run { $q{fh} = main::mk(); $q{fh} = undef; print "f ", main::sz(), "\n" } } Q::run();
+my %m; $m{fh} = mk(); $m{fh} = undef if 1; print "g ", sz(), "\n";
+my %m2; $m2{fh} = mk(); $m2{fh} = undef if 0; print { $m2{fh} } "more"; close $m2{fh}; print "h ", sz(), "\n";
+my %m3; $m3{fh} = mk(); delete $m3{fh} unless 0; print "i ", sz(), "\n";
+my @m4 = (mk()); pop @m4 if @m4; print "j ", sz(), "\n";
+my @m5 = (1, mk()); splice(@m5, 0) if 1; print "k ", sz(), "\n";
+my @objs = ({ fh => mk() }); for (@objs) { $_->{fh} = undef } print "l ", sz(), "\n";
+$ENV{S543M_X} = "v"; $ENV{S543M_X} = undef; print "m ", (defined $ENV{S543M_X} ? "def" : "undef"), "\n";
+package TH { sub TIEHASH { bless {}, shift } sub FETCH { $main::fetch++; 1 } sub STORE { $main::store++ } }
+our %t; tie %t, "TH"; $t{k} = undef; print "o fetch=", ($main::fetch // 0), " store=", ($main::store // 0), "\n";
+our %v; my $i = 0; $v{$i++} = undef; print "p $i ", join(",", keys %v), "\n";
+our %w; $w{k} = 5; $w{k} = undef if $w{k} > 1; print "r ", (defined $w{k} ? "d" : "u"), "\n";
+PL
+{
+    my ($perl, $pcl_out) = run_both("$f1' '$dir");
+    is($pcl_out, $perl, 'F1 (s543m review): an element store of undef flushes on an our / promoted / qualified holder and under an if / unless modifier');
 }

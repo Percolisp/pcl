@@ -12137,7 +12137,12 @@ sub _lower_expr_stmt {
   # A sub's (or a block's) TAIL drops the same way (#5405, s543m: `sub close_it
   # { delete $self->{fh} }` is the ordinary spelling): the wrap returns the
   # value it flushed, read once, in the context the tail inherits.
-  my $drop_ok = !$mod && Pl::Passes::enabled('fh-scope-close')
+  # An `if' / `unless' modifier (the only ones that reach here) wraps the
+  # flushing form, so the flush runs exactly when the statement does (`$h{fh}
+  # = undef if $done;', the s543m review's F1 row 16; a TAIL with a modifier
+  # took the early return above and is not flushed).
+  my $drop_ok = (!$mod || $mod eq 'if' || $mod eq 'unless')
+    && Pl::Passes::enabled('fh-scope-close')
     && ($vctx eq ':void' || "$vctx" eq 'inherit');
   my $drop = $x->{drop_value} && $drop_ok;
   my $form = $self->_lower_expr($expr, $stmt,
@@ -12149,7 +12154,9 @@ sub _lower_expr_stmt {
   # `$h{K} = undef;' / `$r->{K} = undef;' / `$a[I] = undef;' (#5405): the OLD
   # element is flushed before the store (p-flush-dropped-store: the key once,
   # the slot PEEKED -- no FETCH, nothing vivified).  Only the store forms the
-  # macro knows, whose container is a plain variable.
+  # macro knows, whose container is a plain variable and a holder the clear's
+  # flush would read too (_drop_store_form_p: a promoted, `our' or qualified
+  # aggregate included, the s543m review's F1).
   $form = ['p-flush-dropped-store', $form]
     if $x->{drop_store} && $drop_ok && _drop_store_form_p($form);
   # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
@@ -16358,7 +16365,7 @@ sub _fh_drop_flush_var {
   # parameter): that is the eval's edge (#5255), no flush here.
   return undef if $self->eval_mode && $name !~ /::/;
   my $cl = $self->_local_var_cl($name);
-  return undef if ref($cl) || $cl =~ /[\s()]/ || Pl::GlobalPartition::is_exception_global($cl)
+  return undef if !_drop_holder_cl_p($cl)
                || defined Pl::ExprToCL::_foreign_runtime_global_form($name);
   return $cl;
 }
@@ -16395,18 +16402,37 @@ sub _fh_drop_stmt_name {
 }
 
 # Is the lowered element store FORM one p-flush-dropped-store knows (#5405):
-# (setf (p-gethash|p-aref C K) V) or (p-setf (p-gethash-deref|p-aref-deref C
-# K ...) V), the container C a plain variable (an atom: read again by the
-# store, never re-evaluated as an expression)?
-my %DROP_STORE_ACC = (setf => { 'p-gethash' => 1, 'p-aref' => 1 },
-                      'p-setf' => { 'p-gethash-deref' => 1, 'p-aref-deref' => 1 });
+# (setf|p-setf (p-gethash|p-aref|p-gethash-deref|p-aref-deref C K ...) V),
+# the container C a plain variable (an atom: read again by the store, never
+# re-evaluated as an expression)?  The STORE OPERATOR says nothing about the
+# holder (a let-bound hash takes `setf', a promoted file lexical, an `our' or
+# a qualified global `p-setf': the s543m review's F1), so both are taken; the
+# holder question is _drop_holder_cl_p's, the one the clear's flush asks.
+my %DROP_STORE_ACC = ('p-gethash' => 'agg', 'p-aref' => 'agg',
+                      'p-gethash-deref' => 'deref', 'p-aref-deref' => 'deref');
 sub _drop_store_form_p {
   my ($form) = @_;
-  return 0 unless ref($form) eq 'ARRAY' && @$form == 3 && !ref($form->[0]);
-  my $acc = $DROP_STORE_ACC{ $form->[0] } or return 0;
+  return 0 unless ref($form) eq 'ARRAY' && @$form == 3 && !ref($form->[0])
+    && ($form->[0] eq 'setf' || $form->[0] eq 'p-setf');
   my $place = $form->[1];
   return 0 unless ref($place) eq 'ARRAY' && @$place >= 3 && !ref($place->[0]);
-  return ($acc->{ $place->[0] } && !ref($place->[1]) && $place->[1] =~ /^(?:[\w|]+::)?\|?[\$\@%]/) ? 1 : 0;
+  my $kind = $DROP_STORE_ACC{ $place->[0] } or return 0;
+  my $c = $place->[1];
+  return 0 unless !ref($c) && $c =~ /^(?:[\w|]+::)?\|?[\$\@%]/;
+  # An aggregate's own element: the aggregate is the holder.  A -deref store's
+  # container is the SCALAR holding the reference (`$_->{fh} = undef' in a
+  # loop is ordinary): only the aggregate kinds ask the holder question.
+  return ($kind eq 'deref' || _drop_holder_cl_p($c)) ? 1 : 0;
+}
+
+# Is the variable CL form $cl a holder the drop flush reads (#5254 #5354
+# #5405)?  A plain variable that is no core special (`%ENV' `%SIG' `%INC'
+# `@ARGV' `@_' `$_' ...: the partition's exception set, no user's handle
+# holder, keep their emission).  ONE answer for the clear's flush
+# (_fh_drop_flush_var) and the element store's (_drop_store_form_p).
+sub _drop_holder_cl_p {
+  my ($cl) = @_;
+  return (!ref($cl) && $cl !~ /[\s()]/ && !Pl::GlobalPartition::is_exception_global($cl)) ? 1 : 0;
 }
 
 # The variable token of the statement shapes above, else undef.

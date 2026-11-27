@@ -920,6 +920,9 @@ sub break_shape {
 #             below-assignment tail (`$x = A, B` keeps the generic path)
 #   incdec    { name, op, post } -- `$x++` / `--$x` with no modifier
 #   bareword  the Word token, when the statement is one bare word
+#   drop_value / drop_store  the drop flush's shapes (drop_value_shape,
+#             drop_store_shape) of expr -- WITH a modifier too: an `if' /
+#             `unless' wraps the flushing form (the s543m review's F1)
 
 sub expr_shape {
   my ($stmt) = @_;
@@ -929,6 +932,8 @@ sub expr_shape {
   }
   my ($expr, $mod, $cond) = split_modifier(\@k);
   my %r = (k => \@k, expr => $expr, mod => $mod, cond => $cond);
+  $r{drop_value} = drop_value_shape($expr);
+  $r{drop_store} = drop_store_shape($expr);
   return \%r if $mod;
   if (@$expr >= 3
       && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
@@ -949,8 +954,6 @@ sub expr_shape {
       if defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--');
   }
   $r{bareword} = $expr->[0] if @$expr == 1 && $expr->[0]->isa('PPI::Token::Word');
-  $r{drop_value} = drop_value_shape($expr);
-  $r{drop_store} = drop_store_shape($expr);
   return \%r;
 }
 
