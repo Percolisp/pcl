@@ -825,5 +825,51 @@ subst_agrees(q{for my $p ('(?<=a\K)b', 'a(?=b\K)') { my $r = eval { "ab" =~ /$p/
 (my $x = "ab") =~ s/ab/<$1>/; (my $y = "ab") =~ s/(a)(b)/[$3$2]/g; print "$x $y\n";},
   "#5560: \\K in a lookaround dies trappably (perl 5.32+); a template \$N past the pattern's groups is empty, never a Lisp error");
 
+# #5461 / #5462 (s543u): `\G` asserts the TARGET's pos() (0 when unset) -- for
+# a //g step after the first and every s///g step, the previous match's end --
+# wherever it stands.  The rewrite scan spells it as a mark the parse tree makes
+# a filter on *p-gpos*, which s/// binds as m// does (the substitution path read
+# `\G` as the letter G); a leading `\G` in m// keeps the scan-from-pos fast path.
+# A floating `\G` (`-\G`, `.\G`) works in both; under //g a match ending at its
+# \G counts as zero-length (perl's start + gofs == end).  A list-context `\G//gc`
+# keeps pos (#5462).  Every row FAILS on the 5d511ff8 extraction.
+subst_agrees(<<'PL', "#5461: \\G in s/// anchors at the target's pos(): in place, /r, /g, /e, a floating -\\G inside a //g loop, after a lookahead //g, pos reset, qr");
+my $s = "abcabc"; print "1 ", $s =~ s/\Ga/X/r, "\n";
+pos($s) = 3; print "2 ", $s =~ s/\Ga/X/r, " ", pos($s), "\n";
+pos($s) = 2; print "3 ", $s =~ s/\G.*//r, "|\n";
+my $g = "Gab"; print "4 ", $g =~ s/\Ga/X/r, "\n";
+my $t = "aaab"; $t =~ s/\Ga/X/g; my $u = "baaa"; $u =~ s/\Ga/X/g; print "5 $t $u\n";
+my $c = "a-b-c"; my @r; while ($c =~ /-/g) { push @r, $c =~ s/-\G/+/r, $c =~ s/-\G/ uc("y") /er } print "6 @r\n";
+$_ = "q00r00"; /r(?=00)/g and print "7 ", s/\G00/X/r, "\n";
+my $f = "aaa"; pos($f) = 1; $f =~ s/\Ga/b/; print "8 ", pos($f) // 'u', " $f\n";
+my $w = "aaab"; my $n = 0; while ($w =~ s/\Ga/x/) { last if ++$n > 9 } print "9 $w $n\n";
+my $v = "1 2 3"; pos($v) = 2; print "10 ", $v =~ s/\G(\d)/<$1>/gr, " ", "aGb" =~ s/[\G]/!/r, " ", "a\\Gb" =~ s/\\G/!/r, "\n";
+my $q = qr/\Gb/; my $x = "abc"; pos($x) = 1; print "11 ", $x =~ s/$q/B/r, "\n";
+PL
+subst_agrees(<<'PL', "#5461 #5462: a floating \\G in m// and //g, a quantified or alternated \\G, \\G with \\K, a list \\G//gc keeps pos");
+my $s = "abc"; pos($s) = 1; print "1 ", ($s =~ /b\G/ ? "y" : "n"), ($s =~ /a\G/ ? "y[$&]" : "n"), "\n";
+$s = "a-b-c"; pos($s) = 2; my @l = $s =~ /-\G/g; my $n = 0; pos($s) = 2; $n++ while $s =~ /-\G/g; print "2 ", scalar(@l), " $n\n";
+$s = "aaXbb"; pos($s) = 3; @l = $s =~ /(?:a|X)\Gb/g; print "3 @l\n";
+$s = "aaab"; pos($s) = 0; print "4 ", ($s =~ /(?:\Ga)+/ ? "[$&]" : "no"), " ", ("xb" =~ /\Ga|b/ ? "[$&]" : "no"), "\n";
+$s = "a.b.c"; my @o; while ($s =~ /\./g) { push @o, ($s =~ /.\G/ ? $& : "-") } print "5 @o\n";
+$s = "aab"; pos($s) = 0; @l = $s =~ /\Ga/gc; print "6 ", pos($s) // 'u'; pos($s) = 1; @l = $s =~ /\Gq/gc; print " ", pos($s) // 'u', "\n";
+$s = "ab"; pos($s) = 1; print "7 ", ($s =~ /\Gb\K/ ? "[$&]" : "no"), " ", ($s =~ s/\G\Kb/B/r), "\n";
+PL
+{
+    # A //g or s///g whose \G a match can BYPASS (`X\G|b`) is refused, loud and
+    # trappable: perl advances it by an offset it computes for the whole
+    # pattern (docs/not-supported.md ns-regex-escapes); without /g it runs.
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'EOP';
+my $s = "aaXbb"; pos($s) = 3;
+for my $code (sub { my @l = $s =~ /X\G|b/g }, sub { (my $t = $s) =~ s/X\G|b/-/g }) {
+  print eval { $code->(); 1 } ? "lived " : ($@ =~ /bypass is not supported/ ? "refused " : "other ") }
+pos($s) = 3; print $s =~ /X\G|b/ ? "[$&]" : "no", "\n";
+EOP
+    close $fh;
+    chomp(my $got = `$RealBin/../../runpcl $file 2>&1`);
+    is($got, 'refused refused [X]', '#5461: a //g or s///g whose \G a match can bypass is refused trappably; a single match runs');
+}
+
 
 done_testing();
