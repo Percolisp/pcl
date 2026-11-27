@@ -54,6 +54,12 @@ sub run_cmd {
     my $out = qx{@{[ join ' ', map { sh_quote($_) } @cmd ]} 2>&1};
     return ($out, $? >> 8);
 }
+# The same, from another working directory (the relative-path rows).
+sub run_cmd_in {
+    my ($dir, @cmd) = @_;
+    my $out = qx{cd @{[ sh_quote($dir) ]} && @{[ join ' ', map { sh_quote($_) } @cmd ]} 2>&1};
+    return ($out, $? >> 8);
+}
 sub tool  { return run_cmd($^X, $TOOL, @_) }
 sub smoke { return run_cmd($^X, $SMOKE, @_) }
 sub git_in {
@@ -288,6 +294,17 @@ write_file("$D/corpus/rosetta/0003-Delta-Fixed-Now.pl", slurp($victim) . "\n");
 is($rrc, 2, 'run: a corpus that does not match the manifest is not run');
 like($ro, qr/not run/, 'run: and says so');
 write_file($victim, $orig);
+
+# A RELATIVE --dir / --outdir: spawn() changes into each program's work directory before it
+# opens the output files and execs the program, so the runner makes them absolute (before s543o
+# every program of a relative --corpus came out DIFF, and --bless-expect refused them all).
+($ro, $rrc) = run_cmd_in($TMP, $^X, $TOOL, 'run', '--dir', 'corpus-dir', '--pcl', $FAKE, '--outdir', 'rel-out');
+like($ro, qr/^ROSETTA: 3 of 5 identical to perl /m, 'run: a relative --dir and --outdir measure what an absolute one does');
+($ro) = run_cmd_in($TMP, $^X, $SMOKE, '--corpus', 'corpus-dir/corpus', '--pcl', $FAKE, '--outdir', 'rel-out2', '--baseline', 'none');
+like($ro, qr/^EVERYDAY \(corpus \S+\): 3 of 5 identical to perl /m, 'the runner: a relative --corpus and --outdir work (it makes them absolute)');
+($bo, $brc) = run_cmd_in($TMP, $^X, $TOOL, 'build', '--dir', 'rel-build', '--repo', "file://$SRC", '--commit', $SHA);
+is($brc, 0, 'build: a relative --dir builds') or diag($bo);
+like($bo, qr/^verify: \S+ matches /m, 'build: and its corpus verifies (the admission ran the programs from the right place)');
 
 # ---------------------------------------------------------- classify
 ($ro) = run_with([@ROW{qw(beta gamma)}]);

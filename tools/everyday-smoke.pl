@@ -101,6 +101,7 @@ use File::Basename qw(basename dirname);
 use File::Path qw(make_path remove_tree);
 use File::Temp qw(tempdir);
 use File::Copy qw(copy);
+use File::Spec;
 use POSIX qw(:sys_wait_h);
 use Text::ParseWords qw(shellwords);
 use Cwd qw(abs_path);
@@ -122,8 +123,11 @@ my $ROOT = eval { PCLPaths::root($0) };
 if (!defined $ROOT) { print STDERR $@; exit 2 }
 
 my $CORPUS_DEFAULT = "$ROOT/everyday";
-my $CORPUS   = defined $opt{corpus} ? _rstrip_slash($opt{corpus}) : $CORPUS_DEFAULT;
-my $OUTDIR   = defined $opt{outdir} ? _rstrip_slash($opt{outdir}) : "$ROOT/.everyday";
+# ABSOLUTE, because spawn() changes into the program's work directory before it
+# opens the output files and execs the program (s543o: a relative --corpus or
+# --outdir made every program DIFF, and --bless-expect refuse every program).
+my $CORPUS   = defined $opt{corpus} ? File::Spec->rel2abs(_rstrip_slash($opt{corpus})) : $CORPUS_DEFAULT;
+my $OUTDIR   = defined $opt{outdir} ? File::Spec->rel2abs(_rstrip_slash($opt{outdir})) : "$ROOT/.everyday";
 my $HISTORY  = defined $opt{history} ? $opt{history} : "$ROOT/baselines/everyday-history.tsv";
 my $BASELINE = defined $opt{baseline} ? $opt{baseline}
                                       : "$ROOT/baselines/everyday-baseline.tsv";

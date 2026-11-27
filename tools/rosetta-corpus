@@ -87,6 +87,7 @@ use File::Find ();
 use File::Path qw(make_path);
 use File::Copy qw(move);
 use File::Basename qw(dirname);
+use File::Spec;
 use Digest::SHA;
 use FindBin qw($RealBin);
 use lib "$RealBin/lib";
@@ -122,6 +123,7 @@ sub slurp { my ($p) = @_; open my $h, '<:raw', $p or return undef; local $/; my 
 sub spew  { my ($p, $t) = @_; open my $h, '>:raw', $p or die "rosetta-corpus: $p: $!\n"; print $h $t; close $h or die "rosetta-corpus: $p: $!\n" }
 sub sha256_of { my ($p) = @_; return Digest::SHA->new(256)->addfile($p, 'b')->hexdigest }
 sub rstrip_slash { my ($p) = @_; $p =~ s{/+$}{}; return $p }
+sub abs_dir { my ($p) = @_; return File::Spec->rel2abs(rstrip_slash($p)) }   # messages and BUILD-INFO name it whole
 sub default_dir { return PCLPaths::rosetta_dir() }
 
 sub options {
@@ -129,7 +131,7 @@ sub options {
     my %o;
     GetOptionsFromArray($argv, \%o, @spec) or usage(2);
     usage(2) if @$argv;
-    $o{dir} = rstrip_slash(defined $o{dir} ? $o{dir} : default_dir());
+    $o{dir} = abs_dir(defined $o{dir} ? $o{dir} : default_dir());
     return \%o;
 }
 
@@ -525,7 +527,7 @@ sub cmd_run {
     Getopt::Long::Configure(qw(pass_through no_auto_abbrev));
     GetOptionsFromArray(\@argv, \%o, qw(dir=s manifest=s)) or usage(2);
     Getopt::Long::Configure(qw(no_pass_through auto_abbrev));
-    my $dir = rstrip_slash(defined $o{dir} ? $o{dir} : default_dir());
+    my $dir = abs_dir(defined $o{dir} ? $o{dir} : default_dir());
     if (my ($bad) = grep { /^--?(?:corpus|label|bless-expect|verify-with-perl)(?:=|$)/ } @argv) {
         print STDERR "rosetta-corpus: run measures THE corpus under its own name; $bad is not a run option here\n";
         return 2;
