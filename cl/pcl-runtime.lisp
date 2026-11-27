@@ -43623,33 +43623,51 @@ would consume, so it dies naming the stream (rule 12)."
           do (set (svref *p-capture-syms* i) *p-undef*))
     (setf *p-captures-set* m)))
 
+(defmacro %p-caps-nest (m fn &rest syms)
+  "Expand to NESTED whens over the capture specials SYMS, the shape of
+   %set-caps-upto: (FN SYM I) for each I below M, so a state with no capture
+   pays one fixnum test and each special is read or written DIRECTLY (a
+   `set' through *p-capture-syms* is a full call)."
+  (labels ((nest (i names)
+             (when names
+               `((when (> ,m ,i)
+                   (,fn ,(car names) ,i)
+                   ,@(nest (1+ i) (cdr names)))))))
+    (car (nest 0 syms))))
+
 (defun %p-match-snapshot ()
   "A copy of the whole match state -- what $1..$N, $&, $`, $', @-, @+, %+,
-   %-, $+, $^N and @{^CAPTURE} answer from -- for %p-match-restore.  The
-   register offsets are copied out of the REUSED *match-rs* / *match-re*
-   vectors; the derived variables are not copied, they are rebuilt from the
-   record.  Layout: #(captures-set subject beg end whole pre post have
-   ngroups closers reg-names rs re $1 .. $captures-set)."
-  (let* ((m *p-captures-set*)
-         (n *match-ngroups*)
-         (v (make-array (+ 13 m))))
-    (declare (type fixnum m n))
-    (setf (svref v 0) m
-          (svref v 1) *match-subject*
-          (svref v 2) *match-beg*
-          (svref v 3) *match-end*
-          (svref v 4) *match-whole*
-          (svref v 5) *match-pre*
-          (svref v 6) *match-post*
-          (svref v 7) *match-have*
-          (svref v 8) n
-          (svref v 9) *match-closers*
-          (svref v 10) *match-reg-names*
-          (svref v 11) (subseq (the simple-vector *match-rs*) 0 n)
-          (svref v 12) (subseq (the simple-vector *match-re*) 0 n))
-    (dotimes (i m)
-      (setf (svref v (+ 13 i)) (symbol-value (svref *p-capture-syms* i))))
-    v))
+   %-, $+, $^N and @{^CAPTURE} answer from -- for %p-match-restore, or :NONE
+   when no match is recorded (the commonest saved state: a caller that has
+   not matched, and every state such a restore leaves).  The register offsets
+   are copied out of the REUSED *match-rs* / *match-re* vectors; the derived
+   variables are not copied, they are rebuilt from the record.  ONE
+   simple-vector: #(captures-set subject beg end whole pre post have ngroups
+   closers reg-names) then $1 .. $captures-set, then the ngroups starts and
+   the ngroups ends."
+  (if (and (not *match-have*) (zerop (the fixnum *p-captures-set*)))
+      :none
+      (let* ((m *p-captures-set*)
+             (n *match-ngroups*)
+             (v (make-array (+ 11 m n n))))
+        (declare (type fixnum m n))
+        (setf (svref v 0) m
+              (svref v 1) *match-subject*
+              (svref v 2) *match-beg*
+              (svref v 3) *match-end*
+              (svref v 4) *match-whole*
+              (svref v 5) *match-pre*
+              (svref v 6) *match-post*
+              (svref v 7) *match-have*
+              (svref v 8) n
+              (svref v 9) *match-closers*
+              (svref v 10) *match-reg-names*)
+        (macrolet ((%cap-out (sym i) `(setf (svref v (+ 11 ,i)) ,sym)))
+          (%p-caps-nest m %cap-out $1 $2 $3 $4 $5 $6 $7 $8 $9 $10
+                        $11 $12 $13 $14 $15 $16 $17 $18 $19 $20))
+        (replace v (the simple-vector *match-rs*) :start1 (+ 11 m) :end2 n)
+        (replace v (the simple-vector *match-re*) :start1 (+ 11 m n) :end2 n)
+        v)))
 
 (defun %p-match-restore (v)
   "Put back the match state %p-match-snapshot copied: the frame that saved it
@@ -43657,35 +43675,42 @@ would consume, so it dies naming the stream (rule 12)."
    now above the saved count go back to undef -- the *p-captures-set*
    invariant -- and the derived variables are rebuilt from the restored
    record when next read (at once while a derived container is pinned)."
-  (declare (type simple-vector v))
-  (let ((m (svref v 0))
-        (n (svref v 8))
-        (now *p-captures-set*))
-    (declare (type fixnum m n now))
-    (dotimes (i m)
-      (set (svref *p-capture-syms* i) (svref v (+ 13 i))))
-    (loop for i of-type fixnum from m below now
-          do (set (svref *p-capture-syms* i) *p-undef*))
-    (setf *p-captures-set* m)
-    (setf *match-subject* (svref v 1)
-          *match-beg* (svref v 2)
-          *match-end* (svref v 3)
-          *match-whole* (svref v 4)
-          *match-pre* (svref v 5)
-          *match-post* (svref v 6)
-          *match-have* (svref v 7)
-          *match-ngroups* n
-          *match-closers* (svref v 9)
-          *match-reg-names* (svref v 10)
-          *match-derived* nil)
-    (when (plusp n)
-      (when (< (length (the simple-vector *match-rs*)) n)
-        (setf *match-rs* (make-array n :initial-element nil)
-              *match-re* (make-array n :initial-element nil)))
-      (replace (the simple-vector *match-rs*) (the simple-vector (svref v 11)))
-      (replace (the simple-vector *match-re*) (the simple-vector (svref v 12))))
-    (when *match-derived-eager* (%p-derive-match-vars))
-    (values)))
+  (if (eq v :none)
+      (let ((now *p-captures-set*))
+        (declare (type fixnum now))
+        (loop for i of-type fixnum from 0 below now
+              do (set (svref *p-capture-syms* i) *p-undef*))
+        (setf *p-captures-set* 0)
+        (%clear-match-strings))
+      (let ((m (svref v 0))
+            (n (svref v 8))
+            (now *p-captures-set*))
+        (declare (type simple-vector v) (type fixnum m n now))
+        (macrolet ((%cap-in (sym i) `(setf ,sym (svref v (+ 11 ,i)))))
+          (%p-caps-nest m %cap-in $1 $2 $3 $4 $5 $6 $7 $8 $9 $10
+                        $11 $12 $13 $14 $15 $16 $17 $18 $19 $20))
+        (loop for i of-type fixnum from m below now
+              do (set (svref *p-capture-syms* i) *p-undef*))
+        (setf *p-captures-set* m
+              *match-subject* (svref v 1)
+              *match-beg* (svref v 2)
+              *match-end* (svref v 3)
+              *match-whole* (svref v 4)
+              *match-pre* (svref v 5)
+              *match-post* (svref v 6)
+              *match-have* (svref v 7)
+              *match-ngroups* n
+              *match-closers* (svref v 9)
+              *match-reg-names* (svref v 10)
+              *match-derived* nil)
+        (when (plusp n)
+          (when (< (length (the simple-vector *match-rs*)) n)
+            (setf *match-rs* (make-array n :initial-element nil)
+                  *match-re* (make-array n :initial-element nil)))
+          (replace (the simple-vector *match-rs*) v :start2 (+ 11 m) :end2 (+ 11 m n))
+          (replace (the simple-vector *match-re*) v :start2 (+ 11 m n) :end2 (+ 11 m n n)))
+        (when *match-derived-eager* (%p-derive-match-vars))))
+  (values))
 
 (defun %p-match-record (str match-start match-end reg-starts reg-ends
                         &optional closers reg-names)
