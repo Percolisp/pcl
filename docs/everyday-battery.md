@@ -161,10 +161,37 @@ find out whether the *program* or the *perl* changed, program by program.
 tools/everyday-smoke.pl --corpus /path/to/corpus --baseline none
 ```
 
-is all it takes.  Third-party programs (Rosetta Code, task #2104) are **never
-checked in**: the programs and their derived expectations live in a scratch
-directory, `--bless-expect` derives them there, and `--record` refuses, because
-a history row must identify what was measured.
+is all a one-off population takes: its line reads `EVERYDAY (corpus DIR): ...`
+and `--record` refuses it, because a history row must identify what was
+measured.
+
+**A NAMED corpus** (s543o, task #2104) is a non-default corpus with a name, a
+baseline and a history of its own:
+
+```bash
+tools/everyday-smoke.pl --corpus DIR --label NAME --baseline FILE --history FILE
+```
+
+Its summary line is `NAME: N of M identical to perl (P %) -- <sha> gen <gen>`
+(the label in capitals; a partial run still says `(subset)`); its baseline is a
+list of what is wrong like this corpus's, with the same buckets; `--record`
+appends to the `--history` file in `everyday-history.tsv`'s columns, and without
+`--history` a non-default corpus is refused as before, the message saying how.
+A named corpus's baseline may carry a **class column** before the cause
+(`area/name TAB verdict TAB first-diff-line TAB class TAB cause`): a row with
+five fields has one (a cause never holds a TAB, and this corpus's rows have
+four); the runner carries the class and judges only the verdict, the line and
+the cause.  **The default corpus's line is `EVERYDAY` whatever the options** --
+`--label` is refused for it -- and its buckets, its `--record` row and its exit
+status are what they were.
+
+The one named corpus is **ROSETTA**: `tools/rosetta-corpus run` passes
+`--label ROSETTA --baseline baselines/rosetta-causes.tsv --history
+baselines/rosetta-history.tsv` (`docs/rosetta-plan.md` section 2).
+Third-party programs are **never checked in**: the Rosetta programs and their
+expectations live outside the checkout (`PCLPaths::rosetta_dir`), rebuilt by
+`tools/rosetta-corpus build` from the pinned upstream commit and checked
+against a manifest of names and digests, `baselines/rosetta-corpus.tsv`.
 
 ## When to run it
 
@@ -180,7 +207,9 @@ never in the `Pl/t` gate (the gate measures the transpiler; this measures a
 measurement tool).  It drives the runner through a **fake `pcl`** that runs each
 fixture program under perl and then misbehaves by name, so every verdict is
 reachable in seconds without SBCL — and so the test does not depend on whichever
-PCL bug happens to exist today.
+PCL bug happens to exist today.  The named-corpus options (`--label`,
+`--history`, the class column) are driven end to end by
+`prove tools/t/rosetta-corpus.t`, on a synthetic corpus written for it.
 
 ## Not in this instrument (yet)
 

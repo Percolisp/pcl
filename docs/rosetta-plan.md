@@ -31,18 +31,46 @@ ordinary by definition.
   commit `1d475861d`, 2,239 Perl files), filtered STATICALLY to programs that
   touch no file, process, network, clock or chance, then admitted only if perl
   runs them to completion, deterministically, with output, in under 8 s (the
-  s493 selection, `~/pcl-agent-scratch/s493/angles/rosetta/select.pl`): 655.
-  Re-admitted on 2026-11-24 by `tools/everyday-smoke.pl --bless-expect` (three
-  perl runs each, one from another path): **652** (three refused: two whose
-  output depends on where the file is, one perl itself exits 255 on).
-* **Where:** `~/pcl-agent-scratch/s543/rosetta/` -- `corpus/rosetta/NNNN-task.pl`
-  with its `.expect` (perl 5.40.3's STDOUT) and `.rc`; `out/rosetta/` the
-  last run's `.out` / `.err` / `.rc` per program; `run.sh` + `run.log` the run;
-  `classify.pl` + `classes.tsv` the first-complaint classes; `refused/` the
-  three programs left out.
-* **How to run:** `tools/everyday-smoke.pl --corpus ~/pcl-agent-scratch/s543/rosetta/corpus --baseline none --jobs 2 --timeout 60 --outdir DIR`
-  as ONE bounded `heavy.sh` leg (six minutes on the day).  It prints
-  `EVERYDAY (corpus ...): N of 652 identical to perl`.
+  s493 selection): 655.  Re-admitted on 2026-11-24 by
+  `tools/everyday-smoke.pl --bless-expect` (three perl runs each, one from
+  another path): **652** (three refused: two whose output depends on where the
+  file is, one perl itself exits 255 on under `LC_ALL=C`).  Since s543o both
+  steps are one recipe, `tools/rosetta-corpus build`, and it reproduces the 652
+  byte for byte (below).
+* **Where:** outside every checkout, in `PCLPaths::rosetta_dir` --
+  `$PCL_ROSETTA_DIR` when set, else `~/.pcl-cache/rosetta` (beside the module
+  cache; `pcl --clear-cache` leaves it alone, a hand `rm -rf ~/.pcl-cache/*`
+  does not, and `build` makes it again).  It holds `corpus/rosetta/NNNN-task.pl`
+  with its `.expect` (perl's STDOUT) and, for a non-zero exit, `.rc`;
+  `refused/` what the admission refused, with `REASONS.tsv`; `work/` the clone;
+  `BUILD-INFO` and `build.log`.  Until s543o the corpus existed only as
+  scratch files built by hand (`~/pcl-agent-scratch/s493/angles/rosetta/select.pl`,
+  then `~/pcl-agent-scratch/s543/rosetta/`); that directory is still a valid
+  `--dir` on the machine that made it.
+* **The recipe -- `tools/rosetta-corpus`** (s543o; the rules in
+  `tools/lib/PCLRosetta.pm`):
+  `build` fetches the pinned commit (`1d475861d7141ef2fafff293d9339f56e4b0f5db`;
+  a shallow, blob-less, sparse fetch of `/Task/*/Perl/*`), selects STATICALLY
+  with the s493 word filter (verbatim; a candidate's number is its place among
+  the candidates in sorted path order), and admits through
+  `tools/everyday-smoke.pl --bless-expect --timeout 8` under `ulimit -v 4000000`
+  (three perl runs, one a copy at another path from another cwd), refusing
+  what printed nothing or more than 200,000 bytes; `verify` compares a corpus
+  with the MANIFEST `baselines/rosetta-corpus.tsv` (one row per program: name,
+  sha256 of the `.pl`, sha256 of the `.expect`, the exit status -- names and
+  digests only); `classify` reads a run's outdir and prints each differing
+  program's verdict, line and CLASS (section 3's eight).
+* **How to run:** `tools/rosetta-corpus run` -- as ONE bounded `heavy.sh` leg
+  (about seven minutes at `--jobs 2`).  It verifies the corpus against the
+  manifest (and refuses to run one that differs), then runs
+  `tools/everyday-smoke.pl` on it with `--label ROSETTA`, the cause table
+  `baselines/rosetta-causes.tsv` as `--baseline`, `--history
+  baselines/rosetta-history.tsv`, `--jobs 2 --timeout 60 --outdir <root>/.rosetta`;
+  runner options after it win (`--record`, `--jobs`, a program).  The line a
+  batch quotes, BEFORE -> AFTER beside `EVERYDAY:`, is the last one:
+  `ROSETTA: N of 652 identical to perl (P %) -- <sha> gen <generation>`, and
+  the buckets are the battery's (NEW = a regression; FIXED = the row leaves by
+  edit).  `--record` on a clean tree appends a row to the history.
 * **What it is NOT:** it has no I/O, no processes, no modules beyond the core
   ones a computation uses.  Files, pipes, sockets and CPAN modules are the
   everyday battery's and the board's.  A good Rosetta number says "the
@@ -99,8 +127,15 @@ dropped / notice / timeout / heap ones.  For every program:
    not filed again.
 
 The census's product is `baselines/rosetta-causes.tsv`: one row per differing
-program -- name, class, the cause in the board's grammar (`#N`, `NS:<id>`,
-`UNREDUCED #N`).  The bar for "done": every silent program has a cause; every
+program -- name, verdict, first differing line, class, the cause in the
+board's grammar (`#N`, `NS:<id>`, `UNREDUCED #N`).  It is ALSO the run's
+baseline, so it has the runner's columns (name, verdict, line, cause) with the
+class inserted before the cause (s543o; the format is in the file's header).
+s543o seeds it: one row per differing program, its class from `classify`, its
+cause `UNREDUCED #2104` (the 18 outside the subset keyed on their
+not-supported id); a census agent edits the cause column row by row, and
+`Pl/t/verdict-register-01.t` checks every key, the five fields, the class and
+the name.  The bar for "done": every silent program has a cause; every
 other one at least a class and a first reproducer; the cause table sums to the
 run.  A COUNT is not a finding: each row was re-run for its cause.
 
