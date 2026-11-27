@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    use builtin qw(indexed);\n    no warnings;\n    my @pairs = indexed(\"x\", \"y\");\n    print \"@pairs\\n\";\n\n    perl: 0 x 1 y\n    PCL : Undefined subroutine &main::indexed called at ... line 3.   (exit 255)\n\n    The qualified call fails the same way: `builtin::indexed(\"a\", \"b\")` dies \"Undefined subroutine &BUILTIN::indexed\".\n\nWHAT THE RUNTIME HAS (`defined &builtin::NAME`, probed for perl 5.40.3's list): true false is_bool weaken unweaken is_weak blessed refaddr reftype ceil floor trim stringify created_as_string created_as_number are there; MISSING: indexed, inf, nan, is_tainted, load_module, export_lexically -- `use builtin qw(inf nan); print inf` dies \"Undefined subroutine &main::inf\" too (probed: perl prints inf; the parser registers their `()` prototype, #3242, but the runtime has no function).  Only `indexed` is met by a Rosetta program.\nWHERE: `p-import-builtins` (cl/pcl-runtime.lisp) aliases each named function from the BUILTIN package and SKIPS a name it does not define (\"perl's own list grows per version\"), so the `use` succeeds and the call dies later; perl dies at compile time for an unknown name and has `indexed` since 5.36.  The function itself is `(i0, v0, i1, v1, ...)` over its argument list (in scalar context the count of that list, perl warns).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): with `sub indexed { my $i = 0; map { ($i++, $_) } @_ }` in place of the import, 0294 is byte-identical to perl (its only cause); 0119 then still differs by #650 (its import list is `use builtin <indexed floor>`) and #5560 (`\\K`), and with all three patched it is identical too.  The `for my ($k, $v) (LIST)` loops of both programs (5.36 for_list) work.\n\nPROGRAMS: 0294-Countdown, 0119-Bifid-cipher.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0294-Countdown, 0119-Bifid-cipher",
+   "id" : 5502,
+   "status" : "pending",
+   "subject" : "LOUD: `builtin::indexed` (perl 5.36+, stable in 5.40) is not implemented -- `use builtin 'indexed'` imports nothing (a name the runtime lacks is skipped silently) and the first `indexed(LIST)` dies \"Undefined subroutine &main::indexed\" (Rosetta 0294 0119)",
+   "triage" : "in",
+   "triage_reason" : "the language as perl 5.40 implements it is IN (docs/supported-subset.md section 3); builtin::indexed is a documented core function (perldoc builtin), the idiom of `for my ($i, $v) (indexed @a)`"
+}

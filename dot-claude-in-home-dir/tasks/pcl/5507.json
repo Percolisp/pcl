@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    use v5.36;\n    sub gen ($n) {\n        state $calls = 10;\n        sub peek { $calls }\n        $calls += $n;\n        return peek();\n    }\n    say gen(3); say gen(4);\n\n    perl: 13\n          17\n    PCL : 3\n          7          (exit 0, nothing on stderr)\n\n    Control: the same sub WITHOUT the signature (`sub gen { my $n = shift; ... }`): perl 13 17, PCL 13 17.  A `my` (not state) of a signature sub read by a nested named sub is right too (probed: `my @seq = (1, 2); sub cnt { scalar(@seq) }` = 2 in both).\n\nWHERE (emitted Lisp, the array spelling of 0710): the signature sub is emitted by the v1 path (`;;` source comments, `(p-check-arity ...)`) and declares the state cell `(p-defcell @state__gen__seq__1 ...)`, used by gen's own statements, while the nested sub's read compiles to `(p-aref @seq ...)` -- the package global, a second name for what perl has as one pad entry.  Two resolvers for one variable (CLAUDE.md: a detector and its rewriter share ONE resolver).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): the signature / no-signature pair above is the discriminator, and on the program itself: 0710 with its `<...>` import list spelled qw (#650), its `\\K` table helper rewritten (#5560) AND its one signature replaced by `my $n = shift;` is byte-identical to perl; with only the first two patched it still prints a column of 1s (the nested generators read an empty package array) -- this task is that third cause.\n\nPROGRAMS: 0710-Klarner-Rado-sequence.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0710-Klarner-Rado-sequence (`sub gen ($n) { state @seq = 1; ... sub next2 { state $i = 0; $seq[$i++] * 2 + 1 } ... }`)",
+   "id" : 5507,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a `state` variable of a SIGNATURE sub is invisible to a NAMED sub nested in it -- the inner sub reads the PACKAGE variable of that name (v1's signature path names the state cell `@state__gen__seq__1`, the inner sub's read resolves to `@seq`); without the signature both see one variable (Rosetta 0710)",
+   "triage" : "in",
+   "triage_reason" : "signatures (5.36 default) and state variables are core language, IN by docs/supported-subset.md section 3; a named sub nested in a sub sees the enclosing sub's state variable (perlsub)"
+}

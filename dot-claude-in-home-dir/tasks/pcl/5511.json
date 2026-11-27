@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPES (neutral reproducers, run on the tree, perl 5.40.3 vs PCL):\n\n    my %h;\n    my $y = pop @{ $h{k} || [] };\n    print exists($h{k}) ? \"viv\" : \"none\", \"\\n\";\n    perl: none\n    PCL : viv          (exit 0, nothing on stderr: SILENT)\n\n    my @b;\n    my $x = shift @{ $b[-1] // [] };\n    print defined($x) ? \"d\" : \"u\", \" \", scalar(@b), \"\\n\";\n    perl: u 0\n    PCL : Modification of non-creatable array value attempted, subscript -1      (exit 255)\n\nWHERE (emitted Lisp): `(p-pop (p-cast-@ (p-|| (p-gethash-box %h \"k\") (make-p-box ...))))` and\n`(p-shift (p-cast-@ (p-// (p-aref-box @b -1) ...)))` -- the BOX accessors (p-gethash-box, p-aref-box: the lvalue/vivifying\nfetch a modifying deref uses) are applied THROUGH the `||` / `//` to its left operand.  The lvalue context belongs to the\n`@{...}` operand as a whole; `EXPR || DEFAULT` is not an lvalue in perl, so its operands are plain reads.  (#165 is the inverse\n-- a `for (A || B)` alias that perl DOES make writable -- and is not this.)\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1093 with the element read first (`my $t = @bins ? $bins[-1] : undef; shift @{ $t // [] }`)\nno longer dies; it then differs by its second cause, #5463 (`$bins[shift]`, a builtin name autoquoted as a subscript), and with\nthat spelled `$bins[shift()]` too it is byte-identical to perl.\n\nPROGRAMS: 1093-Priority-queue.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1093-Priority-queue (`shift @{ $bins[-1] // [] }` and `@{ $bins[-1] // [] } == 0`)",
+   "id" : 5511,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a `||` / `//` DEFAULT inside a modifying array dereference fetches its left ELEMENT as an LVALUE -- `pop @{ $h{k} || [] }` CREATES `$h{k}` (perl leaves it absent) and `shift @{ $a[-1] // [] }` on an empty array dies \"Modification of non-creatable array value attempted, subscript -1\" (Rosetta 1093)",
+   "triage" : "in",
+   "triage_reason" : "`@{ EXPR || [] }` is the ordinary \"default to an empty list\" idiom; the left operand of `||` / `//` is an rvalue (perlop), IN by docs/supported-subset.md section 3"
+}

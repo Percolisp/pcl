@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    my @w = map split, \"a b\", \" c  d \";\n    print scalar(@w), \" @w\\n\";\n\n    perl: 4 a b c d\n    PCL : Unhandled sb-int:simple-program-error ... invalid number of arguments: 1   + a Lisp backtrace (exit 1)\n\n    Controls that work: `my @w = split;` with $_ set, and `map { split } \"p q\"`.\n\nWHERE (emitted Lisp): `(p-map (lambda ($_) (p-split $_)) \"a b\" \" c  d \")` -- the EXPR-form path supplies the default operand\nas the FIRST argument (the pattern slot) and no string; the block-form path builds the full default `split ' ', $_`.  Two\nlowerings of the zero-argument builtin (rule 11: one place should own the defaults of `split`).\nUNTIDY half: a wrong-arity call to a runtime function is an internal error that reaches the user raw (#1427's census).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1359 with `map { split } <DATA>` is byte-identical to perl -- its only cause.\n\nPROGRAMS: 1359-Stem-and-leaf-plot.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1359-Stem-and-leaf-plot (`sort { $a <=> $b } map split, <DATA>`)",
+   "id" : 5513,
+   "status" : "pending",
+   "subject" : "UNTIDY / LOUD: `map split, LIST` (a bare `split` as map's EXPR) emits `(p-split $_)` -- a ONE-argument call to the two-argument runtime split -- and the program dies at the call with a raw \"invalid number of arguments: 1\" backtrace; perl: split ' ', $_ per element (`map { split } LIST` is right) (Rosetta 1359)",
+   "triage" : "in",
+   "triage_reason" : "bare `split` (= split ' ', $_) and map's EXPR form are core language (perlfunc split, map), IN by docs/supported-subset.md section 3"
+}

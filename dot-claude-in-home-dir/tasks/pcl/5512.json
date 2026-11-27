@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    our $g = 1;\n    sub f { $_[0] ? (local $g = 2) : 0; return $g }\n    print f(1), \" \", $g, \"\\n\";\n\n    perl: 2 1\n    PCL : PCL: refused statement at ... line 2: ... -- local in this expression position is not supported (#3370)\n          (the die at the statement, exit 255)\n\n    The program's spelling (a glob alias in the false arm) is refused the same way:\n    our @p; sub area { $#_ > 0 ? @p = @_ : (local *p = shift); ... }\n\nWHERE: Parser2's local-term lowering (`_lower_local_terms`): `_split_void_local_list` takes the void comma list and ruling 3's\n`COND and/or (LIST)` spellings, `_hoist_local_term` the first-evaluated term; a local in a `?:` arm is neither, and\n`_local_value_consumed` says its value is consumed (the arm is the statement's value), so it is refused instead of announced\n(#3414 is the announced, VOID-position residue -- `(local $_, my $x) = @_` -- and is not this).  A void-context ternary whose arm\nis a `local` is the `if (C) { local ... }` shape with perl's scope rule: the localization lasts to the end of the ENCLOSING\nblock (the sub here), not the arm.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1259 with the line rewritten `local *p; if ($#_ > 0) { @p = @_ } else { *p = shift }`\n(the same scope) is byte-identical to perl -- its only cause.\n\nPROGRAMS: 1259-Shoelace-formula-for-polygonal-area.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1259-Shoelace-formula-for-polygonal-area (`$#_ > 0 ? @p = @_ : (local *p = shift);` -- alias the argument array or copy the list)",
+   "id" : 5512,
+   "status" : "pending",
+   "subject" : "DROP: a `local` in a TERNARY ARM of a void statement is refused -- `C ? (local $g = 2) : 0;` and `$#_ > 0 ? @p = @_ : (local *p = shift);` die \"local in this expression position is not supported (#3370)\" at the statement; #3370 is closed and its rulings split `COND and (LIST)` / `COND or local ...`, not `?:` (Rosetta 1259)",
+   "triage" : "in",
+   "triage_reason" : "`local` in a conditional expression is core language (perlsub: local is an expression), IN by docs/supported-subset.md section 3"
+}

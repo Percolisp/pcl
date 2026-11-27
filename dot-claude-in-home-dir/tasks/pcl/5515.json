@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducers, run on the tree, perl 5.40.3 vs PCL):\n\n    sub f { print join(\",\", @_), \"\\n\" }\n    f 1, state => 5;\n    f 1, my => 6;\n    f 1, if => 7;\n    print 1, state => 8, \"\\n\";\n    perl: 1,state,5 / 1,my,6 / 1,if,7 / 1state8\n    PCL : 1,5 / 1,6 / 1,if,7 / 18          (exit 0, nothing on stderr)\n\n    sub f { print join(\",\", @_), \"\\n\" }\n    f 1, our => 5;\n    f 1, local => 6;\n    f state => 7;\n    my @l = (1, state => 2);\n    print \"@l\\n\";\n    my @m = map { $_ } 1, state => 3;\n    print \"@m\\n\";\n    perl: 1,our,5 / 1,local,6 / state,7 / 1 state 2 / 1 state 3\n    PCL : 1,5 / 1,6 / (the `f state => 7;` line is GONE -- no output, no drop announced) / 1 state 2 / 1 3\n\nTOKENS: PPI is right (`f 1, state => 5;` = Word(f) Number(1) Operator(,) Word(state) Operator(=>) Number(5)), and\n`f(1, state => 5)` is right -- so it is PCL's paren-less argument path: a declarator word there is taken as a declaration\nbefore the `=>` autoquote rule is consulted (`if` before `=>` is right, so it is the declarator family only).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1502 with its three `state=>` keys quoted (`'state'=>`) is byte-identical to perl --\nits only cause.\n\nPROGRAMS: 1502-Universal-Turing-machine.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1502-Universal-Turing-machine (`run_utm halt => 'qf', state => 'q0', ...`)",
+   "id" : 5515,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a declarator keyword (`state`, `my`, `our`, `local`) before `=>` in a PAREN-LESS argument list is DROPPED with its fat comma -- `f 1, state => 5` passes (1, 5), `print 1, my => 2` prints 12, and `f state => 7;` (the first argument) loses the whole call with no message; the parenthesised call and a plain list are right (Rosetta 1502)",
+   "triage" : "in",
+   "triage_reason" : "`=>` quotes the word before it whatever it is (perlop \"Comma Operator\"), named arguments to a paren-less call are ordinary perl, IN by docs/supported-subset.md section 3"
+}

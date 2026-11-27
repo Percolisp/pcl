@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    my ($p, $q, $r, $s);\n    (($p, $q), ($r, $s)) = (1, 2, 3, 4);\n    print \"$p $q $r $s\\n\";\n    my ($u, ($v, $w)) = (5, 6, 7);\n    print \"$u $v $w\\n\";\n\n    perl: 1 2 3 4\n          5 6 7\n    PCL : 1  2\n          5 6\n          (exit 0, nothing on stderr; the `my ((...), (...)) = ...` spelling gives the same: `1  2 ` for four names)\n\nWHERE (emitted Lisp): `(p-scalar-ctx (p-list-= (vector (vector $a1 $b1) (vector $a2 $b2)) (vector 1 2 3 4)))` -- the inner groups stay nested VECTORS of places, and p-list-= assigns element by element of the OUTER vector, so the first value goes into the first group's first place (or is lost) and the rest shifts.  perl flattens every paren level of an lvalue list before assigning.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 0188 with the declaration written flat, `my ($x1, $y1, $x2, $y2, $x3, $y3) = (...)`, is byte-identical to perl -- its only cause.  The program is LOUD under PCL only because the wrong coordinates make a denominator 0 (\"Illegal division by zero\"); the shape itself is silent.\n\nPROGRAMS: 0188-Centre-and-radius-of-a-circle-passing-th.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0188-Centre-and-radius-of-a-circle-passing-th (`my (($x1, $y1), ($x2, $y2), ($x3, $y3)) = (@$p1, @$p2, @$p3)`)",
+   "id" : 5503,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a NESTED paren group on the LEFT of a list assignment is not flattened -- `(($p, $q), ($r, $s)) = (1, 2, 3, 4)` and `my (($a, $b), ($c, $d)) = LIST` leave the inner variables wrong (PCL \"1  2 \", perl \"1 2 3 4\"); the emission is `(p-list-= (vector (vector $p $q) (vector $r $s)) ...)` (Rosetta 0188)",
+   "triage" : "in",
+   "triage_reason" : "list assignment is core language (perldata: nested parens on the left flatten like those on the right), IN by docs/supported-subset.md section 3"
+}

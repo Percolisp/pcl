@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPES (neutral reproducers, run on the tree, perl 5.40.3 vs PCL):\n\n    my $m = \"\\xff\";\n    my $r = ++vec($m, 0, 8);\n    print \"$r \", vec($m, 0, 8), \"\\n\";\n    my $q = \"\\x01\";\n    my $s = ++vec($q, 0, 1);\n    print \"$s \", vec($q, 0, 1), \"\\n\";\n    perl: 0 0\n          0 0\n    PCL : 256 0\n          2 0          (exit 0, nothing on stderr)\n\n    my $m = \"\\xff\";\n    my $r = (vec($m, 0, 8) += 1);\n    print \"$r \", vec($m, 0, 8), \"\\n\";\n    my $t = (vec($m, 0, 8) = 300);\n    print \"$t \", vec($m, 0, 8), \"\\n\";\n    my $u = \"\\xff\"; my $w = vec($u, 0, 8)++;\n    print \"$w \", vec($u, 0, 8), \"\\n\";\n    perl: 0 0 / 44 44 / 255 0\n    PCL : 256 0 / 300 44 / 255 0      (the postfix form is right: it answers the OLD value)\n\nWHERE: the assignment / pre-increment of the vec place returns the value it was GIVEN; perl returns the lvalue after the\nstore, which for vec is the value masked to BITS bits (perl's magic: the assignment's value is the target read back).  The\nsame question may hold for `substr` 4-arg / lvalue substr assignment values -- not probed.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1053 with `do { ++vec($bitmask, $_, 8); vec($bitmask, $_, 8) } and last` (the\nstored value read back) is byte-identical to perl -- its only cause.  With the bug the 9-element power set's two-byte counter\nnever carries out of byte 0, the `redo` never ends: the program's TIMEOUT (sizes 4 and 6 -- one byte -- are right).\n\nPROGRAMS: 1053-Power-set (class TIMEOUT: the endless loop).\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 1053-Power-set (a bit-vector counter `++vec($mask, $_, 8) and last for 0 .. $bytes` whose carry depends on the wrapped value)",
+   "id" : 5516,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: the VALUE of an update of a `vec` lvalue is the UNTRUNCATED number, not the stored field -- `++vec($s, 0, 8)` on 255 answers 256 (perl 0), `(vec($s, 0, 8) = 300)` answers 300 (perl 44), `(vec($s, 0, 8) += 1)` 256; the stored bits are right (Rosetta 1053)",
+   "triage" : "in",
+   "triage_reason" : "vec is a core builtin and its lvalue a documented form (perlfunc vec), IN by docs/supported-subset.md section 3"
+}

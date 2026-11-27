@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    {\n        my $count, $other;\n        sub bump { $count++; return $count }\n    }\n    print bump(), bump(), \"\\n\";\n\n    perl: 12\n    PCL : Transpile failed: / Parser2 TODO: lexical 'count' possibly captured by nested sub bump   (exit 1, nothing runs)\n\n    Control (the same with `my $count;`): perl 12, PCL 12.  So the capture itself is lowered; the COMMA TAIL is the trigger.\n\nWHERE: the lead-declaration-with-expression-tail branch of Parser2's block lowering (the `_lead_decl_with_expr_tail` shape #318 describes: the `VAR <tail>` tail is lowered inside the fresh let) produces a binding the capture analysis cannot place, and the capture refusal fires.  CLAUDE.md's standing rule: a scope-blind capture refusal is a bug.  Cousin, not the same shape: #2058 (Module::Metadata's `pn` refusal).\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 0306 with `my $num; our ($sum, $sum2);` in place of `my $num, $sum, $sum2;` (the same variables: my binds only the first) is byte-identical to perl -- its only cause; and the control pair above (with / without the comma tail) isolates the trigger.\n\nPROGRAMS: 0306-Cumulative-standard-deviation.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0306-Cumulative-standard-deviation (`{ my $num, $sum, $sum2; sub stddev { ... } }`)",
+   "id" : 5505,
+   "status" : "pending",
+   "subject" : "LOUD: `my $x, $y;` (a lead `my` with a comma tail) in a block whose NAMED sub uses $x refuses the whole file at transpile -- \"Parser2 TODO: lexical 'x' possibly captured by nested sub NAME\"; `my $x;` alone (the static-variable idiom) compiles (Rosetta 0306)",
+   "triage" : "in",
+   "triage_reason" : "a named sub closing over a block lexical is core language (perlsub \"Persistent variables with closures\"); `my $x, $y` is valid perl (my binds $x only), IN by docs/supported-subset.md section 3"
+}

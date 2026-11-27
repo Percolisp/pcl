@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543q (Opus 5.5, 2026-11-28, CODE 6a1301ed = MAIN-READY-114 + records, v2-16500) by the Rosetta census B (docs/rosetta-plan.md section 6b; #2104).\n\nTHE SHAPE (neutral reproducer, run on the tree, perl 5.40.3 vs PCL):\n\n    use POSIX qw(getenv INFINITY);\n    print defined(getenv(\"PATH\")) ? \"set\" : \"unset\", \" \", (INFINITY > 1e308 ? \"inf\" : \"finite\"), \"\\n\";\n\n    perl: set inf\n    PCL : \"getenv\" is not exported by the POSIX module\n          \"INFINITY\" is not exported by the POSIX module\n          Can't continue after import errors at .../lib/POSIX.pm line 43.     (exit 255)\n\nTHE GAP, measured: perl 5.40.3's POSIX @EXPORT + @EXPORT_OK hold 766 names, the shim's 191.  Most of the 575 missing are the ruled-out families (termios, SigSet, sysconf/_SC_*, the stdio and string.h names perl itself refuses) or perl builtins POSIX re-exports (abs, exp, sqrt -- they work without it); the ones a pure-computation program meets are `getenv`, the C99 float constants `INFINITY` `NAN` `Inf` `NaN` `HUGE_VAL` `FP_*` `M_*`, and the C99 math functions (`isfinite` `fpclassify` `acosh` `asinh` `atanh` `erf` `erfc` `exp2` `expm1` `log1p` `lgamma` `rint` `lrint` `nextafter` `scalbn` `ilogb` `logb` `j0` `j1` `jn` ...).  `INFINITY` is `9**9**9`, `NAN` its difference with itself; `getenv(NAME)` is `$ENV{NAME}`.\nWHERE: the shim (rule 9a, lib/ layer); not-supported.md \"POSIX\" says the shim is \"perl's own default export list restricted to what it implements\" -- these names are neither implemented nor ruled out.\n\nCHEAP DISCRIMINATING MEASUREMENT (taken): 1049 with `use constant INFINITY => 9**9**9;` in place of the import is byte-identical to perl (its only cause); 0399 is two lines and has no other statement.\n\nPROGRAMS: 0399-Environment-variables, 1049-Posit-numbers-encoding.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "Rosetta: 0399-Environment-variables (use POSIX 'getenv'), 1049-Posit-numbers-encoding (use POSIX qw(INFINITY))",
+   "id" : 5506,
+   "status" : "pending",
+   "subject" : "LOUD: lib/POSIX.pm lacks `getenv` and the C99 constants `INFINITY` / `NAN` -- `use POSIX 'getenv'` and `use POSIX qw(INFINITY)` die at import \"\\\"getenv\\\" is not exported by the POSIX module\"; neither is in not-supported.md's list of ruled-out POSIX names (Rosetta 0399 1049)",
+   "triage" : "in",
+   "triage_reason" : "POSIX is a shipped shim, IN by docs/supported-subset.md section 3; getenv and INFINITY are pure computation (no libc state), not among ns-posix's ruled-out syscalls"
+}
