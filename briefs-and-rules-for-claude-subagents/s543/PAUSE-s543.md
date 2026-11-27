@@ -286,3 +286,10 @@ The reviewing session's own task IDs: 5084-5099.  Both batches: Opus 5.5 / xhigh
 * Merge order n -> m -> l.  The count at the stop: 20 ordinary + 66 rare.
 * NEXT ACTION = `s543/resume-after-stop.md` (the three merges; then ROSETTA, `docs/rosetta-plan.md`).
 * **CORRECTION by the USER (00:3x): "no more subtasks" was for this session only.**  The next session resumes the three batches and launches the Rosetta census without asking (the section "2026-11-25 00:0x" above read it as a standing word: wrong).  After Rosetta the work goes on, perhaps with other task priorities.
+
+## 2026-11-27 21:3x -- THE SESSION RESUMES: s543n, s543m, s543l are continued, STACKED n -> m -> l; three at a time (the USER)
+* The box was shut down in order and booted 21:24; nothing ran; CI green on `17f6420f`.  The resume note is `s543/resume-1127.md` (it wins over the STOP.md files where they differ).
+* **The USER (21:3x): three subtasks at a time** in this session.  s543n is started first; s543m when `scratch/s543n/REBASED` exists; s543l when `scratch/s543m/REBASED` exists.
+* **Generations renumbered by the rulebook** (the merge order runs against the reserved numbers): s543n keeps v2-16300, s543m takes v2-16400, s543l v2-16500.
+* **Ruled for s543n: #3451`s remembered-path route is not platform-touching** (`sb-posix:fstat`, `stat-dev`, `stat-ino` are in the base runtime already): no install-matrix or macOS leg owed.
+* The reviewing session reviews s543m and s543l while they run and does not commit on main between s543n`s rebase and its merge.
