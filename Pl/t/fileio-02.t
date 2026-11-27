@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 51;
+plan tests => 52;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
