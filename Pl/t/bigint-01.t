@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 sub write_pl {
     my ($code) = @_;
@@ -115,6 +115,13 @@ my @bd = $y->copy->bdiv(2); print scalar(@bd), " [@bd]\n";},
 
 both_agree(q{use bignum; print "[$_]\n" for 9, do { my $q = 1/3; $q }; my @l = (1/3, 10/4); print scalar(@l), "\n";},
            '#5465: `use bignum` literal divisions in a for list and a list assignment');
+
+# #5468 (s543t): under `use bigint` every literal is an object, so `@i - 1`
+# is an overloaded `-' with an ARRAY operand -- its count, not its first
+# element; `@rows == 2' over array references died in Math::BigInt's objectify.
+both_agree(q{use bigint; my @i = (3, 5, 4, 2, 1); my $k = @i - 1; print "$k\n";
+my @rows = ([4], [5]); print "two\n" if @rows == 2; my @e; print @e + 1, " ", 10 - @i, "\n";},
+           '#5468: `use bigint` -- an array operand of an overloaded operator is its count');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,

@@ -5165,9 +5165,20 @@
    through this function -- the ONE place.  The value is the handler's
    SCALAR value: a sub frame leaves a raw array or hash as it is and its
    CALL SITE counts it (p-scalar), and here this function is the call site
-   -- `sub { my @l = (1, 2, 3); @l }' as a handler answers 3 (probed)."
+   -- `sub { my @l = (1, 2, 3); @l }' as a handler answers 3 (probed).
+
+   THE OTHER OPERAND IS ITS SCALAR VALUE too (task #5468, s543t; ir-spec
+   section 3.4): an operator's operands are in scalar context, and the
+   emitter hands a bare `@a' / `%h' operand over RAW because the plain arm's
+   coercion (to-number / to-string) counts it.  Handed to a handler raw, the
+   vector was FLATTENED into its @_ -- `@a - $obj' gave the handler
+   ($obj, $a[0], $a[1]) with $a[1] as the swapped flag, and an empty array
+   shifted the flag into the operand.  Coerced HERE, once, for every key and
+   every dispatch path (both operands of every binary op, the comparisons,
+   `x', `.', the compound forms, nomethod); a REFERENCE operand is a box and
+   passes untouched (`$aref + $obj' hands the handler the reference)."
   ;; use overload: build the args Perl overload handlers expect
-  (let ((other-val    (or other *p-undef*))
+  (let ((other-val    (if (null other) *p-undef* (%p-overload-scalar-value other)))
         (reversed-val (if reversedp (make-p-box 1) (make-p-box "")))
         (*wantarray*  nil))
     (flet ((call3 (fn) (funcall fn self other-val reversed-val))

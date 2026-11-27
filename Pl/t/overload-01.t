@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 52;
+plan tests => 53;
 
 sub run_cl {
     my ($code) = @_;
@@ -1096,4 +1096,30 @@ PL
     print $fh $prog; close $fh;
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want, '#5465: an overload handler runs in scalar context in a list assignment, a sub tail, a map body, a for list; an array-valued handler answers its count; a method call keeps list context (perl oracle)');
+}
+
+# #5468 (s543t): a bare ARRAY / HASH operand of an operator whose other
+# operand is overloaded reaches the handler as its SCALAR value (the count),
+# not flattened into @_ (which made it the first element and shifted the
+# swapped flag); a REFERENCE operand stays the reference.
+{
+    my $prog = <<'PL';
+package Num;
+sub show { my ($op) = @_; sub { my ($x, $y, $sw) = @_; my $o = ref $y && ref $y ne 'Num' ? ref($y) : $y; $o = 'undef' unless defined $o; "$op(" . ($sw ? "$o,N" : "N,$o") . ")" } }
+use overload '-' => show('-'), '+' => show('+'), '/' => show('/'), '==' => show('=='),
+             'x' => show('x'), '<=>' => show('<=>'), '""' => sub { "N" };
+sub new { bless {}, shift }
+package main;
+my @a = (7, 8, 9); my @e = (); my %h = (a => 1, b => 2); my $r = [4, 5];
+my @aa = ([1], [2]);
+my $n = Num->new;
+print @a - $n, " ", $n + @a, " ", @e + $n, " ", %h + $n, " ", @$r - $n, "\n";
+print $n / @a, " ", @a x $n, " ", $n <=> @a, " ", @aa == $n, " ", $r + $n, "\n";
+my $m = Num->new; $m += @a; print "$m\n";
+sub g { my $s = shift; $s / @_ } print g($n, 4, 5, 6), "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want, '#5468: an array / hash operand beside an overloaded one reaches the handler as its count, on either side, in a comparison, `x`, a compound assignment and `/ @_`; a reference stays a reference (perl oracle)');
 }

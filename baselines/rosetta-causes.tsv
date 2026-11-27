@@ -44,7 +44,6 @@ rosetta/0033-Ackermann-function	DIFF	1	LOUD	#5500 -- `use bigint try => LIB` die
 rosetta/0047-Amb	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0071-Arithmetic-evaluation	DIFF	2	SILENT	#5460 + #5461 -- a void comma operand runs as a list //g (pos lost, the visible half #5462); \G in s/// is a literal G
 rosetta/0107-Base-16-numbers-needing-a-to-f	DIFF	1	SILENT	#5560 -- \K never matches (silent; the only cause: a capture spelling runs identical)
-rosetta/0110-Bell-numbers	DIFF	1	LOUD	#5468 -- an array of references compared with `==` under bigint: the handler gets the first element, objectify dies
 rosetta/0119-Bifid-cipher	DIFF	1	LOUD	#650 + #5502 + #5560 -- `use builtin <indexed floor>` imports nothing; then builtin::indexed is missing; then `\K` in the table helper
 rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	#5463 -- a bare builtin (length) as an array subscript is autoquoted to index 0
 rosetta/0161-Calculating-the-value-of-e	DIFF	1	LOUD	#5500 -- `use bignum qw(e)` dies at the import
@@ -68,7 +67,6 @@ rosetta/0399-Environment-variables	DIFF	1	LOUD	#5506 -- lib/POSIX.pm lacks geten
 rosetta/0422-Exactly-three-adjacent-3-in-lists	DIFF	1	DROPPED	#650 -- a spaced `[< w w >]` word list right after `[` (PPI: an operator) drops the table statement
 rosetta/0442-Extreme-floating-point-values	DIFF	1	SILENT	#1475 -- printf float conversions drop the sign of -0.0 (also #2532 item 1)
 rosetta/0445-FASTA-format	DIFF	1	LOUD	#1292 -- a spaced `< $var >` glob emits a 3-argument `p-.`, a raw arity condition at the call (untidy: #1427)
-rosetta/0466-Fast-Fourier-transform	DIFF	2	NOTICE	#5468 -- an overloaded `/` with an array divisor gets the first element; the NOTICE is Math::Complex's own $SIG{FPE} (announced, not-supported ns-sig; stdout unaffected)
 rosetta/0473-Fibonacci-n-step-number-sequences	DIFF	1	LOUD	#650 -- `use List::Util <max sum>` imports nothing (PPI operator + PCL's rebuild drops the spaces: a readline)
 rosetta/0477-Fibonacci-sequence	DIFF	24	SILENT	NS:ns-integers-unbounded -- integer + past 2**64 stays exact where perl turns to a double (by design, #1513)
 rosetta/0478-Fibonacci-word	DIFF	1	EXHAUSTED	#5518 -- SBCL's fixed 1 GB heap; a foreach over split // of a 24 M-char string needs more (perl 2.1 GB)
@@ -92,7 +90,6 @@ rosetta/0838-McNuggets-problem	DIFF	1	SILENT	#5560 -- \K never matches (the only
 rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	#5510 -- `sort $scalar =~ /re/gm` takes the scalar as the comparator, the statement drops
 rosetta/0887-N-body-problem	DIFF	3	SILENT	#5466 -- a one-element slice as the left side of += / -= (the updates are lost)
 rosetta/0903-Nested-templated-data	DIFF	1	SILENT	#1285 -- a paren-less call of a no-prototype sub with { "key" => ... } passes the block value, not an anon hash
-rosetta/0904-Next-highest-int-from-digits	DIFF	6	SILENT	#5468 -- under bigint an array operand of an overloaded - is its first element, not its count
 rosetta/0923-Numbers-divisible-by-their-individual-di	DIFF	3	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/0925-Numbers-in-base-16-representation-that-c	DIFF	1	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/0927-Numbers-k-whose-divisor-sum-is-equal-to-	DIFF	1	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
