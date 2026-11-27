@@ -3021,7 +3021,8 @@
                               (p-flush-dropped-value (p-pop @stk)))
                             (p-if (p-str-eq $c ")")
                               (progn (p-line 751)
-                                (p-if (p-&& @stk (p-str-eq (p-aref @stk -1) "(")) (p-pop @stk))))))))))))))))))
+                                (p-if (p-&& @stk (p-str-eq (p-aref @stk -1) "("))
+                                  (p-flush-dropped-value (p-pop @stk)))))))))))))))))))
 
 (p-sub pl-p_pack
   (&rest %_args)
