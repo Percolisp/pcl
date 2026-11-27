@@ -40,13 +40,11 @@
 # (docs/rosetta-plan.md step 1).
 #
 # area/name<TAB>verdict<TAB>first-diff-line<TAB>class<TAB>cause
-rosetta/0033-Ackermann-function	DIFF	1	LOUD	#5500 -- `use bigint try => LIB` dies at the import
 rosetta/0047-Amb	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0071-Arithmetic-evaluation	DIFF	2	SILENT	#5460 + #5461 -- a void comma operand runs as a list //g (pos lost, the visible half #5462); \G in s/// is a literal G
 rosetta/0107-Base-16-numbers-needing-a-to-f	DIFF	1	SILENT	#5560 -- \K never matches (silent; the only cause: a capture spelling runs identical)
 rosetta/0119-Bifid-cipher	DIFF	1	LOUD	#650 + #5502 + #5560 -- `use builtin <indexed floor>` imports nothing; then builtin::indexed is missing; then `\K` in the table helper
 rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	#5463 -- a bare builtin (length) as an array subscript is autoquoted to index 0
-rosetta/0161-Calculating-the-value-of-e	DIFF	1	LOUD	#5500 -- `use bignum qw(e)` dies at the import
 rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	#5503 -- `my ((..), (..), (..)) = LIST` is not flattened, the wrong coordinates divide by zero
 rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	#5464 -- an element += a slice adds the slice count, not its last element
 rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
@@ -78,7 +76,6 @@ rosetta/0649-Inconsummate-numbers-in-base-10	DIFF	1	LOUD	#650 + #5560 -- `use Li
 rosetta/0670-Integer-long-division	DIFF	4	SILENT	#1494 -- the \N{NAME} named-character escape is not implemented (literal text)
 rosetta/0672-Integer-overflow	DIFF	2	SILENT	NS:ns-integers-unbounded -- use integer arithmetic does not wrap at 64 bits (by design, #1513)
 rosetta/0710-Klarner-Rado-sequence	DIFF	2	LOUD	#650 + #5507 + #5560 -- `use List::Util <max min>`; a state array of a signature sub is invisible to its nested subs; `\K`
-rosetta/0715-Knuths-power-tree	DIFF	1	LOUD	#5500 -- `use bigint (try => LIB)` dies at the import
 rosetta/0768-Longest-common-substring	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0774-Longest-substrings-without-repeating-cha	DIFF	1	SILENT	#5560 -- \K never matches (a substitution with \K; $+ itself is right)
 rosetta/0808-Ludic-numbers	DIFF	4	SILENT	#5466 -- undef of a hash slice (the key-set idiom) vivifies no key
@@ -95,7 +92,6 @@ rosetta/0937-Numerical-and-alphabetical-suffixes	DIFF	2	NOT-SUPPORTED	NS:ns-rege
 rosetta/0945-Odd-squarefree-semiprimes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0994-Pathological-floating-point-problems	DIFF	1	NOT-SUPPORTED	NS:ns-bigint -- use bigrat is announced and its literals stay plain numbers; Math::BigRat does not run yet (#3000)
 rosetta/0996-Peaceful-chess-queen-armies	DIFF	1	SILENT	#5461 -- \G in a substitution is a literal G (a replace-before-pos step never matches)
-rosetta/0998-Pells-equation	DIFF	1	LOUD	#5500 -- `use bigint try => LIB` dies at the import
 rosetta/1011-Periodic-table	DIFF	1	LOUD	#650 -- `use List::Util <sum head>` imports nothing
 rosetta/1049-Posit-numbers-encoding	DIFF	1	LOUD	#5506 -- lib/POSIX.pm lacks INFINITY
 rosetta/1050-Positive-decimal-integers-with-the-digit	DIFF	1	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)

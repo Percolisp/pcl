@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 20;
 
 sub write_pl {
     my ($code) = @_;
@@ -137,6 +137,21 @@ while ($n > 0) { push @d, $n % 7; $n = int($n / 7) } print "@d\n";},
 both_agree(q{use Math::BigRat; print join(" ", map { Math::BigRat->new($_) } "3", "49/4", "1/3", "0.5", "-7/2", "5/-10"), "\n";
 print Math::BigRat->new("1/3") + Math::BigRat->new("1/6"), " ", Math::BigRat->new("3/4") * 2, " ", Math::BigRat->new("3/4")->numify, "\n";},
            '#2560: Math::BigRat->new("N/D") and its arithmetic');
+
+# #5500 (s543t): the import list is perl's -- the backend / accuracy options
+# are taken (and handed to Math::BigInt->import), PI e bpi bexp are exported
+# on request, an unknown word dies at the `use` (nothing printed).
+both_agree(q{use bigint try => "GMP", l => "Calc"; print 3**50, " ", 7/2, " ", ref(1), " ", inf(), "\n";},
+           '#5500: `use bigint try => ..., l => ...` takes the options');
+
+both_agree(q{use bignum qw(e PI bexp); print substr(e, 0, 12), " ", substr(PI, 0, 12), " ", bexp(1, 10), " ", 1/3, "\n";},
+           '#5500: `use bignum qw(e PI bexp)` exports the on-request constants');
+
+both_agree(q{use bigint accuracy => 5; print 3**50, "\n";},
+           '#5500: `use bigint accuracy => N` reaches Math::BigInt');
+
+both_agree(q{use bigint qw(inf); print "ran\n";},
+           '#5500: an unknown import word dies at the use (inf is exported only by default)');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,
