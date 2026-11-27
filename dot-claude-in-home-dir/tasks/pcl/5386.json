@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543l (Opus 5.5, 2026-11-27), from the reviewing session's L3 (review of s543l, probes-1127/rl2/p/z-05.pl); base = tree.  No task owned it (searched: #1029 #1873 #2108 #2374 #5333 #5380 -- the __DIE__ / signal neighbourhood).\n\nA `die` raised inside a signal handler calls `$SIG{__DIE__}` TWICE in perl -- once at the die inside the handler, once more when perl re-raises it out of the signal dispatch (Perl_sighandler's die_sv of ERRSV) -- and ONCE under PCL.  The $@ the eval sees is the same (\"h\").\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    $| = 1; $SIG{USR1} = sub { die \"h\\n\" };\n    { local $SIG{__DIE__} = sub { print \"DIEHOOK $_[0]\" }; eval { kill USR1 => $$; sleep 1 }; print \"[\", $@ =~ s/\\n//r, \"]\\n\"; }\n    $SIG{ALRM} = sub { die \"al\\n\" };\n    { local $SIG{__DIE__} = sub { print \"DH3 $_[0]\" }; eval { alarm 1; sleep 3 }; print \"[\", $@ =~ s/\\n//r, \"]\\n\"; }\n  perl: DIEHOOK h / DIEHOOK h / [h] / DH3 al / DH3 al / [al]\n  PCL:  DIEHOOK h / [h] / DH3 al / [al]\n  A plain `die` in an eval: one call in both (right).\n\nDIRECTION (not built): the delivery (%p-sig-deliver's :handler arm) re-raises a Perl die that leaves the handler through the die hook once more (perl's second call), with *p-in-die-handler* as perl's PL_diehook guard.  Measure first whether the second call sees the same message object.\n\nFREQUENCY: rare -- a __DIE__ hook that prints or counts while a signal handler dies (a logging hook under an alarm timeout would print the line twice in perl); known from the review probe only.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "a __DIE__ hook that prints or counts while a signal handler dies; known from the review probe only",
+   "id" : "5386",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): a die raised inside a signal handler calls $SIG{__DIE__} once; perl calls it twice (at the die, and again when the signal dispatch re-raises it)",
+   "triage" : "in",
+   "triage_reason" : "the __DIE__ hook's call count for a die in a signal handler"
+}

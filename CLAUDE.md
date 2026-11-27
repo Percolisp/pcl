@@ -207,6 +207,7 @@ tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # rebuild a verd
 tools/corpus-diff.pl               # emission A/B over the corpus; READ its SILENT-DROP line
 tools/emission-ab.pl --ref <base> --list lib/**/*.pm
 tools/everyday-smoke.pl            # the steering number: `EVERYDAY: N of M identical to perl`
+tools/rosetta-corpus run [--record]  # the HELD-OUT corpus (650 Rosetta programs): `ROSETTA: N of 650`; build / verify / classify
 tools/board-timing.pl --run        # the board's RUN phase, perl vs PCL (docs/cpan-runtime-comparison-s541.md)
 tools/run-perl-suite.pl --all --quick --jobs 4   # perl's own t/ (the companion), default form
 tools/run-perl-suite.pl --jobs 1 FILE            # one companion file

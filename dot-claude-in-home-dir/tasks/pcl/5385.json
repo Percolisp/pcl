@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543l (Opus 5.5, 2026-11-27), from the reviewing session's L2 (review of s543l, probes-1127/rl/p/l-03.pl row 3); base = tree.\n\n`sysread` interrupted by a signal whose Perl handler RETURNS: perl's sysread returns undef with $! = EINTR and leaves the data in the pipe for the next read; PCL restarts the read and returns the data written later (the handler ran; the interruption is invisible).\n\nREPRODUCER (perl 5.40.3 | ./runpcl):\n    pipe(my $rd, my $wr); select((select($wr), $| = 1)[0]); my $got = 0; $SIG{USR1} = sub { $got++ };\n    if (!fork) { select(undef, undef, undef, 0.3); kill USR1 => getppid(); select(undef, undef, undef, 0.5); print $wr \"third\\n\"; exit 0 }\n    my $n = sysread($rd, my $b, 100); print \"n=\", (defined $n ? $n : \"undef\"), \" eintr=\", ($!{EINTR} ? 1 : 0), \" got=$got\\n\"; wait;\n  perl: n=undef eintr=1 got=1      PCL: n=6 eintr=0 got=1\n  readline under the same returning handler: perl and PCL both restart (perl's PerlIO retries a returning handler's EINTR for buffered reads) -- right.\n\nDIRECTION (not built): %p-read-impl's sysread arm (the raw fd read) returns undef with errno EINTR when a Perl handler ran during the read and returned (the s543l rule-12 list: the die case already leaves the read), instead of SBCL's restarting read.  Measure what read() (buffered) does in perl first: it restarts like readline.\n\nFREQUENCY: rare -- a loop around sysread retries on EINTR anyway (`next if $!{EINTR}`), and a program that counts on sysread returning EINTR from a returning handler is unusual; known from the review probe only.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "a program that counts on sysread returning EINTR from a handler that returns is unusual (loops retry on EINTR); known from the review probe only",
+   "id" : "5385",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): sysread interrupted by a signal whose handler RETURNS restarts and returns the later data; perl returns undef with $! = EINTR and leaves the data for the next read",
+   "triage" : "in",
+   "triage_reason" : "sysread interrupted by a returning handler"
+}
