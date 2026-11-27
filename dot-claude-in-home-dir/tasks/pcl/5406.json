@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-27), from the reviewing session's review of s543m (F1's \"also in this family\").  PRE-EXISTING: base 9a3ce86f the same; s543m's element-store flush (#5405) takes ONE level only.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p11/rows.pl prog 1):\n    my $f = \"/tmp/x.$$\"; sub mk { open my $t, \">\", $f or die; print $t \"hdata\"; $t } sub sz { my $s = -s $f; unlink $f; $s // \"none\" }\n    my $self = { list => [ mk() ] }; $self->{list}[0] = undef; print \"a \", sz(), \"\\n\";\n    my $o = { a => { fh => mk() } }; $o->{a}{fh} = undef; print \"b \", sz(), \"\\n\";\nperl: a 5 / b 5.  PCL (base and tree): a 0 / b 0.\n\nSAME PLACE AS F1? NO.  F1 widened the HOLDER question of `Parser2::_drop_store_form_p` (which store operator, which container atom); this shape fails earlier and twice: `Pl::Stmt::_one_level_elem` accepts one subscript after the symbol (or `->` + one), and the lowered store's container is an EXPRESSION, `(p-setf (p-aref (p-viv-array-container (p-gethash-deref $self \"list\")) 0) (p-undef))`, while `p-flush-dropped-store` requires a symbol container (read again by the store).  Direction: the shape accepts N subscripts; the macro binds a non-symbol container ONCE (the store vivifies it anyway; perl evaluates the constant RHS first, so the order is not observable) and peeks the slot.  Cost: one more `let` per such statement.\n\n",
+   "frequency" : "rare",
+   "frequency_reason" : "no `}[N] = undef` / `}{k} = undef` statement in lib/, cpan-tests/, everyday/ or the Rosetta corpus (grep, 2026-11-27); known from the review's x-05 probe only",
+   "id" : "5406",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an element TWO levels down overwritten with undef (`$self->{list}[0] = undef;`, `$o->{a}{fh} = undef;`) does not flush the escaped output handle it held (perl writes it out at the statement)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong (a file read back before exit is short): the drop flush family of ns-escaping-filehandle, IN"
+}

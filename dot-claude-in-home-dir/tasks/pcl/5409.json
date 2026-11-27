@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-27), from the reviewing session's review of s543m (F4; m-11 row 7).  PRE-EXISTING: base 9a3ce86f the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p11/rows.pl prog 4):\n    my $f = \"/tmp/x.$$\"; sub mk { open my $t, \">\", $f or die; print $t \"hdata\"; $t } sub sz { my $s = -s $f; unlink $f; $s // \"none\" }\n    my %h; sub d2 { return delete $h{fh} } $h{fh} = mk(); d2(); print \"a \", sz(), \"\\n\";\n    sub d3 { my $s = shift; return delete $s->{fh} } my $o = { fh => mk() }; d3($o); print \"b \", sz(), \"\\n\";\n    $h{fh} = mk(); my $k = d2(); print \"c \", sz(), \"\\n\";     # control: the caller KEEPS it (perl 0)\nperl: a 5 / b 5 / c 0.  PCL (base and tree): a 0 / b 0 / c 0.\n\nSAME PLACE AS THE :tail WRAP? NO.  The tail wrap is `Parser2::_lower_expr_stmt` (a block's last EXPRESSION statement, `$tail_ctx` 'inherit': `(p-flush-dropped-value FORM :tail)`); a `return` statement is lowered by the break-statement path (`p-return` / `p-tail-value` of `_lower_expr($expr, $stmt, 'inherit', 1)`, Parser2 near \"A returned call must see the CALLER's context\").  Direction: that path asks `Pl::Stmt::drop_value_shape` of the return's expression and wraps the returned form the same way (`:tail` outside eval text) -- one helper for the wrap shared by both paths (rule 11), not a copy.  The `p-tail-value` / `p-return` value and context must stay byte-identical in meaning (s543j: a comma list in the caller's context).\n\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "the explicit `return` spelling of the sub-tail drop s543m took as ordinary (#5405: \"the ordinary way an object lets go of its handle\"); `return delete $...` occurs in lib/Hash/Util.pm and Text-CSV's t/71_pp.t (not of handles)",
+   "id" : "5409",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an explicit `return delete $h{fh};` (or `return pop @a;`) as a sub's last statement does not flush the dropped handle in a VOID caller, where the implicit tail `delete $h{fh}` does since s543m (#5405)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong (a file read back before exit is short): the drop flush family of ns-escaping-filehandle, IN"
+}

@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-27), from the reviewing session's review of s543m (F5).  PRE-EXISTING: base 9a3ce86f the same.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p11/rows.pl prog 5):\n    my $f = \"/tmp/x.$$\"; sub mk { open my $t, \">\", $f or die; print $t \"hdata\"; $t } sub sz { my $s = -s $f; unlink $f; $s // \"none\" }\n    my %h; sub take { delete $h{fh} } $h{fh} = mk(); print { take() } \"x\"; print \"a \", sz(), \"\\n\";\n    $h{fh} = mk(); my $cnt = () = take(); print \"b \", sz(), \" $cnt\\n\";\nperl: a 6 / b 5 1.  PCL (base and tree): a 0 / b 0 1.\n\nSAME PLACE? NO: no statement shape names the drop (the value is consumed by the statement and released at its end: perl's FREETMPS).  A flush there would need a per-statement temporaries notion the drop flush does not have; the s543m `:tail` wrap flushes only in a VOID caller, and here the caller uses the value (as the print's handle / as the countof list).  Left as a residue (ns-escaping-filehandle names it).\n\n",
+   "frequency" : "rare",
+   "frequency_reason" : "a handle taken out of its holder and used only inside one statement is an unusual spelling; known from the review's m-10 row 5 / m-11 row 12 only (the reviewing session: rare)",
+   "id" : "5410",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a handle that is only a TEMPORARY of its statement is not flushed when the statement ends (`print { take() } \"x\";`, `my $n = () = take();` with `take` deleting it from its holder; perl frees and writes it there)",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong (a file read back before exit is short): the drop flush family of ns-escaping-filehandle, IN"
+}

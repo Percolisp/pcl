@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-27",
+   "description" : "FILED s543m (Opus 5.5, 2026-11-27), from the reviewing session's review of s543m (F9).  PRE-EXISTING: the base 9a3ce86f prints `(?^:x)`; s543m's #5402 added the `u` (as perl does) and left the `n` out, as it was.\n\nREPRODUCER (perl 5.40.3 | ./runpcl; scratch/s543m/p11/rows.pl prog 8):\n    use v5.22; print qr/x/n, \" \", qr/x/in, \" \", qr/(a)/n, \"\\n\";\n    no feature \"unicode_strings\"; print qr/x/n, \"\\n\";\nperl: (?^un:x) (?^uin:x) (?^un:(a)) / (?^n:x).  PCL tree: (?^u:x) (?^ui:x) (?^u:(a)) / (?^:x).  Base: (?^:x) (?^i:x) (?^:(a)) / (?^:x).\n\nWHERE: the qr's stringification builds its flag string from the pattern's flags (ir-spec 10-reflags, s543m's #5402 added the charset letter there); `n` (no capture) is accepted by the compiler and honoured by the matcher but not listed among the flags the string shows.  perl's order is `^` + charset + `msixxn` letters as given ... measure perl for `qr/x/nix`, `qr/x/xxn` before writing the order.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "no `qr/.../n` in lib/, cpan-tests/, everyday/ or the Rosetta corpus (grep, 2026-11-27); the `/n` flag is a 5.22 addition (the reviewing session: rare)",
+   "id" : "5413",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a qr's `n` flag is missing from its string (`qr/x/n` prints `(?^u:x)` under `use v5.22`, perl `(?^un:x)`; `(?^:x)` vs perl `(?^n:x)` without unicode_strings); the flag itself works",
+   "triage" : "in",
+   "triage_reason" : "a silent wrong of a value printed or compared (the qr's stringification), IN"
+}

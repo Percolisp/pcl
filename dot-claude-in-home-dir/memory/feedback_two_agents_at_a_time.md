@@ -23,3 +23,8 @@ figure in [[project_s421_opus_agents_inflight]] and the s452 interleaved-plan li
 parallel jobs", then "Ah, run three subjobs at a time."  The cap is whatever the USER states at
 the start of a session; the default when nothing is said stays TWO.  s498 ran three: s494p
 (resumed), s497b, s498c.
+
+**Update (USER 2026-11-27, s543):** the default is TWO.  When the USER names another number ("run three
+subtasks at a time"), it holds FOR THAT SESSION only -- write "for this session" after it in every record,
+and fall back to two in the next session without asking.  (Fable had first read a second message of that day
+as making three the standing default; the USER corrected it.)
