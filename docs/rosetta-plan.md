@@ -257,3 +257,15 @@ dispatch** (#5465 #5468 #5467, with #2560: 7 programs), **the slice family**
 (#5466 #5464 #5469: 5), **regex escapes and Unicode** (#2381 #2440 #1494 and
 the `\K` / `\b{wb}` decision: 6 IN + 12 if `\K` comes in), **`\G` and
 context** (#5461 #5460 #5462: 2), then the singles.
+
+### 6b. The loud, dropped and resource programs (s543q, IN PROGRESS, CODE `6a1301ed` = MAIN-READY-114 + s543p's records)
+
+**IN PROGRESS -- the rows written early for the overload / big-number batch
+s543t; the whole table, sorted by programs broken, replaces this one when the
+census ends.**  Program names only (GFDL); the reproducers are in the tasks.
+
+| cause | class | programs | names | task | known before | IN / OUT | with |
+|---|---|---:|---|---|---|---|---|
+| `use bigint try => LIB` / `lib =>` and `use bignum qw(e PI)`: the shims hand every import argument to Exporter and die | LOUD | 4 | 0033 0715 0998 0161 | #5500 | new | IN | -- (lib/ shim) |
+| an ARRAY operand of an overloaded op is its first element (an `==` under bigint on an array of refs dies in objectify; Math::Complex `/ @_`) | LOUD, NOTICE | 2 | 0110 0466 | #5468 | yes (s543p's) | IN | #5465 #5467 |
+| an overloaded ASSIGNMENT operator (`+=` `-=` `.=`) is never called: `+` or numification instead | LOUD | 1 | 1253 | #5501 | new | IN | #5468 (the same dispatch) |
