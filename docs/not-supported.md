@@ -1931,11 +1931,11 @@ process BY the signal (the normative contract is `docs/ir-spec.md` §8, "The
 - **A wholesale `%SIG = (...)` holds PLAIN slots** for its extent: a handler
   stored through them is not installed (task #2264), except ALRM, which `alarm`
   installs from whatever `$SIG{ALRM}` holds.  `local %SIG` keeps the magic
-  since s543l (#5333): the scope's %SIG is a COPY of the caller's view, so a
-  store installs and the caller's handlers and `__WARN__` / `__DIE__` stay in
-  force until a store, as perl's do; but a key the scope did not store READS
-  the caller's value (and `keys %SIG` counts it), where perl's localized hash
-  starts EMPTY and reads undef.
+  since s543l (#5333): the scope's %SIG is perl's EMPTY hash, a store to a signal
+  key installs, and the caller's handlers and `__WARN__` / `__DIE__` stay in
+  force until a store, as perl's do; inside it `delete $SIG{NAME}` removes the
+  key as in perl.  A wholesale `%SIG = (...)` INSIDE the scope is the plain-slot
+  case above.
 - **An inherited SIG_IGN on INT TERM ALRM PIPE is invisible in SOURCE MODE
   only** (`PCL_NO_CORE=1`, a development switch): those signals start at
   perl's default there.  Every saved core (the cached one, an installed

@@ -37,7 +37,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 25;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -204,6 +204,25 @@ eval { local %SIG = (%SIG, USR1 => sub { die "via usr1\n" }); kill USR1 => $$; s
 print "4 $@"; kill USR1 => $$; kill HUP => $$; select(undef, undef, undef, 0.2);
 { local %SIG; $SIG{USR1} = sub { print "5 inner\n" }; kill USR1 => $$; select(undef, undef, undef, 0.2); }
 kill USR1 => $$; print "6 ignored\n"; $SIG{USR1} = "DEFAULT"; kill USR1 => $$; sleep 1; print "NOT REACHED\n";
+PERL
+
+# #5333 (s543l, the review's L1): the scope's %SIG is perl's EMPTY hash --
+# keys 0, an element undef and not existing, false, an empty copy -- while
+# the caller's USR1 handler and __WARN__ stay in force; a store adds its one
+# key, `delete` removes it, a `local $SIG{X}` inside leaves no key, the list
+# form holds its pairs, a sub's scope is empty each call.  Lines 1-7 failed on
+# the batch's first form (a COPY of the caller's view: 67 keys, the caller's
+# values); the handler lines failed on the base (a plain empty table: the
+# outer handler and __WARN__ were lost and USR1 killed the program).
+same_as_perl('local-sig-view', <<'PERL', 'local %SIG: the scope reads perl\'s empty hash while the caller\'s handlers stay in force (#5333)');
+$| = 1; no warnings; sub nap { select(undef, undef, undef, 0.2) }
+$SIG{USR1} = sub { print "outer\n" }; $SIG{__WARN__} = sub { print "W: $_[0]" };
+{ local %SIG; print "1 ", scalar(keys %SIG), " ", (defined $SIG{USR1} ? "def" : "undef"), " ", (exists $SIG{USR1} ? "ex" : "noex"), " ", (defined $SIG{__WARN__} ? "def" : "undef"), " ", (%SIG ? "t" : "f"), "\n";
+  my %c = %SIG; print "2 ", scalar(keys %c), "\n"; kill USR1 => $$; nap(); warn "w-in\n";
+  $SIG{HUP} = 'IGNORE'; print "3 ", join(",", sort keys %SIG), "\n"; delete $SIG{HUP}; print "4 ", scalar(keys %SIG), "\n";
+  { local $SIG{USR1} = sub { print "elem\n" }; kill USR1 => $$; nap(); } print "5 ", scalar(keys %SIG), "\n"; }
+{ local %SIG = (USR1 => sub { print "list\n" }); print "6 ", scalar(keys %SIG), "\n"; kill USR1 => $$; nap(); }
+sub f { local %SIG; scalar(keys %SIG) } print "7 ", f(), f(), " ", ref($SIG{USR1}), "\n"; kill USR1 => $$; nap();
 PERL
 
 # #5380 (s543l): a handler that DIES on a self-kill of a signal SBCL runs

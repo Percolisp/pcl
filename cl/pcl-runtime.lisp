@@ -4447,6 +4447,35 @@
     h)
   "Perl %SIG - signal handlers")
 
+;;; `local %SIG` (task #5333, s543l; the localizer is p-local-store :sig).
+;;; perl's localized %SIG is an EMPTY hash -- keys 0, every element undef --
+;;; while the HANDLERS stay the caller's until the scope stores one.  PCL
+;;; keeps the two apart: the scope's %SIG is a fresh empty table (the VIEW),
+;;; the callers' views wait in *p-sig-outer-views* (innermost first), and the
+;;; runtime asks %p-sig-entry for what it ACTS on (a delivery, the __WARN__ /
+;;; __DIE__ hooks).  A store to an absent signal key of the scope's view makes
+;;; that key's signal cell first (%p-sig-view-cell), so it installs as a store
+;;; to the caller's %SIG does.  Outside every `local %SIG` the list is NIL and
+;;; nothing here runs.
+(defvar *p-sig-outer-views* nil
+  "The %SIG views the active `local %SIG` scopes replaced, innermost first.")
+
+(defun %p-sig-view-cell (h k)
+  "Inside `local %SIG`: when H is the scope's %SIG view and K a signal name
+   the view does not hold, install K's signal cell in H and return it (a
+   store then installs the handler); else NIL.  The store paths call it on
+   an ABSENT key only, and only while *p-sig-outer-views* is non-NIL."
+  (when (and (eq h %SIG) (string/= k "ZERO") (%p-signal-number k))
+    (setf (gethash (%p-own-string k) h) (%p-sig-cell-box k))))
+
+(defun %p-sig-entry (name)
+  "The %SIG entry the runtime ACTS on for NAME (a delivery, the __WARN__ /
+   __DIE__ hooks): the current view's, else -- inside `local %SIG` -- the
+   innermost caller view's that holds it (perl: the scope's empty hash leaves
+   the handlers as they were).  NIL when none holds it."
+  (or (gethash name %SIG)
+      (loop for v in *p-sig-outer-views* thereis (gethash name v))))
+
 ;;; Held-back SIGCHLD (task #2107): the variables and the macro live here, before
 ;;; the process code that uses them; the delivery machinery is further down.
 (defvar *p-chld-deferred* nil
@@ -16202,14 +16231,19 @@ which is one of #1140's escape spellings (probed)."
     (when r (return-from %p-gethash-store
               (%p-tie-store-elem r k (%pcl-scalar-collapse value)))))
   (multiple-value-bind (existing found) (gethash k h)
-    (if (and found (p-box-p existing))
-        (box-set existing value)
-        (let ((raw (%p-storable-raw value)))
-          (if raw
-              (setf (gethash (%p-own-string k) h) raw)
-              (let ((box (make-p-box nil)))
-                (setf (gethash (%p-own-string k) h) box)
-                (box-set box value)))))))
+    (cond ((and found (p-box-p existing))
+           (box-set existing value))
+          ;; an absent signal key of a `local %SIG` view: its cell (#5333)
+          ((and *p-sig-outer-views* (not found)
+                (setf existing (%p-sig-view-cell h k)))
+           (box-set existing value))
+          (t
+           (let ((raw (%p-storable-raw value)))
+             (if raw
+                 (setf (gethash (%p-own-string k) h) raw)
+                 (let ((box (make-p-box nil)))
+                   (setf (gethash (%p-own-string k) h) box)
+                   (box-set box value))))))))
 
 (defun (setf p-gethash) (value hash key)
   "Setf expander for p-gethash - allows assignment to hash elements.
@@ -16302,6 +16336,7 @@ which is one of #1140's escape spellings (probed)."
     ;; undef box (perl's lvalue autovivification).  p-gethash-argbox is the lazy
     ;; sibling, for read-only uses that must not create the key.
     (or (%p-hash-elem-cell h k)
+        (and *p-sig-outer-views* (%p-sig-view-cell h k))  ; `local %SIG` (#5333)
         (let ((box (make-p-box *p-undef*)))
           (setf (gethash k h) box)
           box))))
@@ -17322,10 +17357,13 @@ which is one of #1140's escape spellings (probed)."
            ;; the old value comes back and the signal returns to its default
            ;; disposition.  The magic slot itself stays, so a later store is
            ;; still installed; `exists' therefore stays true where perl's
-           ;; turns false (docs/not-supported.md, "%SIG").
+           ;; turns false (docs/not-supported.md, "%SIG") -- except in a
+           ;; `local %SIG` view, where a later store makes the cell again
+           ;; (%p-sig-view-cell) and the key leaves as in perl (#5333).
            ((%p-signal-cell-box-p v)
             (prog1 (%p-hash-unbox-elem v)
-              (box-set v *p-undef*)))
+              (box-set v *p-undef*)
+              (when (and *p-sig-outer-views* (eq h %SIG)) (remhash k h))))
            (t
             (remhash k h)
             (if found
@@ -19152,7 +19190,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; `print` — one flattener for all three (task #2004 residue).
     (setf args (coerce (p-flatten-args args) 'list))
     (let* ((msg (p-warn-build-message args loc))
-           (handler (and (not *p-in-warn-handler*) (gethash "__WARN__" %SIG))))
+           (handler (and (not *p-in-warn-handler*) (%p-sig-entry "__WARN__"))))
       (cond
         ;; Custom handler: call with message as argument ($_[0])
         ((and handler (functionp (unbox handler)))
@@ -19514,7 +19552,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "The $SIG{__DIE__} handler to call now as a CL function, or NIL: none set,
    DEFAULT / IGNORE / empty, or already inside one."
   (unless *p-in-die-handler*
-    (let* ((cell (gethash "__DIE__" %SIG))
+    (let* ((cell (%p-sig-entry "__DIE__"))
            (h (and cell (unbox cell))))
       (cond ((functionp h) h)
             ((and (stringp h) (string/= h "")
@@ -27633,8 +27671,9 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %p-sig-current-value (name)
   "The value $SIG{NAME} holds right now.  Read through %SIG itself, not the
-   stored table, so a `local %SIG' or a wholesale `%SIG = (...)' still answers."
-  (let ((b (gethash name %SIG)))
+   stored table, so a wholesale `%SIG = (...)' still answers; inside `local
+   %SIG' an unstored key answers from the caller's view (%p-sig-entry)."
+  (let ((b (%p-sig-entry name)))
     (if b (unbox b) *p-undef*)))
 
 (defun %p-sig-set (name value)
@@ -28057,8 +28096,8 @@ would consume, so it dies naming the stream (rule 12)."
    When it fires, $SIG{ALRM} is invoked; with no handler the process dies by
    SIGALRM, as perl's does.  Returns the seconds that were remaining on any
    previously-scheduled alarm.  The disposition is re-derived from the value
-   $SIG{ALRM} holds NOW, so a handler reached through `local %SIG = (…)' —
-   which replaces the magic slot with a plain one — is installed too."
+   $SIG{ALRM} holds NOW, so a handler reached through a wholesale `%SIG = (…)'
+   — which replaces the magic slot with a plain one — is installed too."
   (%p-sig-apply "ALRM")
   (sb-posix:alarm (if secs (truncate (to-number secs)) 0)))
 
@@ -37480,6 +37519,20 @@ would consume, so it dies naming the stream (rule 12)."
     (setf (gethash kv *p-inc-table*) value)
     (vector :inc old found)))
 
+(declaim (inline %p-lhe-slot))
+(defun %p-lhe-slot (hv kv)
+  "KV's slot in HV for `local $h{K}`: the box and whether it exists, as
+   GETHASH answers -- except that inside `local %SIG` an absent signal key of
+   the scope's view gets its cell first (%p-sig-view-cell, #5333), so the
+   local installs.  Third value: T when that cell was made here -- the
+   restore then removes the key and leaves the signal at its default, as
+   perl's delete magic does (%p-lhe-restore)."
+  (multiple-value-bind (b found) (gethash kv hv)
+    (if (or found (null *p-sig-outer-views*))
+        (values b found nil)
+        (let ((c (%p-sig-view-cell hv kv)))
+          (values c (and c t) (and c t))))))
+
 (defun %p-lhe-save (hv kv)
   "Save hash[key] for local. Returns saved state vector."
   (%p-when-tied (r hv)
@@ -37498,12 +37551,12 @@ would consume, so it dies naming the stream (rule 12)."
         ;; undef and is exported as "" (probed 5.40.3; #1030)
         (%p-env-store kv *p-undef*)
         (vector :env old syn old-undef))
-      (multiple-value-bind (old-bx old-ex) (gethash kv hv)
+      (multiple-value-bind (old-bx old-ex made) (%p-lhe-slot hv kv)
         (if (%p-signal-cell-box-p old-bx)
             ;; A %SIG signal slot keeps its MAGIC box (#2107): the VALUE is
             ;; saved and cleared through the setter, so the disposition follows
             ;; the local and the restore reinstalls the saved handler.
-            (prog1 (vector :magic (unbox old-bx) old-bx)
+            (prog1 (vector :magic (unbox old-bx) old-bx made)
               (box-set old-bx *p-undef*))
             (progn
               ;; Install a fresh box so body assignments don't clobber the saved
@@ -37533,7 +37586,13 @@ would consume, so it dies naming the stream (rule 12)."
             (%p-env-store kv (if (aref saved 3) *p-undef* old))
             (%p-env-remove kv)))
       (let ((old-ex (aref saved 1)) (old-bx (aref saved 2)))
-        (cond ((eq (aref saved 0) :magic) (box-set old-bx old-ex))
+        (cond ((eq (aref saved 0) :magic)
+               ;; a key the `local %SIG` view did not hold leaves it again,
+               ;; and perl's delete clears the magic: the signal is at its
+               ;; DEFAULT until the scope ends (probed 5.40.3)
+               (if (aref saved 3)
+                   (progn (box-set old-bx *p-undef*) (remhash kv hv))
+                   (box-set old-bx old-ex)))
               (old-ex (setf (gethash kv hv) old-bx))
               (t (remhash kv hv))))))
 
@@ -37559,10 +37618,10 @@ would consume, so it dies naming the stream (rule 12)."
         ;; undef element exported as "", as perl's (#1030)
         (%p-env-store kv (if (null init-val) *p-undef* init-val))
         (vector :env old syn old-undef))
-      (multiple-value-bind (old-bx old-ex) (gethash kv hv)
+      (multiple-value-bind (old-bx old-ex made) (%p-lhe-slot hv kv)
         (if (%p-signal-cell-box-p old-bx)
             ;; %SIG signal slot: see %p-lhe-save.
-            (prog1 (vector :magic (unbox old-bx) old-bx)
+            (prog1 (vector :magic (unbox old-bx) old-bx made)
               (box-set old-bx init-val))
             (let ((bx (make-p-box nil)))
               (box-set bx init-val)
@@ -37628,36 +37687,31 @@ would consume, so it dies naming the stream (rule 12)."
     (:inc (setf *p-inc-table* saved))
     (:sig (%p-sig-local-restore saved))))
 
-;;; `local %SIG` (task #5333).  perl's localized %SIG is a new hash, but the
-;;; HANDLERS -- the OS dispositions, PL_psig_ptr, the __WARN__ / __DIE__
-;;; hooks -- change only when the scope STORES one (probed 5.40.3: an
-;;; IGNOREd signal stays ignored, an outer sub handler still runs, an outer
-;;; __WARN__ / __DIE__ still fires), and at the exit every signal the scope
-;;; changed is back to the caller's.  PCL's view of the scope is a COPY of the
-;;; caller's %SIG: the same signal cells (stateless: they read and write
-;;; *p-sig-stored*, so a store installs at once), the other keys' VALUES in
-;;; fresh entries (a store to $SIG{__WARN__} does not reach the caller's).
-;;; One difference stays (docs/not-supported.md "%SIG"): a key the scope did
-;;; not store reads the caller's value, where perl's empty hash reads undef.
+;;; `local %SIG` (task #5333).  perl's localized %SIG is a new EMPTY hash
+;;; (keys 0, every element undef), but the HANDLERS -- the OS dispositions,
+;;; PL_psig_ptr, the __WARN__ / __DIE__ hooks -- change only when the scope
+;;; STORES one (probed 5.40.3: an IGNOREd signal stays ignored, an outer sub
+;;; handler still runs, an outer __WARN__ / __DIE__ still fires), and at the
+;;; exit every signal the scope changed is back to the caller's.  PCL's scope
+;;; view is a fresh empty table; the caller's view goes on *p-sig-outer-views*,
+;;; where %p-sig-entry finds what the runtime acts on for a key the scope did
+;;; not store, and a store to a signal key makes its cell first
+;;; (%p-sig-view-cell, beside the %SIG defvar), so it installs at once.
 
 (defun %p-sig-local-save ()
-  "The caller's %SIG view and a copy of its stored signal values."
+  "The caller's %SIG view, a copy of its stored signal values, and the outer
+   views list as it was."
   (let ((stored (make-hash-table :test 'equal)))
     (maphash (lambda (k v) (setf (gethash k stored) v)) *p-sig-stored*)
-    (cons %SIG stored)))
+    (list %SIG stored *p-sig-outer-views*)))
 
 (defun %p-sig-local-fill (pairs)
-  "The scope's %SIG: a copy of the caller's view (see the section note), then
-   each pair of PAIRS stored through it -- a signal key through its cell's
-   setter (it installs), any other key as an element.  An odd trailing key
-   gets undef, as `%SIG = LIST' does."
+  "The scope's %SIG: an EMPTY view (the caller's pushed on
+   *p-sig-outer-views*), then each pair of PAIRS stored through it -- a
+   signal key becomes its cell and installs (%p-sig-view-cell), any other
+   key is an element.  An odd trailing key gets undef, as `%SIG = LIST' does."
   (let ((view (make-hash-table :test 'equal)))
-    (maphash (lambda (k v)
-               (setf (gethash k view)
-                     (if (%p-signal-cell-box-p v)
-                         v
-                         (%p-make-hash-entry (%p-hash-unbox-elem v)))))
-             %SIG)
+    (push %SIG *p-sig-outer-views*)
     (setf %SIG view)
     (let ((n (length pairs)))
       (loop for i from 0 below n by 2
@@ -37665,10 +37719,12 @@ would consume, so it dies naming the stream (rule 12)."
                      (if (< (1+ i) n) (aref pairs (1+ i)) *p-undef*))))))
 
 (defun %p-sig-local-restore (saved)
-  "The caller's %SIG view back, then every signal whose stored value the
-   scope changed stored back and its OS disposition re-applied."
-  (destructuring-bind (view . stored) saved
-    (setf %SIG view)
+  "The caller's %SIG view and outer views back, then every signal whose
+   stored value the scope changed stored back and its OS disposition
+   re-applied."
+  (destructuring-bind (view stored outer) saved
+    (setf %SIG view
+          *p-sig-outer-views* outer)
     (let ((names '()))
       (maphash (lambda (k v) (unless (eq v (gethash k stored '%p-absent)) (push k names)))
                *p-sig-stored*)

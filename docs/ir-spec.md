@@ -4549,12 +4549,14 @@ synthetic entry's flag) and replaces it through the `%ENV = LIST` arm (a bare `l
 child started inside sees the localized one.  `:inc` installs a fresh `*p-inc-table*` filled by the `%INC = LIST`
 arm: a `require` / `do FILE` in the scope records there, and a file required in the scope runs again at the next
 `require` after it (the caller's %INC never had it); `local $INC{K}` / `delete local $INC{K}` save and restore the
-entry of that store.  `:sig` makes the scope's %SIG a COPY of the caller's view -- the same stateless signal cells (a
-store installs at once), the other keys' values in fresh entries -- then stores the list through it; the exit puts
-the view back and re-applies every signal whose stored value the scope changed.  So, as in perl, the caller's
-dispositions, handlers and `__WARN__` / `__DIE__` stay in force until the scope stores one (perl's handlers change
-only by a store); unlike perl's empty hash, a key the scope did not store READS the caller's value
-(`docs/not-supported.md` "%SIG").  The three names are core variables, selected by storage name.  Example: `{ local
+entry of that store.  `:sig` makes the scope's %SIG perl's EMPTY hash (keys 0, an element undef) and keeps the caller's view on
+`*p-sig-outer-views*`; what the runtime ACTS on for a key -- a delivery, the `__WARN__` / `__DIE__` hooks -- is the
+current view's entry, else the innermost caller view's (`%p-sig-entry`), so the caller's dispositions, handlers and
+hooks stay in force until the scope stores one (perl's handlers change only by a store).  A store to an absent
+signal key of the scope's view makes that key's signal cell first (`%p-sig-view-cell`: the element store, the
+lvalue cell, `local $SIG{K}`), so it installs at once; a `local $SIG{K}` that made the key removes it again and
+leaves the signal at its default until the scope ends, and `delete` removes the key -- perl's clear magic.  The
+exit puts the view back and re-applies every signal whose stored value the scope changed.  The three names are core variables, selected by storage name.  Example: `{ local
 %SIG = (USR1 => sub {…}); kill USR1 => $$ }` lowers to `(p-local-store :sig (let ((*wantarray* t)) (p-flatten-args
 (list "USR1" (p-anon-sub …)))) … (p-kill …))`.
 
