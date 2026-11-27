@@ -258,14 +258,71 @@ dispatch** (#5465 #5468 #5467, with #2560: 7 programs), **the slice family**
 the `\K` / `\b{wb}` decision: 6 IN + 12 if `\K` comes in), **`\G` and
 context** (#5461 #5460 #5462: 2), then the singles.
 
-### 6b. The loud, dropped and resource programs (s543q, IN PROGRESS, CODE `6a1301ed` = MAIN-READY-114 + s543p's records)
+### 6b. The loud, dropped and resource programs (s543q, 2026-11-28, CODE `6a1301ed` = MAIN-READY-114)
 
-**IN PROGRESS -- the rows written early for the overload / big-number batch
-s543t; the whole table, sorted by programs broken, replaces this one when the
-census ends.**  Program names only (GFDL); the reproducers are in the tasks.
+**44 programs, 30 causes, 11 of them known before census B** (6 older open
+tasks, 4 filed the same day by census A and the reviewing session, 1
+not-supported id); **19 new tasks, #5500-#5518; 0 FIXED-BY a merge** (all 44
+re-run on s543m's tree, the `local` / `%SIG` ones again after s543l's merge:
+unchanged); **0 UNREDUCED**.  Every program was re-run, reduced to a neutral
+reproducer, and its cause CONFIRMED by a perl-equivalent rewrite of that
+spelling in a scratch copy that makes the program identical to perl; four
+programs hold two or three causes (0119 0649 0710 1093), so the table counts
+50 program-causes.  The two TIMEOUT programs are NOT slow: both are endless
+loops of a correctness cause (#5514, #5516) -- no `SLOW:` task; the two
+EXHAUSTED ones were sized through one bounded leg (#1929, #5518).  Six
+programs end in a raw Lisp condition: that FORM is #1427's (and #2556's for
+the two resource deaths), the cause is in the table.  Program names only
+(GFDL); the reproducers are in the tasks.
 
 | cause | class | programs | names | task | known before | IN / OUT | with |
 |---|---|---:|---|---|---|---|---|
-| `use bigint try => LIB` / `lib =>` and `use bignum qw(e PI)`: the shims hand every import argument to Exporter and die | LOUD | 4 | 0033 0715 0998 0161 | #5500 | new | IN | -- (lib/ shim) |
-| an ARRAY operand of an overloaded op is its first element (an `==` under bigint on an array of refs dies in objectify; Math::Complex `/ @_`) | LOUD, NOTICE | 2 | 0110 0466 | #5468 | yes (s543p's) | IN | #5465 #5467 |
-| an overloaded ASSIGNMENT operator (`+=` `-=` `.=`) is never called: `+` or numification instead | LOUD | 1 | 1253 | #5501 | new | IN | #5468 (the same dispatch) |
+| a word list written as a glob, `<a b>`: after `use Module` it imports nothing (PPI: an operator; PCL's rebuild drops the spaces and makes a readline), after `[` a spaced `< a b >` drops the statement | LOUD 6, DROPPED 2 | 8 | 0119 0316 0422 0473 0649 0710 1011 1364 | #650 | yes (moved rare -> ordinary) | IN -- PPI: **needs the USER's word** (the PPI program is closed); the import half has a few-line PCL fix | #1292 #5508 |
+| `use bigint try => LIB` / `lib =>` and `use bignum qw(e PI)`: the shims hand every import argument to Exporter and die | LOUD | 4 | 0033 0715 0998 0161 | #5500 | new | IN | s543t's batch |
+| `\K` never matches (here the 2nd / 3rd cause of three LOUD programs, the only stdout cause of 0266) | LOUD, NOTICE | 4 | 0119 0266 0649 0710 | #5560 | yes (census A: 11 silent programs) | IN (ruled 2026-11-28) | s543u's batch |
+| an ARRAY operand of an overloaded op is its first element (`@rows == 2` under bigint dies in objectify; Math::Complex `/ @_`) | LOUD, NOTICE | 2 | 0110 0466 | #5468 | yes (census A) | IN | s543t, #5501 |
+| `builtin::indexed` is not implemented (the import skips it, the call dies) | LOUD | 2 | 0294 0119 | #5502 | new | IN | -- |
+| lib/POSIX.pm lacks `getenv` and `INFINITY` (and the C99 constants / math functions) | LOUD | 2 | 0399 1049 | #5506 | new | IN | #5500 (a shim's import) |
+| `sort $scalar OP ...` takes the scalar as the comparator: a drop (`=~`, `$_ > 0 ?`) or a raw `NIL is undefined` | DROPPED | 2 | 0841 1308 | #5510 | new | IN | #1427 |
+| a non-ASCII lexical's WRITE sites emit an unescaped symbol (:invert reads it as another name): unbound, or an endless loop | LOUD, TIMEOUT | 2 | 1497 0313 | #5514 | new | IN | -- |
+| a foreach range is materialized in the modifier form and with a `use constant` end: `for 1 .. Inf` dies out of memory | LOUD | 2 | 0557 1291 | #5517 | new | IN | #1427 (the raw die) |
+| an `:lvalue` sub assigned to | DROPPED | 2 | 1498 1499 | `NS:ns-lvalue-subs` | yes (ns, deferred #930) | OUT | -- |
+| `$a[shift]`: a builtin name as a subscript is autoquoted (1093's 2nd cause) | LOUD | 1 | 1093 | #5463 | yes (census A) | IN | #5511 |
+| `\G` in a substitution is a literal G | LOUD | 1 | 1297 | #5461 | yes (census A) | IN | s543u's batch; #3414 (its notice) |
+| a `state` variable of a SIGNATURE sub is invisible to a named sub nested in it (0710's 2nd cause) | LOUD | 1 | 0710 | #5507 | new | IN | -- |
+| `pop @{ $h{k} \|\| [] }` / `shift @{ $a[-1] // [] }` fetch the element as an LVALUE: the key is created, an empty array dies | LOUD | 1 | 1093 | #5511 | new | IN | #165 (the inverse) |
+| an overloaded ASSIGNMENT operator (`+=` `-=` `.=`) is never called | LOUD | 1 | 1253 | #5501 | new | IN | s543t, #5468 |
+| nested paren groups on a list-assignment LHS are not flattened | LOUD | 1 | 0188 | #5503 | new | IN | -- |
+| `map(sub { ... }, LIST)` (the EXPR form) runs the sub's body per element | LOUD | 1 | 0220 | #5504 | new | IN | #5513 (map's EXPR path) |
+| `my $x, $y;` in a block whose named sub uses $x refuses the file ("possibly captured") | LOUD | 1 | 0306 | #5505 | new | IN | #318 #2058 |
+| PPI lexes `{` after `not` / `!` as a block: the anon hash is dereferenced as a list | LOUD | 1 | 0493 | #5508 | new | IN -- PPI: needs the USER's word | #650 #286 |
+| `CONST*$var` (no space) is lexed as a glob cast after a bareword: a drop (PCL's prototype table knows CONST) | DROPPED | 1 | 0556 | #5509 | new | IN | ppi-upstream-bugs §12 (`_repair_glob_multiply`) |
+| a `local` in a TERNARY arm is refused (#3370's closed refusal) | DROPPED | 1 | 1259 | #5512 | new | IN | #3414 |
+| `map split, LIST` emits a one-argument split: a raw arity condition | LOUD | 1 | 1359 | #5513 | new | IN | #5504, #1427 |
+| `state` / `my` / `our` / `local` before `=>` in a paren-less argument list is dropped | LOUD | 1 | 1502 | #5515 | new | IN | -- |
+| the value of `++vec(...)` / `vec(...) = V` is the untruncated number: the counter never carries (an endless redo) | TIMEOUT | 1 | 1053 | #5516 | new | IN | -- |
+| `&$_(ARGS)` is dropped | DROPPED | 1 | 0333 | #4807 | yes | IN | -- |
+| `(Bareword)[i]` in a list is called, not the string | LOUD | 1 | 0523 | #1594 | yes | IN | -- |
+| a spaced `< $var >` glob emits a 3-argument `p-.` (a raw arity condition) | LOUD | 1 | 0445 | #1292 | yes | IN | #650, #1427 |
+| `\N{name}` is literal text (and charnames' script list is not found) | NOTICE | 1 | 1495 | #1494 | yes | IN | census A (0670 1436) |
+| recursion deeper than ~10,000 exhausts the binding stack (perl: 100,000 in 0.4 s) | EXHAUSTED | 1 | 0293 | #1929 | yes | IN (criterion 4) | #2556 (the form) |
+| SBCL's fixed 1 GB heap; a foreach over `split //` costs 1.2-3x perl's memory (perl needs 2.1 GB here) | EXHAUSTED | 1 | 0478 | #5518 | new | IN (criterion 4) | #2556 (the form), #1590 |
+
+**Frequency:** #650 moved rare -> ordinary (eight programs); #4807 #1594 #1292
+#3414 #1427 #1929 #2556, which had no field (= ordinary), now name their
+programs.  `tools/task-triage.pl` on the live store: 33 ordinary + 62 rare
+(after census A) -> **41 ordinary + 61 rare** (#650 and the seven new silent
+shapes: #5503 #5504 #5507 #5511 #5514 #5515 #5516).  **No duplicate with
+census A**: its #5463 #5468 #5461 and the reviewing session's #5560 were
+appended, not refiled.
+
+**The fix batches this table suggests, largest first:** **the lexer's term
+position** (#650 #5508 #5509, with #1292: 11 programs; #650 and #5508 need the
+USER's word on the closed PPI program, but #650's six import programs need
+only PCL's rebuild to keep the spaces); **overloading and the big-number
+shims** (#5500 #5501 #5468, already in s543t: 7 programs); **regex escapes**
+(#5560 #5461, already in s543u: 5); **list operators' first operand** (#5510
+sort, #5504 / #5513 map's EXPR form, #5515 the paren-less list: 5 programs,
+one parser area); **the shims' missing names** (#5502 builtin::indexed, #5506
+POSIX: 4); then the singles, and the two resource tasks for the criterion-4
+decision.
