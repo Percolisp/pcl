@@ -50,7 +50,6 @@ rosetta/0161-Calculating-the-value-of-e	DIFF	1	LOUD	#5500 -- `use bignum qw(e)` 
 rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	#5503 -- `my ((..), (..), (..)) = LIST` is not flattened, the wrong coordinates divide by zero
 rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	#5464 -- an element += a slice adds the slice count, not its last element
 rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
-rosetta/0195-Check-Machin-like-formulas	DIFF	1	SILENT	#2560 + #5465 -- a BigRat "N/D" string is 1; an overloaded / handler runs in list context (bdiv gives quotient and remainder)
 rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	#5504 -- `map(sub { ... }, LIST)` runs the sub body per element instead of making code refs
 rosetta/0243-Common-sorted-list	DIFF	1	SILENT	#5466 -- a slice ++ (the seen-set idiom) vivifies no key
 rosetta/0266-Consistent-overhead-byte-stuffing	DIFF	33	NOTICE	#5560 -- `\K` in s///ger never matches; the NOTICE is #3414's `local` in a list-assignment head (stdout unaffected)
@@ -71,7 +70,6 @@ rosetta/0477-Fibonacci-sequence	DIFF	24	SILENT	NS:ns-integers-unbounded -- integ
 rosetta/0478-Fibonacci-word	DIFF	1	EXHAUSTED	#5518 -- SBCL's fixed 1 GB heap; a foreach over split // of a 24 M-char string needs more (perl 2.1 GB)
 rosetta/0493-Find-first-missing-positive	DIFF	1	LOUD	#5508 -- PPI lexes `{` after `not` as a block, the anon hash is dereferenced as a list
 rosetta/0523-FizzBuzz	DIFF	1	LOUD	#1594 -- `(Bareword)[i]` in a list is called, not the string
-rosetta/0545-Fractran	DIFF	1	SILENT	#2560 -- a Math::BigRat "N/D" string constructor is 1
 rosetta/0556-Gamma-function	DIFF	3	DROPPED	#5509 -- `CONST*$var` without spaces is lexed as a glob cast, the statement drops
 rosetta/0557-Gapful-numbers	DIFF	3	LOUD	#5517 -- a modifier foreach over `$start .. Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/0632-Host-introspection	DIFF	1	DROPPED	NS:ns-given-when -- refused, announced

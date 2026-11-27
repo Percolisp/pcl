@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 51;
+plan tests => 52;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -553,4 +553,23 @@ open(my $h, "<", $f) or die; <$h>; push @r, $.; close $g; push @r, $.; close $h;
 open(FH, "<", $f) or die; <FH>; <FH>; open(FH, "<", $f) or die; @r = ($.); <FH>; push @r, $.; close FH; push @r, $.; print "c @r\n";
 @ARGV = ($f, $f); @r = (); while (<>) { push @r, $.; close ARGV if eof } print "d @r\n";
 unlink $f;
+END
+
+# 52. #932's sub half (s543t, found again as #2560: Math::BigRat->new("49/4")
+# built its denominator from Math::BigFloat::new's own $2 and answered 1):
+# the capture variables are DYNAMICALLY SCOPED to the sub frame -- a called
+# sub's matches leave the caller's $1 $2 $& @- %+ as they were, the callee's
+# `return $1' is its own capture, nested frames each get theirs back, and an
+# anonymous sub is a frame too.  Probed 5.40.3; the base printed
+# `in:49 no 49  49 [0 0]` / `kv g:g f:gh | gh ` / `7 7` / `e e`.
+is run_cl(<<'END'), "in:49 in:4 49 4 49/4 [0 0 3]\nkv g:g f:ef | ab a\nx1 y2\ne cd\n", 'a called sub\'s match does not reach the caller\'s capture variables (#932, #2560)';
+sub inner { my $x = shift; $x =~ /^(\d+)$/ or return "no"; return "in:$1" }
+sub ret1 { "kq" =~ /(k)(q)/; return $1 }
+sub tail2 { "uv" =~ /(u)(v)/; $2 }
+sub g2 { "gh" =~ /(g)(h)/; "g:$1" }
+sub f2 { "ef" =~ /(e)(f)/; my $in = g2(); "$in f:$1$2" }
+if ("49/4" =~ m|^(\S+)/(\S+)$|) { my $a = inner($1); my $b = inner($2); print "$a $b $1 $2 $& [@-]\n" }
+if ("ab" =~ /(?<first>a)(b)/) { print ret1(), tail2(), " ", f2(), " | $1$2 $+{first}\n" }
+my @w; my $str = "x1y2"; while ($str =~ /(\w)(\d)/g) { inner("7"); push @w, "$1$2" } print "@w\n";
+if ("cd" =~ /(c)(d)/) { my $r = sub { "ee" =~ /(e)/; $1 }->(); print "$r $1$2\n" }
 END

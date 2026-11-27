@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 sub write_pl {
     my ($code) = @_;
@@ -130,6 +130,13 @@ print ref(int($b)), " ", int($b) / 7, " ", int(Math::BigFloat->new("-2.5")), "\n
 my $n = Math::BigInt->new("98765432109876543210"); my @d;
 while ($n > 0) { push @d, $n % 7; $n = int($n / 7) } print "@d\n";},
            '#5467: int() of a big-number object is the class\'s int (an object)');
+
+# #2560 / #3000 (s543t): Math::BigRat's "N/D" string constructor -- its
+# Math::BigFloat::new($1) call ran matches of its own, whose $2 used to reach
+# the caller (#932's sub half): "49/4" was 1.
+both_agree(q{use Math::BigRat; print join(" ", map { Math::BigRat->new($_) } "3", "49/4", "1/3", "0.5", "-7/2", "5/-10"), "\n";
+print Math::BigRat->new("1/3") + Math::BigRat->new("1/6"), " ", Math::BigRat->new("3/4") * 2, " ", Math::BigRat->new("3/4")->numify, "\n";},
+           '#2560: Math::BigRat->new("N/D") and its arithmetic');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,

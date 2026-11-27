@@ -15834,6 +15834,41 @@ create the key on a read-only call, which perl does not.
       (%p-leavesub-scalar v)
       (if (eq *wantarray* t) (%p-leavesub-aggregate v) v)))
 
+;;; THE CAPTURE VARIABLES ARE SCOPED TO THE SUB FRAME (task #932's sub half,
+;;; found again as #2560, s543t; docs/ir-spec.md "Match variables").  perl
+;;; saves PL_curpm -- the last successful match, which $1..$N, $&, $`, $',
+;;; @-, @+, %+ ... all read -- when a sub is entered and puts it back when the
+;;; sub is left, so a called sub's own matches never reach the caller:
+;;;     if ("49/4" =~ m|(\S+)/(\S+)|) { my $n = f($1); my $d = f($2) }
+;;; reads the caller's $2 although f matched in between.  PCL's match state is
+;;; a set of globals (%p-match-record is the one writer), and before this the
+;;; callee's match was the caller's too: Math::BigRat->new("49/4") built its
+;;; denominator from Math::BigFloat::new's own $2 and answered 1.
+;;;
+;;; LAZY: each frame binds *p-match-saved* to :UNSAVED -- one special binding
+;;; and one compare per call -- and only the FIRST successful match inside the
+;;; frame copies the state it is about to overwrite (%p-match-snapshot); the
+;;; frame's normal exit writes the copy back (%p-match-restore).  A sub that
+;;; matches nothing allocates nothing.  NIL outside every frame: the top level
+;;; is perl's outermost scope and never restores.
+;;;
+;;; NOT DONE (#932 / #684 keep them): a DIE that unwinds through the frame
+;;; does not restore (like p-loc-save, the normal exit only), and a BARE BLOCK,
+;;; a loop body, a map / grep / sort block and an eval are no scope of their
+;;; own -- only a sub is.
+(defvar *p-match-saved* nil
+  "The match state the current SUB FRAME has overwritten, saved at its first
+   successful match; :UNSAVED while the frame has matched nothing; NIL at the
+   top level, outside every frame.")
+
+(defmacro %p-match-scope (&body body)
+  "BODY as one perl scope for the match variables (see *p-match-saved*)."
+  (let ((s (gensym "SAVED")))
+    `(let ((*p-match-saved* :unsaved))
+       (multiple-value-prog1 (progn ,@body)
+         (let ((,s *p-match-saved*))
+           (unless (eq ,s :unsaved) (%p-match-restore ,s)))))))
+
 (defmacro p-sub-frame (&body body)
   "A Perl SUB frame: BODY with `return` bound to it, and perl's leave rule
    applied to the value it exits with.  ONE spelling of the frame — p-sub uses
@@ -15848,8 +15883,14 @@ create the key on a read-only call, which perl does not.
    statement is running again, so the caller's location must be back —
    otherwise `my $z = f() / 0;` would report f's last line.  A `return` is a
    normal return here (the catch is inside), so it restores too.  A DIE does
-   NOT, deliberately: the catcher must see the die site."
-  `(p-loc-save (%p-leavesub (catch :p-return ,@body))))
+   NOT, deliberately: the catcher must see the die site.
+
+   AND IT IS PERL'S SAVE OF PL_curpm (task #932's sub half, s543t #2560): the
+   capture variables are DYNAMICALLY SCOPED, so a match inside the sub leaves
+   the caller's $1 / $& / @- as they were once the sub returns
+   (%p-match-scope; the return VALUE is copied first, so `return $1' is the
+   callee's capture)."
+  `(p-loc-save (%p-match-scope (%p-leavesub (catch :p-return ,@body)))))
 
 (defun p-cloned-sub (f)
   "Return a code ref that CALLS F but is a DISTINCT OBJECT from every other
@@ -29204,7 +29245,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-16500"
+(defparameter *pcl-cache-generation* "v2-16600"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -43582,6 +43623,70 @@ would consume, so it dies naming the stream (rule 12)."
           do (set (svref *p-capture-syms* i) *p-undef*))
     (setf *p-captures-set* m)))
 
+(defun %p-match-snapshot ()
+  "A copy of the whole match state -- what $1..$N, $&, $`, $', @-, @+, %+,
+   %-, $+, $^N and @{^CAPTURE} answer from -- for %p-match-restore.  The
+   register offsets are copied out of the REUSED *match-rs* / *match-re*
+   vectors; the derived variables are not copied, they are rebuilt from the
+   record.  Layout: #(captures-set subject beg end whole pre post have
+   ngroups closers reg-names rs re $1 .. $captures-set)."
+  (let* ((m *p-captures-set*)
+         (n *match-ngroups*)
+         (v (make-array (+ 13 m))))
+    (declare (type fixnum m n))
+    (setf (svref v 0) m
+          (svref v 1) *match-subject*
+          (svref v 2) *match-beg*
+          (svref v 3) *match-end*
+          (svref v 4) *match-whole*
+          (svref v 5) *match-pre*
+          (svref v 6) *match-post*
+          (svref v 7) *match-have*
+          (svref v 8) n
+          (svref v 9) *match-closers*
+          (svref v 10) *match-reg-names*
+          (svref v 11) (subseq (the simple-vector *match-rs*) 0 n)
+          (svref v 12) (subseq (the simple-vector *match-re*) 0 n))
+    (dotimes (i m)
+      (setf (svref v (+ 13 i)) (symbol-value (svref *p-capture-syms* i))))
+    v))
+
+(defun %p-match-restore (v)
+  "Put back the match state %p-match-snapshot copied: the frame that saved it
+   is returning normally (task #932's sub half).  The capture specials set
+   now above the saved count go back to undef -- the *p-captures-set*
+   invariant -- and the derived variables are rebuilt from the restored
+   record when next read (at once while a derived container is pinned)."
+  (declare (type simple-vector v))
+  (let ((m (svref v 0))
+        (n (svref v 8))
+        (now *p-captures-set*))
+    (declare (type fixnum m n now))
+    (dotimes (i m)
+      (set (svref *p-capture-syms* i) (svref v (+ 13 i))))
+    (loop for i of-type fixnum from m below now
+          do (set (svref *p-capture-syms* i) *p-undef*))
+    (setf *p-captures-set* m)
+    (setf *match-subject* (svref v 1)
+          *match-beg* (svref v 2)
+          *match-end* (svref v 3)
+          *match-whole* (svref v 4)
+          *match-pre* (svref v 5)
+          *match-post* (svref v 6)
+          *match-have* (svref v 7)
+          *match-ngroups* n
+          *match-closers* (svref v 9)
+          *match-reg-names* (svref v 10)
+          *match-derived* nil)
+    (when (plusp n)
+      (when (< (length (the simple-vector *match-rs*)) n)
+        (setf *match-rs* (make-array n :initial-element nil)
+              *match-re* (make-array n :initial-element nil)))
+      (replace (the simple-vector *match-rs*) (the simple-vector (svref v 11)))
+      (replace (the simple-vector *match-re*) (the simple-vector (svref v 12))))
+    (when *match-derived-eager* (%p-derive-match-vars))
+    (values)))
+
 (defun %p-match-record (str match-start match-end reg-starts reg-ends
                         &optional closers reg-names)
   "THE one writer of the match variables on a SUCCESSFUL match (task #1804,
@@ -43592,6 +43697,10 @@ would consume, so it dies naming the stream (rule 12)."
    reads them as bare symbols.  $+, $^N, %+, %-, @-, @+ and @{^CAPTURE} are
    NOT written: %p-store-match's record is enough to build them, and they are
    built the first time one of them is read (%p-derive-match-vars)."
+  ;; The frame's first match saves the state it overwrites (task #932's sub
+  ;; half: see *p-match-saved*) -- one special read and one compare after that.
+  (when (eq *p-match-saved* :unsaved)
+    (setf *p-match-saved* (%p-match-snapshot)))
   (let ((n (if reg-starts (length reg-starts) 0)))
     (declare (type fixnum n))
     (%p-set-captures str reg-starts reg-ends n)
