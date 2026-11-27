@@ -115,26 +115,26 @@ rosetta/1168-Remove-vowels-from-a-string	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unico
 rosetta/1169-Rep-string	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1178-Reverse-a-string	DIFF	3	SILENT	#2381 -- \X is base+marks, not UAX 29 (flag pairs and ZWJ emoji split)
 rosetta/1188-Roman-numerals-Decode	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/1198-Round-robin-tournament-schedule	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1198-Round-robin-tournament-schedule	DIFF	1	SILENT	#5469 -- a slice assignment from the same whole array reads it while writing it
 rosetta/1253-Set	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	UNREDUCED #2104
 rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/1297-Solve-a-Hopido-puzzle	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/1298-Solve-a-Numbrix-puzzle	DIFF	10	SILENT	UNREDUCED #2104
+rosetta/1298-Solve-a-Numbrix-puzzle	DIFF	10	SILENT	NS:ns-regex-escapes -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/1300-Solve-the-no-connection-puzzle	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/1306-Sort-an-outline-at-every-level	DIFF	78	SILENT	UNREDUCED #2104
+rosetta/1306-Sort-an-outline-at-every-level	DIFF	78	SILENT	NS:ns-regex-escapes -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/1308-Sort-numbers-lexicographically	DIFF	1	DROPPED	UNREDUCED #2104
-rosetta/1336-Special-pythagorean-triplet	DIFF	1	SILENT	UNREDUCED #2104
-rosetta/1342-Split-a-character-string-based-on-change	DIFF	5	SILENT	UNREDUCED #2104
+rosetta/1336-Special-pythagorean-triplet	DIFF	1	SILENT	#5470 -- without use utf8, a high byte after an interpolated variable is read into its name
+rosetta/1342-Split-a-character-string-based-on-change	DIFF	5	SILENT	#2381 -- \X is base+marks, not UAX 29 (a regional-indicator flag splits)
 rosetta/1359-Stem-and-leaf-plot	DIFF	1	LOUD	UNREDUCED #2104
 rosetta/1364-Straddling-checkerboard	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/1376-String-length	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1376-String-length	DIFF	1	SILENT	#2381 -- \X is base+marks, not UAX 29 (Hangul L+V+T jamo count one each)
 rosetta/1390-Substring-primes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/1432-Tarjan	DIFF	8	SILENT	UNREDUCED #2104
-rosetta/1436-Terminal-control-Display-an-extended-cha	DIFF	2	SILENT	UNREDUCED #2104
-rosetta/1473-Tuppers-self-referential-formula	DIFF	1	SILENT	UNREDUCED #2104
-rosetta/1479-Twos-complement	DIFF	6	SILENT	UNREDUCED #2104
-rosetta/1480-Type-detection	DIFF	5	SILENT	UNREDUCED #2104
+rosetta/1432-Tarjan	DIFF	8	SILENT	#2644 -- a no-initialiser my in a sub, captured by a my sub, keeps the first call contents
+rosetta/1436-Terminal-control-Display-an-extended-cha	DIFF	2	SILENT	#1494 -- the \N{NAME} named-character escape is not implemented (literal text)
+rosetta/1473-Tuppers-self-referential-formula	DIFF	1	SILENT	#5465 -- Math::BigInt / inside a map block runs its overload handler in list context (quotient and remainder)
+rosetta/1479-Twos-complement	DIFF	6	SILENT	NS:ns-integers-unbounded -- sprintf %d of a UV above IV_MAX is not reinterpreted as an IV (by design, #1513)
+rosetta/1480-Type-detection	DIFF	5	SILENT	#5471 -- ref of a reference to a package scalar holding a ref to a named hash is SCALAR, not REF
 rosetta/1488-UTF-8-encode-and-decode	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
 rosetta/1495-Unicode-strings	DIFF	1	NOTICE	UNREDUCED #2104
 rosetta/1497-Unicode-variable-names	DIFF	1	LOUD	UNREDUCED #2104
@@ -142,4 +142,4 @@ rosetta/1498-Unicode-variable-names	DIFF	1	DROPPED	UNREDUCED #2104
 rosetta/1499-Unicode-variable-names	DIFF	1	DROPPED	UNREDUCED #2104
 rosetta/1502-Universal-Turing-machine	DIFF	2	LOUD	UNREDUCED #2104
 rosetta/1551-Worthwhile-task-shaving	DIFF	5	DROPPED	NS:ns-given-when -- refused, announced
-rosetta/1561-XXXX-redacted	DIFF	3	SILENT	UNREDUCED #2104
+rosetta/1561-XXXX-redacted	DIFF	3	SILENT	NS:ns-regex-escapes -- \b{wb} never matches (the only cause: with \b the program runs identical to perl on the same text)
