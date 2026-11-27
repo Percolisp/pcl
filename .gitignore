@@ -21,6 +21,11 @@ scratch/*/out/
 # produced (.out/.err/.rc) and the fresh cwd each program gets.
 /.everyday/
 
+# tools/rosetta-corpus run's results (the same runner, the Rosetta corpus:
+# s543o, task #2104).  The corpus itself never enters a checkout (GFDL): it
+# lives in PCLPaths::rosetta_dir, beside the module cache.
+/.rosetta/
+
 # Claude Code's lock file inside the task store, which lives in the repo
 # (dot-claude-in-home-dir/README.md).  The tasks and notes are tracked; the
 # lock is machine state.

@@ -1,0 +1,602 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# rosetta-corpus -- THE ROSETTA CORPUS: rebuild it anywhere, check it, run it
+# (docs/rosetta-plan.md section 2; task #2104; s543o).
+#
+# The Rosetta corpus is the project's HELD-OUT measurement: the Perl solutions
+# of Rosetta Code that touch no file, process, network, clock or chance and
+# that perl runs deterministically -- programs nobody here wrote and PCL was
+# never tuned on.  Its text is GFDL 1.2, so it is NEVER checked in.  This
+# recipe rebuilds it byte for byte from the pinned upstream commit; the
+# repository holds only the rules (tools/lib/PCLRosetta.pm), the MANIFEST of
+# names and digests (baselines/rosetta-corpus.tsv), the CAUSE TABLE
+# (baselines/rosetta-causes.tsv, also the run's baseline) and the HISTORY of
+# the number (baselines/rosetta-history.tsv).
+#
+# USAGE
+#   tools/rosetta-corpus build    [--dir DIR] [--repo URL] [--commit SHA]
+#   tools/rosetta-corpus verify   [--dir DIR] [--manifest FILE]
+#   tools/rosetta-corpus run      [--dir DIR] [--manifest FILE] [RUNNER OPTIONS]
+#   tools/rosetta-corpus classify [--dir DIR] [--outdir OUT] [--table FILE]
+#   tools/rosetta-corpus manifest [--dir DIR] [--commit SHA --perl vX.Y.Z]
+#
+#   DIR  defaults to $PCL_ROSETTA_DIR, else <cache root>/rosetta (normally
+#        ~/.pcl-cache/rosetta: PCLPaths::rosetta_dir).  It holds corpus/rosetta/
+#        (the programs), refused/ (what the admission refused, with
+#        REASONS.tsv), work/RosettaCodeData (the clone), BUILD-INFO, build.log.
+#
+# build     Fetch the pinned commit into DIR/work/RosettaCodeData -- a shallow,
+#           blob-less, sparse fetch of that one commit, or, if the server
+#           refuses a fetch by sha, a blob-less fetch of the whole history --
+#           and check that HEAD is the pinned commit.  SELECT statically (the
+#           s493 word filter, PCLRosetta::static_refusal; a candidate's number
+#           is its place among the candidates in sorted path order), then
+#           ADMIT: tools/everyday-smoke.pl --bless-expect --timeout 8 under
+#           `ulimit -v 4000000` (three perl runs, one of them a copy at another
+#           path from another cwd, all agreeing in STDOUT and exit status), and
+#           refuse what printed nothing or more than 200,000 bytes; then re-run
+#           every admitted program once more, minutes later (the runner's
+#           --verify-with-perl): a DRIFT is an answer that holds the clock or
+#           chance, and is refused.  THE CLOCK IS DECIDED ONCE: when the
+#           manifest describes this commit, the programs it names are admitted
+#           at --timeout 60 (the 8 s wall-clock rule decided them when the
+#           corpus was defined; a borderline one would come and go with the
+#           box's load) and only the others face the 8 s rule.  THE MANIFEST
+#           IS THE CORPUS: a program admitted here that it does not name (a
+#           module this perl has and the defining one had not) is refused with
+#           that reason, never added.  Refuses to write over an existing
+#           DIR/corpus or DIR/refused; a clone already at the pinned commit is
+#           reused.  Ends with `verify`.
+# verify    Every name of the manifest present, every .pl and .expect digest
+#           and every exit status equal, nothing extra.  Exit 1 on any
+#           difference, each one printed.
+# run       verify, then exec tools/everyday-smoke.pl --corpus DIR/corpus
+#           --label ROSETTA --baseline baselines/rosetta-causes.tsv --history
+#           baselines/rosetta-history.tsv --jobs 2 --timeout 60 --outdir
+#           <root>/.rosetta, followed by the RUNNER OPTIONS, which win
+#           (`--jobs 4`, `--record`, `--pcl CMD`, `--outdir D`, a program).
+#           THE LINE A BATCH QUOTES is the last one:
+#               ROSETTA: N of M identical to perl (P %) -- <sha> gen <generation>
+#           and with the cause table as the baseline the buckets are the
+#           battery's: NEW (a regression) / FIXED (the row leaves by edit) /
+#           MOVED / UNEXPLAINED / STALE.
+# classify  Read a finished run's outdir (default <root>/.rosetta) against the
+#           corpus and print one TAB-separated line per differing program --
+#           key, verdict, first-diff line, CLASS, first complaint (the first
+#           four are a cause-table row's first four columns) -- then the
+#           class counts as `#` lines, and a `# CLASS MOVED` line for each
+#           program whose class is not its row's in the cause table (--table;
+#           the runner's MOVED sees the verdict and the line only).  The
+#           classes are docs/rosetta-plan.md's eight (PCLRosetta::class_of).
+# manifest  Print DIR's manifest (the commit and perl from DIR/BUILD-INFO, or
+#           --commit / --perl for a corpus made before this tool).
+#
+# LICENCE: no program text and no expected output ever enters the checkout
+# -- not a fixture, not a doc example, not a commit message.
+#
+# EXIT  0 ok · 1 a difference (verify, and build's closing verify) · 2 usage,
+#       a missing tree or a step that failed.
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptionsFromArray);
+use File::Find ();
+use File::Path qw(make_path);
+use File::Copy qw(move);
+use File::Basename qw(dirname);
+use Digest::SHA;
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use PCLPaths ();
+use PCLEveryday qw(verdict_for expected_rc_of first_complaint TIMEOUT_RC);
+use PCLRosetta qw(static_refusal task_of program_id class_of read_manifest
+                  @CLASSES $UPSTREAM $PINNED $AREA $SPARSE
+                  $PERL_TIMEOUT $REBUILD_TIMEOUT $MAX_OUTPUT $ADDRESS_SPACE_KB);
+
+my $ROOT = eval { PCLPaths::root($0) };
+if (!defined $ROOT) { print STDERR $@; exit 2 }
+my $RUNNER   = "$ROOT/tools/everyday-smoke.pl";
+my $MANIFEST = "$ROOT/baselines/rosetta-corpus.tsv";
+my $TABLE    = "$ROOT/baselines/rosetta-causes.tsv";
+my $HISTORY  = "$ROOT/baselines/rosetta-history.tsv";
+my $OUTDIR   = "$ROOT/.rosetta";
+
+my %SUB = (build => \&cmd_build, verify => \&cmd_verify, run => \&cmd_run,
+           classify => \&cmd_classify, manifest => \&cmd_manifest);
+my $cmd = shift @ARGV;
+usage(0) if defined $cmd && $cmd =~ /^(?:-h|--help|help)$/;
+usage(2) if !defined $cmd || !$SUB{$cmd};
+# A step that dies exits 2 (a failed step), never 255.
+my $exit = eval { $SUB{$cmd}->(@ARGV) };
+if (!defined $exit) { print STDERR $@; exit 2 }
+exit $exit;
+
+# =========================================================================
+# small things
+# =========================================================================
+
+sub slurp { my ($p) = @_; open my $h, '<:raw', $p or return undef; local $/; my $t = <$h>; close $h; return defined $t ? $t : '' }
+sub spew  { my ($p, $t) = @_; open my $h, '>:raw', $p or die "rosetta-corpus: $p: $!\n"; print $h $t; close $h or die "rosetta-corpus: $p: $!\n" }
+sub sha256_of { my ($p) = @_; return Digest::SHA->new(256)->addfile($p, 'b')->hexdigest }
+sub rstrip_slash { my ($p) = @_; $p =~ s{/+$}{}; return $p }
+sub default_dir { return PCLPaths::rosetta_dir() }
+
+sub options {
+    my ($argv, @spec) = @_;
+    my %o;
+    GetOptionsFromArray($argv, \%o, @spec) or usage(2);
+    usage(2) if @$argv;
+    $o{dir} = rstrip_slash(defined $o{dir} ? $o{dir} : default_dir());
+    return \%o;
+}
+
+# The programs of a corpus directory, by name (NNNN-task), sorted.
+sub corpus_names {
+    my ($c) = @_;
+    opendir(my $dh, $c) or return ();
+    my @n = sort map { /^(.*)\.pl\z/s ? $1 : () } readdir $dh;
+    closedir $dh;
+    return @n;
+}
+
+# =========================================================================
+# build
+# =========================================================================
+
+sub cmd_build {
+    my @argv = @_;
+    my $o = options(\@argv, qw(dir=s repo=s commit=s));
+    my $repo   = defined $o->{repo}   ? $o->{repo}   : $UPSTREAM;
+    my $commit = defined $o->{commit} ? $o->{commit} : $PINNED;
+    die "rosetta-corpus: --commit must be a full 40-hex sha, not '$commit'\n" if $commit !~ /^[0-9a-f]{40}$/;
+    my $dir = $o->{dir};
+    for my $d ("$dir/corpus", "$dir/refused") {
+        die "rosetta-corpus: $d exists -- build writes a FRESH corpus: remove $dir/corpus and $dir/refused"
+          . " (the clone in $dir/work is kept and reused)\n" if -e $d;
+    }
+    make_path("$dir/work");
+    open my $log, '>:raw', "$dir/build.log" or die "rosetta-corpus: $dir/build.log: $!\n";
+    my $say = sub { my ($t) = @_; print $t; print $log $t };
+
+    my $work = "$dir/work/RosettaCodeData";
+    my $how  = fetch($work, $repo, $commit, $say);
+    $say->("fetch: $repo at $commit ($how) into $work\n");
+
+    my ($cands, $n_all, $n_static) = candidates($work);
+    $say->(sprintf("select: %d Perl solutions, %d filtered statically, %d candidates\n",
+                   $n_all, $n_static, scalar @$cands));
+    my $corpus = "$dir/corpus";
+    make_path("$corpus/$AREA");
+    spew("$corpus/$AREA/$_->{id}.pl", $_->{code}) for @$cands;
+
+    # THE CLOCK IS DECIDED ONCE (PCLRosetta $REBUILD_TIMEOUT): the programs the
+    # manifest names for THIS commit are admitted at the runner's default
+    # timeout, every other candidate at the 8 s rule.  Every other rule is
+    # re-checked for every program.
+    my $named = manifest_names($commit);
+    my @groups = $named
+        ? ([$REBUILD_TIMEOUT, 'named by the manifest', [grep {  $named->{"$AREA/$_->{id}"} } @$cands]],
+           [$PERL_TIMEOUT,    'not in the manifest',   [grep { !$named->{"$AREA/$_->{id}"} } @$cands]])
+        : ([$PERL_TIMEOUT, 'no manifest for this commit: the corpus is DEFINED here', $cands]);
+    my %runner_said;
+    for my $g (@groups) {
+        my ($timeout, $what, $list) = @$g;
+        $say->(sprintf("admit: %d candidates %s, at --timeout %d\n", scalar @$list, $what, $timeout));
+        next if !@$list;
+        my $s = admit($corpus, $say, $timeout, map { "$corpus/$AREA/$_->{id}.pl" } @$list);
+        @runner_said{ keys %$s } = values %$s;
+    }
+    my ($admitted, $refused) = sort_out($corpus, $cands, \%runner_said);
+
+    # THE CLOCK AND CHANCE, ONCE MORE: every admitted program is re-run once,
+    # minutes after its admission, by the runner's own --verify-with-perl.  An
+    # answer that holds the date (1442-Text-to-HTML: its three admission runs
+    # fell inside one second) or a coin flip that agreed three times by chance
+    # (0359: two outputs, half and half) is not a fact of the program.
+    ($admitted, my $drifted) = drift_pass($corpus, $say, $admitted);
+    push @$refused, @$drifted;
+
+    # THE MANIFEST IS THE CORPUS: a program admitted here that the manifest
+    # does not name stays out -- the corpus was defined without it (a module
+    # this perl has and the defining perl had not, a faster clock) -- and is
+    # listed with that reason, never added.
+    if ($named) {
+        my @extra = grep { !$named->{"$AREA/$_->{id}"} } @$admitted;
+        $admitted = [grep { $named->{"$AREA/$_->{id}"} } @$admitted];
+        push @$refused, map { +{ id => $_->{id}, why => 'admitted here, but the manifest does not name it: the corpus was defined without it' } } @extra;
+    }
+    @$refused = sort { $a->{id} cmp $b->{id} } @$refused;
+    make_path("$dir/refused");
+    for my $r (@$refused) {
+        for my $ext (qw(pl expect rc)) {
+            my $f = "$corpus/$AREA/$r->{id}.$ext";
+            move($f, "$dir/refused/$r->{id}.$ext") or die "rosetta-corpus: move $f: $!\n" if -e $f;
+        }
+    }
+    spew("$dir/refused/REASONS.tsv",
+         "# tools/rosetta-corpus build: what the admission refused (name, reason)\n"
+         . join('', map { "$_->{id}\t$_->{why}\n" } @$refused));
+
+    my %by;
+    $by{ reason_kind($_->{why}) }++ for @$refused;
+    my $kinds = join(', ', map { "$_=$by{$_}" } sort keys %by);
+    spew("$dir/BUILD-INFO", join('', map { "$_->[0]\t$_->[1]\n" }
+        [source => $repo], [commit => $commit], [fetch => $how],
+        [perl => $^X], ['perl-version' => sprintf('v%vd', $^V)], [date => utc_stamp()],
+        ['perl-solutions' => $n_all], ['filtered-static' => $n_static],
+        [manifest => $named ? scalar(keys %$named) . " programs named for this commit" : 'none for this commit (a definition)'],
+        [candidates => scalar @$cands], [admitted => scalar @$admitted],
+        [refused => scalar @$refused], ['refused-by-kind' => $kinds]));
+    $say->(sprintf("\nbuild: %d Perl solutions: filtered-static=%d, admitted=%d, refused=%d (%s)\n",
+                   $n_all, $n_static, scalar @$admitted, scalar @$refused, $kinds));
+    $say->("perl: $^X (" . sprintf('v%vd', $^V) . ")\n");
+    close $log;
+
+    if (!-f $MANIFEST) { print "\nno manifest at $MANIFEST: nothing to verify against (`manifest` prints one)\n"; return 0 }
+    print "\n";
+    return verify_and_report($dir, $MANIFEST);
+}
+
+# The clone.  Every git command runs with GIT_DIR / GIT_WORK_TREE spelled out,
+# so it can never fall through to a repository the directory happens to be in.
+sub git_env {
+    my ($work) = @_;
+    return (GIT_DIR => "$work/.git", GIT_WORK_TREE => $work, GIT_TERMINAL_PROMPT => 0,
+            GIT_CEILING_DIRECTORIES => dirname($work), LC_ALL => 'C');
+}
+sub git_run {
+    my ($work, $capture, @args) = @_;
+    my %env = git_env($work);
+    local @ENV{ keys %env } = values %env;
+    if ($capture) {
+        open my $ph, '-|', 'git', @args or die "rosetta-corpus: git: $!\n";
+        local $/; my $out = <$ph>; close $ph;
+        return ($? == 0, defined $out ? $out : '');
+    }
+    return (system { 'git' } 'git', @args) == 0;
+}
+sub git { my ($work, @args) = @_; git_run($work, 0, @args) or die "rosetta-corpus: git @args failed in $work\n"; return }
+
+sub fetch {
+    my ($work, $repo, $commit, $say) = @_;
+    if (-e $work) {
+        die "rosetta-corpus: $work exists and is not a clone: remove it\n" if !-d "$work/.git";
+        my ($ok, $head) = git_run($work, 1, 'rev-parse', 'HEAD');
+        $head =~ s/\s+\z//;
+        return 'reused' if $ok && $head eq $commit;
+        die "rosetta-corpus: $work holds " . ($ok ? "commit $head" : 'no commit') . ", not $commit: remove it\n";
+    }
+    make_path($work);
+    system({ 'git' } 'git', 'init', '-q', $work) == 0 or die "rosetta-corpus: git init $work failed\n";
+    git($work, 'remote', 'add', 'origin', $repo);
+    git($work, 'config', 'remote.origin.promisor', 'true');
+    git($work, 'config', 'remote.origin.partialclonefilter', 'blob:none');
+    git($work, 'config', 'core.sparseCheckout', 'true');
+    git($work, 'config', 'core.sparseCheckoutCone', 'false');   # $SPARSE is a pattern, not a cone
+    make_path("$work/.git/info");
+    spew("$work/.git/info/sparse-checkout", "$SPARSE\n");
+    my $how = 'shallow fetch of the commit';
+    if (!git_run($work, 0, 'fetch', '-q', '--depth', '1', '--filter=blob:none', 'origin', $commit)) {
+        $say->("the server refused a fetch by sha: fetching the whole history (blob-less)\n");
+        git($work, 'fetch', '-q', '--filter=blob:none', 'origin');
+        $how = 'blob-less fetch of the whole history';
+    }
+    git($work, '-c', 'advice.detachedHead=false', 'checkout', '-q', '--detach', $commit);
+    my ($ok, $head) = git_run($work, 1, 'rev-parse', 'HEAD');
+    $head =~ s/\s+\z//;
+    die "rosetta-corpus: after the checkout HEAD is '$head', not $commit\n" if !$ok || $head ne $commit;
+    return $how;
+}
+
+# The STATIC selection, exactly as s493 ran it: every *.pl under a /Perl/
+# directory of Task/, in sorted path order; a file that cannot be read is
+# skipped unnumbered; one the word filter matches is counted and dropped; the
+# rest are numbered 1, 2, ... in that order.
+sub candidates {
+    my ($work) = @_;
+    my @all;
+    File::Find::find(sub { push @all, $File::Find::name if /\.pl$/ }, "$work/Task") if -d "$work/Task";
+    my @rel = sort grep { m{/Perl/} } map { substr($_, length($work) + 1) } @all;
+    my (@c, $static, $n);
+    for my $rel (@rel) {
+        my $code = slurp("$work/$rel");
+        next if !defined $code;
+        if (defined static_refusal($code)) { $static++; next }
+        $n++;
+        my $task = task_of($rel);
+        die "rosetta-corpus: $rel is a candidate outside Task/<task>/Perl/ -- the sparse checkout"
+          . " holds no such path; the selection does not know how to name it\n" if !defined $task;
+        push @c, { id => program_id($n, $task), rel => $rel, code => $code };
+    }
+    return (\@c, scalar @rel, $static // 0);
+}
+
+# The names the manifest lists, when it describes COMMIT; undef when there is
+# no manifest or it describes another commit (a new corpus is being defined).
+# A manifest that cannot be read is a failed step, never "no manifest".
+sub manifest_names {
+    my ($commit) = @_;
+    return undef if !-e $MANIFEST;
+    my ($rows, $head, $err) = read_manifest($MANIFEST);
+    die "rosetta-corpus: $err\n" if !$rows;
+    return (($head->{commit} // '') eq $commit) ? $rows : undef;
+}
+
+# THE ADMISSION is the runner's (rule 11): --bless-expect writes the .expect /
+# .rc beside each program it admits and prints one line per program.  The
+# address-space limit is the s493 one; it needs a shell's `ulimit`, because
+# core perl has no setrlimit.
+sub admit {
+    my ($corpus, $say, $timeout, @files) = @_;
+    my @cmd = ('/bin/sh', '-c', 'ulimit -v "$1" && shift && exec "$@"', 'sh', $ADDRESS_SPACE_KB,
+               $^X, $RUNNER, '--corpus', $corpus, '--bless-expect', '--timeout', $timeout, @files);
+    $say->("admit: @cmd[5 .. 11] FILE...  (ulimit -v $ADDRESS_SPACE_KB)\n");
+    open my $ph, '-|', @cmd or die "rosetta-corpus: cannot run the admission: $!\n";
+    my %said;
+    while (defined(my $l = <$ph>)) {
+        $say->($l);
+        $said{$2} = { what => $1, why => $3 } if $l =~ /^(blessed|REFUSED|NEEDS)\s+(\S+)\s+(.*?)\s*$/;
+    }
+    close $ph;
+    my $rc = $? >> 8;
+    die "rosetta-corpus: the admission failed (tools/everyday-smoke.pl exit $rc)\n" if $? & 127 || $rc > 1;
+    return \%said;
+}
+
+# Every candidate is admitted or refused with a reason -- never neither (rule 12).
+sub sort_out {
+    my ($corpus, $cands, $said) = @_;
+    my (@in, @out);
+    for my $c (@$cands) {
+        my $s = $said->{"$AREA/$c->{id}"}
+            or die "rosetta-corpus: the admission said nothing about $AREA/$c->{id}\n";
+        my $why;
+        if ($s->{what} ne 'blessed') { $why = $s->{what} eq 'NEEDS' ? "needs: $s->{why}" : $s->{why} }
+        else {
+            my $size = -s "$corpus/$AREA/$c->{id}.expect";
+            die "rosetta-corpus: $c->{id} was blessed but has no .expect\n" if !defined $size;
+            $why = $size == 0           ? 'no output: perl printed nothing'
+                 : $size > $MAX_OUTPUT  ? "huge output: $size bytes, the limit is $MAX_OUTPUT"
+                 :                        undef;
+        }
+        if (defined $why) { push @out, { id => $c->{id}, why => $why } } else { push @in, $c }
+    }
+    return (\@in, \@out);
+}
+
+# The DRIFT pass: the runner re-derives each admitted program's expectation
+# once and names the ones that no longer match (the runner's logic, rule 11).
+sub drift_pass {
+    my ($corpus, $say, $admitted) = @_;
+    return ($admitted, []) if !@$admitted;
+    my @cmd = ('/bin/sh', '-c', 'ulimit -v "$1" && shift && exec "$@"', 'sh', $ADDRESS_SPACE_KB,
+               $^X, $RUNNER, '--corpus', $corpus, '--verify-with-perl', '--timeout', $REBUILD_TIMEOUT,
+               map { "$corpus/$AREA/$_->{id}.pl" } @$admitted);
+    $say->(sprintf("drift: %d admitted programs re-run once: @cmd[5 .. 11] FILE...\n", scalar @$admitted));
+    open my $ph, '-|', @cmd or die "rosetta-corpus: cannot run the drift pass: $!\n";
+    my (%drift, $in_drift, $verified);
+    while (defined(my $l = <$ph>)) {
+        $say->($l);
+        if    ($l =~ /^DRIFT \(/)                    { $in_drift = 1 }
+        elsif ($l =~ /^\S/)                          { $in_drift = 0 }
+        elsif ($in_drift && $l =~ /^\s+(\S+)\s+(.*?)\s*$/) { $drift{$1} = $2 }
+        $verified = $1 if $l =~ /^verified (\d+) programs/;
+    }
+    close $ph;
+    my $rc = $? >> 8;
+    die "rosetta-corpus: the drift pass failed (tools/everyday-smoke.pl exit $rc)\n" if $? & 127 || $rc > 1;
+    die "rosetta-corpus: the drift pass verified " . ($verified // 'no') . " programs, not " . scalar(@$admitted) . "\n"
+        if ($verified // -1) != @$admitted;
+    my (@keep, @out);
+    for my $c (@$admitted) {
+        my $d = $drift{"$AREA/$c->{id}"};
+        if (defined $d) { push @out, { id => $c->{id}, why => "drift: a re-run minutes after the admission: $d (the answer depends on the clock or on chance)" } }
+        else            { push @keep, $c }
+    }
+    return (\@keep, \@out);
+}
+
+sub reason_kind {
+    my ($why) = @_;
+    return $why =~ /^perl timed out/     ? 'timeout'
+         : $why =~ /^drift:/             ? 'drift'
+         : $why =~ /^admitted here, but the manifest/ ? 'not-in-manifest'
+         : $why =~ /^perl exited/        ? 'perl-fails'
+         : $why =~ /^run 2/              ? 'nondeterministic'
+         : $why =~ /^the COPY/           ? 'path-dependent'
+         : $why =~ /^no output/          ? 'no-output'
+         : $why =~ /^huge output/        ? 'huge-output'
+         : $why =~ /^needs:/             ? 'needs'
+         :                                 'other';
+}
+
+sub utc_stamp { my @t = gmtime(time); return sprintf("%04d-%02d-%02dT%02d:%02d:%02dZ", $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0]) }
+
+# =========================================================================
+# verify / manifest
+# =========================================================================
+
+# The differences between DIR's corpus and a manifest, one line each.
+sub differences {
+    my ($dir, $rows) = @_;
+    my $c = "$dir/corpus/$AREA";
+    return ("MISSING the corpus itself: $c (tools/rosetta-corpus build --dir $dir)") if !-d $c;
+    my @d;
+    opendir(my $top, "$dir/corpus") or return ("cannot read $dir/corpus: $!");
+    push @d, map { "EXTRA   $dir/corpus/$_ (the corpus has one area, $AREA)" } sort grep { !/^\.\.?$/ && $_ ne $AREA } readdir $top;
+    closedir $top;
+    opendir(my $dh, $c) or return ("cannot read $c: $!");
+    my %on_disk;
+    for my $f (sort grep { !/^\.\.?$/ } readdir $dh) {
+        if ($f =~ /^(.*)\.(?:pl|expect|rc)\z/s) { $on_disk{"$AREA/$1"} = 1 }
+        else { push @d, "EXTRA   $AREA/$f (a file the runner would read: only .pl, .expect, .rc belong here)" }
+    }
+    closedir $dh;
+    for my $k (sort keys %$rows) {
+        (my $name = $k) =~ s{^\Q$AREA\E/}{};
+        my $base = "$c/$name";
+        my $r = $rows->{$k};
+        if (!-f "$base.pl") { push @d, "MISSING $k.pl"; next }
+        push @d, "CHANGED $k.pl (sha256 " . sha256_of("$base.pl") . ", the manifest says $r->{pl})"
+            if sha256_of("$base.pl") ne $r->{pl};
+        if (!-f "$base.expect") { push @d, "MISSING $k.expect" }
+        elsif (sha256_of("$base.expect") ne $r->{expect}) {
+            push @d, "CHANGED $k.expect (sha256 " . sha256_of("$base.expect") . ", the manifest says $r->{expect})";
+        }
+        my $rc = expected_rc_of($base);
+        push @d, "CHANGED $k.rc (exit status $rc, the manifest says $r->{rc})" if $rc != $r->{rc};
+    }
+    push @d, map { "EXTRA   $_ (not in the manifest)" } grep { !$rows->{$_} } sort keys %on_disk;
+    return @d;
+}
+
+sub verify_and_report {
+    my ($dir, $manifest) = @_;
+    my ($rows, $head, $err) = read_manifest($manifest);
+    if (!$rows) { print STDERR "rosetta-corpus: $err\n"; return 2 }
+    my @d = differences($dir, $rows);
+    my $what = sprintf("%d programs, commit %s", scalar keys %$rows, $head->{commit} // '(none named)');
+    if (!@d) { print "verify: $dir/corpus matches $manifest ($what)\n"; return 0 }
+    print "$_\n" for @d;
+    printf("verify: %d difference(s) between %s/corpus and %s (%s)\n", scalar @d, $dir, $manifest, $what);
+    return 1;
+}
+
+sub cmd_verify {
+    my @argv = @_;
+    my $o = options(\@argv, qw(dir=s manifest=s));
+    return verify_and_report($o->{dir}, defined $o->{manifest} ? $o->{manifest} : $MANIFEST);
+}
+
+sub build_info {
+    my ($dir) = @_;
+    my $t = slurp("$dir/BUILD-INFO");
+    return undef if !defined $t;
+    return { map { /^([^\t]+)\t(.*)$/ ? ($1 => $2) : () } split /\n/, $t };
+}
+
+# The header facts come from DIR/BUILD-INFO; a corpus made before this tool
+# (the s543 scratch corpus) has none, and then --commit and --perl name them.
+sub cmd_manifest {
+    my @argv = @_;
+    my $o = options(\@argv, qw(dir=s commit=s perl=s));
+    my $dir = $o->{dir};
+    my $info = build_info($dir) // {};
+    $info->{source} //= $UPSTREAM;
+    $info->{commit} = $o->{commit} if defined $o->{commit};
+    $info->{'perl-version'} = $o->{perl} if defined $o->{perl};
+    for my $k ('commit', 'perl-version') {
+        die "rosetta-corpus: no $k for the manifest -- $dir/BUILD-INFO names it after a build; for a corpus"
+          . " made without one pass --commit SHA --perl vX.Y.Z\n" if !defined $info->{$k};
+    }
+    my $c = "$dir/corpus/$AREA";
+    my @names = corpus_names($c);
+    die "rosetta-corpus: no programs under $c\n" if !@names;
+    print "# rosetta-corpus.tsv -- the MANIFEST of the Rosetta corpus (tools/rosetta-corpus; docs/rosetta-plan.md section 2).\n",
+          "#\n",
+          "# NAMES AND DIGESTS ONLY.  Rosetta Code's text is GFDL 1.2: no program and no expected output is\n",
+          "# ever checked in.  `tools/rosetta-corpus build` rebuilds the corpus from the commit below and\n",
+          "# `verify` compares it with this file; a row changes only with a new commit or a new rule, by edit.\n",
+          "#\n",
+          "# source: $info->{source}\n",
+          "# commit: $info->{commit}\n",
+          "# perl: $info->{'perl-version'}\n",
+          "# programs: " . scalar(@names) . "\n",
+          "#\n",
+          "# area/name\tsha256 of the .pl\tsha256 of the .expect\texpected exit status\n";
+    for my $n (@names) {
+        my $base = "$c/$n";
+        die "rosetta-corpus: $AREA/$n has no .expect\n" if !-f "$base.expect";
+        print join("\t", "$AREA/$n", sha256_of("$base.pl"), sha256_of("$base.expect"), expected_rc_of($base)), "\n";
+    }
+    return 0;
+}
+
+# =========================================================================
+# run / classify
+# =========================================================================
+
+sub cmd_run {
+    my @argv = @_;
+    my %o;
+    Getopt::Long::Configure(qw(pass_through no_auto_abbrev));
+    GetOptionsFromArray(\@argv, \%o, qw(dir=s manifest=s)) or usage(2);
+    Getopt::Long::Configure(qw(no_pass_through auto_abbrev));
+    my $dir = rstrip_slash(defined $o{dir} ? $o{dir} : default_dir());
+    if (my ($bad) = grep { /^--?(?:corpus|label|bless-expect|verify-with-perl)(?:=|$)/ } @argv) {
+        print STDERR "rosetta-corpus: run measures THE corpus under its own name; $bad is not a run option here\n";
+        return 2;
+    }
+    my $v = verify_and_report($dir, defined $o{manifest} ? $o{manifest} : $MANIFEST);
+    if ($v != 0) {
+        print STDERR "rosetta-corpus: the corpus does not match the manifest, so a run of it would not be THE number -- not run\n";
+        return 2;
+    }
+    my @cmd = ($^X, $RUNNER, '--corpus', "$dir/corpus", '--label', 'ROSETTA',
+               '--baseline', $TABLE, '--history', $HISTORY,
+               '--jobs', 2, '--timeout', 60, '--outdir', $OUTDIR, @argv);
+    print STDERR "rosetta-corpus: @cmd\n";
+    exec { $cmd[0] } @cmd or die "rosetta-corpus: exec $cmd[0]: $!\n";
+}
+
+sub cmd_classify {
+    my @argv = @_;
+    my $o = options(\@argv, qw(dir=s outdir=s table=s));
+    my $c   = "$o->{dir}/corpus/$AREA";
+    my $out = (defined $o->{outdir} ? rstrip_slash($o->{outdir}) : $OUTDIR) . "/$AREA";
+    my @names = corpus_names($c);
+    die "rosetta-corpus: no programs under $c\n" if !@names;
+    # The table's class per row, to say where a run's class is not the row's
+    # (the runner's MOVED sees the verdict and the line, not the class).
+    my %row_class;
+    if (defined(my $t = slurp(defined $o->{table} ? $o->{table} : $TABLE))) {
+        for (split /\n/, $t) { my @f = split /\t/; $row_class{ $f[0] } = $f[3] if !/^#/ && @f == 5 }
+    }
+    my (%n, @not_run, @moved, $same);
+    for my $name (@names) {
+        my $base = "$c/$name";
+        my $want = slurp("$base.expect");
+        my $got  = slurp("$out/$name.out");
+        my $rct  = slurp("$out/$name.rc");
+        if (!defined $want || !defined $got || !defined $rct || $rct !~ /^(-?\d+)\s*\z/) { push @not_run, "$AREA/$name"; next }
+        my $rc = $1;
+        my $want_rc = expected_rc_of($base);
+        my $err = slurp("$out/$name.err");
+        my ($verdict, $line) = verdict_for($want, $want_rc, $got, $rc, $rc == TIMEOUT_RC);
+        my $class = class_of($verdict, $rc, $want_rc, $err);
+        if (!defined $class) { $same++; next }
+        $n{$class}++;
+        my $was = $row_class{"$AREA/$name"};
+        push @moved, "$AREA/$name $was -> $class" if defined $was && $was ne $class;
+        (my $complaint = first_complaint($err)) =~ s/\t/ /g;
+        print join("\t", "$AREA/$name", $verdict, $line, $class, $complaint), "\n";
+    }
+    my $differ = 0; $differ += $_ for values %n;
+    print "# classes: ", join(', ', map { "$_ " . ($n{$_} // 0) } @CLASSES), "\n";
+    printf("# %d of %d differ, %d same; %d not run (%s against %s)\n",
+           $differ, scalar @names, $same // 0, scalar @not_run, $out, $c);
+    print "# NOT RUN: $_\n" for @not_run;
+    print "# CLASS MOVED (the table's row says otherwise; re-check its cause): $_\n" for @moved;
+    return 0;
+}
+
+sub usage {
+    my ($code) = @_;
+    my $fh = $code ? *STDERR : *STDOUT;
+    open my $me, '<', $0 or exit $code;
+    my $started = 0;
+    while (defined(my $l = <$me>)) {
+        last if $l =~ /^use strict/;
+        next if $l =~ /^#!/;
+        $l =~ s/^# ?//;
+        next if $l =~ /^(?:Copyright \(c\)|This is free software|same terms as the Perl|SPDX-License-Identifier)/;
+        next if !$started && $l !~ /\S/;
+        $started = 1;
+        print $fh $l;
+    }
+    close $me;
+    exit $code;
+}

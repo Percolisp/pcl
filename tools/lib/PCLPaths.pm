@@ -25,13 +25,16 @@ package PCLPaths;
 #   root — the PCL tree a running script belongs to.  THE one derivation
 #   (task #1302): there were FIVE spellings, and they agreed only because
 #   every caller happened to sit at the checkout root or one level under it.
+#
+#   rosetta_dir — where tools/rosetta-corpus keeps the Rosetta corpus
+#   ($PCL_ROSETTA_DIR, else beside the module cache; s543o, task #2104).
 use strict;
 use warnings;
 use Config;
 use Cwd ();
 use File::Basename qw(dirname);
 use Exporter 'import';
-our @EXPORT_OK = qw(perl_suite_t cache_root root root_of program_inc perl_builtin_inc_dirs);
+our @EXPORT_OK = qw(perl_suite_t cache_root root root_of program_inc perl_builtin_inc_dirs rosetta_dir);
 
 # The t/ directory of the perl BUILD tree matching the running perl.
 #   1. $PCL_PERL_SUITE_T                      — explicit, always wins
@@ -166,6 +169,25 @@ sub cache_root {
     $home = eval { (getpwuid($<))[7] } if !defined $home || !length $home;
     $home = '.' if !defined $home || !length $home;
     return _trim_slashes($home) . '/.pcl-cache';
+}
+
+# ------------------------------------------------------- the Rosetta corpus
+#
+# Where tools/rosetta-corpus keeps the held-out corpus it rebuilds (task
+# #2104, s543o; docs/rosetta-plan.md section 2):
+#
+#   $PCL_ROSETTA_DIR when it is set and non-empty, else <cache_root>/rosetta
+#
+# BESIDE THE MODULE CACHE, outside every checkout: the corpus is GFDL text that
+# is never checked in, and every worktree on a machine measures the one copy.
+# It is not a cache -- `pcl --clear-cache` names its own four directories and
+# leaves it alone -- but it is REBUILDABLE: a hand `rm -rf ~/.pcl-cache/*`
+# removes it, `tools/rosetta-corpus verify` then says so, and `build` makes
+# it again from the pinned commit.
+sub rosetta_dir {
+    my $env = $ENV{PCL_ROSETTA_DIR};
+    return _trim_slashes($env) if defined $env && length $env;
+    return cache_root() . '/rosetta';
 }
 
 # Where cache_root's answer came from — 'env' or 'default'.  `pcl --cache-info`

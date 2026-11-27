@@ -75,10 +75,22 @@
 #                       `--baseline none` = verdicts only, no buckets)
 #   --outdir DIR        where results and work directories go (default <root>/.everyday)
 #   --record            append one row to baselines/everyday-history.tsv
-#                       (whole-corpus runs of the default corpus on a clean tree only)
+#                       (whole-corpus runs on a clean tree only; a non-default
+#                       corpus needs --history)
+#   --history FILE      the history --record appends to (default
+#                       <root>/baselines/everyday-history.tsv)
+#   --label NAME        a NAMED corpus: the summary line reads `NAME: N of M ...`
+#                       (in capitals) instead of `EVERYDAY (corpus DIR): ...`;
+#                       refused for the default corpus, whose line is EVERYDAY
 #   --bless-expect      derive .expect/.rc for the named programs (needs perl)
 #   --verify-with-perl  re-derive everything and report DRIFT / NEEDS (needs perl)
 #   --list              print the selected programs and exit
+#
+# A NAMED CORPUS (s543o, task #2104) is a non-default --corpus with its own
+# --label, --baseline and --history: tools/rosetta-corpus run passes all three
+# for the Rosetta corpus (ROSETTA, baselines/rosetta-causes.tsv,
+# baselines/rosetta-history.tsv).  Its baseline may carry a CLASS column
+# before the cause (see read_baseline); the buckets are the battery's.
 #
 # EXIT  0 all explained · 1 NEW / UNEXPLAINED / STALE / DRIFT · 2 usage, or the
 #       tree or the command under test was not found.
@@ -95,13 +107,14 @@ use Cwd qw(abs_path);
 use FindBin qw($RealBin);
 use lib "$RealBin/lib";
 use PCLPaths ();   # the ONE root resolver (task #1302)
+use PCLEveryday qw(first_diff_line verdict_for expected_rc_of first_complaint TIMEOUT_RC);
 
 my $LINE_WIDTH = 160;   # every per-program line is cut to one terminal line
 
 # ------------------------------------------------------------------ options
 my %opt = (jobs => 2, timeout => 60);
 GetOptions(\%opt, qw(jobs=i timeout=i pcl=s corpus=s baseline=s outdir=s
-                     record bless-expect verify-with-perl list help|h))
+                     record history=s label=s bless-expect verify-with-perl list help|h))
     or usage(2);
 usage(0) if $opt{help};
 
@@ -111,12 +124,22 @@ if (!defined $ROOT) { print STDERR $@; exit 2 }
 my $CORPUS_DEFAULT = "$ROOT/everyday";
 my $CORPUS   = defined $opt{corpus} ? _rstrip_slash($opt{corpus}) : $CORPUS_DEFAULT;
 my $OUTDIR   = defined $opt{outdir} ? _rstrip_slash($opt{outdir}) : "$ROOT/.everyday";
-my $HISTORY  = "$ROOT/baselines/everyday-history.tsv";
+my $HISTORY  = defined $opt{history} ? $opt{history} : "$ROOT/baselines/everyday-history.tsv";
 my $BASELINE = defined $opt{baseline} ? $opt{baseline}
                                       : "$ROOT/baselines/everyday-baseline.tsv";
 my $DEFAULT_CORPUS = (abs_path($CORPUS) // $CORPUS) eq (abs_path($CORPUS_DEFAULT) // $CORPUS_DEFAULT);
 
 if (!-d $CORPUS) { print STDERR "everyday-smoke: no corpus directory $CORPUS\n"; exit 2 }
+
+# The summary line's NAME: EVERYDAY for the default corpus, always -- the
+# battery's line is quoted by every batch report and by docs/everyday-battery.md,
+# so no option renames it.  A named corpus prints its --label in capitals.
+my $LABEL;
+if (defined $opt{label}) {
+    if ($DEFAULT_CORPUS) { print STDERR "everyday-smoke: --label names a non-default --corpus; the default corpus's line is EVERYDAY\n"; exit 2 }
+    if ($opt{label} !~ /^[A-Za-z][A-Za-z0-9_-]*$/) { print STDERR "everyday-smoke: --label '$opt{label}' is not a name (a letter, then letters, digits, - or _)\n"; exit 2 }
+    $LABEL = uc $opt{label};
+}
 
 # The command under test.  Split like a shell word list so `--pcl 'perl -X'`
 # works; the default is the tree's own driver (NOT runpcl: script arguments
@@ -277,7 +300,7 @@ sub run_serial {
         if (time() - $start > $timeout) {
             kill 'KILL', -$pid; kill 'KILL', $pid;
             waitpid($pid, 0);
-            return (-1, 1);
+            return (TIMEOUT_RC, 1);
         }
         select(undef, undef, undef, 0.02);
     }
@@ -290,40 +313,10 @@ sub run_serial {
 sub slurp { my ($p) = @_; open my $h, '<:raw', $p or return undef; local $/; my $t = <$h>; close $h; return defined $t ? $t : '' }
 sub spew  { my ($p, $t) = @_; open my $h, '>:raw', $p or die "everyday-smoke: $p: $!\n"; print $h $t; close $h }
 
-# The 1-based number of the first STDOUT line that differs.  When one side is
-# a prefix of the other, that is the first line the shorter one does not have.
-sub first_diff_line {
-    my ($want, $got) = @_;
-    my @w = split /(?<=\n)/, $want;
-    my @g = split /(?<=\n)/, $got;
-    my $n = @w < @g ? @w : @g;
-    for my $i (0 .. $n - 1) { return $i + 1 if $w[$i] ne $g[$i] }
-    return $n + 1;
-}
-
-sub expected_rc { my ($p) = @_; my $t = slurp("$p->{base}.rc"); return defined $t && $t =~ /(\d+)/ ? $1 : 0 }
-
-sub verdict_for {
-    my ($want, $want_rc, $got, $got_rc, $timed_out) = @_;
-    return ('TIMEOUT', '-') if $timed_out;
-    return ('DIFF', first_diff_line($want, $got)) if $got ne $want;
-    return ('RC', '-') if $got_rc != $want_rc;
-    return ('same', '-');
-}
-
-# PCL's first REAL complaint: the banner, the compiler's notes and SBCL's
-# style warnings are not one.
-sub first_complaint {
-    my ($text) = @_;
-    return '' if !defined $text;
-    for my $l (split /\n/, $text) {
-        next if $l !~ /\S/;
-        next if $l =~ /^PCL Runtime loaded/ || $l =~ /^;/ || $l =~ /^WARNING/ || $l =~ /STYLE-WARNING/;
-        $l =~ s/\s+$//;
-        return $l;
-    }
-    return '';
-}
+# first_diff_line, verdict_for, first_complaint and the .rc reading live in
+# tools/lib/PCLEveryday.pm since s543o: tools/rosetta-corpus classify reads a
+# finished run's outdir with the same definitions (rule 11).
+sub expected_rc { my ($p) = @_; return expected_rc_of($p->{base}) }
 
 # =========================================================================
 # the run
@@ -362,7 +355,7 @@ sub run_corpus {
             if (time() - $kid{$pid}{start} > $kid{$pid}{timeout}) {
                 kill 'KILL', -$pid; kill 'KILL', $pid;
                 waitpid($pid, 0);
-                finish($kid{$pid}, -1, 1, \%res);
+                finish($kid{$pid}, TIMEOUT_RC, 1, \%res);
                 delete $kid{$pid};
                 $reaped = 1;
             }
@@ -424,12 +417,15 @@ sub report {
 
     my $n = 0; $n += $same{$_} // 0 for keys %tot;
     my $m = 0; $m += $tot{$_} for keys %tot;
+    # A named corpus is named by its label, so it needs no `corpus DIR`; a
+    # subset is said either way, so a partial number is never quoted as THE one.
+    my $name = defined $LABEL ? $LABEL : 'EVERYDAY';
     my @qual;
-    push @qual, "corpus $CORPUS" if !$DEFAULT_CORPUS;
+    push @qual, "corpus $CORPUS" if !$DEFAULT_CORPUS && !defined $LABEL;
     push @qual, "subset"         if $is_subset;
     my ($sha, $dirty) = git_state();
     printf("\n%s: %d of %d identical to perl (%.1f %%) -- %s%s gen %s\n",
-           @qual ? "EVERYDAY (" . join(', ', @qual) . ")" : "EVERYDAY",
+           @qual ? "$name (" . join(', ', @qual) . ")" : $name,
            $n, $m, $m ? 100 * $n / $m : 0, $sha, $dirty ? '+dirty' : '', generation());
 
     record_history($n, $m, \%same, \%tot, $is_subset, $sha, $dirty) if $opt{record};
@@ -493,7 +489,13 @@ sub buckets {
     return $exit;
 }
 
-# area/name <TAB> verdict <TAB> first-diff-line <TAB> cause
+# area/name <TAB> verdict <TAB> first-diff-line [<TAB> class] <TAB> cause
+#
+# The CLASS column is a named corpus's (s543o): baselines/rosetta-causes.tsv
+# carries the first-complaint class of tools/rosetta-corpus classify there.
+# The battery's rows have four fields, and a cause never holds a TAB, so a
+# FIVE-field row is one with a class.  The runner carries the class and does
+# not judge it; the buckets read the verdict, the line and the cause only.
 sub read_baseline {
     my ($file) = @_;
     return ({}, undef) if !defined $file || $file eq 'none';
@@ -504,9 +506,10 @@ sub read_baseline {
         $n++;
         next if $l =~ /^\s*#/ || $l !~ /\S/;
         chomp $l;
-        my @f = split /\t/, $l, 4;
-        return ({}, "everyday-smoke: $file line $n: expected 4 tab-separated fields\n") if @f < 3;
-        $rows{ $f[0] } = { verdict => $f[1], line => $f[2], cause => defined $f[3] ? $f[3] : '' };
+        my @f = split /\t/, $l, 5;
+        return ({}, "everyday-smoke: $file line $n: expected 4 tab-separated fields (5 with a class column)\n") if @f < 3;
+        my ($class, $cause) = @f == 5 ? @f[3, 4] : (undef, $f[3]);
+        $rows{ $f[0] } = { verdict => $f[1], line => $f[2], cause => defined $cause ? $cause : '', class => $class };
     }
     close $fh;
     return (\%rows, undef);
@@ -535,12 +538,17 @@ sub generation {
 }
 
 # One row per whole-corpus measurement: the trend the project steers by.  A
-# SUBSET, a non-default corpus or a dirty tree is refused, because a row that
-# does not identify what was measured is worse than no row.
+# SUBSET, a non-default corpus without a history of its own, or a dirty tree
+# is refused, because a row that does not identify what was measured is worse
+# than no row.  A NAMED corpus records into the file its --history names, in
+# the battery's columns (s543o).
 sub record_history {
     my ($n, $m, $same, $tot, $is_subset, $sha, $dirty) = @_;
     my $why = $is_subset        ? "it measured a SUBSET ($n of $m), not the whole corpus"
-            : !$DEFAULT_CORPUS  ? "it measured $CORPUS, not the default corpus"
+            : !$DEFAULT_CORPUS && !defined $opt{history}
+                                ? "it measured $CORPUS, not the default corpus"
+                                  . " (a named corpus records into its own history: pass --history FILE;"
+                                  . " tools/rosetta-corpus run does)"
             : $dirty            ? "the tree is dirty ($dirty change(s) besides scratch/); the sha would not identify what was measured"
             : $sha eq 'unknown' ? undef
             :                     undef;
