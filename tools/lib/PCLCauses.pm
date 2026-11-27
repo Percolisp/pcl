@@ -241,11 +241,16 @@ sub task_state {
 #   companion  rel, perl#, perl verb, PCL verb, rowkey, CAUSE
 #   sweep      file, num, description, got, expected, CAUSE
 #   shortfall  key, count, CAUSE                 (weighted by its count)
+#   rosetta    area/name, verdict, first-diff-line, class, CAUSE
+#              (baselines/rosetta-causes.tsv, s543o: `need` 0, so a row short of
+#              its cause comes back -- with an undef cause -- and is RED in the
+#              gate row instead of being skipped)
 my %BASELINE = (
     board     => { n => 7, need => 3, key => sub { "$_[0] $_[1]\t" . (length $_[3] ? $_[3] : "#$_[2]") } },
     companion => { n => 6, need => 4, key => sub { "$_[0]\t$_[4]" } },
     sweep     => { n => 6, need => 2, key => sub { "$_[0]\t$_[2]" } },
     shortfall => { n => 3, need => 1, key => sub { $_[0] } },
+    rosetta   => { n => 5, need => 0, key => sub { $_[0] } },
 );
 
 # baseline_causes($path, $format) -> [ { key, cause, fields => [...], line } ]

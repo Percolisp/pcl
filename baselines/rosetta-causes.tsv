@@ -1,0 +1,145 @@
+# rosetta-causes.tsv -- THE ROSETTA CAUSE TABLE, and the baseline of `tools/rosetta-corpus run`
+# (task #2104; docs/rosetta-plan.md sections 3-4; s543o).
+#
+# THIS FILE LISTS WHAT IS WRONG, like baselines/everyday-baseline.tsv: one row per Rosetta program
+# that does NOT match perl; a program that matches has NO row.  NAMES ONLY: the programs and their
+# expected output are GFDL text and never enter this repository (tools/rosetta-corpus rebuilds them
+# from the pinned commit; baselines/rosetta-corpus.tsv holds their names and digests).  A note is
+# one line written by hand -- never a pasted stderr line: PCL's complaints quote the program.
+#
+# COLUMNS (TAB-separated): the runner's baseline format with a CLASS column before the cause.
+#   area/name        rosetta/NNNN-task, the name in baselines/rosetta-corpus.tsv
+#   verdict          DIFF | RC | TIMEOUT, as tools/everyday-smoke.pl decides it
+#   first-diff-line  the first differing STDOUT line; `-` for RC and TIMEOUT
+#   class            the FIRST-COMPLAINT class (`tools/rosetta-corpus classify`; docs/rosetta-plan.md
+#                    section 3), one of: SILENT LOUD NOT-SUPPORTED DROPPED MODULE-MISSING NOTICE
+#                    TIMEOUT EXHAUSTED -- where the narrowing starts, not a cause
+#   cause            the board's grammar (docs/failure-cause-classes.md "The grammar"): `#N ...` an
+#                    OPEN task, `NS:<id> ...` a docs/not-supported.md id, `UNREDUCED #N ...` not
+#                    reduced yet -- task N names the program; #2104 holds every seeded row until a
+#                    census agent replaces it.  Pl/t/verdict-register-01.t checks every KEY, the
+#                    five fields, the class and the name: a typo fails the gate.
+#
+# ROWS CHANGE OR LEAVE BY EDIT, never by a re-bless (there is no --bless-baseline):
+#   NEW          a differing program with no row             => the run exits 1 (a regression)
+#   FIXED        a row whose program is now `same`           => edit the row OUT, citing the batch
+#   MOVED        the verdict or the first-diff line changed  => re-attribute it (re-classify too)
+#   UNEXPLAINED  a row with an empty cause                   => the run exits 1
+#   STALE        a row naming a program that is not there    => the run exits 1
+#
+# SEEDED s543o (2026-11-27) from the run of MAIN-READY-111 0ab08642 (gen v2-16300), confirmed by
+# s543o's own run of the same code through `tools/rosetta-corpus run`.  On the 652-program corpus
+# of 2026-11-24: 547 identical, 105 differing -- SILENT 43, LOUD 28, NOT-SUPPORTED 12, DROPPED 11,
+# MODULE-MISSING 4, NOTICE 3, TIMEOUT 2, EXHAUSTED 2 (the plan's section 3 table, program for
+# program, on -110).  TWO OF THE 105 LEFT THE CORPUS with their rows (baselines/rosetta-corpus.tsv's
+# header: broken probes, not PCL's): 0359 (nondeterministic; NOT-SUPPORTED, regex code blocks) and
+# 1442 (its expectation holds the bless date; SILENT).  So 547 of 650, 103 rows -- SILENT 42,
+# LOUD 28, NOT-SUPPORTED 11, DROPPED 11, MODULE-MISSING 4, NOTICE 3, TIMEOUT 2, EXHAUSTED 2.
+# 17 are keyed on their not-supported id (10 regex code blocks, 2 given / when, 4
+# Unicode::Normalize (XS), 1 bigrat); the other 86 are UNREDUCED #2104 for the census
+# (docs/rosetta-plan.md step 1).
+#
+# area/name<TAB>verdict<TAB>first-diff-line<TAB>class<TAB>cause
+rosetta/0033-Ackermann-function	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0047-Amb	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/0071-Arithmetic-evaluation	DIFF	2	SILENT	UNREDUCED #2104
+rosetta/0107-Base-16-numbers-needing-a-to-f	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0110-Bell-numbers	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0119-Bifid-cipher	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	UNREDUCED #2104
+rosetta/0161-Calculating-the-value-of-e	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
+rosetta/0195-Check-Machin-like-formulas	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0243-Common-sorted-list	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0266-Consistent-overhead-byte-stuffing	DIFF	33	NOTICE	UNREDUCED #2104
+rosetta/0293-Count-the-coins	DIFF	1	EXHAUSTED	UNREDUCED #2104
+rosetta/0294-Countdown	DIFF	3	LOUD	UNREDUCED #2104
+rosetta/0306-Cumulative-standard-deviation	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0313-Cycle-detection	TIMEOUT	-	TIMEOUT	UNREDUCED #2104
+rosetta/0316-Damm-algorithm	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/0333-Demings-funnel	DIFF	2	DROPPED	UNREDUCED #2104
+rosetta/0337-Department-numbers	DIFF	3	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/0346-Determine-if-a-string-is-squeezable	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
+rosetta/0351-Digital-root	DIFF	6	SILENT	UNREDUCED #2104
+rosetta/0399-Environment-variables	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0422-Exactly-three-adjacent-3-in-lists	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/0442-Extreme-floating-point-values	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0445-FASTA-format	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0466-Fast-Fourier-transform	DIFF	2	NOTICE	UNREDUCED #2104
+rosetta/0473-Fibonacci-n-step-number-sequences	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0477-Fibonacci-sequence	DIFF	24	SILENT	UNREDUCED #2104
+rosetta/0478-Fibonacci-word	DIFF	1	EXHAUSTED	UNREDUCED #2104
+rosetta/0493-Find-first-missing-positive	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0523-FizzBuzz	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0545-Fractran	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0556-Gamma-function	DIFF	3	DROPPED	UNREDUCED #2104
+rosetta/0557-Gapful-numbers	DIFF	3	LOUD	UNREDUCED #2104
+rosetta/0567-Getting-the-number-of-decimal-places	DIFF	5	SILENT	UNREDUCED #2104
+rosetta/0632-Host-introspection	DIFF	1	DROPPED	NS:ns-given-when -- refused, announced
+rosetta/0641-Idiomatically-determine-all-the-lowercas	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0649-Inconsummate-numbers-in-base-10	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0670-Integer-long-division	DIFF	4	SILENT	UNREDUCED #2104
+rosetta/0672-Integer-overflow	DIFF	2	SILENT	UNREDUCED #2104
+rosetta/0710-Klarner-Rado-sequence	DIFF	2	LOUD	UNREDUCED #2104
+rosetta/0715-Knuths-power-tree	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0768-Longest-common-substring	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/0774-Longest-substrings-without-repeating-cha	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0808-Ludic-numbers	DIFF	4	SILENT	UNREDUCED #2104
+rosetta/0818-Magic-constant	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0838-McNuggets-problem	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	UNREDUCED #2104
+rosetta/0887-N-body-problem	DIFF	3	SILENT	UNREDUCED #2104
+rosetta/0903-Nested-templated-data	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0904-Next-highest-int-from-digits	DIFF	6	SILENT	UNREDUCED #2104
+rosetta/0923-Numbers-divisible-by-their-individual-di	DIFF	3	SILENT	UNREDUCED #2104
+rosetta/0925-Numbers-in-base-16-representation-that-c	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0927-Numbers-k-whose-divisor-sum-is-equal-to-	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0933-Numbers-with-prime-digits-whose-sum-is-1	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0937-Numerical-and-alphabetical-suffixes	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/0945-Odd-squarefree-semiprimes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/0994-Pathological-floating-point-problems	DIFF	1	NOT-SUPPORTED	NS:ns-bigint -- use bigrat is announced and its literals stay plain numbers; Math::BigRat does not run yet (#3000)
+rosetta/0996-Peaceful-chess-queen-armies	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/0998-Pells-equation	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1011-Periodic-table	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1049-Posit-numbers-encoding	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1050-Positive-decimal-integers-with-the-digit	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1053-Power-set	TIMEOUT	-	TIMEOUT	UNREDUCED #2104
+rosetta/1093-Priority-queue	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1118-Quine	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1122-RSA-code	DIFF	4	SILENT	UNREDUCED #2104
+rosetta/1139-Range-modifications	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/1168-Remove-vowels-from-a-string	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
+rosetta/1169-Rep-string	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/1178-Reverse-a-string	DIFF	3	SILENT	UNREDUCED #2104
+rosetta/1188-Roman-numerals-Decode	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/1198-Round-robin-tournament-schedule	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1253-Set	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1297-Solve-a-Hopido-puzzle	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1298-Solve-a-Numbrix-puzzle	DIFF	10	SILENT	UNREDUCED #2104
+rosetta/1300-Solve-the-no-connection-puzzle	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/1306-Sort-an-outline-at-every-level	DIFF	78	SILENT	UNREDUCED #2104
+rosetta/1308-Sort-numbers-lexicographically	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/1336-Special-pythagorean-triplet	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1342-Split-a-character-string-based-on-change	DIFF	5	SILENT	UNREDUCED #2104
+rosetta/1359-Stem-and-leaf-plot	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1364-Straddling-checkerboard	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1376-String-length	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1390-Substring-primes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
+rosetta/1432-Tarjan	DIFF	8	SILENT	UNREDUCED #2104
+rosetta/1436-Terminal-control-Display-an-extended-cha	DIFF	2	SILENT	UNREDUCED #2104
+rosetta/1473-Tuppers-self-referential-formula	DIFF	1	SILENT	UNREDUCED #2104
+rosetta/1479-Twos-complement	DIFF	6	SILENT	UNREDUCED #2104
+rosetta/1480-Type-detection	DIFF	5	SILENT	UNREDUCED #2104
+rosetta/1488-UTF-8-encode-and-decode	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
+rosetta/1495-Unicode-strings	DIFF	1	NOTICE	UNREDUCED #2104
+rosetta/1497-Unicode-variable-names	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1498-Unicode-variable-names	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/1499-Unicode-variable-names	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/1502-Universal-Turing-machine	DIFF	2	LOUD	UNREDUCED #2104
+rosetta/1551-Worthwhile-task-shaving	DIFF	5	DROPPED	NS:ns-given-when -- refused, announced
+rosetta/1561-XXXX-redacted	DIFF	3	SILENT	UNREDUCED #2104

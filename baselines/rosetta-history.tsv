@@ -1,0 +1,9 @@
+# rosetta-history.tsv -- one row per whole-corpus run of the Rosetta corpus (`tools/rosetta-corpus run --record`;
+# docs/rosetta-plan.md; task #2104).  The columns are baselines/everyday-history.tsv's.
+# M is the corpus's size (baselines/rosetta-corpus.tsv); a new pinned commit is a new corpus and starts a new file.
+# Row 1 was entered by hand (s543o) from docs/rosetta-plan.md section 3: the run of 2026-11-24 23:31 +0200 printed
+# `5f39d4ef` (records over MAIN-READY-110's code, 26d0dac4: no Pl/ cl/ lib/ change between them).  It measured the
+# 652-program corpus of that day; s543o left two broken probes out of it (0359 nondeterministic, 1442 holds the
+# date: baselines/rosetta-corpus.tsv's header), both differing then, so M is 650 from row 2 on -- read N/M.
+# date	sha	gen	same	total	by-area
+2026-11-24T21:31:51Z	26d0dac4	v2-16000	547	652	rosetta=547/652

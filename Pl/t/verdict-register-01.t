@@ -25,7 +25,11 @@
 #     completed / done;
 #   * an UNREDUCED key's task names the t-file (the dumping-ground guard).
 #
-# GATE for baselines/cpan-board14-fails.tsv; REPORT (counts via note(), never
+# GATE for baselines/cpan-board14-fails.tsv and (s543o) the Rosetta cause table
+# baselines/rosetta-causes.tsv -- the same checks, plus the table's SHAPE (five
+# fields, a verdict, a class of docs/rosetta-plan.md's eight, a name of the
+# manifest baselines/rosetta-corpus.tsv), because the census agents edit it
+# row by row and the runner trusts it; REPORT (counts via note(), never
 # a failing row) for perl-suite-fails.tsv, fail-baseline.tsv and
 # row-shortfall.tsv until #1836's batch moves them (ruling 8).
 #
@@ -48,6 +52,7 @@ use lib "$RealBin/../../tools/lib";
 use File::Basename qw(basename);
 use PCLCauses qw(parse_cause baseline_causes task_state);
 use PCLNsIds qw(read_ids);
+use PCLRosetta qw(read_manifest @CLASSES);
 
 my $root   = "$RealBin/../..";
 my $store  = $ENV{PCL_TASK_STORE} // "$root/dot-claude-in-home-dir/tasks/pcl";
@@ -140,6 +145,44 @@ TODO: {
       or diag(show($board->{prob}{task}));
     is(scalar @{ $board->{prob}{unreduced} || [] }, 0, 'board: every UNREDUCED key\'s task names the t-file')
       or diag(show($board->{prob}{unreduced}));
+}
+
+# ── GATE: the Rosetta cause table (s543o; docs/rosetta-plan.md) ─────────────
+# The baseline of `tools/rosetta-corpus run`, edited row by row by the census
+# agents.  Its KEYS get the board's checks (check_row; the UNREDUCED check's
+# "t-file" is the program's name, so an UNREDUCED key's task must name the
+# program -- #2104 lists the seeded ones), and its SHAPE is checked here.
+my $rosetta_file = "$root/baselines/rosetta-causes.tsv";
+my $rosetta = scan($rosetta_file, 'rosetta', 0);
+ok($rosetta, 'the Rosetta cause table is readable') or BAIL_OUT("no $rosetta_file");
+note sprintf 'rosetta: %d rows', $rosetta->{rows};
+is(scalar @{ $rosetta->{prob}{grammar} || [] }, 0, 'rosetta: every cause is in the grammar (a leading marker with its key)')
+  or diag(show($rosetta->{prob}{grammar}));
+is(scalar @{ $rosetta->{prob}{id} || [] }, 0, 'rosetta: every NS: key is a live not-supported id')
+  or diag(show($rosetta->{prob}{id}));
+TODO: {
+    local $TODO = $strict ? undef : 'advisory in a git worktree: the task store is a checkout as old as the branch';
+    is(scalar @{ $rosetta->{prob}{task} || [] }, 0, 'rosetta: every task key is an OPEN task in the store (CLOSE-WITH-ROWS)')
+      or diag(show($rosetta->{prob}{task}));
+    is(scalar @{ $rosetta->{prob}{unreduced} || [] }, 0, 'rosetta: every UNREDUCED key\'s task names the program')
+      or diag(show($rosetta->{prob}{unreduced}));
+}
+{
+    my ($manifest, undef, $merr) = read_manifest("$root/baselines/rosetta-corpus.tsv");
+    ok($manifest, 'the Rosetta manifest is readable') or diag($merr);
+    my %class = map { ($_ => 1) } @CLASSES;
+    my @bad;
+    for my $r (@{ baseline_causes($rosetta_file, 'rosetta') || [] }) {
+        my ($key, $verdict, $line, $class) = @{ $r->{fields} };
+        my $nf = @{ $r->{fields} };
+        push @bad, "$key: $nf fields, not 5 (area/name, verdict, first-diff-line, class, cause)" if $nf != 5;
+        push @bad, "$key: verdict '" . ($verdict // '') . "' is not DIFF / RC / TIMEOUT" if ($verdict // '') !~ /^(?:DIFF|RC|TIMEOUT)$/;
+        push @bad, "$key: first-diff-line '" . ($line // '') . "' is not a number or -" if ($line // '') !~ /^(?:[1-9]\d*|-)$/;
+        push @bad, "$key: class '" . ($class // '') . "' is not one of @CLASSES" if !$class{ $class // '' };
+        push @bad, "$key: not a program of baselines/rosetta-corpus.tsv" if $manifest && !$manifest->{$key};
+    }
+    is(scalar @bad, 0, 'rosetta: every row has five fields, a verdict, a line, a class of the eight and a name of the manifest')
+      or diag(show(\@bad));
 }
 
 # ── REPORT: the three other baselines (ruling 8: they move with #1836) ──────
