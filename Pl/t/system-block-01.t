@@ -455,7 +455,8 @@ system("sh -c 'echo o4; echo e4 1>&2' 2>&1"); print "4 rc=$?\n";},
 # which IS the signal number, so every one read `0/SIG`.  Expectations probed
 # against perl 5.40.3 (a: `|-` INT; b: `-|` LIST TERM, KILL, exit 3; c: `yes`
 # killed by PIPE when the reader closes; d: fork + exec + waitpid).
-is run_cl(q{sub st { ($? & 127) . "/" . ($? >> 8) }
+is run_cl(q{$SIG{PIPE} = "DEFAULT";   # the row asserts a child killed by PIPE: a parent that IGNORES it (a CI runner) hands that on, and `yes` then exits 1 in perl too
+sub st { ($? & 127) . "/" . ($? >> 8) }
 open(my $w, "|-", "perl") or die; print $w '$SIG{INT} = "DEFAULT"; kill "INT", $$; sleep 1;'; close $w; print "a ", st(), "\n";
 for my $s (["sh", "-c", 'kill -TERM $$'], ["sh", "-c", 'kill -KILL $$'], ["sh", "-c", "exit 3"]) { open(my $f, "-|", @$s) or die; my @x = <$f>; close $f; print "b ", st(), "\n"; }
 open(my $y, "-|", "yes") or die; my $one = <$y>; close $y; print "c ", st(), "\n";
