@@ -44,7 +44,8 @@ ordinary by definition.
   does not, and `build` makes it again).  It holds `corpus/rosetta/NNNN-task.pl`
   with its `.expect` (perl's STDOUT) and, for a non-zero exit, `.rc`;
   `refused/` what the admission refused, with `REASONS.tsv`; `work/` the clone;
-  `BUILD-INFO` and `build.log`.  Until s543o the corpus existed only as
+  `BUILD-INFO` and `build.log`.  On the development box it holds s543o's
+  verified build (2026-11-27).  Until s543o the corpus existed only as
   scratch files built by hand (`~/pcl-agent-scratch/s493/angles/rosetta/select.pl`,
   then `~/pcl-agent-scratch/s543/rosetta/`, which holds the 652 and so fails
   `verify` by the two broken probes of section 3).
@@ -63,15 +64,15 @@ ordinary by definition.
   once: the programs the manifest names get the runner's 60 s, not 8 (the 8 s
   rule is a wall clock: 0478 runs 7.8 s here and timed out at load 15), and a
   program admitted here that the manifest does not name is refused with that
-  reason (three URL programs use URI, installed here after s493; 1107 runs
-  8.03 s, inside the runner's whole-second timeout) -- THE MANIFEST IS THE
-  CORPUS.  `verify` compares a corpus
+  reason (three URL programs use URI, installed here after s493; 0574 0896
+  1107 1150 run 4.8-6.6 s on a quiet box, and the clock refused them at s493
+  and at load 15) -- THE MANIFEST IS THE CORPUS.  `verify` compares a corpus
   with the MANIFEST `baselines/rosetta-corpus.tsv` (one row per program: name,
   sha256 of the `.pl`, sha256 of the `.expect`, the exit status -- names and
   digests only); `classify` reads a run's outdir and prints each differing
   program's verdict, line and CLASS (section 3's eight).
 * **How to run:** `tools/rosetta-corpus run` -- as ONE bounded `heavy.sh` leg
-  (about seven minutes at `--jobs 2`).  It verifies the corpus against the
+  (3 min 48 s at `--jobs 2` on MAIN-READY-111).  It verifies the corpus against the
   manifest (and refuses to run one that differs), then runs
   `tools/everyday-smoke.pl` on it with `--label ROSETTA`, the cause table
   `baselines/rosetta-causes.tsv` as `--baseline`, `--history
@@ -87,7 +88,7 @@ ordinary by definition.
   language core computes right", nothing more.
 * **Licence:** Rosetta Code's text is GFDL 1.2.  **No program and no expected
   output is ever checked into this repository.**  Checked in are: the recipe
-  that rebuilds the corpus, the cause table (program NAME -> verdict -> cause)
+  that rebuilds the corpus, the manifest of names and digests, the cause table (program NAME -> verdict -> cause)
   and the history of the number.
 
 ## 3. Where it stands (measured 2026-11-24 on MAIN-READY-110 `26d0dac4`, v2-16000)
