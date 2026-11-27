@@ -45,52 +45,52 @@ rosetta/0047-Amb	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) bl
 rosetta/0071-Arithmetic-evaluation	DIFF	2	SILENT	#5460 + #5461 -- a void comma operand runs as a list //g (pos lost, the visible half #5462); \G in s/// is a literal G
 rosetta/0107-Base-16-numbers-needing-a-to-f	DIFF	1	SILENT	#5560 -- \K never matches (silent; the only cause: a capture spelling runs identical)
 rosetta/0110-Bell-numbers	DIFF	1	LOUD	#5468 -- an array of references compared with `==` under bigint: the handler gets the first element, objectify dies
-rosetta/0119-Bifid-cipher	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0119-Bifid-cipher	DIFF	1	LOUD	#650 + #5502 + #5560 -- `use builtin <indexed floor>` imports nothing; then builtin::indexed is missing; then `\K` in the table helper
 rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	#5463 -- a bare builtin (length) as an array subscript is autoquoted to index 0
 rosetta/0161-Calculating-the-value-of-e	DIFF	1	LOUD	#5500 -- `use bignum qw(e)` dies at the import
-rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	#5503 -- `my ((..), (..), (..)) = LIST` is not flattened, the wrong coordinates divide by zero
 rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	#5464 -- an element += a slice adds the slice count, not its last element
 rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
 rosetta/0195-Check-Machin-like-formulas	DIFF	1	SILENT	#2560 + #5465 -- a BigRat "N/D" string is 1; an overloaded / handler runs in list context (bdiv gives quotient and remainder)
-rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	#5504 -- `map(sub { ... }, LIST)` runs the sub body per element instead of making code refs
 rosetta/0243-Common-sorted-list	DIFF	1	SILENT	#5466 -- a slice ++ (the seen-set idiom) vivifies no key
 rosetta/0266-Consistent-overhead-byte-stuffing	DIFF	33	NOTICE	#5560 -- `\K` in s///ger never matches; the NOTICE is #3414's `local` in a list-assignment head (stdout unaffected)
-rosetta/0293-Count-the-coins	DIFF	1	EXHAUSTED	UNREDUCED #2104
-rosetta/0294-Countdown	DIFF	3	LOUD	UNREDUCED #2104
-rosetta/0306-Cumulative-standard-deviation	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/0313-Cycle-detection	TIMEOUT	-	TIMEOUT	UNREDUCED #2104
+rosetta/0293-Count-the-coins	DIFF	1	EXHAUSTED	#1929 -- a 100,000-deep memoized recursion exhausts the binding stack at depth ~10,000 (raw dump: #2556)
+rosetta/0294-Countdown	DIFF	3	LOUD	#5502 -- builtin::indexed is not implemented
+rosetta/0306-Cumulative-standard-deviation	DIFF	1	LOUD	#5505 -- `my $x, $y;` in a block whose named sub uses $x refuses the file (possibly captured)
+rosetta/0313-Cycle-detection	TIMEOUT	-	TIMEOUT	#5514 -- the write sites of a non-ASCII lexical emit an unescaped symbol, the loop never sees the update (endless)
 rosetta/0316-Damm-algorithm	DIFF	1	DROPPED	#650 -- a spaced `[< w w >]` word list right after `[` (PPI: an operator) drops the table statement
 rosetta/0333-Demings-funnel	DIFF	2	DROPPED	#4807 -- `&$_(ARGS)` is dropped
 rosetta/0337-Department-numbers	DIFF	3	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0346-Determine-if-a-string-is-squeezable	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
 rosetta/0351-Digital-root	DIFF	6	SILENT	#5467 -- int() of a Math::BigInt ignores its int overload (a plain number, then doubles)
-rosetta/0399-Environment-variables	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0399-Environment-variables	DIFF	1	LOUD	#5506 -- lib/POSIX.pm lacks getenv
 rosetta/0422-Exactly-three-adjacent-3-in-lists	DIFF	1	DROPPED	#650 -- a spaced `[< w w >]` word list right after `[` (PPI: an operator) drops the table statement
 rosetta/0442-Extreme-floating-point-values	DIFF	1	SILENT	#1475 -- printf float conversions drop the sign of -0.0 (also #2532 item 1)
 rosetta/0445-FASTA-format	DIFF	1	LOUD	#1292 -- a spaced `< $var >` glob emits a 3-argument `p-.`, a raw arity condition at the call (untidy: #1427)
 rosetta/0466-Fast-Fourier-transform	DIFF	2	NOTICE	#5468 -- an overloaded `/` with an array divisor gets the first element; the NOTICE is Math::Complex's own $SIG{FPE} (announced, not-supported ns-sig; stdout unaffected)
 rosetta/0473-Fibonacci-n-step-number-sequences	DIFF	1	LOUD	#650 -- `use List::Util <max sum>` imports nothing (PPI operator + PCL's rebuild drops the spaces: a readline)
 rosetta/0477-Fibonacci-sequence	DIFF	24	SILENT	NS:ns-integers-unbounded -- integer + past 2**64 stays exact where perl turns to a double (by design, #1513)
-rosetta/0478-Fibonacci-word	DIFF	1	EXHAUSTED	UNREDUCED #2104
-rosetta/0493-Find-first-missing-positive	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/0478-Fibonacci-word	DIFF	1	EXHAUSTED	#5518 -- SBCL's fixed 1 GB heap; a foreach over split // of a 24 M-char string needs more (perl 2.1 GB)
+rosetta/0493-Find-first-missing-positive	DIFF	1	LOUD	#5508 -- PPI lexes `{` after `not` as a block, the anon hash is dereferenced as a list
 rosetta/0523-FizzBuzz	DIFF	1	LOUD	#1594 -- `(Bareword)[i]` in a list is called, not the string
 rosetta/0545-Fractran	DIFF	1	SILENT	#2560 -- a Math::BigRat "N/D" string constructor is 1
-rosetta/0556-Gamma-function	DIFF	3	DROPPED	UNREDUCED #2104
-rosetta/0557-Gapful-numbers	DIFF	3	LOUD	UNREDUCED #2104
+rosetta/0556-Gamma-function	DIFF	3	DROPPED	#5509 -- `CONST*$var` without spaces is lexed as a glob cast, the statement drops
+rosetta/0557-Gapful-numbers	DIFF	3	LOUD	#5517 -- a modifier foreach over `$start .. Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/0567-Getting-the-number-of-decimal-places	DIFF	5	SILENT	#5465 -- under bignum a literal division in a for list runs its overload handler in list context (quotient and remainder)
 rosetta/0632-Host-introspection	DIFF	1	DROPPED	NS:ns-given-when -- refused, announced
 rosetta/0641-Idiomatically-determine-all-the-lowercas	DIFF	1	SILENT	#2440 -- POSIX bracket classes [[:lower:]] [[:upper:]] are ASCII ranges (perl: Unicode under unicode_strings)
 rosetta/0649-Inconsummate-numbers-in-base-10	DIFF	1	LOUD	#650 + #5560 -- `use List::Util <sum max>` imports nothing; then `\K` in the table helper
 rosetta/0670-Integer-long-division	DIFF	4	SILENT	#1494 -- the \N{NAME} named-character escape is not implemented (literal text)
 rosetta/0672-Integer-overflow	DIFF	2	SILENT	NS:ns-integers-unbounded -- use integer arithmetic does not wrap at 64 bits (by design, #1513)
-rosetta/0710-Klarner-Rado-sequence	DIFF	2	LOUD	UNREDUCED #2104
+rosetta/0710-Klarner-Rado-sequence	DIFF	2	LOUD	#650 + #5507 + #5560 -- `use List::Util <max min>`; a state array of a signature sub is invisible to its nested subs; `\K`
 rosetta/0715-Knuths-power-tree	DIFF	1	LOUD	#5500 -- `use bigint (try => LIB)` dies at the import
 rosetta/0768-Longest-common-substring	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0774-Longest-substrings-without-repeating-cha	DIFF	1	SILENT	#5560 -- \K never matches (a substitution with \K; $+ itself is right)
 rosetta/0808-Ludic-numbers	DIFF	4	SILENT	#5466 -- undef of a hash slice (the key-set idiom) vivifies no key
 rosetta/0818-Magic-constant	DIFF	1	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/0838-McNuggets-problem	DIFF	1	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
-rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	UNREDUCED #2104
+rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	#5510 -- `sort $scalar =~ /re/gm` takes the scalar as the comparator, the statement drops
 rosetta/0887-N-body-problem	DIFF	3	SILENT	#5466 -- a one-element slice as the left side of += / -= (the updates are lost)
 rosetta/0903-Nested-templated-data	DIFF	1	SILENT	#1285 -- a paren-less call of a no-prototype sub with { "key" => ... } passes the block value, not an anon hash
 rosetta/0904-Next-highest-int-from-digits	DIFF	6	SILENT	#5468 -- under bigint an array operand of an overloaded - is its first element, not its count
@@ -104,10 +104,10 @@ rosetta/0994-Pathological-floating-point-problems	DIFF	1	NOT-SUPPORTED	NS:ns-big
 rosetta/0996-Peaceful-chess-queen-armies	DIFF	1	SILENT	#5461 -- \G in a substitution is a literal G (a replace-before-pos step never matches)
 rosetta/0998-Pells-equation	DIFF	1	LOUD	#5500 -- `use bigint try => LIB` dies at the import
 rosetta/1011-Periodic-table	DIFF	1	LOUD	#650 -- `use List::Util <sum head>` imports nothing
-rosetta/1049-Posit-numbers-encoding	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1049-Posit-numbers-encoding	DIFF	1	LOUD	#5506 -- lib/POSIX.pm lacks INFINITY
 rosetta/1050-Positive-decimal-integers-with-the-digit	DIFF	1	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
-rosetta/1053-Power-set	TIMEOUT	-	TIMEOUT	UNREDUCED #2104
-rosetta/1093-Priority-queue	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1053-Power-set	TIMEOUT	-	TIMEOUT	#5516 -- `++vec(...)` answers the untruncated value, the byte counter never carries: an endless redo
+rosetta/1093-Priority-queue	DIFF	1	LOUD	#5511 + #5463 -- `@{ $x[-1] // [] }` fetches the element as an lvalue (dies on an empty array); `$bins[shift]` is autoquoted
 rosetta/1118-Quine	DIFF	1	SILENT	#1716 -- seek DATA, 0, 0 rewinds to the data section, not the source file
 rosetta/1122-RSA-code	DIFF	4	SILENT	#5467 -- int() of a Math::BigInt (use bigint) ignores its int overload: a plain number, then doubles
 rosetta/1139-Range-modifications	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
@@ -117,16 +117,16 @@ rosetta/1178-Reverse-a-string	DIFF	3	SILENT	#2381 -- \X is base+marks, not UAX 2
 rosetta/1188-Roman-numerals-Decode	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1198-Round-robin-tournament-schedule	DIFF	1	SILENT	#5469 -- a slice assignment from the same whole array reads it while writing it
 rosetta/1253-Set	DIFF	1	LOUD	#5501 -- the class's overloaded `+=` is never called, the object becomes a number
-rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	UNREDUCED #2104
-rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	#5512 -- a `local` in a ternary arm is refused
+rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	#5517 -- a modifier foreach over `1..Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/1297-Solve-a-Hopido-puzzle	DIFF	1	LOUD	#5461 -- `s/\G00/$new/r` never anchors, the solver never places a step and dies with its own message
 rosetta/1298-Solve-a-Numbrix-puzzle	DIFF	10	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
 rosetta/1300-Solve-the-no-connection-puzzle	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1306-Sort-an-outline-at-every-level	DIFF	78	SILENT	#5560 -- \K never matches (the only cause: a capture spelling runs identical)
-rosetta/1308-Sort-numbers-lexicographically	DIFF	1	DROPPED	UNREDUCED #2104
+rosetta/1308-Sort-numbers-lexicographically	DIFF	1	DROPPED	#5510 -- `sort $_ > 0 ? ... : ...` takes $_ as the comparator, the statement drops
 rosetta/1336-Special-pythagorean-triplet	DIFF	1	SILENT	#5470 -- without use utf8, a high byte after an interpolated variable is read into its name
 rosetta/1342-Split-a-character-string-based-on-change	DIFF	5	SILENT	#2381 -- \X is base+marks, not UAX 29 (a regional-indicator flag splits)
-rosetta/1359-Stem-and-leaf-plot	DIFF	1	LOUD	UNREDUCED #2104
+rosetta/1359-Stem-and-leaf-plot	DIFF	1	LOUD	#5513 -- `map split, LIST` emits a one-argument split call (raw arity condition: #1427)
 rosetta/1364-Straddling-checkerboard	DIFF	1	LOUD	#650 -- `use List::Util <min max>` imports nothing
 rosetta/1376-String-length	DIFF	1	SILENT	#2381 -- \X is base+marks, not UAX 29 (Hangul L+V+T jamo count one each)
 rosetta/1390-Substring-primes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
@@ -137,9 +137,9 @@ rosetta/1479-Twos-complement	DIFF	6	SILENT	NS:ns-integers-unbounded -- sprintf %
 rosetta/1480-Type-detection	DIFF	5	SILENT	#5471 -- ref of a reference to a package scalar holding a ref to a named hash is SCALAR, not REF
 rosetta/1488-UTF-8-encode-and-decode	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
 rosetta/1495-Unicode-strings	DIFF	1	NOTICE	#1494 -- `\N{name}` is left as literal text (and charnames' script list `greek` is not found)
-rosetta/1497-Unicode-variable-names	DIFF	1	LOUD	UNREDUCED #2104
-rosetta/1498-Unicode-variable-names	DIFF	1	DROPPED	UNREDUCED #2104
-rosetta/1499-Unicode-variable-names	DIFF	1	DROPPED	UNREDUCED #2104
-rosetta/1502-Universal-Turing-machine	DIFF	2	LOUD	UNREDUCED #2104
+rosetta/1497-Unicode-variable-names	DIFF	1	LOUD	#5514 -- `$Δ++` emits an unescaped symbol, a raw unbound-variable condition
+rosetta/1498-Unicode-variable-names	DIFF	1	DROPPED	NS:ns-lvalue-subs -- an `:lvalue` sub assigned to (`NAME = 1`) is refused
+rosetta/1499-Unicode-variable-names	DIFF	1	DROPPED	NS:ns-lvalue-subs -- an `:lvalue` sub assigned to (`NAME = 1`) is refused
+rosetta/1502-Universal-Turing-machine	DIFF	2	LOUD	#5515 -- `state => VALUE` in a paren-less argument list drops the key, the sub sees no initial state
 rosetta/1551-Worthwhile-task-shaving	DIFF	5	DROPPED	NS:ns-given-when -- refused, announced
 rosetta/1561-XXXX-redacted	DIFF	3	SILENT	#5561 -- \b{wb} never matches (the only cause: with \b the program runs identical to perl on the same text)
