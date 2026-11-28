@@ -240,8 +240,8 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     try2 { die "boom\n" } catch2 { print "caught" };
   };
   my $ok = eval { PCLCore::strip_loc(Pl::Parser2->parse_code($src_ok)) };
-  ok(defined $ok && $ok !~ /--anon-block-/ && $ok =~ /\(p-sub-frame \(block nil \(p-print "caught"\)\)\)/,
-     'non-capturing block-form arg lowers to the same in-place lambda') or diag($@);
+  ok(defined $ok && $ok !~ /--anon-block-/ && $ok =~ /\(p-sub-frame :no-match \(block nil \(p-print "caught"\)\)\)/,
+     'non-capturing block-form arg lowers to the same in-place lambda (a frame :no-match since #5545: the block writes no match state)') or diag($@);
 
   # DECLINE RESIDUE: bodies the embed hook refuses (a `package` statement needs
   # v1's revert wrapper; a named sub / `use` hoists) must ALSO stay in place —
@@ -667,8 +667,8 @@ EOF
   # behaviour, this row owns the spelling).
   my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
   like(PCLCore::strip_loc($an),
-       qr/\(lambda \(&rest %_args\)\s+\(let\s+\(\(\@_ \(p-flatten-args %_args\)\)\s+\(\*pcl-current-package\* "main"\)\s+\(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(p-sub-frame \(block nil 42\)\)\)\)/,
-       '#78: anon sub emits v1 wrapper shape as one structured form');
+       qr/\(lambda \(&rest %_args\)\s+\(let\s+\(\(\@_ \(p-flatten-args %_args\)\)\s+\(\*pcl-current-package\* "main"\)\s+\(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(p-sub-frame :no-match \(block nil 42\)\)\)\)/,
+       '#78: anon sub emits v1 wrapper shape as one structured form (its frame :no-match since #5545: the body writes no match state)');
   # Layout is no longer the v1-vs-native discriminator (the structural printer
   # breaks lines too); v1's text body is marked by its `;; <src>` echo lines.
   unlike($an, qr/;; 42/,
