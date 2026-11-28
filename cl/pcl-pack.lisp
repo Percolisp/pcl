@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-17100
+;;; pcl: pipeline=v2 gen=v2-17300
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -1213,7 +1213,7 @@
   (&rest %_args)
   (:wantarray-insensitive t
     :writes-args nil
-    :needs (:nonlocal_exit.loop_control :regex.literal :regex.native))
+    :needs (:nonlocal_exit.loop_control :regex.literal :regex.native :match))
   (p-args-body :copy (block nil
       (p-let (($tmpl :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $tmpl) @_))
@@ -1381,7 +1381,7 @@
 (p-sub pl-_pack_parse_count
   (&rest %_args)
   (:writes-args nil
-    :needs (:nonlocal_exit.die :nonlocal_exit.return :regex.literal :regex.native))
+    :needs (:nonlocal_exit.die :nonlocal_exit.return :regex.literal :regex.native :match))
   (p-args-body :copy (block nil
       (p-let (($tmpl :box (make-p-box nil)) ($ti_ref :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $tmpl $ti_ref) @_))
@@ -1919,8 +1919,7 @@
                                                                         "main")
                                                                       (*pcl-caller-wantarray*
                                                                         *wantarray*))
-                                                                    (p-sub-frame
-                                                                      (block nil
+                                                                    (p-sub-frame :no-match (block nil
                                                                         (p-file
                                                                           "cl/pack-impl.pl")
                                                                         (p-void-ctx (p-line 426)
@@ -2007,7 +2006,7 @@
   (&rest %_args)
   (:writes-args nil
     :captures ($MAX_GROUP_DEPTH__file__3727705105595030002)
-    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.native))
+    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.native :match))
   (p-args-body :copy (block nil
       (p-let
         (($tmpl :box (make-p-box nil))
@@ -3028,7 +3027,7 @@
   (&rest %_args)
   (:wantarray-insensitive t
     :writes-args nil
-    :needs (:dynamic_scope.local :regex.literal :regex.native))
+    :needs (:dynamic_scope.local :regex.literal :regex.native :match))
   (p-args-body :copy (block nil
       (p-file "cl/pack-impl.pl")
       (p-void-ctx (p-line 763)
@@ -3119,7 +3118,7 @@
 (p-sub pl-_unpack_str
   (&rest %_args)
   (:writes-args nil
-    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.subst :regex.native))
+    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.subst :regex.native :match))
   (p-args-body
     (block nil
       (p-let
@@ -3418,8 +3417,7 @@
                                                       ((@_ (p-flatten-args %_args))
                                                         (*pcl-current-package* "main")
                                                         (*pcl-caller-wantarray* *wantarray*))
-                                                      (p-sub-frame
-                                                        (block nil
+                                                      (p-sub-frame :no-match (block nil
                                                           (p-file "cl/pack-impl.pl")
                                                           (p-void-ctx (p-line 868)
                                                             (p-let
@@ -3571,7 +3569,9 @@
   (&rest %_args)
   (:writes-args nil
     :captures ($MAX_GROUP_DEPTH__file__3727705105595030002)
-    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.subst :regex.native))
+    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control
+      :regex.literal :regex.subst
+      :regex.native :match))
   (p-args-body
     (block nil
       (p-let
@@ -4405,7 +4405,7 @@
 
 (p-sub pl-_next_format_item
   (&rest %_args)
-  (:writes-args nil :needs (:nonlocal_exit.return :regex.literal :regex.native))
+  (:writes-args nil :needs (:nonlocal_exit.return :regex.literal :regex.native :match))
   (p-args-body :copy (block nil
       (p-let (($tmpl :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $tmpl) @_))
@@ -4448,7 +4448,7 @@
 
 (p-sub pl-p_unpack
   (&rest %_args)
-  (:writes-args nil :needs (:regex.literal :regex.split :regex.subst :regex.native))
+  (:writes-args nil :needs (:regex.literal :regex.split :regex.subst :regex.native :match))
   (p-args-body
     (block nil
       (p-let (($tmpl :box (make-p-box nil)) ($s :box (make-p-box nil)))
@@ -4552,8 +4552,7 @@
                                         ((@_ (p-flatten-args %_args))
                                           (*pcl-current-package* "main")
                                           (*pcl-caller-wantarray* *wantarray*))
-                                        (p-sub-frame
-                                          (block nil
+                                        (p-sub-frame :no-match (block nil
                                             (p-file "cl/pack-impl.pl")
                                             (p-line 1211)
                                             (p-incf $checksum (p-aref @_ 0)))))))
@@ -4585,8 +4584,7 @@
                                             ((@_ (p-flatten-args %_args))
                                               (*pcl-current-package* "main")
                                               (*pcl-caller-wantarray* *wantarray*))
-                                            (p-sub-frame
-                                              (block nil
+                                            (p-sub-frame :no-match (block nil
                                                 (p-file "cl/pack-impl.pl")
                                                 (p-line 1223)
                                                 (p-push @result (p-aref @_ 0)))))))
@@ -4603,8 +4601,7 @@
                                 ((@_ (p-flatten-args %_args))
                                   (*pcl-current-package* "main")
                                   (*pcl-caller-wantarray* *wantarray*))
-                                (p-sub-frame
-                                  (block nil
+                                (p-sub-frame :no-match (block nil
                                     (p-file "cl/pack-impl.pl")
                                     (p-line 1226)
                                     (p-push @result (p-aref @_ 0)))))))
