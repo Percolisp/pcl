@@ -14422,6 +14422,15 @@ sub _sub_writes_args {
         return 1 if _nodes_write_var(\@before, '$_');
         next;
       }
+      # An @_ SLICE `@_[LIST]' is a list of the caller's elements, written
+      # exactly when one `$_[N]' would be (`@_[0,1] = (8,9)', `@_[0,1] += 3',
+      # `@_[0,1]++': #5466's lvalue slice) -- the element's one predicate.
+      my $sl = $sym->snext_sibling;
+      if ($sl && $sl->isa('PPI::Structure::Subscript')
+          && ($sl->start // '') eq '[') {
+        return 1 if _args_elem_written($sym, $sl);
+        next;
+      }
       return 1 if _args_array_escapes($sym);
       next;
     }

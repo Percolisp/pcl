@@ -12611,15 +12611,68 @@ per element."
              (,key ,(caddr place)))
          ,(funcall fn (list acc cont key)))))
 
+  ;; ── A SLICE UNDER A MODIFYING SCALAR OPERATOR IS ITS LAST ELEMENT (#5466) ──
+  ;; `@seen{@list}++', `@h{LIST} += N', `undef @h{LIST}', `@$r[$i] -= $d':
+  ;; perl's slice there is an LVALUE list -- pp_hslice / pp_aslice in lvalue
+  ;; context CREATE every element (an absent key holds undef) -- and the scalar
+  ;; operator acts on its LAST element, whose value is the expression's value
+  ;; (probed 5.40.3: `@h{qw(b a c)}++' leaves a=undef b=undef c=1 and answers
+  ;; 0; a tied hash is asked only FETCH / STORE of the last key; an EMPTY slice
+  ;; dies "Modification of a read-only value attempted").  The emitter hands
+  ;; every one of these macros the slice FORM -- bare in void context, wrapped
+  ;; in `p-list-scalar' / `p-slice-result' when the operator's value is read --
+  ;; and each of them used to act on the rvalue slice's RESULT vector, so
+  ;; nothing reached the container.  ONE rewrite for every operator family
+  ;; (rule 11): the slice becomes the ELEMENT place of its last subscript, with
+  ;; the container and the subscript list evaluated ONCE, so each macro then
+  ;; runs its own element arm -- `@h{K}++' and `$h{K}++' cannot drift.  The
+  ;; four ++/-- macros (%p-incdec-once-form), the compound family
+  ;; (%store-back-form), the short-circuit assigns (%p-elem-place-form), `.='
+  ;; and `undef' (its compiler macro) ask it.  docs/ir-spec.md §3.2e3.
+  (defun %p-slice-operand (place)
+    "The SLICE form `(p-aslice C . IDX)' / `(p-hslice C . KEYS)' that PLACE
+     is -- bare, or inside the one-argument scalar-context wrap the emitter
+     gives a slice whose value is read (`p-list-scalar', `p-slice-result') --
+     or NIL.  A closed set: any other head is not a slice operand."
+    (cond
+      ((and (consp place) (member (car place) '(p-aslice p-hslice))) place)
+      ((and (consp place) (member (car place) '(p-list-scalar p-slice-result))
+            (consp (cdr place)) (null (cddr place)))
+       (%p-slice-operand (cadr place)))
+      (t nil)))
+
+  (defun %p-slice-operand-form (place fn &optional box)
+    "When PLACE is a slice operand (%p-slice-operand), the expansion that binds
+     its container once, vivifies every element and finds the LAST subscript
+     (%p-hslice-lvalue-last / %p-aslice-lvalue-last), and calls FN with that
+     element's PLACE; NIL otherwise.  BOX: the place is the eager box accessor
+     -- the shape the emitter gives an ELEMENT operand of `++' / `--' /
+     `undef' -- rather than the value accessor of the compound family."
+    (let ((s (%p-slice-operand place)))
+      (when s
+        (let ((hashp (eq (car s) 'p-hslice))
+              (c (gensym "CONT"))
+              (k (gensym "LAST")))
+          `(let* ((,c ,(cadr s))
+                  (,k (,(if hashp '%p-hslice-lvalue-last '%p-aslice-lvalue-last)
+                        ,c ,@(cddr s))))
+             ,(funcall fn (list (if hashp
+                                    (if box 'p-gethash-box 'p-gethash)
+                                    (if box 'p-aref-box 'p-aref))
+                                c k)))))))
+
   (defun %p-elem-place-form (place fn)
     "Call FN with a place whose container and key are evaluated ONCE: for an
-     ELEMENT place that is %p-vivified-elem-form's rebound place, and for
-     anything else PLACE itself.  The seam the short-circuit assigns share
-     with %store-back-form (task #1152), so `$h{k()} ||= 1` and
-     `$h{k()} .= \"q\"` cannot disagree about how often k() runs."
-    (if (%p-elem-place-p place)
-        (%p-vivified-elem-form place fn)
-        (funcall fn place))))
+     ELEMENT place that is %p-vivified-elem-form's rebound place, for a SLICE
+     operand its last element's (%p-slice-operand-form), and for anything
+     else PLACE itself.  The seam the short-circuit assigns share with
+     %store-back-form (task #1152), so `$h{k()} ||= 1` and `$h{k()} .= \"q\"`
+     cannot disagree about how often k() runs."
+    (cond
+      ((%p-elem-place-p place) (%p-vivified-elem-form place fn))
+      ((%p-slice-operand place)
+       (%p-slice-operand-form place (lambda (p) (%p-elem-place-form p fn))))
+      (t (funcall fn place)))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %store-back-form (place build)
@@ -12640,10 +12693,13 @@ per element."
      are all fixed by it — the NESTED spelling used to hand :UNDEF to SBCL's
      GETHASH and die (task #1057), and the FLAT one used to evaluate its key
      twice (`$h{k()} .= \"q\"` called k() twice where perl calls it once, task
-     #1152)."
+     #1152).  A SLICE operand is its last element's place (#5466,
+     %p-slice-operand-form)."
     (cond
       ((%p-elem-place-p place)
        (%p-vivified-elem-form place (lambda (p) `(setf ,p ,(funcall build p)))))
+      ((%p-slice-operand place)
+       (%p-slice-operand-form place (lambda (p) (%store-back-form p build))))
       ((%p-accessor-place-p place)
        `(setf ,place ,(funcall build place)))
       ;; A BOX place answers the box, the lvalue (p-setf's fallback says why:
@@ -13125,12 +13181,14 @@ per element."
      assignment (`($x += f())++'): its value is the assigned BOX (#4644), so
      MACRO runs on that box held in a temporary, and f() runs once as in perl
      (#4681).  NIL for a symbol, a box accessor, a p-cast-$ or an accessor
-     place (%p-accessor-place-p), which the macros' own arms take."
-    (when (and (consp place)
-               (not (member (car place) '(p-aref-box p-gethash-box p-cast-$)))
-               (not (%p-accessor-place-p place)))
-      (let ((tmp (gensym "PLACE")))
-        `(let ((,tmp ,place)) (,macro ,tmp))))))
+     place (%p-accessor-place-p), which the macros' own arms take.  A SLICE
+     is MACRO on its last element's box place (#5466, %p-slice-operand-form)."
+    (or (%p-slice-operand-form place (lambda (p) `(,macro ,p)) t)
+        (when (and (consp place)
+                   (not (member (car place) '(p-aref-box p-gethash-box p-cast-$)))
+                   (not (%p-accessor-place-p place)))
+          (let ((tmp (gensym "PLACE")))
+            `(let ((,tmp ,place)) (,macro ,tmp)))))))
 
 (defmacro p-pre++ (place)
   "Perl prefix ++ - works on boxed values, hash/array elements, and derefs.
@@ -13545,6 +13603,9 @@ per element."
                     value
                     `(%p-str-operand ,value))))
     (cond
+      ;; a SLICE: `.=' on its last element (#5466, %p-slice-operand-form)
+      ((%p-slice-operand place)
+       (%p-slice-operand-form place (lambda (p) `(p-.= ,p ,operand-value))))
       ((and (%p-elem-place-p place) (member (car place) '(p-gethash p-aref)))
        (%p-vivified-elem-form
         (list (car place) (cadr place) (%p-.=-operand-form (caddr place) operand-value))
@@ -13717,6 +13778,17 @@ per element."
                              (if (%pcl-definedp ,cur)
                                  ,cur
                                  (p-setf ,p ,value)))))))
+
+;;; `undef @h{LIST}' / `undef @a[LIST]' (#5466): `undef' is a modifying
+;;; scalar operator like `++', so a SLICE operand is its LAST element, every
+;;; element vivified (Rosetta's key-set idiom `undef @seen{@list}').  p-undef is
+;;; a FUNCTION and cannot see its argument's form, so the rewrite is this
+;;; compiler macro -- the p-join / p-map precedent (#1205, #1010): the slice
+;;; becomes `(p-undef (p-gethash-box C K))', the element spelling, and any other
+;;; argument is left to the function.
+(define-compiler-macro p-undef (&whole form &optional (val nil val-p))
+  (or (and val-p (%p-slice-operand-form val (lambda (p) `(p-undef ,p)) t))
+      form))
 
 ;;; ============================================================
 ;;; Numeric Comparison
@@ -17034,6 +17106,48 @@ which is one of #1140's escape spellings (probed)."
     (let ((result (make-array n :adjustable t :fill-pointer 0)))
       (dotimes (i n result)
         (%p-vpush (p-gethash-box hash (svref flat i)) result)))))
+
+;;; The run-time half of %p-slice-operand-form (task #5466): a slice under a
+;;; modifying scalar operator vivifies every element and the operator acts on
+;;; the LAST.  These two find that last subscript after creating the others,
+;;; as perl's lvalue pp_hslice / pp_aslice do -- an absent key of a plain hash
+;;; is created holding undef, a hole of a plain array becomes undef -- with no
+;;; element cell promoted (the operator's own element place stores the last
+;;; one).  A TIED container is asked nothing for the others: perl hands out a
+;;; tiedelem proxy that is never read, so only the last key's FETCH / STORE
+;;; run (probed 5.40.3).  The subscript list is evaluated once, by the call.
+;;; An EMPTY slice dies as perl's does: its last element is the read-only undef.
+(defun %p-hslice-lvalue-last (hash &rest keys)
+  "The key a modifying scalar operator acts on in `@HASH{KEYS}': the last,
+   after every other key of the slice is vivified.  See the note above.
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
+  (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
+    (when (zerop n) (%p-readonly-modification))
+    (let ((h (unbox hash)))
+      (when (and (hash-table-p h) (not (%p-tied h)))
+        (dotimes (i (1- n))
+          (let ((k (to-string (svref flat i))))
+            (unless (nth-value 1 (gethash k h))
+              (setf (p-gethash h k) *p-undef*))))))
+    (svref flat (1- n))))
+
+(defun %p-aslice-lvalue-last (arr &rest indices)
+  "The index a modifying scalar operator acts on in `@ARR[INDICES]': the
+   last, after every other index of the slice is vivified (the array grows; a
+   subscript before the start dies perl's non-creatable death).  See the note
+   above %p-hslice-lvalue-last.
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
+  (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
+    (when (zerop n) (%p-readonly-modification))
+    (let ((a (unbox arr)))
+      (when (and (vectorp a) (not (stringp a)) (not (%p-tied a)))
+        (dotimes (i (1- n))
+          (let* ((idx (svref flat i))
+                 (ai (%p-array-index a idx)))
+            (when (< ai 0) (%p-non-creatable-index idx))
+            (when (or (>= ai (length a)) (null (aref a ai)))
+              (setf (p-aref a ai) *p-undef*))))))
+    (svref flat (1- n))))
 
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
@@ -29303,7 +29417,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-16900"
+(defparameter *pcl-cache-generation* "v2-17100"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

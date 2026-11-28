@@ -148,4 +148,31 @@ sub TIEHASH { bless {}, shift } sub STORE { $st++; $_[0]{$_[1]} = $_[2] } sub FE
 PL
 is($pcl, $perl, '++ / -- on an assignment evaluates it once and increments its box (#4681)');
 
+# #5466 (s543v): a SLICE as the operand of a modifying scalar operator (`++`
+# `--` `op=` `||=` `.=` `undef`) is an LVALUE list -- every element vivified,
+# the operator on the LAST one, its value the expression's -- through a
+# reference, nested, in `@_` (the caller's variables) and tied (only the last
+# key's FETCH / STORE); an empty slice dies read-only.  PCL acted on the
+# rvalue slice's result: the `@seen{@list}++` key set stayed EMPTY.  Every row
+# sorts its keys.  FAILS on 38420fae.
+($perl, $pcl) = both('slice-op', <<'PL');
+sub ks { my $h = shift; join(" ", map { "$_=" . ($h->{$_} // "u") } sort keys %$h) }
+my %c; my $v = @c{qw(b a c)}++; print "1 ", ks(\%c), " v=$v\n";
+my @a = (1, 1, 1); @a[0, 2]++; my $w = --@a[1, 0]; print "2 @a w=$w\n";
+my %e; @e{qw(p q)} += 5; my %f = (q => 10); @f{qw(p q)} *= 3; print "3 ", ks(\%e), " | ", ks(\%f), "\n";
+my %h; undef @h{qw(a b c)}; my %g = (a => 1, b => 2); undef @g{qw(a b)}; print "4 ", ks(\%h), " | ", ks(\%g), "\n";
+my $r = [1, 2, 3]; @$r[1] += 10; @$r[2] -= 1; $r->@[0, 1] *= 2; print "5 @$r\n";
+my %s; @s{qw(x y)} ||= 4; @s{qw(x z)} .= "q"; @s{qw(w y)} //= 7; print "6 ", ks(\%s), "\n";
+my %n; @{$n{in}}{qw(a b)}++; my @k = qw(m n); my $calls = 0; sub kk { $calls++; @k } @n{kk()}++; print "7 ", ks($n{in}), " ", ks({ map { $_ => $n{$_} } @k }), " calls=$calls\n";
+sub g { @_[0, 1] += 3 } my ($p, $q) = (1, 2); g($p, $q); print "8 $p $q\n";
+my $err = eval { my @none = (); @h{@none}++; 1 } ? "no error" : ($@ =~ /^Modification of a read-only value attempted/ ? "read-only" : "other: $@");
+print "9 $err\n";
+tie my %t, 'TL'; @t{qw(a b)}++; @t{qw(c d)} += 2; undef @t{qw(e f)}; print "10 @TL::log\n";
+my %m; my @r = (@m{qw(a b)}++); my $sum = (@m{qw(a b)} += 2); print "11 @r $sum ", ks(\%m), "\n";
+package TL; our @log;
+sub TIEHASH { bless {}, shift } sub FETCH { push @log, "F$_[1]"; $_[0]{$_[1]} }
+sub STORE { push @log, "S$_[1]"; $_[0]{$_[1]} = $_[2] } sub EXISTS { push @log, "E$_[1]"; exists $_[0]{$_[1]} }
+PL
+is($pcl, $perl, 'a slice under ++ / op= / undef is an lvalue list: every element vivified, the last one modified (#5466)');
+
 done_testing();
