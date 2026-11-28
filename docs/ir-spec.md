@@ -993,6 +993,17 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   `%p-flatten-list`'s scalar arm, and `p-setf`'s array-slice / hash-slice arms
   through `%p-assign-snapshot-vector` (a slice hands out the container's own
   element boxes, #818).
+- **A slice store whose right side IS its target array copies it first**
+  (normative, s543v, task #5469): the same COMMON rule asked of the whole
+  container.  `@a[0,3,1,2] = @a` on (1,2,3,4) is 1 3 4 2 and the rotation
+  `@a[1..$#a, 0] = @a` moves every element; a store is never seen by a later
+  read.  The test is a run-time IDENTITY of the right-side array and the
+  target container (the same array named, through a reference `@$p[...] =
+  @$q` with `$q == $p`, through a glob alias), asked only when the snapshot
+  is the right side itself (every element a plain value), so an unrelated
+  array pays one comparison and no copy, and a literal list is never tested.
+  A TIED array as the whole right side is its FETCHed values, never its
+  empty shell.  Example: `my @a = (1,2,3); @a[2,1,0] = @a` leaves `3 2 1`.
 
 **Ref identity is a monotonic id, deliberately NOT a machine address**
 (`object-address`, `cl/pcl-runtime.lisp`). A translator must reproduce the
@@ -2115,6 +2126,26 @@ perlop: "A slice of an empty list is still an empty list."  `(@e)[0,1,2]`, `()[0
 
 **A LIST builtin that finds nothing is the EMPTY LIST in list context (normative, s520a, task #3412).**  `stat` / `lstat` on a missing path, `caller` past the outermost frame and a `getpw*` / `getgr*` lookup that misses answer the zero-length vector in list context (undef in scalar context), never raw NIL or `*p-undef*` -- those are ONE element in an argument list.  Example: `sub n { scalar @_ } n(stat "/no/such")` is `0`, so core `File::stat::stat($missing)` (`populate(CORE::stat $arg)`) returns undef.
 
+### 3.2e3 A slice under a MODIFYING scalar operator is its LAST element, every element vivified (normative, s543v, task #5466)
+
+The operand of `++` / `--` (either fixity), of every `OP=` (`||=` `&&=` `//=`
+`.=` included) and of `undef` may be an array or hash slice, through a
+reference, nested, of `@_`: perl's slice there is an LVALUE list -- every
+element is created (an absent key holds undef, an array grows) -- and the
+operator acts on its LAST element, whose result is the expression's value.
+A tied container is asked only the last element's FETCH / STORE; an EMPTY
+slice dies `Modification of a read-only value attempted` (its last element is
+the read-only undef).  The key / value slice `%h{...}` and the list slice
+`(LIST)[I]` are not modifiable (perl refuses at compile time; rule 9).  The
+emitter hands the operator the slice FORM, bare or in its scalar-context wrap
+(`p-list-scalar`, `p-slice-result`); the operator's macro (and `p-undef`'s
+compiler macro) rewrites it ONCE into the LAST element's own place -- the
+container and the subscript list evaluated once -- so `@h{K}++` and
+`$h{K}++` are the same operation.  Example: `@seen{@list}++` leaves every key
+of `@list` in `%seen` (undef but the last, which is 1) and is the value 0;
+`(p-post++ (p-hslice %seen @list))` reads as `(let* ((C %seen) (K
+(%p-hslice-lvalue-last C @list))) (p-post++ (p-gethash-box C K)))`.
+
 ### 3.2f `strict refs` is a LEXICAL fact the dereference SITE carries (normative, s497b, task #2103)
 
 `use strict 'refs'` is a compile-time, lexically scoped hint, so the compiler
@@ -2650,6 +2681,18 @@ Three sites read that same rule, and each was a silent wrong before it:
   in scalar context), `((1 and 2, 0) or (3, 4))` is `3 4`.  Example: `sub f {
   1, g() }` lowers to `(if *wantarray* (p-flatten-args (list 1 (pl-g)))
   (progn 1 (pl-g)))`.
+* **The RIGHT operand of a compound assignment is SCALAR context, whatever
+  the target** (normative, s543v, task #5464).  Every `OP=` -- `+=` `-=`
+  `*=` `/=` `%=` `**=` `x=` `<<=` `>>=` `&=` `|=` `^=` the string-bitwise
+  three, `||=` `&&=` `//=` and `.=` -- evaluates its right side in scalar
+  context, for a scalar target and an element target, in a statement or in a
+  value position: a slice there is its LAST element, an array its count, a
+  call sees `wantarray` false.  The context is the operator node's own fact
+  (`PExpr::child_context`), never the statement's, so `$C[0] += @v[1]` and
+  `$s += @v[1]` cannot disagree.  Example: `$C[0] += @v[1]` lowers to `(p-incf
+  (p-aref @C 0) (p-list-scalar (p-aslice @v 1)))`, and `$h{k} ||= f()` with
+  a context-sensitive `f` to `(p-or-assign (p-gethash %h "k") (p-scalar-ctx
+  (pl-f)))`.
 
 ## 5. Calling convention
 
@@ -7752,7 +7795,7 @@ then names the store op, as perl's optree names `sassign` / `aassign` /
 | `(p-aref (p-gethash\|p-gethash-deref\|p-aref-deref\|p-aref …) I)` | `p-autoviv-aref-set` | vivifying aelem store |
 | `(p-aref-deref …)` `(p-gethash-deref …)` `(p-$ …)` `(p-cast-$ …)`, any other `(p-aref …)` / `(p-gethash …)` | the CL `setf` writer | deref store |
 | `(vector …)` | `p-list-=` | aassign |
-| `(p-aslice A I…)` / `(p-hslice H K…)` | the slice loop (constant subscripts unrolled) | slice store |
+| `(p-aslice A I…)` / `(p-hslice H K…)` | the slice loop (constant subscripts unrolled); an array slice whose right side IS the target array reads a copy (§2.5, #5469) | slice store |
 | `(p-errno-string)` | `(setf (p-errno-string) V)` | `$!` store |
 | `(p-pos V)` / `(p-vec S O B)` / `(p-substr S P [L])` | `p-pos` / `p-vec-set` / 4-arg `p-substr` | lvalue builtins |
 | `(p-stash …)` | `p-stash-assign` | stash alias |
@@ -7763,13 +7806,13 @@ The other eleven:
 | macro | dispatches on | arms |
 |---|---|---|
 | `p-list-=` | the LHS list | all plain `$` scalars, at most 8 (the #910 fast path); undef skip placeholders (context wraps peeled); a greedy array / hash; `(p-list-x (vector …) N)` (static or dynamic count); slices and element lvalues; `(p-backslash-list …)` / `(p-backslash-sub …)` refaliasing |
-| `p-.=` | the place | element `(p-gethash\|p-aref …)` -> append in place through the vivified temps; deref element -> append; `(p-cast-$ …)` -> `%p-deref-append`; other element / accessor place -> store-back; scalar box or raw slot |
-| `p-pre++` `p-post++` `p-pre--` `p-post--` | the place | a one-element `(vector X)` unwrapped; box-returning `(p-aref-box\|p-gethash-box …)`; `(p-cast-$ …)` (the old value captured first); element / accessor places -> store-back; a variable |
+| `p-.=` | the place | a slice (bare / `p-list-scalar` / `p-slice-result`) -> its last element's place (§3.2e3); element `(p-gethash\|p-aref …)` -> append in place through the vivified temps; deref element -> append; `(p-cast-$ …)` -> `%p-deref-append`; other element / accessor place -> store-back; scalar box or raw slot |
+| `p-pre++` `p-post++` `p-pre--` `p-post--` | the place | a one-element `(vector X)` unwrapped; a slice -> its last element's box place (§3.2e3); box-returning `(p-aref-box\|p-gethash-box …)`; `(p-cast-$ …)` (the old value captured first); element / accessor places -> store-back; a variable |
 | `p-scalar-=` | the VALUE form | `(p-backslash …)` -> store the reference box itself (box-in-box, through STORE when tied); anything else -> a value store |
 | `%p-viv-root` | the place | a variable -> vivify a fresh aggregate INTO it; an expression -> the ensure function |
 | `p-viv-ensure-arrayref` | (via `%p-viv-root`) | as above, with an array |
 | `p-sort-cmp` | the body | leading `declare` forms hoisted above the `return` catch |
-| `%define-compound-pair` / `%store-back-form` | the place | element place -> container and key bound once, container vivified; accessor place (`p-pos p-vec p-substr p-array-last-index`, their `defsetf` writers) -> read-modify-write; a raw slot (the `-raw` twin) -> plain `setf`; else the generic store |
+| `%define-compound-pair` / `%store-back-form` | the place | element place -> container and key bound once, container vivified; a slice -> its last element's place (§3.2e3; the short-circuit assigns through `%p-elem-place-form` too); accessor place (`p-pos p-vec p-substr p-array-last-index`, their `defsetf` writers) -> read-modify-write; a raw slot (the `-raw` twin) -> plain `setf`; else the generic store |
 
 A place shape not in these tables is not emitted; the macros that end in a
 fallback arm (`p-setf`'s `box-set`) treat it as a scalar store.
