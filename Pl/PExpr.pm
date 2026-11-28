@@ -4127,28 +4127,7 @@ sub handle_subcalls {
     # extra argument and BigInt::length carped "Rounding is not supported".
     my $is_method_name = $self->_word_is_method_name($e, $i);
 
-    # Special handling for split: ensure pattern and string are always provided
-    # split()        -> split(" ", $_)
-    # split(/pat/)   -> split(/pat/, $_)
-    if ($func_name eq 'split' && !$is_method_name) {
-      my $arg_count = scalar(@$c_ids);
-      if ($arg_count == 0) {
-        # No args: add " " pattern and $_
-        my $space = PPI::Token::Quote::Double->new('" "');
-        my $space_id = $self->make_node($space);
-        $self->add_child_to_node($top_id, $space_id);
-        my $underscore = PPI::Token::Symbol->new('$_');
-        my $underscore_id = $self->make_node($underscore);
-        $self->add_child_to_node($top_id, $underscore_id);
-      } elsif ($arg_count == 1) {
-        # One arg (pattern): add $_
-        my $underscore = PPI::Token::Symbol->new('$_');
-        my $underscore_id = $self->make_node($underscore);
-        $self->add_child_to_node($top_id, $underscore_id);
-      }
-    }
-
-    # Add implicit $_ if function defaults to it
+    # Add implicit $_ if function defaults to it (split's " ", $_ included)
     if (!$is_method_name) {
       $self->add_implicit_default_param($func_name, $top_id);
       $self->collapse_extra_unary_params($func_name, $top_id);
@@ -4941,26 +4920,7 @@ sub handle_subcalls {
       $self->add_child_to_node($top_id, $c_id);
     }
 
-    # Special handling for split: ensure pattern and string are always provided
-    if ($sub_name eq 'split') {
-      my $arg_count = scalar(@$c_ids);
-      if ($arg_count == 0) {
-        # No args: add " " pattern and $_
-        my $space = PPI::Token::Quote::Double->new('" "');
-        my $space_id = $self->make_node($space);
-        $self->add_child_to_node($top_id, $space_id);
-        my $underscore = PPI::Token::Symbol->new('$_');
-        my $underscore_id = $self->make_node($underscore);
-        $self->add_child_to_node($top_id, $underscore_id);
-      } elsif ($arg_count == 1) {
-        # One arg (pattern): add $_
-        my $underscore = PPI::Token::Symbol->new('$_');
-        my $underscore_id = $self->make_node($underscore);
-        $self->add_child_to_node($top_id, $underscore_id);
-      }
-    }
-
-    # Add implicit $_ if function defaults to it
+    # Add implicit $_ if function defaults to it (split's " ", $_ included)
     $self->add_implicit_default_param($sub_name, $top_id);
     $self->collapse_extra_unary_params($sub_name, $top_id);
 
@@ -5023,6 +4983,22 @@ sub add_implicit_default_param {
   # A feature-gated keyword (`fc`, `say`) where it is NOT one is the user's
   # sub, which takes no implicit operand (#4603, Pl::Parser::gated_keyword_at).
   return if $self->_gated_keyword_is_sub($func_name, $node_id);
+
+  # split's defaults are its OWN, not `$_` in the first slot: a bare `split`
+  # is `split ' ', $_` and `split /PAT/` is `split /PAT/, $_` (perlfunc).  This
+  # is the ONE owner for every path that builds a split call (#5513: `map
+  # split, LIST` came through the zero-argument path below the operator test
+  # and got `(split $_)` -- the pattern slot filled, no string -- a raw
+  # arity condition at run time; the two argument-list paths each carried a
+  # copy of this rule).
+  if ($func_name eq 'split') {
+    my $given = scalar(@{ $self->get_node_children($node_id) }) - 1;
+    $self->add_child_to_node($node_id,
+      $self->make_node(PPI::Token::Quote::Double->new('" "'))) if $given == 0;
+    $self->add_child_to_node($node_id,
+      $self->make_node(PPI::Token::Symbol->new('$_'))) if $given <= 1;
+    return;
+  }
 
   # Check if function uses $_ as default (-2) or @_ as default (-3)
   my @specs = ref($param_spec) eq 'ARRAY' ? @$param_spec : ($param_spec);

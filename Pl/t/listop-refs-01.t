@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub run_cl {
     my ($code) = @_;
@@ -135,3 +135,17 @@ test_cl('map(sub { ... }, LIST) / grep(sub { ... }, LIST): the sub is the value'
      my @k = map { sub { 5 } } 1; print ref($k[0]), "\n";
      my @q = map +sub { 6 }, 1; print $q[0]->(), "\n";',
     "3 CODE 10,11,12\n2CODE\n2\nCODE\n[1] [2]\nCODE\n6\n");
+
+# #5513 (s543x): a bare `split` as map's / grep's EXPR (or before any comma)
+# is `split ' ', $_` -- split's own defaults, from the ONE place that owns
+# them (PExpr::add_implicit_default_param); it was `(split $_)`, the pattern
+# slot filled and no string: a raw arity condition.  Probed perl 5.40.3.
+test_cl('map split, LIST / grep split, LIST / (split, 1): split gets its own defaults',
+    'my @w = map split, "a b", " c  d "; print scalar(@w), " @w\n";
+     print join(",", sort { $a cmp $b } map split, "y x", "z"), "\n";
+     print join(",", grep split, "p", " ", "q r"), "\n";
+     $_ = "m n"; my @r = (split, 1); print "@r\n";
+     my @s = map CORE::split(/,/), "e,f"; print "@s\n";
+     my @u = map { split } "g h"; print "@u\n";
+     my @v = map split(/-/), "i-j", "k"; print "@v\n";',
+    "4 a b c d\nx,y,z\np,q r\nm n 1\ne f\ng h\ni j k\n");
