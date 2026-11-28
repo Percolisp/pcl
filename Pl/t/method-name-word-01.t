@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 20;
 
 sub write_pl {
     my ($code) = @_;
@@ -197,3 +197,28 @@ both_agree('package Foo; sub x { "X" } package main;'
          . ' my $o = bless {}, "Foo"; my @m = ($o->x => 2); print "@m|\n";'
          . ' my @q = (x => 1); my @r = (Foo::x => 1); print "@q|@r|\n";',
            '#333: `(Foo->x => 1)` calls the class method before a fat comma');
+
+# s543x (#5515): the same fact for the word BEFORE `=>` -- the fat comma quotes
+# the identifier on its left whatever it spells, so a declarator word there is a
+# STRING.  extract_declarations (and v1's expression statement, for `state`)
+# stripped it as a declarator, which dropped the key and moved the fat comma
+# onto the word before it: `f 1, state => 5` passed (1, 5), and `f state => 7;`
+# quoted `f` itself -- the call became a void list, gone with no message.  ONE
+# predicate, `Pl::PExpr::_fat_comma_quotes_word`.
+both_agree('use feature "state"; sub f { print join(",", @_), "|\n" }'
+         . ' f 1, state => 5; f 1, my => 6; f our => 7; f local => 8, 1;'
+         . ' f state => 1, my => 2, our => 3, local => 4;'
+         . ' print 1, state => 8, "|\n"; my @a; push @a, state => 1; print "@a|\n";'
+         . ' my @m = map { $_ } 1, state => 3; print "@m|\n";'
+         . ' sub r { return 1, state => 4 } print join(",", r()), "|\n";'
+         . ' sub rq { return state => 4 } print join(",", rq()), "|\n";'
+         . ' my $t = 1; f state => 9 if $t; f 1, state'
+         . "\n" . ' => 2;',
+           '#5515: a declarator word before `=>` in a paren-less list is the string');
+# The other side: a REAL declaration in a list keeps its reading (control).
+both_agree('use feature "state"; sub f { print join(",", @_), "|\n" } our $g = 2;'
+         . ' f 1, my $x = 5; print "$x|\n"; my @b; push @b, my $y; print scalar(@b), "|\n";'
+         . ' print state $n = 3; print "|\n"; f(local $_ = 1); f 1, local $g = 3; print "$g|\n";'
+         . ' f 1, our $og = 4; print "$og|\n"; my %h = (state => 1, my => 2);'
+         . ' print join(",", map { "$_=$h{$_}" } sort keys %h), "|$h{state}|\n";',
+           '#5515: a real declaration in a list, and `state =>` in parens, unchanged (control)');

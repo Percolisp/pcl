@@ -2550,8 +2550,11 @@ sub _process_expression_statement {
   # statements (not PPI::Statement::Variable) because they start with an operator.
   # We detect the 'state' keyword here, register the state declaration (emits
   # defvar + rename), strip 'state' from parts, then parse the remaining expression.
+  # A `state` the fat comma quotes is a STRING, not a declarator (`return 1,
+  # state => 4` reaches this seam; #5515): PExpr's one fat-comma predicate.
   for my $i (0 .. $#parts) {
-    if (ref($parts[$i]) eq 'PPI::Token::Word' && $parts[$i]->content eq 'state') {
+    if (ref($parts[$i]) eq 'PPI::Token::Word' && $parts[$i]->content eq 'state'
+        && !$self->_expr_parser([])->_fat_comma_quotes_word(\@parts, $i)) {
       # Build synthetic parts for just the state declaration (state keyword + vars)
       my @decl_parts = @parts[$i .. $#parts];
       if ($self->environment->in_subroutine == 0) {

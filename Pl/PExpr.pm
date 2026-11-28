@@ -510,6 +510,33 @@ sub _word_is_method_name {
   return 0;
 }
 
+# Does the fat comma after it QUOTE the word at $e->[$i]?  perl's `=>` quotes
+# the identifier on its left whatever the identifier spells -- a declarator, a
+# statement keyword, a quote-like operator's name (perlop "Comma Operator";
+# toke.c checks for `=>` before it looks the word up as a keyword) -- unless
+# it is a METHOD NAME after `->` (#481) or a qualified name callable here
+# (#4701).  ONE predicate: the fat-comma rewrite in cleanup_for_parsing asks
+# it, and so does every pass that would otherwise read the word as a keyword
+# first -- extract_declarations stripped `state` / `my` / `our` / `local`
+# before `=>` as a declarator, which dropped the key AND moved the fat comma
+# onto the word before it: `f 1, state => 5` passed (1, 5), and `f state => 7;`
+# quoted `f` itself and the call became a void list -- a statement gone with
+# no announcement (#5515).  Whitespace and comments between the word and the
+# `=>` are skipped (extract_declarations sees the raw tokens; a newline may
+# sit there).
+sub _fat_comma_quotes_word {
+  my ($self, $e, $i) = @_;
+  my $w = $e->[$i];
+  return 0 unless ref($w) eq 'PPI::Token::Word';
+  my $j = $i + 1;
+  $j++ while $j < @$e && ref($e->[$j]) =~ /::(?:Whitespace|Comment)$/;
+  return 0 unless $j < @$e && ref($e->[$j]) eq 'PPI::Token::Operator'
+               && $e->[$j]->content eq '=>';
+  return 0 if $self->_word_is_method_name($e, $i);
+  return 0 if $self->_qualified_word_callable($w);
+  return 1;
+}
+
 
 # Extract declarations (my, our, state, local) from expression.
 # Returns modified expression with declarators stripped.
@@ -634,7 +661,8 @@ sub extract_declarations {
     # overridable builtins, so CORE::<declarator> is the bare declarator.
     elsif (ref($item) eq 'PPI::Token::Word'
            && $item->content() =~ /^(?:CORE::)?($kinds)$/
-           && !$self->_word_is_method_name($exprs, $ix)) {
+           && !$self->_word_is_method_name($exprs, $ix)
+           && !$self->_fat_comma_quotes_word($exprs, $ix)) {
       my $decl_type = $1;
 
       # Look ahead for the variable in the next items
@@ -6937,6 +6965,8 @@ sub cleanup_for_parsing {
     }
     # - - - Replace foo => "bar" with "foo" , "bar":
     if (ref($part) eq 'PPI::Token::Operator' && $part->content() eq '=>') {
+      # The ONE quoting question, asked while the `=>` is still in place.
+      my $quotes_prev = $i > 0 && $self->_fat_comma_quotes_word(\@no_ws, $i - 1);
       # A NEW comma token in the LOCAL array — never set_content on the
       # shared tree token.  The old destructive rewrite made this pass
       # non-idempotent: the key stringification below lives only in the
@@ -6960,9 +6990,8 @@ sub cleanup_for_parsing {
       # package part before it looks for `=>`), so `Foo::bar => 1` and
       # `-Foo::bar => 1` CALL a declared Foo::bar (keys 3 / -3, probed); an
       # undeclared one is the bareword string either way (#4701).
-      if (ref($prev) eq "PPI::Token::Word"
-          && !$self->_word_is_method_name(\@no_ws, $i-1)
-          && !$self->_qualified_word_callable($prev)) {
+      # (_fat_comma_quotes_word, the one predicate.)
+      if ($quotes_prev) {
         $no_ws[$i-1] = $self->_make_string_of_token_word($prev);
       }
       # A FILETEST letter is autoquoted by the fat comma too, and the string
