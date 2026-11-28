@@ -400,15 +400,15 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-28: main = MAIN-READY-117 `f61cbf04` (generation v2-16900; nineteen batches merged in
-this session, MAIN-READY-99 .. -117, each with its sha and content in `docs/session-log.md` s543; the four of 2026-11-27:
+**s543, 2026-11-28: main = MAIN-READY-118 `96bf714c` (generation v2-17100; twenty batches merged in
+this session, MAIN-READY-99 .. -118, each with its sha and content in `docs/session-log.md` s543; the four of 2026-11-27:
 s543n the filehandle family, s543o the Rosetta instrument, s543m the string-eval residue + the container drop flush,
 s543l the `local` residue + a signal handler's `die` no longer swallowed by a blocking read; 2026-11-28: s543t, THE FIRST
-ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures restored at a sub's return; s543w, the lexer's term position -- a word list written as a glob, on the PPI branch; s543u, the regex escapes -- `\K`, `\G` in a substitution, `\b{wb}`).**  Gate
-**380 files / 12,605 rows `Result: PASS`** (measured on merged main); full
-sweep **TOTAL passing 18,810**, GATE clean; corpus-diff population 111
+ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures restored at a sub's return; s543w, the lexer's term position -- a word list written as a glob, on the PPI branch; s543u, the regex escapes -- `\K`, `\G` in a substitution, `\b{wb}`; s543v, the slice family -- and the right side of every `OP=` in scalar context).**  Gate
+**380 files / 12,608 rows `Result: PASS`** (measured on merged main); full
+sweep **TOTAL passing 18,809**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **ROSETTA 586 of 650 (90.2 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **32 live IN silent wrongs of ORDINARY code + 62 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
+(95.1 %)**; **ROSETTA 591 of 650 (90.9 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **29 live IN silent wrongs of ORDINARY code + 63 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -421,8 +421,8 @@ MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second ru
 `eca93377` (157 commits over upstream, 65 groups, 76 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **THE CENSUS IS COMPLETE (2026-11-28): all 103 differing programs carry a cause (`docs/rosetta-plan.md` 6a / 6b; 86 ours).
-RUNNING (the default of two again: the usage limit cut the batches twice): the ROSETTA FIX BATCHES s543v (the slice family: in its merge
-turn, expected 591), s543t2 (#5545: the capture scope only where a body can match; after s543v), s543x (a list operator's first operand).
+RUNNING (the default of two again: the usage limit cut the batches twice): the ROSETTA FIX BATCHES s543t2 (#5545: the capture scope only where a body can
+match: in its merge turn), s543x (a list operator's first operand); WRITTEN, waiting: `s543/s543y-prompt.md` (Unicode in names, strings, patterns).
 State, the written and the next briefs: `s543/PAUSE-s543.md`, last section.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
@@ -437,7 +437,7 @@ end (`docs/not-supported.md` ns-escaping-filehandle; the open half is
 s543a, except from a BEGIN / END / `use` body (#5101).  Cost flags kept by the s536 rule (each with its numbers in `docs/session-log.md` s543 at its merge): s543g `local($h{k}) = g(...)` +29 %;
 s543j a valued `local` slice tail +58 % a call; s543n bareword `print OUT` +9.5 %, `<IN>` +6.7 %; s543m the drop flush's test, `@a = ()` +81 %,
 `$h{k} = undef` +36..47 % (#5540); s543l `local $a[1]` +12 %, `local %INC` +23 %; **s543t EVERY SUB CALL +3..8 % for the capture scope,
-a matching sub in a loop +15 % (#5545: s543t2 is on it)**.
+a matching sub in a loop +15 % (#5545: s543t2 is on it)**; s543v a slice store from its own array +15.5 % (the copy).
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
 moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only

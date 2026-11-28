@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543x (Opus 5.5, 2026-11-28, base main 6a5a0631 = MAIN-READY-117 + records, v2-16900; tree v2-17200) by the list-operator first-operand batch (#5510 #5504 #5513 #5515).\n\nTHE SHAPE (neutral reproducer, perl 5.40.3 vs PCL on the s543x tree):\n\n    my $c = sub { $b <=> $a };\n    my @r = sort $c, 3;              print scalar(@r), \"\\n\";   # perl 2   PCL 1\n    my @q = sort(scalar($c), 3);     print scalar(@q), \"\\n\";   # perl 2   PCL 1\n    my @m = ($c, 3); my @s = sort @m; print scalar(@s), \"\\n\";  # perl 2   PCL 2 (an array: not the guess)\n\nWHERE: cl/pcl-runtime.lisp `p-sort` -- `(first-val (%p-sort-resolve-comparator (unbox (first args)))) (has-fn\n(functionp first-val))` -- and `%p-sort-classic`'s `:default` arm, which repeats the test (\"`sort LIST' decides\ncomparator-vs-list at RUN time ... The parser could not know\").  Since s543x (#5510) the PARSER does know: every\ncomparator the emitter builds is a `(p-sort-cmp ...)` lambda, a `(p-sort-named ...)` struct or the scalar-comparator\n`let`, and `sort LIST` has none.  A fix makes the presence static (e.g. a distinct entry or a marker for the\nno-comparator form) -- it moves every `sort LIST` emission and ClassicSort's `:default` mode, so it was not taken in\ns543x (the brief's bar: the comparator sites' emission must not move).\n\nCHEAP DISCRIMINATING MEASUREMENT: `(p-sort (lambda (a b) 0) 3)` vs `(p-sort $c 3)` -- the runtime cannot tell a\ncomparator lambda from a user's code ref: both are CL functions after unbox.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "probe-only (s543x m1-rt.pl): sorting a list whose first element is a code ref; no program or module in the wide list, the board, everyday or Rosetta holds it",
+   "id" : 5620,
+   "status" : "pending",
+   "subject" : "SILENT WRONG (rare): `sort LIST` whose FIRST element is a CODE reference takes it as the COMPARATOR -- p-sort (and %p-sort-classic's :default arm) decide comparator-or-list at RUN time by `(functionp (unbox (first args)))`, so `sort $c, 3` / `sort(scalar($c), 3)` with $c a code ref sort (3) by $c (perl: the two-element list)",
+   "triage" : "in",
+   "triage_reason" : "sort of a list is core language (perlfunc sort); IN by docs/supported-subset.md section 3"
+}

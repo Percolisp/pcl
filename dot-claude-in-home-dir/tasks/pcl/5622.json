@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543x (Opus 5.5, 2026-11-28, base main 6a5a0631 = MAIN-READY-117 + records, v2-16900; tree v2-17200) by the list-operator first-operand batch (#5510 #5504 #5513 #5515).\n\nTHE SHAPE (neutral reproducer):\n\n    my $c = sub { $b <=> $a }; my $r = \\$c; my @l = (3, 1, 2);\n    my @s = sort $$r @l; print \"@s\\n\";      # perl: 3 2 1\n    PCL: PCL: statement dropped ... Missing case: [prefix_op, Token::Symbol<@l>]\n\nWHERE: Pl/PExpr.pm `_sort_scalar_is_comparator` (s543x) asks `_is_scalar_fh_token`, a single `$` Symbol; PPI hands\n`$$r` over as Cast(`$`) + Symbol(`$r`) and `${$r}` as Cast + Block.  print's slot has the same gap (measured s543x: `print $$r \"x\\n\"` with $r a ref to a handle prints x in perl, with a \"String found where operator expected\" warning; PCL drops the statement).  The fix extends the ONE slot predicate to a cast run and builds the comparator node from the run.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "probe-only (s543x m1-probe.pl row 29); no sort $$ / sort ${ site in the wide list, the board, everyday or Rosetta",
+   "id" : 5622,
+   "status" : "pending",
+   "subject" : "DROP (rare): `sort $$r LIST` / `sort ${$r} LIST` -- a scalar DEREFERENCE as sort's SUBREF comparator (perly.y `indirob: scalar`, and `$$r` is a scalar) is a dropped statement; `sort $r LIST` works",
+   "triage" : "in",
+   "triage_reason" : "sort SUBREF LIST with any scalar is core syntax (perly.y indirob); IN by docs/supported-subset.md section 3"
+}

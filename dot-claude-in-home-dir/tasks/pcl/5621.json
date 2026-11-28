@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543x (Opus 5.5, 2026-11-28, base main 6a5a0631 = MAIN-READY-117 + records, v2-16900; tree v2-17200) by the list-operator first-operand batch (#5510 #5504 #5513 #5515).\n\nTHE SHAPE (neutral reproducer, perl 5.40.3 vs PCL on the s543x tree):\n\n    $| = 1; my $sh = \"/bin/sh\";\n    my $rc = system $sh \"argv0\", \"-c\", 'echo ok';   # perl: prints ok, rc 0\n    my @a = (\"argv0\", \"-c\", 'echo ok'); $rc = system $sh @a;\n    PCL: PCL: statement dropped ... Missing case: ['Token::Symbol<$sh>', ...]\n\nperl's rule is the indirect-object slot's (toke.c, case '$', the one rule s543x made PCL's `print $fh` and\n`sort $by` ask: `Pl::PExpr::_is_scalar_fh_token` + `_is_print_term_start`); PCL has the slot for print / printf / say\n/ sort and the BLOCK form of system / exec (`indirect_program`, #2082) but no scalar arm for system / exec.  The fix\nis the block arm's node (`indirect_program`) built from a scalar when the slot predicate says so.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "grep over the wide list, the board dists, everyday, lib/ and the Rosetta corpus (s543x): 0 sites; perlfunc teaches it",
+   "id" : 5621,
+   "status" : "pending",
+   "subject" : "DROP (rare): `system $prog LIST` / `exec $prog LIST` -- a SCALAR indirect object (perlfunc exec's own `exec $shell '-sh'` example) is a dropped statement (\"Bug. Fell through\"); the block form `system { $prog } LIST` works",
+   "triage" : "in",
+   "triage_reason" : "the indirect-object PROGRAM of system / exec is documented core syntax (perlfunc exec); IN by docs/supported-subset.md section 3"
+}
