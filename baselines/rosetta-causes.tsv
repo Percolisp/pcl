@@ -44,10 +44,8 @@ rosetta/0047-Amb	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) bl
 rosetta/0119-Bifid-cipher	DIFF	1	LOUD	#5502 -- builtin::indexed is missing (the `use builtin <...>` word list imports since s543w, #650)
 rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	#5463 -- a bare builtin (length) as an array subscript is autoquoted to index 0
 rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	#5503 -- `my ((..), (..), (..)) = LIST` is not flattened, the wrong coordinates divide by zero
-rosetta/0190-Centroid-of-a-set-of-N-dimensional-point	DIFF	1	SILENT	#5464 -- an element += a slice adds the slice count, not its last element
 rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
 rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	#5504 -- `map(sub { ... }, LIST)` runs the sub body per element instead of making code refs
-rosetta/0243-Common-sorted-list	DIFF	1	SILENT	#5466 -- a slice ++ (the seen-set idiom) vivifies no key
 rosetta/0293-Count-the-coins	DIFF	1	EXHAUSTED	#1929 -- a 100,000-deep memoized recursion exhausts the binding stack at depth ~10,000 (raw dump: #2556)
 rosetta/0294-Countdown	DIFF	3	LOUD	#5502 -- builtin::indexed is not implemented
 rosetta/0306-Cumulative-standard-deviation	DIFF	1	LOUD	#5505 -- `my $x, $y;` in a block whose named sub uses $x refuses the file (possibly captured)
@@ -67,9 +65,7 @@ rosetta/0670-Integer-long-division	DIFF	4	SILENT	#1494 -- the \N{NAME} named-cha
 rosetta/0672-Integer-overflow	DIFF	2	SILENT	NS:ns-integers-unbounded -- use integer arithmetic does not wrap at 64 bits (by design, #1513)
 rosetta/0710-Klarner-Rado-sequence	DIFF	2	SILENT	#5507 -- a state array of a signature sub is invisible to its nested subs (the `use List::Util <...>` word list imports since s543w, #650)
 rosetta/0768-Longest-common-substring	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/0808-Ludic-numbers	DIFF	4	SILENT	#5466 -- undef of a hash slice (the key-set idiom) vivifies no key
 rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	#5510 -- `sort $scalar =~ /re/gm` takes the scalar as the comparator, the statement drops
-rosetta/0887-N-body-problem	DIFF	3	SILENT	#5466 -- a one-element slice as the left side of += / -= (the updates are lost)
 rosetta/0903-Nested-templated-data	DIFF	1	SILENT	#1285 -- a paren-less call of a no-prototype sub with { "key" => ... } passes the block value, not an anon hash
 rosetta/0937-Numerical-and-alphabetical-suffixes	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0945-Odd-squarefree-semiprimes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
@@ -83,7 +79,6 @@ rosetta/1168-Remove-vowels-from-a-string	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unico
 rosetta/1169-Rep-string	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1178-Reverse-a-string	DIFF	3	SILENT	#2381 -- \X is base+marks, not UAX 29 (flag pairs and ZWJ emoji split)
 rosetta/1188-Roman-numerals-Decode	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/1198-Round-robin-tournament-schedule	DIFF	1	SILENT	#5469 -- a slice assignment from the same whole array reads it while writing it
 rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	#5512 -- a `local` in a ternary arm is refused
 rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	#5517 -- a modifier foreach over `1..Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/1300-Solve-the-no-connection-puzzle	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced

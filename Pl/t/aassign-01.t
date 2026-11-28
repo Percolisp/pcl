@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 47;
+plan tests => 48;
 
 sub run_cl {
     my ($code) = @_;
@@ -600,3 +600,24 @@ test_cl('#4082 a slice assignment flattens an array / repetition on its right si
      @s{qw(x y)} = %src;
      print "$s{x}$s{y}\n";',
     "a=1,b=2,c=3\na=1,b=2,c=3\na=x,b=x,c=y\n1 2 3 | 1 2 3\np1\n");
+
+# #5469 (s543v): a SLICE assignment whose right side IS the target array --
+# a permutation, the rotation `@a[1..$#a, 0] = @a`, through a reference to the
+# same array, through a glob alias -- copies the right side first (perl's
+# common-assignment rule), so no store is seen by a later read; an unrelated
+# array and a slice on the right are controls (row 7); a TIED array on the
+# right side is its FETCHed values, not its empty shell (row 8).  Every
+# expected line is perl's.  FAILS on 38420fae.
+test_cl('#5469 a slice assignment from the same array copies its right side first',
+    'my @a = (1, 2, 3, 4); @a[0, 3, 1, 2] = @a; print "1 @a\n";
+     my @c = (1, 2, 3); @c[2, 1, 0] = @c; print "2 @c\n";
+     my @r = (1, 2, 3, 4, 5); @r[1 .. $#r, 0] = @r; print "3 @r\n";
+     my $p = [1, 2, 3, 4]; my $q = $p; @$p[0, 3, 1, 2] = @$q; $p->@[1, 0] = $p->@*; print "4 @$p\n";
+     our @ga = (1, 2, 3, 4); our @gb; *gb = \@ga; @ga[0, 3, 1, 2] = @gb; print "5 @ga\n";
+     my @s = (qw(w x y z)); my $n = (@s[0, 3, 1, 2] = @s); print "6 @s $n\n";
+     my @b = (1, 2, 3); @b[1, 2] = @b[0, 1]; my @u = (1, 2, 3); my @o = (7, 8, 9); @u[0 .. 2] = @o; print "7 @b | @u\n";
+     package TA; sub TIEARRAY { bless { d => [@_[1 .. $#_]] }, $_[0] } sub FETCH { $_[0]{d}[$_[1]] }
+     sub STORE { $_[0]{d}[$_[1]] = $_[2] } sub FETCHSIZE { scalar @{$_[0]{d}} }
+     sub STORESIZE { $#{$_[0]{d}} = $_[1] - 1 } sub EXTEND {} sub CLEAR { @{$_[0]{d}} = () }
+     package main; tie my @t, "TA", 1, 2, 3; my @d = (0, 0, 0); @d[2, 1, 0] = @t; print "8 @d\n";',
+    "1 1 3 4 2\n2 3 2 1\n3 5 1 2 3 4\n4 3 1 4 2\n5 1 3 4 2\n6 w y z x 4\n7 1 1 2 | 7 8 9\n8 3 2 1\n");

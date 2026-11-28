@@ -11399,15 +11399,21 @@ per element."
    included, so it keeps the lazy snapshot, as does the all-scalar literal
    list (the common case: one type test per element, no allocation).  A list
    that spreads takes %p-flatten-list, the walk every list assignment uses."
+  ;; A TIED array as the whole right side is an empty SHELL (tie moves the
+  ;; contents aside), so its lazy snapshot was the empty list and every store
+  ;; got undef (`@a[2,1,0] = @tied`); its values are its FETCHed view, which
+  ;; is %p-flatten-list's walk (s543v, #5469's probe).  One fixnum test when
+  ;; nothing is tied.
   (let ((v (cond ((listp src) (coerce src 'vector))
                  ((and (vectorp src) (not (stringp src))) src)
                  (t (vector src)))))
-    (if (and (simple-vector-p v)
-             (loop for x across v
-                   thereis (and (not (p-box-p x))
-                                (or (null x) (consp x) (hash-table-p x)
-                                    (and (vectorp x) (not (stringp x)))
-                                    (%p-hash-marker-p x)))))
+    (if (or (%p-tied v)
+            (and (simple-vector-p v)
+                 (loop for x across v
+                       thereis (and (not (p-box-p x))
+                                    (or (null x) (consp x) (hash-table-p x)
+                                        (and (vectorp x) (not (stringp x)))
+                                        (%p-hash-marker-p x))))))
         (%p-flatten-list v)
         (%p-assign-snapshot-vector v))))
 
@@ -12063,13 +12069,40 @@ per element."
            (loop for i from (second f) to (third f) do (push i out)))
           (t (return-from %p-const-subscript-values nil))))))
 
-  (defun %p-slice-src-bindings (src src-vec value)
+  (defun %p-slice-src-bindings (src src-vec value &optional container)
     "The LET* bindings both slice-assignment arms open with: VALUE evaluated
      once into SRC, coerced to a vector, and SNAPSHOTTED before any store.
      ONE spelling (rule 11) — the array arm and the hash arm had it twice, and
-     the constant-subscript arms make four."
-    `((,src ,value)
-      (,src-vec (%p-slice-src-vector ,src))))
+     the constant-subscript arms make four.
+
+     CONTAINER is the ARRAY arm's target form, and with it the snapshot asks
+     perl's COMMON-assignment question (OPpASSIGN_COMMON; #910's test in
+     p-list-=, which copies only a source that may share storage with a
+     target): when the right side IS the target array -- `@a[0,3,1,2] = @a',
+     the rotation `@a[1..$#a, 0] = @a', the same array through a reference or
+     a glob alias -- the stores must read a COPY taken first, or each store is
+     seen by the later reads (task #5469; perl 1 3 4 2, PCL gave 1 3 2 2).
+     %p-slice-src-vector hands SRC itself back only when every element is a
+     plain value (an element BOX, a list, a tied array already give a fresh
+     vector), so the identity test is reached only then -- an unrelated array
+     pays one EQ and no copy -- and a literal `(vector ...)' right side,
+     fresh by construction, is not tested at all.  The test is a RUN-TIME
+     identity (`@$r[0,1] = @$q' with $q == $r is only known there); the
+     container form is evaluated for it only on that path.  The copy keeps
+     the array's shape (adjustable, filled), because SRC-VEC is also the
+     assignment's VALUE and a Perl array there reads as its count in scalar
+     context (a simple vector does not: task #1206)."
+    (let ((sv (gensym "SV")))
+      `((,src ,value)
+        (,src-vec ,(if (and container
+                            (not (and (consp value) (eq (car value) 'vector))))
+                       `(let ((,sv (%p-slice-src-vector ,src)))
+                          (if (and (eq ,sv ,src) (eq ,sv ,container))
+                              (make-array (length ,sv) :adjustable t
+                                          :fill-pointer (length ,sv)
+                                          :initial-contents ,sv)
+                              ,sv))
+                       `(%p-slice-src-vector ,src))))))
 
   (defun %p-unrolled-slice-stores (accessor container subs src-vec)
     "The N stores a constant-subscript slice assignment becomes: subscript K at
@@ -12219,7 +12252,7 @@ per element."
        ;; The assignment proper; a simple-symbol array is auto-declared first
        ;; (#387 family 46, s413: the body was spelled once per case).
        (let ((body
-              `(let* ,(%p-slice-src-bindings src src-vec value)
+              `(let* ,(%p-slice-src-bindings src src-vec value arr)
                  ,@(if consts
                        ;; CONSTANT indices: the N stores, no run-time index
                        ;; walk (task #1203; see %p-const-subscript-values).
