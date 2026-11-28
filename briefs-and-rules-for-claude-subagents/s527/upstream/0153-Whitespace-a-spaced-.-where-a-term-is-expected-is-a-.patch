@@ -1,0 +1,93 @@
+From ea961bca3fa7f74fb502dee503db5e0ffa724c2c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 00:50:18 +0200
+Subject: [PATCH 153/157] Whitespace: a spaced <...> where a term is expected
+ is a glob
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Where perl expects a term, a < starts a readline or a glob whatever
+character follows it (toke.c yyl_leftpointy: scan_inputsymbol reads to
+the first >; a <...> holding more than a filehandle name is a glob), so
+[< 4 5 >] is the list of 4 and 5 and < $s > globs the words of $s.
+
+The two readline tests of the < arm -- after an operator, a builtin that
+takes an operand or use Module (_term_expected), and after the } of a
+statement or map / grep block (_after_statement_block) -- asked for a
+closed <...> whose first character was not whitespace, so a spaced word
+list was a less-than there and a readline only after ( ; = , and while.
+Both now ask one helper, _closed_angle: <>, or a < whose next character
+is not <, > or =, closed by a > on the line.  The term tests themselves
+are unchanged, so after a term -- a variable, a number, a call, a
+subscript, a method name, a builtin that takes no operand -- the < still
+compares.
+
+Fixes PCL §77 (its eleven rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Whitespace.pm | 16 ++++++++++++----
+ t/ppi_bugs_pcl.t            |  3 +--
+ 2 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index db16c3ce..98cdb013 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -315,9 +315,8 @@ sub __TOKENIZER__on_char {
+ 		# return <$fh>, $s .= <STDIN> -- a closed <...> is a readline or a
+ 		# glob, whatever it holds (toke.c yyl_leftpointy: PL_expect is not
+ 		# XOPERATOR).  A block's } is decided below.
+-		pos $t->{line} = $t->{line_cursor};
+ 		return 'QuoteLike::Readline'
+-		  if $t->{line} =~ m/\G<(?:>|[^<>=\s][^<>]*>)/gc
++		  if _closed_angle($t)
+ 		  and not ( $prev and $prev->isa('PPI::Token::Structure') and $prev->content eq '}' )
+ 		  and $t->_term_expected;
+ 
+@@ -348,9 +347,8 @@ sub __TOKENIZER__on_char {
+ 			# word (map { ... } <op/*>, grep { ... } <$fh>) perl expects a
+ 			# term, so a closed <...> is a readline or a glob, whatever it
+ 			# holds.  After a subscript's } the < compares.
+-			pos $t->{line} = $t->{line_cursor};
+ 			return 'QuoteLike::Readline'
+-			  if $t->{line} =~ m/\G<(?:>|[^<>=\s][^<>]*>)/gc
++			  if _closed_angle($t)
+ 			  and $t->_after_statement_block;
+ 		}
+ 
+@@ -497,6 +495,16 @@ sub __TOKENIZER__on_char {
+ 	PPI::Exception->throw("Encountered unexpected character '$char'");
+ }
+ 
++# True when the < at the tokenizer's cursor is closed by a > later on the
++# line: <>, or a < whose next character is not <, > or = (perl's
++# scan_inputsymbol reads to the first >, so whitespace inside counts as
++# any other character: < a b > is glob(" a b "), the words a and b).
++sub _closed_angle {
++	my $t = shift;
++	pos $t->{line} = $t->{line_cursor};
++	return $t->{line} =~ m/\G<(?:>|[^<>=][^<>]*>)/gc;
++}
++
+ sub __TOKENIZER__on_line_end {
+ 	$_[1]->_finalize_token if $_[1]->{token};
+ }
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 885f7e67..e1ee6216 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2569,8 +2569,7 @@ for my $case ( [ q{use Mod; $x < $y;}, q{Operator=<} ], [ q{use 5.010; 1 < 2;},
+ # $s.  PPI took a < with whitespace after it for a less-than everywhere
+ # but after ( ; = , and while -- after [ { => return a binary operator ?
+ # and after the block of map, grep or sort.
+-TODO: {
+-    local $TODO = q{PCL §77: a spaced <...> where a term is expected is lexed as a less-than};
++{
+     for my $case ( [ q{my @r = ([< 4 5 >], [< 6 7 >]);}, q{QuoteLike::Readline=< 4 5 >} ],
+                    [ q{my $h = { < a b > };}, q{QuoteLike::Readline=< a b >} ],
+                    [ q{my %h = (k => < a b >);}, q{QuoteLike::Readline=< a b >} ],
+-- 
+2.53.0
+

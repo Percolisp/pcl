@@ -1,7 +1,7 @@
 From 96155372626134061d56dc0038026cf6e55a009f Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 21:15:58 +0200
-Subject: [PATCH 144/149] TODO tests: _ is a word except as a filetest's or
+Subject: [PATCH 144/157] TODO tests: _ is a word except as a filetest's or
  stat's operand
 
 perl reads _ as a plain word (toke.c); only as the operand of a

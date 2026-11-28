@@ -1,0 +1,121 @@
+From d20ff42c8cce2d8f17838f1889cbc42b2f39d433 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 00:43:09 +0200
+Subject: [PATCH 151/157] Tokenizer: <...> after use Module is the import list
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After the module name of a use or no statement, and after the version
+that may follow it, perl expects a term (toke.c S_tokenize_use sets
+PL_expect to XTERM), so a <...> there is a glob: use List::Util <max
+sum> imports max and sum.  _term_expected now says so through a new
+_after_use_module: the significant tokens before the current one are a
+word (the module) and use or no that opens its statement (nothing, a ;,
+a brace or a label before it), with an optional Number (the version)
+after the module.  The < arm of Token/Whitespace.pm asks _term_expected
+after a Number too, which a version is; anywhere else a number still
+ends a term.
+
+The feature tracking of Statement/Include.pm reads such an argument:
+<say try> names say and try, as qw<say try> does (a <...> holding a
+filehandle name, <try>, names nothing; one holding a wildcard keeps the
+old warning).  Without that, use feature <say signatures> would warn and
+switch nothing on.
+
+Fixes PCL §76 (its seven rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Statement/Include.pm |  9 +++++++++
+ lib/PPI/Token/Whitespace.pm  |  3 ++-
+ lib/PPI/Tokenizer.pm         | 17 +++++++++++++++++
+ t/ppi_bugs_pcl.t             |  3 +--
+ 4 files changed, 29 insertions(+), 3 deletions(-)
+
+diff --git a/lib/PPI/Statement/Include.pm b/lib/PPI/Statement/Include.pm
+index 2dd9d7e8..c6971a74 100644
+--- a/lib/PPI/Statement/Include.pm
++++ b/lib/PPI/Statement/Include.pm
+@@ -330,6 +330,15 @@ sub _decompose_argument {
+ 	  or $arg->isa("PPI::Statement::Expression");
+ 	my $as_text = $arg->can("literal") || $arg->can("string");
+ 	return $as_text->($arg) if $as_text;
++	# A word list written as a glob: <say signatures> is glob("say
++	# signatures"), the two words (perl reads a <...> that holds more than
++	# a filehandle name as a glob, and a pattern without a wildcard is
++	# itself); <say> alone reads the filehandle say and names nothing.
++	if ( $arg->isa("PPI::Token::QuoteLike::Readline") ) {
++		my ($inside) = $arg->content =~ /\A<(.*)>\z/s;
++		return if !defined $inside or $inside =~ /\A\$?[\w':]*\z/;
++		return split ' ', $inside if $inside !~ /[*?\[\]{}~\\"'\$\@]/;
++	}
+ 	return if $arg->isa("PPI::Token::Operator")
+ 	  or $arg->content eq ",";
+ 	warn "possibly unrecognized feature because of unknown arg decompose"
+diff --git a/lib/PPI/Token/Whitespace.pm b/lib/PPI/Token/Whitespace.pm
+index 4fed0581..db16c3ce 100644
+--- a/lib/PPI/Token/Whitespace.pm
++++ b/lib/PPI/Token/Whitespace.pm
+@@ -302,7 +302,8 @@ sub __TOKENIZER__on_char {
+ 		# $#foo < $bar
+ 		return 'Operator' if $prev and $prev->isa('PPI::Token::Symbol');
+ 		return 'Operator' if $prev and $prev->isa('PPI::Token::Magic');
+-		return 'Operator' if $prev and $prev->isa('PPI::Token::Number');
++		return 'Operator' if $prev and $prev->isa('PPI::Token::Number')
++		  and !$t->_term_expected;   # use Mod 1.2 <a b>: the import list
+ 		return 'Operator' if $prev and $prev->isa('PPI::Token::ArrayIndex');
+ 
+ 		# If it is <<... it's a here-doc instead
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index e754f5a6..0941a983 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -1184,6 +1184,7 @@ sub _term_expected {
+ 	return 1 if $self->_opcontext eq 'operand';
+ 	# A block's } does not end a term (map { $_ } ~~$y); a subscript's does
+ 	return !$self->_after_term if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
++	return 1 if $self->_after_use_module;
+ 	return '' if !$prev->isa('PPI::Token::Word');
+ 	return '' if $prevprev and $prevprev->isa('PPI::Token::Operator') and $prevprev->content eq '->';
+ 	my $word = $prev->content;
+@@ -1195,6 +1196,22 @@ sub _term_expected {
+ 	return $KEYWORDS{$word} && !$NO_OPERAND{$word};
+ }
+ 
++# After the module name of a use or no statement, and after the version
++# that may follow it (use Mod 1.2), perl expects a term: the import list
++# (toke.c S_tokenize_use sets PL_expect to XTERM before it forces the name
++# and the version), so use List::Util <max sum> imports max and sum.
++sub _after_use_module {
++	my $self = shift;
++	my @prev = $self->_previous_significant_tokens(4);
++	shift @prev if @prev and $prev[0]->isa('PPI::Token::Number');
++	my ( $module, $use, $before ) = @prev;
++	return '' if !$use or !$module->isa('PPI::Token::Word') or !$use->isa('PPI::Token::Word');
++	return '' if $use->content ne 'use' and $use->content ne 'no';
++	# The use or no opens its statement
++	return 1 if !$before or $before->isa('PPI::Token::Label');
++	return $before->isa('PPI::Token::Structure') && $before->content =~ /\A[;{}]\z/;
++}
++
+ # Assuming we are currently parsing the word 'x' -- alone, or glued to
+ # the digits of a number when $digits is true (x3 in $a x3, which is
+ # $a x 3) -- return true if previous tokens imply the x is an operator,
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 561558d2..74cfedc3 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2528,8 +2528,7 @@ for my $case ( [ q{print @1 x 2;}, q{Magic=@1} ], [ q{print @a1x;}, q{Symbol=@a1
+ # PL_expect = XTERM), so a <...> there is a glob: `use List::Util <max
+ # sum>;` imports max and sum, as qw<max sum> does.  PPI reads the < as a
+ # less-than after a word it cannot know.
+-TODO: {
+-    local $TODO = q{PCL §76: a <...> word list after use Module is lexed as a less-than};
++{
+     for my $case ( [ q{use Mod <a b>;}, q{QuoteLike::Readline=<a b>} ],
+                    [ q{use Mod<a b>;}, q{QuoteLike::Readline=<a b>} ],
+                    [ q{no Mod <a b>;}, q{QuoteLike::Readline=<a b>} ],
+-- 
+2.53.0
+

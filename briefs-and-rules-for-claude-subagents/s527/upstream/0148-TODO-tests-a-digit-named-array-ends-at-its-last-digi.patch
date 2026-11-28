@@ -1,7 +1,7 @@
 From 110381864b94b621618ee2038622468b85578854 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 22 Nov 2026 15:56:22 +0200
-Subject: [PATCH 148/149] TODO tests: a digit-named array ends at its last
+Subject: [PATCH 148/157] TODO tests: a digit-named array ends at its last
  digit
 
 perl reads a digit run after @ as the whole name of the array (toke.c

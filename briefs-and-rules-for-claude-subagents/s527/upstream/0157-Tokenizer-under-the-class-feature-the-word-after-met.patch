@@ -1,0 +1,65 @@
+From eca93377086b086e6464732b7db241bf836fd3e1 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 03:52:44 +0200
+Subject: [PATCH 157/157] Tokenizer: under the class feature the word after
+ method is its name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Under the class feature method names a method as sub names a sub, and
+perl reads the word after it as the name whatever it is spelled like, so
+method x { ... } and method y { ... } declare x and y.
+__current_token_is_forced_word now forces the word after a method Word
+while the tokenizer's feature set has class on (not after ->, where
+method is a method name of its own); the Lexer then builds the
+Statement::Sub it gives method NAME.  Without the feature, method is an
+ordinary word and nothing changes.
+
+The x had read as the repetition operator after a word, and the { after
+it took the class an operator's { gets.
+
+Fixes PCL §79 (its row).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Tokenizer.pm | 6 ++++++
+ t/ppi_bugs_pcl.t     | 5 +----
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 0941a983..c2564ab4 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -1304,6 +1304,12 @@ sub __current_token_is_forced_word {
+ 			return 1 if not $USUALLY_FORCES{$prevprev->content} and $prevprev->content ne '->';
+ 			return;
+ 		}
++
++		# Under the class feature method names a method as sub names a
++		# sub: method x { ... } and method y { ... } declare x and y
++		return 1 if $content eq 'method' and $prev->isa('PPI::Token::Word')
++			and $t->{feature_set} and $t->{feature_set}{class}
++			and !( $prevprev and $prevprev->content eq '->' );
+ 	}
+ 	# pos on $t->{line} is guaranteed to be set at this point.
+ 
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 0dd1d5f1..f4d38cf3 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2655,10 +2655,7 @@ for my $case ( [ 'my $x = not do { 1 };', 'PPI::Structure::Block' ],
+     my $code = qq{use feature "class";\nclass C { method x { 1 } method y { 2 } method s { 3 } method q { 4 } }};
+     my $doc = PPI::Document->new( \$code );
+     my @names = map { $_->name } @{ $doc->find('PPI::Statement::Sub') || [] };
+-    TODO: {
+-        local $TODO = q{PCL §79: a method named like an operator or a quote-like operator is not its name};
+-        is( "@names", 'x y s q', 'method x / y / s / q { ... }: four methods, by those names' );
+-    }
++    is( "@names", 'x y s q', 'method x / y / s / q { ... }: four methods, by those names' );
+ }
+ # The controls: a method named like a plain word, and sub x / sub y outside
+ # a class, were right.
+-- 
+2.53.0
+

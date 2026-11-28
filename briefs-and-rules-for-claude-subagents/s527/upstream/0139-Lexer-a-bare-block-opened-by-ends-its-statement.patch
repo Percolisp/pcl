@@ -1,7 +1,7 @@
 From 842e6bbdc61d9c86ab01b76826b78a94bcd83ba3 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 18:18:18 +0200
-Subject: [PATCH 139/149] Lexer: a bare block opened by { ; ends its statement
+Subject: [PATCH 139/157] Lexer: a bare block opened by { ; ends its statement
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

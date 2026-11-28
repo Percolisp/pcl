@@ -1,7 +1,7 @@
 From f8630d3edbc7c31dc9522ad998c42be81b3d3120 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 21:16:29 +0200
-Subject: [PATCH 145/149] Word: _ is a word except as a filetest's or stat's
+Subject: [PATCH 145/157] Word: _ is a word except as a filetest's or stat's
  operand
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

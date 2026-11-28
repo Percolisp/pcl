@@ -1,0 +1,88 @@
+From d5e6120d0f6cf3e9d7d968e55a5c202e6605680d Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 00:42:32 +0200
+Subject: [PATCH 150/157] TODO tests: <...> after use Module is the import list
+
+After the module name of a use or no statement, and after the version
+that may follow it, perl expects a term: the import list (toke.c
+S_tokenize_use sets PL_expect to XTERM before it forces the name and the
+version).  A <...> there is a glob, so a word list written as a glob is
+the list of names:
+
+    perl -e 'use List::Util <max sum>; print max(3, 9), sum(1, 2), "\n"'   # 93
+
+PPI reads the < after the module name as a less-than and the > as a
+greater-than, with the words between them as barewords.
+
+Seven rows inside a new PCL section 76 TODO block -- use and no, a
+qualified module name, no space before the <, a version before the list,
+use lib with paths, a label before the use -- and six controls that were
+right: the statement after a use, a version alone, qw<> and a list in
+parentheses, a less-than after a number, and the feature list written as
+a glob (use feature <say try> enables try).  Plan 628 -> 641.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 42 +++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 1e48ce52..561558d2 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 628 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 641 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2522,3 +2522,43 @@ for my $case ( [ q{print @1 x 2;}, q{Magic=@1} ], [ q{print @a1x;}, q{Symbol=@a1
+     my @t = map { short_class($_) } toks($code);
+     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+ }
++
++# §76 -- after the module name of a use or no statement, and after its
++# version, perl expects a term, the import list (toke.c S_tokenize_use sets
++# PL_expect = XTERM), so a <...> there is a glob: `use List::Util <max
++# sum>;` imports max and sum, as qw<max sum> does.  PPI reads the < as a
++# less-than after a word it cannot know.
++TODO: {
++    local $TODO = q{PCL §76: a <...> word list after use Module is lexed as a less-than};
++    for my $case ( [ q{use Mod <a b>;}, q{QuoteLike::Readline=<a b>} ],
++                   [ q{use Mod<a b>;}, q{QuoteLike::Readline=<a b>} ],
++                   [ q{no Mod <a b>;}, q{QuoteLike::Readline=<a b>} ],
++                   [ q{use Mod::Sub <a b>;}, q{QuoteLike::Readline=<a b>} ],
++                   [ q{use Mod 1.2 <a b>;}, q{QuoteLike::Readline=<a b>} ],
++                   [ q{use lib <./x ./y>;}, q{QuoteLike::Readline=<./x ./y>} ],
++                   [ q{L: use Mod <a b>;}, q{QuoteLike::Readline=<a b>} ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
++    }
++}
++# The controls: a version alone, the statement after the use, a qw() list
++# and a list in parentheses were right; the feature list written as a
++# glob names its features (use feature <say try> enables try), with no
++# warning.
++for my $case ( [ q{use Mod; $x < $y;}, q{Operator=<} ], [ q{use 5.010; 1 < 2;}, q{Operator=<} ],
++               [ q{use Mod qw<a b>;}, q{QuoteLike::Words=qw<a b>} ],
++               [ q{use Mod (<a b>);}, q{QuoteLike::Readline=<a b>} ],
++               [ q{my $n = 1 <2;}, q{Operator=<} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
++}
++{
++    my @warned;
++    local $SIG{__WARN__} = sub { push @warned, @_ };
++    my $code = q{use feature <say try>; try { 1 } catch ($e) { 2 }};
++    my $doc  = PPI::Document->new( \$code );
++    ok( $doc && $doc->find_first('PPI::Statement::Compound') && !@warned,
++        "$code: try is a compound statement, no warning (control)" ) or diag "warned: @warned";
++}
+-- 
+2.53.0
+

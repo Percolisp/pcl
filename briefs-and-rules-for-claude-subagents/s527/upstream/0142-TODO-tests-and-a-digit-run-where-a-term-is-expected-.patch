@@ -1,7 +1,7 @@
 From d920e6acf59a1c4d688c90085db0373c3e55d716 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sat, 21 Nov 2026 21:14:55 +0200
-Subject: [PATCH 142/149] TODO tests: % and a digit run where a term is
+Subject: [PATCH 142/157] TODO tests: % and a digit run where a term is
  expected names a hash
 
 perl reads %12 where it expects a term as the hash named 12, as it

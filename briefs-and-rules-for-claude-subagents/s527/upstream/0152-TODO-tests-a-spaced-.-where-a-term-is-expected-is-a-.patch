@@ -1,0 +1,99 @@
+From 48f533470e4e8c38e167183ae8eae1154032583c Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 00:47:20 +0200
+Subject: [PATCH 152/157] TODO tests: a spaced <...> where a term is expected
+ is a glob
+
+Where perl expects a term a < starts a readline or a glob whatever
+follows it (toke.c yyl_leftpointy: under any expectation but XOPERATOR
+scan_inputsymbol reads up to the >, and a <...> that holds more than a
+filehandle name is a glob).  So a word list written with spaces inside
+the brackets is a glob too:
+
+    perl -e 'my @r = ([< 4 5 >], [< 6 7 >]); print "@{$r[1]}\n"'   # 6 7
+    perl -e 'my $s = "p q"; my @w = < $s >; print "@w\n"'          # p q
+
+PPI reads a closed <...> where a term is expected as a readline only
+when no whitespace follows the <, and otherwise as a less-than -- except
+after ( ; = , and while, where an older rule takes it.  After [ { =>
+return a ternary ? or a binary operator, after use Module, and after the
+block of map or grep, the spaced list is a less-than, a list of words
+and a greater-than.
+
+Eleven rows inside a new PCL section 77 TODO block, and twelve controls
+that were right: the unspaced list, the spaced one after ( and =, a
+here-doc in the same slot, and the less-thans after a subscript, an
+element, a call, an array, a number, a method name, a builtin that takes
+no operand and a dereference block.  Plan 641 -> 664.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 48 +++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 47 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 74cfedc3..885f7e67 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 641 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 664 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2561,3 +2561,49 @@ for my $case ( [ q{use Mod; $x < $y;}, q{Operator=<} ], [ q{use 5.010; 1 < 2;},
+     ok( $doc && $doc->find_first('PPI::Statement::Compound') && !@warned,
+         "$code: try is a compound statement, no warning (control)" ) or diag "warned: @warned";
+ }
++
++# §77 -- where perl expects a term, a <...> is a readline or a glob whatever
++# its first character is (toke.c yyl_leftpointy: scan_inputsymbol reads to
++# the >), so a spaced word list is a glob too: `my @r = ([< 4 5 >], [< 6
++# 7 >]); print "@{$r[1]}"` prints 6 7, and `< $s >` globs the words of
++# $s.  PPI took a < with whitespace after it for a less-than everywhere
++# but after ( ; = , and while -- after [ { => return a binary operator ?
++# and after the block of map, grep or sort.
++TODO: {
++    local $TODO = q{PCL §77: a spaced <...> where a term is expected is lexed as a less-than};
++    for my $case ( [ q{my @r = ([< 4 5 >], [< 6 7 >]);}, q{QuoteLike::Readline=< 4 5 >} ],
++                   [ q{my $h = { < a b > };}, q{QuoteLike::Readline=< a b >} ],
++                   [ q{my %h = (k => < a b >);}, q{QuoteLike::Readline=< a b >} ],
++                   [ q{return < a b >;}, q{QuoteLike::Readline=< a b >} ],
++                   [ q{my @a = sort < ./g-*.t >;}, q{QuoteLike::Readline=< ./g-*.t >} ],
++                   [ q{my $c = $x ? < a b > : < c >;}, q{QuoteLike::Readline=< a b >} ],
++                   [ q{my @a = ($x . < a >);}, q{QuoteLike::Readline=< a >} ],
++                   [ q{my @w = [ < $s > ];}, q{QuoteLike::Readline=< $s >} ],
++                   [ q{use Mod < a b >;}, q{QuoteLike::Readline=< a b >} ],
++                   [ q{my %h = map { $_ => 1 } < a b >;}, q{QuoteLike::Readline=< a b >} ],
++                   [ q{my @g = grep { 1 } < a b >;}, q{QuoteLike::Readline=< a b >} ] ) {
++        my ( $code, $want ) = @$case;
++        my @t = map { short_class($_) } toks($code);
++        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
++    }
++}
++# The controls: the unspaced glob, the spaced one after ( and =, a here-doc
++# in the same slot, and the less-thans after a subscript, an element, a
++# call, an array, a number, a method name, a builtin that takes no operand
++# and a dereference block were right.
++for my $case ( [ q{my $r = [<4 5>];}, q{QuoteLike::Readline=<4 5>} ],
++               [ q{my @r = (< 4 5 >);}, q{QuoteLike::Readline=< 4 5 >} ],
++               [ q{my @a = < a b >;}, q{QuoteLike::Readline=< a b >} ],
++               [ qq{my \@a = ([<<"E", 1]);\nx\nE\n}, q{HereDoc=<<"E"} ],
++               [ q{print 1 if $h{a} < 2 and 2 > $h{a};}, q{Operator=<} ],
++               [ q{print 1 if $a[$i] < $b and $b > 1;}, q{Operator=<} ],
++               [ q{print 1 if f() < 3 and 3 > f();}, q{Operator=<} ],
++               [ q{print 1 if @a < 3 and 3 > @a;}, q{Operator=<} ],
++               [ q{print 1 if 1 < $x and $x > 1;}, q{Operator=<} ],
++               [ q{print 1 if $o->size < 3 and 3 > 1;}, q{Operator=<} ],
++               [ q{print 1 if time < 2**40 and 1 > 0;}, q{Operator=<} ],
++               [ q{print 1 if @{$r} < 3 and @{$r} > 1;}, q{Operator=<} ] ) {
++    my ( $code, $want ) = @$case;
++    my @t = map { short_class($_) } toks($code);
++    ok( grep( $_ eq $want, @t ), squash($code) . ": $want (control)" ) or diag "got: @t";
++}
+-- 
+2.53.0
+

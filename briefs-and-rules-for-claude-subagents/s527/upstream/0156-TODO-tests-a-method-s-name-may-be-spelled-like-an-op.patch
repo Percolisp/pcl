@@ -1,0 +1,74 @@
+From 39279909ea2c1912b194b91bfcfcba36958247e4 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 03:51:30 +0200
+Subject: [PATCH 156/157] TODO tests: a method's name may be spelled like an
+ operator
+
+Under the class feature method NAME declares a method, and perl reads the
+word after method as its name whatever it is spelled like (toke.c: the
+method keyword forces the next word, as sub does):
+
+    perl -E 'use feature "class"; no warnings; class C { method x { 7 } } say C->new->x'   # 7
+
+PPI forces the word after sub, package, use and no, not after method: the
+x of method x { ... } is the repetition operator (after a word), and
+method y { ... } / method s { ... } read a transliteration and a
+substitution that swallow the method body.
+
+The rows put the use feature on a line of its own: the tokenizer reads a
+line ahead of the lexer that switches the feature on.
+
+One row inside a new PCL section 79 TODO block (four methods named x, y,
+s and q), and one control that was right: method z, sub x, sub y.  Plan
+687 -> 689.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_bugs_pcl.t | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index a6b1ff57..0dd1d5f1 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -13,7 +13,7 @@
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+ use utf8;
+-use Test::More tests => 687 +($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 689 +($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ 
+@@ -2643,3 +2643,28 @@ for my $case ( [ 'my $x = not do { 1 };', 'PPI::Structure::Block' ],
+     my @c = bracket_classes( $code, '{' );
+     is( $c[0], $want, "$code: the first { is a " . short_class($want) . ' (control)' );
+ }
++
++# §79 -- under the class feature `method NAME` declares a method, and perl
++# reads the word after method as its name whatever it is spelled like
++# (toke.c: KEY_method forces the next word, as KEY_sub does), so a method
++# named x, y or s is a Statement::Sub: `use feature "class"; class C {
++# method x { 7 } } print C->new->x` prints 7.  PPI read the x as the
++# repetition operator after a word and the y and s as a transliteration and
++# a substitution, which swallowed the method body.
++{
++    my $code = qq{use feature "class";\nclass C { method x { 1 } method y { 2 } method s { 3 } method q { 4 } }};
++    my $doc = PPI::Document->new( \$code );
++    my @names = map { $_->name } @{ $doc->find('PPI::Statement::Sub') || [] };
++    TODO: {
++        local $TODO = q{PCL §79: a method named like an operator or a quote-like operator is not its name};
++        is( "@names", 'x y s q', 'method x / y / s / q { ... }: four methods, by those names' );
++    }
++}
++# The controls: a method named like a plain word, and sub x / sub y outside
++# a class, were right.
++{
++    my $code = qq{use feature "class";\nclass C { method z { 4 } } sub x { 1 } sub y { 2 }};
++    my $doc = PPI::Document->new( \$code );
++    my @names = map { $_->name } @{ $doc->find('PPI::Statement::Sub') || [] };
++    is( "@names", 'z x y', 'method z, sub x, sub y: subs by their names (control)' );
++}
+-- 
+2.53.0
+

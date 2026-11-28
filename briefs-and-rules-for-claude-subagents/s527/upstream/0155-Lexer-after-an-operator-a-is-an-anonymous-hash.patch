@@ -1,0 +1,233 @@
+From 9a7338de72b6deb4d083dd6441d70f5f24ab451e Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 28 Nov 2026 03:32:45 +0200
+Subject: [PATCH 155/157] Lexer: after an operator a { is an anonymous hash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After an operator, a \ or the named unary operators defined and ref,
+perl expects a term, and a { there is always an anonymous hash (toke.c
+yyl_leftcurly: under XTERM the { is HASHBRACK, whatever follows it), so
+not { map { $_ => 1 } @l }->{5} looks a key up in a hash built by the
+map.  _curly took the { for a block after every operator but the ones
+%CURLY_CLASSES names (= ||= &&= //= || && // ? : , => +); it now makes it
+a Constructor after any Operator but a postfix ++ or -- (which ends a
+term) and after a \ cast, and %CURLY_CLASSES learns defined and ref.  A
+sigil cast's { is still its dereference block, and the { of do, sub,
+eval, map, grep and sort still opens their block.
+
+t/ppi_token_unknown.t stored the old reading in its fixtures, marked
+there "should be constructor": the braces of 1*{2}, 1 % {x=>2} and the
+other operator rows.  They are updated, under four conditions: the
+fixture reproduced this bug (PCL section 78); perl's reading was probed
+(perl -MO=Deparse -e '$z = 1 * {x=>2}' prints $z = 1 * {'x', 2}); the
+diff is exactly the class of those braces (and the Statement::Expression
+inside {x=>2}, which every anonymous hash holding => gets); nothing else
+changes.  The {$args} fixture serves two kinds of rows -- after an
+operator, where it is now a hash, and after a sigil cast (+*{$args}),
+where it is a dereference block -- so the operator rows take a twin of
+it, @hashctor3_term, and the cast rows keep it as it was.
+
+Fixes PCL §78 (its ten rows).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Lexer.pm      | 14 ++++++++++
+ t/ppi_bugs_pcl.t      |  3 +--
+ t/ppi_token_unknown.t | 61 +++++++++++++++++++++++++------------------
+ 3 files changed, 51 insertions(+), 27 deletions(-)
+
+diff --git a/lib/PPI/Lexer.pm b/lib/PPI/Lexer.pm
+index 96696f25..abb4517c 100644
+--- a/lib/PPI/Lexer.pm
++++ b/lib/PPI/Lexer.pm
+@@ -1362,6 +1362,10 @@ my %CURLY_CLASSES = (
+ 	'warn'   => 'PPI::Structure::Constructor',
+ 	'exists' => 'PPI::Structure::Constructor',
+ 	'delete' => 'PPI::Structure::Constructor',
++	# and after the named unary operators that take a reference
++	# (defined { ... }->{k}, ref { ... })
++	'defined' => 'PPI::Structure::Constructor',
++	'ref'     => 'PPI::Structure::Constructor',
+ );
+ 
+ my @CURLY_LOOKAHEAD_CLASSES = (
+@@ -1465,6 +1469,16 @@ sub _curly {
+ 		}
+ 	}
+ 
++	# After any other operator -- a unary one (not { ... }->{k}, !{ ... }),
++	# a binary one (1 and { ... }, $s . { ... }->{k}) -- and after a \ perl
++	# expects a term, and a { there is always an anonymous hash (toke.c
++	# yyl_leftcurly: under XTERM the { is HASHBRACK).  A postfix ++ or --
++	# ends a term instead; a sigil cast's { is its dereference block.
++	return 'PPI::Structure::Constructor'
++		if $Element
++		and ( ( $Element->isa('PPI::Token::Operator') and $content ne '++' and $content ne '--' )
++			or ( $Element->isa('PPI::Token::Cast') and $content eq '\\' ) );
++
+ 	# Unless we are at the start of the statement, everything else should be a block
+ 	### FIXME This is possibly a bad choice, but will have to do for now.
+ 	return 'PPI::Structure::Block' if $Element;
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 8d4e88be..a6b1ff57 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -2613,8 +2613,7 @@ for my $case ( [ q{my $r = [<4 5>];}, q{QuoteLike::Readline=<4 5>} ],
+ # it): `my @l = (3, 4); print "no" if not { map { $_ => 1 } @l }->{5}`
+ # prints no.  PPI made the { a block after every operator but the few its
+ # table names (= || && // ? : , => +), and after these words.
+-TODO: {
+-    local $TODO = q{PCL §78: an anonymous hash after a unary operator is lexed as a block};
++{
+     for my $code ( 'print 1 if not { a => 1 }->{b};', 'my $y = !{ a => 1 }->{b};',
+                    'my $y = -{ a => 2 }->{a};', 'my $y = ~{ a => 2 }->{a};',
+                    'my $y = \{ a => 2 };', 'my $y = defined { a => 2 }->{a};',
+diff --git a/t/ppi_token_unknown.t b/t/ppi_token_unknown.t
+index ade15a72..bc29016e 100644
+--- a/t/ppi_token_unknown.t
++++ b/t/ppi_token_unknown.t
+@@ -37,8 +37,7 @@ OPERATOR_CAST: {
+ 	my @hashctor1 = (
+ 		'{2}',
+ 		[
+-#			'PPI::Structure::Constructor' => '{2}',
+-			'PPI::Structure::Block' => '{2}',  # should be constructor
++			'PPI::Structure::Constructor' => '{2}',
+ 			'PPI::Token::Structure' => '{',
+ #			'PPI::Statement::Expression' => '2',
+ 			'PPI::Statement' => '2',  # should be expression
+@@ -49,11 +48,9 @@ OPERATOR_CAST: {
+ 	my @hashctor2 = (
+ 		'{x=>2}',
+ 		[
+-#			'PPI::Structure::Constructor' => '{x=>2}',
+-			'PPI::Structure::Block' => '{x=>2}',  # should be constructor
++			'PPI::Structure::Constructor' => '{x=>2}',
+ 			'PPI::Token::Structure' => '{',
+-#			'PPI::Statement::Expression' => 'x=>2',
+-			'PPI::Statement' => 'x=>2',  # should be expression
++			'PPI::Statement::Expression' => 'x=>2',
+ 			'PPI::Token::Word' => 'x',
+ 			'PPI::Token::Operator' => '=>',
+ 			'PPI::Token::Number' => '2',
+@@ -66,6 +63,20 @@ OPERATOR_CAST: {
+ #			'PPI::Structure::Constructor' => '{$args}',
+ 			'PPI::Structure::Block' => '{$args}',  # should be constructor
+ 			'PPI::Token::Structure' => '{',
++#			'PPI::Statement::Expression' => '$args',
++			'PPI::Statement' => '$args',  # should be expression
++			'PPI::Token::Symbol' => '$args',
++			'PPI::Token::Structure' => '}',
++		]
++	);
++	# The same braces where perl expects a term -- after an operator, as in
++	# 1 * {$args} -- are an anonymous hash (toke.c yyl_leftcurly: under XTERM
++	# the { is HASHBRACK); after a cast they open its dereference block, above.
++	my @hashctor3_term = (
++		'{$args}',
++		[
++			'PPI::Structure::Constructor' => '{$args}',
++			'PPI::Token::Structure' => '{',
+ #			'PPI::Statement::Expression' => '$args',
+ 			'PPI::Statement' => '$args',  # should be expression
+ 			'PPI::Token::Symbol' => '$args',
+@@ -89,11 +100,11 @@ OPERATOR_CAST: {
+ 	test_varying_whitespace( @number, @asterisk_op, @hash );
+ 	test_varying_whitespace( @number, @asterisk_op, @hashctor1 );
+ 	test_varying_whitespace( @number, @asterisk_op, @hashctor2 );
+-	test_varying_whitespace( @number, @asterisk_op, @hashctor3 );
++	test_varying_whitespace( @number, @asterisk_op, @hashctor3_term );
+ 	test_varying_whitespace( @number, @exp_op, @bareword );
+-	test_varying_whitespace( @number, @exp_op, @hashctor3 );  # doesn't compile, but make sure ** is operator
++	test_varying_whitespace( @number, @exp_op, @hashctor3_term );  # doesn't compile, but make sure ** is operator
+ 	test_varying_whitespace( @number, @asteriskeq_op, @bareword );
+-	test_varying_whitespace( @number, @asteriskeq_op, @hashctor3 );  # doesn't compile, but make sure it's an operator
++	test_varying_whitespace( @number, @asteriskeq_op, @hashctor3_term );  # doesn't compile, but make sure it's an operator
+ {
+ 	local %known_bad_seps = map { $_ => 1 } qw( space );
+ 	test_varying_whitespace( @nothing, @asterisk_cast, @scalar );
+@@ -105,9 +116,9 @@ OPERATOR_CAST: {
+ 	test_varying_whitespace( @number, @percent_op, @glob );
+ 	test_varying_whitespace( @number, @percent_op, @hashctor1 );
+ 	test_varying_whitespace( @number, @percent_op, @hashctor2 );
+-	test_varying_whitespace( @number, @percent_op, @hashctor3 );
++	test_varying_whitespace( @number, @percent_op, @hashctor3_term );
+ 	test_varying_whitespace( @number, @percenteq_op, @bareword );
+-	test_varying_whitespace( @number, @percenteq_op, @hashctor3 );  # doesn't compile, but make sure it's an operator
++	test_varying_whitespace( @number, @percenteq_op, @hashctor3_term );  # doesn't compile, but make sure it's an operator
+ {
+ 	local %known_bad_seps = map { $_ => 1 } qw( space );
+ 	test_varying_whitespace( @nothing, @percent_cast, @scalar );
+@@ -120,9 +131,9 @@ OPERATOR_CAST: {
+ 	test_varying_whitespace( @number, @ampersand_op, @glob );
+ 	test_varying_whitespace( @number, @ampersand_op, @hashctor1 );
+ 	test_varying_whitespace( @number, @ampersand_op, @hashctor2 );
+-	test_varying_whitespace( @number, @ampersand_op, @hashctor3 );
++	test_varying_whitespace( @number, @ampersand_op, @hashctor3_term );
+ 	test_varying_whitespace( @number, @ampersandeq_op, @bareword );
+-	test_varying_whitespace( @number, @ampersandeq_op, @hashctor3 );  # doesn't compile, but make sure it's an operator
++	test_varying_whitespace( @number, @ampersandeq_op, @hashctor3_term );  # doesn't compile, but make sure it's an operator
+ {
+ 	local %known_bad_seps = map { $_ => 1 } qw( space );
+ 	test_varying_whitespace( @nothing, @ampersand_cast, @scalar );
+@@ -148,19 +159,19 @@ OPERATOR_CAST: {
+ 
+ 	my @single = ( "'3'", [ 'PPI::Token::Quote::Single' => "'3'", ] );
+ 	test_varying_whitespace( @single, @asterisk_op, @scalar );
+-	test_varying_whitespace( @single, @asterisk_op, @hashctor3 );
++	test_varying_whitespace( @single, @asterisk_op, @hashctor3_term );
+ 	test_varying_whitespace( @single, @percent_op, @scalar );
+-	test_varying_whitespace( @single, @percent_op, @hashctor3 );
++	test_varying_whitespace( @single, @percent_op, @hashctor3_term );
+ 	test_varying_whitespace( @single, @ampersand_op, @scalar );
+-	test_varying_whitespace( @single, @ampersand_op, @hashctor3 );
++	test_varying_whitespace( @single, @ampersand_op, @hashctor3_term );
+ 
+ 	my @double = ( '"3"', [ 'PPI::Token::Quote::Double' => '"3"', ] );
+ 	test_varying_whitespace( @double, @asterisk_op, @scalar );
+-	test_varying_whitespace( @double, @asterisk_op, @hashctor3 );
++	test_varying_whitespace( @double, @asterisk_op, @hashctor3_term );
+ 	test_varying_whitespace( @double, @percent_op, @scalar );
+-	test_varying_whitespace( @double, @percent_op, @hashctor3 );
++	test_varying_whitespace( @double, @percent_op, @hashctor3_term );
+ 	test_varying_whitespace( @double, @ampersand_op, @scalar );
+-	test_varying_whitespace( @double, @ampersand_op, @hashctor3 );
++	test_varying_whitespace( @double, @ampersand_op, @hashctor3_term );
+ 
+ 	test_varying_whitespace( @scalar, @asterisk_op, @scalar );
+ 	test_varying_whitespace( @scalar, @percent_op, @scalar );
+@@ -286,11 +297,11 @@ OPERATOR_CAST: {
+ 		]
+ 	);
+ 	test_varying_whitespace( @evalblock, @asterisk_op, @scalar );
+-	test_varying_whitespace( @double, @asterisk_op, @hashctor3 );
++	test_varying_whitespace( @double, @asterisk_op, @hashctor3_term );
+ 	test_varying_whitespace( @evalblock, @percent_op, @scalar );
+-	test_varying_whitespace( @evalblock, @percent_op, @hashctor3 );
++	test_varying_whitespace( @evalblock, @percent_op, @hashctor3_term );
+ 	test_varying_whitespace( @evalblock, @ampersand_op, @scalar );
+-	test_varying_whitespace( @evalblock, @ampersand_op, @hashctor3 );
++	test_varying_whitespace( @evalblock, @ampersand_op, @hashctor3_term );
+ 
+ 	my @evalstring = (
+ 		'eval "2"',
+@@ -300,11 +311,11 @@ OPERATOR_CAST: {
+ 		]
+ 	);
+ 	test_varying_whitespace( @evalstring, @asterisk_op, @scalar );
+-	test_varying_whitespace( @evalstring, @asterisk_op, @hashctor3 );
++	test_varying_whitespace( @evalstring, @asterisk_op, @hashctor3_term );
+ 	test_varying_whitespace( @evalstring, @percent_op, @scalar );
+-	test_varying_whitespace( @evalstring, @percent_op, @hashctor3 );
++	test_varying_whitespace( @evalstring, @percent_op, @hashctor3_term );
+ 	test_varying_whitespace( @evalstring, @ampersand_op, @scalar );
+-	test_varying_whitespace( @evalstring, @ampersand_op, @hashctor3 );
++	test_varying_whitespace( @evalstring, @ampersand_op, @hashctor3_term );
+ 
+ 	my @curly_subscript1 = (
+ 		'$y->{x}',
+-- 
+2.53.0
+

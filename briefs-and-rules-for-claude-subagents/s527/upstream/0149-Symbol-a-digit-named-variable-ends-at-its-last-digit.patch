@@ -1,7 +1,7 @@
 From 7fd02b752960524f33dec35019f71668241e5d63 Mon Sep 17 00:00:00 2001
 From: Bernt Budde <bernt.budde@gmail.com>
 Date: Sun, 22 Nov 2026 15:57:19 +0200
-Subject: [PATCH 149/149] Symbol: a digit-named variable ends at its last digit
+Subject: [PATCH 149/157] Symbol: a digit-named variable ends at its last digit
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
