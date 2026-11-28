@@ -403,20 +403,26 @@ like($ms, qr/\(p-list-ctx \(p-readline 'STDIN\)\)/,
      'readline <STDIN> list-context bound + bareword quote');
 
 # --- converted: gen_glob_form (E2.1) ----------------------------------------
-# literal / interpolated (p-. concat) / negated-char-class (glob + remove-if
-# filter) patterns, all with the wantarray bind.
+# literal / interpolated (ONE string, the string lowering's p-string-concat:
+# #1292, s543w -- the pieces joined with the binary p-. died at three) /
+# negated-char-class (glob + remove-if filter) patterns, all with the
+# wantarray bind.
 my $gl = Pl::Parser2->parse_code(<<'EOT');
 my $dir = "d";
+my $n = 1;
 my @a = <*.txt>;
 my @b = <$dir/*.c>;
 my @c = <[!._]*>;
 my $one = <*.log>;
+my @t = <$dir/x-$n.c>;
 print "@a";
 EOT
 like($gl, qr/\(p-list-ctx \(p-glob "\*\.txt"\)\)/,
      'glob literal → (p-glob "*.txt") list-context bound');
-like($gl, qr/\(p-glob \(p-\. \$dir "\/\*\.c"\)\)/,
-     'glob interpolated → (p-glob (p-. …))');
+like($gl, qr/\(p-glob \(p-string-concat \$dir "\/\*\.c"\)\)/,
+     'glob interpolated → (p-glob (p-string-concat …)), the "..." lowering');
+like($gl, qr/\(p-glob \(p-string-concat \$dir "\/x-" \$n "\.c"\)\)/,
+     'glob of three interpolation pieces → one n-ary (p-string-concat …) (#1292)');
 like($gl, qr/\(remove-if\s+\(lambda \(--f--\)\s+\(let \(\(--name-- \(file-namestring \(pathname --f--\)\)\)\)\s+\(and \(> \(length --name--\) 0\) \(find \(char --name-- 0\) "\._"\)\)\)\)\s+\(p-glob "\?\*"\)\)/,
      'glob [!chars] → glob "?"-simplified + remove-if filter');
 like($gl, qr/\(p-scalar-ctx \(p-glob "\*\.log"\)\)/,
