@@ -434,17 +434,10 @@ handle one level inside the dropped value), at a container cleared / an element 
 `splice` (s543m) or at exit, never at the block's
 end (`docs/not-supported.md` ns-escaping-filehandle; the open half is
 #5407 #5412); `caller`, `croak` and a runtime die name perl's file and line since
-s543a, except from a BEGIN / END / `use` body (#5101).  Cost flags kept by
-the s536 rule: s543g, `local($h{k}) = g(...)` +28.6 % (the call now
-runs in list context, as in perl) and a chained `local $h{a}{b}` +13.1 %;
-s543j, a sub ending in a valued
-`local` slice assignment +58 % a call (0.19 us: the right side is counted as perl counts it; no such sub in
-the 2,047-file list); s543h's flag is GONE (#5272 fixed in s543k: the first compile of a large eval text
-behind `package`, 83.5 -> 45.9 s); s543n, a bareword `print OUT` +9.5 % (6.5 ns a print) and `<IN>` +6.7 % (the name's key is read
-from the symbol first; `print STDOUT` -19 %, a print after the select idiom -56 %); s543m, the drop flush's test: `@a = ()` +81 % (0.14 us a clear of 20 elements), `%h = ()` +12 %,
-`$h{k} = undef` +36..47 % (10 ns a store), a store or `pop` under a modifier +17 % (#5540); s543l, `local $a[1]` +12 %, a bare `local $h{k}` as a sub's list value +23 %,
-`local %INC` +23 %, `local %SIG` 0.2 -> 0.3 us a scope; **s543t, EVERY SUB CALL pays for the capture scope: +8 % on a small recursive sub,
-+3..4 % on a closure call, +15 % for a matching sub in a loop (#5545, s543t2 is on it)**, `/=` `|=` `^=` +8 %.
+s543a, except from a BEGIN / END / `use` body (#5101).  Cost flags kept by the s536 rule (each with its numbers in `docs/session-log.md` s543 at its merge): s543g `local($h{k}) = g(...)` +29 %;
+s543j a valued `local` slice tail +58 % a call; s543n bareword `print OUT` +9.5 %, `<IN>` +6.7 %; s543m the drop flush's test, `@a = ()` +81 %,
+`$h{k} = undef` +36..47 % (#5540); s543l `local $a[1]` +12 %, `local %INC` +23 %; **s543t EVERY SUB CALL +3..8 % for the capture scope,
+a matching sub in a loop +15 % (#5545: s543t2 is on it)**.
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
 moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only
