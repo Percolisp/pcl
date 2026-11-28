@@ -4047,6 +4047,12 @@ silently green became honest failures:
   expected` pair, each in its plain and its `($s, %h)` spelling;
 - `perl-tests/time.t` — unchanged at 72/0: its `warning_is` rows expect NO
   warning, and PCL emits none, so they pass honestly.
+- `perl-tests/flip.t` — 13/1 → 12/2 (s543v): its `like($warn,
+  qr/uninitialized/)` row passed only because the numeric flip-flop printed
+  its `$.` uninitialized warning UNCONDITIONALLY; that default-off diagnostic
+  is now absent like every other one (a program without `use warnings` — a
+  compound assignment's flip-flop, `$m += 1 .. 3` — printed a stderr line
+  perl does not).
 
 In the companion suite the population is CLOSED and was measured whole — eight
 files call the three helpers anywhere under perl's `t/`, and all eight were
