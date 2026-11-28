@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 628;
+use Test::More tests => 664;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2508,4 +2508,88 @@ for my $case ( [ q{print @1 x 2;}, q{Magic=@1} ], [ q{print @a1x;}, q{Symbol=@a1
     my ( $code, $want ) = @$case;
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+
+# §76 -- after the module name of a use or no statement, and after its
+# version, perl expects a term, the import list (toke.c S_tokenize_use sets
+# PL_expect = XTERM), so a <...> there is a glob: `use List::Util <max
+# sum>;` imports max and sum, as qw<max sum> does.  PPI reads the < as a
+# less-than after a word it cannot know.
+{
+    for my $case ( [ q{use Mod <a b>;}, q{QuoteLike::Readline=<a b>} ],
+                   [ q{use Mod<a b>;}, q{QuoteLike::Readline=<a b>} ],
+                   [ q{no Mod <a b>;}, q{QuoteLike::Readline=<a b>} ],
+                   [ q{use Mod::Sub <a b>;}, q{QuoteLike::Readline=<a b>} ],
+                   [ q{use Mod 1.2 <a b>;}, q{QuoteLike::Readline=<a b>} ],
+                   [ q{use lib <./x ./y>;}, q{QuoteLike::Readline=<./x ./y>} ],
+                   [ q{L: use Mod <a b>;}, q{QuoteLike::Readline=<a b>} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: a version alone, the statement after the use, a qw() list
+# and a list in parentheses were right; the feature list written as a
+# glob names its features (use feature <say try> enables try), with no
+# warning.
+for my $case ( [ q{use Mod; $x < $y;}, q{Operator=<} ], [ q{use 5.010; 1 < 2;}, q{Operator=<} ],
+               [ q{use Mod qw<a b>;}, q{QuoteLike::Words=qw<a b>} ],
+               [ q{use Mod (<a b>);}, q{QuoteLike::Readline=<a b>} ],
+               [ q{my $n = 1 <2;}, q{Operator=<} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), "$code: $want (control)" ) or diag "got: @t";
+}
+{
+    my @warned;
+    local $SIG{__WARN__} = sub { push @warned, @_ };
+    my $code = q{use feature <say try>; try { 1 } catch ($e) { 2 }};
+    my $doc  = PPI::Document->new( \$code );
+    ok( $doc && $doc->find_first('PPI::Statement::Compound') && !@warned,
+        "$code: try is a compound statement, no warning (control)" ) or diag "warned: @warned";
+}
+
+# §77 -- where perl expects a term, a <...> is a readline or a glob whatever
+# its first character is (toke.c yyl_leftpointy: scan_inputsymbol reads to
+# the >), so a spaced word list is a glob too: `my @r = ([< 4 5 >], [< 6
+# 7 >]); print "@{$r[1]}"` prints 6 7, and `< $s >` globs the words of
+# $s.  PPI took a < with whitespace after it for a less-than everywhere
+# but after ( ; = , and while -- after [ { => return a binary operator ?
+# and after the block of map, grep or sort.
+{
+    for my $case ( [ q{my @r = ([< 4 5 >], [< 6 7 >]);}, q{QuoteLike::Readline=< 4 5 >} ],
+                   [ q{my $h = { < a b > };}, q{QuoteLike::Readline=< a b >} ],
+                   [ q{my %h = (k => < a b >);}, q{QuoteLike::Readline=< a b >} ],
+                   [ q{return < a b >;}, q{QuoteLike::Readline=< a b >} ],
+                   [ q{my @a = sort < ./g-*.t >;}, q{QuoteLike::Readline=< ./g-*.t >} ],
+                   [ q{my $c = $x ? < a b > : < c >;}, q{QuoteLike::Readline=< a b >} ],
+                   [ q{my @a = ($x . < a >);}, q{QuoteLike::Readline=< a >} ],
+                   [ q{my @w = [ < $s > ];}, q{QuoteLike::Readline=< $s >} ],
+                   [ q{use Mod < a b >;}, q{QuoteLike::Readline=< a b >} ],
+                   [ q{my %h = map { $_ => 1 } < a b >;}, q{QuoteLike::Readline=< a b >} ],
+                   [ q{my @g = grep { 1 } < a b >;}, q{QuoteLike::Readline=< a b >} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: the unspaced glob, the spaced one after ( and =, a here-doc
+# in the same slot, and the less-thans after a subscript, an element, a
+# call, an array, a number, a method name, a builtin that takes no operand
+# and a dereference block were right.
+for my $case ( [ q{my $r = [<4 5>];}, q{QuoteLike::Readline=<4 5>} ],
+               [ q{my @r = (< 4 5 >);}, q{QuoteLike::Readline=< 4 5 >} ],
+               [ q{my @a = < a b >;}, q{QuoteLike::Readline=< a b >} ],
+               [ qq{my \@a = ([<<"E", 1]);\nx\nE\n}, q{HereDoc=<<"E"} ],
+               [ q{print 1 if $h{a} < 2 and 2 > $h{a};}, q{Operator=<} ],
+               [ q{print 1 if $a[$i] < $b and $b > 1;}, q{Operator=<} ],
+               [ q{print 1 if f() < 3 and 3 > f();}, q{Operator=<} ],
+               [ q{print 1 if @a < 3 and 3 > @a;}, q{Operator=<} ],
+               [ q{print 1 if 1 < $x and $x > 1;}, q{Operator=<} ],
+               [ q{print 1 if $o->size < 3 and 3 > 1;}, q{Operator=<} ],
+               [ q{print 1 if time < 2**40 and 1 > 0;}, q{Operator=<} ],
+               [ q{print 1 if @{$r} < 3 and @{$r} > 1;}, q{Operator=<} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), squash($code) . ": $want (control)" ) or diag "got: @t";
 }

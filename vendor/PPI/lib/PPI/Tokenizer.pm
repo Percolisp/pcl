@@ -1184,6 +1184,7 @@ sub _term_expected {
 	return 1 if $self->_opcontext eq 'operand';
 	# A block's } does not end a term (map { $_ } ~~$y); a subscript's does
 	return !$self->_after_term if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
+	return 1 if $self->_after_use_module;
 	return '' if !$prev->isa('PPI::Token::Word');
 	return '' if $prevprev and $prevprev->isa('PPI::Token::Operator') and $prevprev->content eq '->';
 	my $word = $prev->content;
@@ -1193,6 +1194,22 @@ sub _term_expected {
 	# term position KEY_x goes to just_a_word)
 	return '' if $OPERATOR{$word} or $QUOTELIKE{$word};
 	return $KEYWORDS{$word} && !$NO_OPERAND{$word};
+}
+
+# After the module name of a use or no statement, and after the version
+# that may follow it (use Mod 1.2), perl expects a term: the import list
+# (toke.c S_tokenize_use sets PL_expect to XTERM before it forces the name
+# and the version), so use List::Util <max sum> imports max and sum.
+sub _after_use_module {
+	my $self = shift;
+	my @prev = $self->_previous_significant_tokens(4);
+	shift @prev if @prev and $prev[0]->isa('PPI::Token::Number');
+	my ( $module, $use, $before ) = @prev;
+	return '' if !$use or !$module->isa('PPI::Token::Word') or !$use->isa('PPI::Token::Word');
+	return '' if $use->content ne 'use' and $use->content ne 'no';
+	# The use or no opens its statement
+	return 1 if !$before or $before->isa('PPI::Token::Label');
+	return $before->isa('PPI::Token::Structure') && $before->content =~ /\A[;{}]\z/;
 }
 
 # Assuming we are currently parsing the word 'x' -- alone, or glued to

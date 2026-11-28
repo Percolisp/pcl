@@ -302,7 +302,8 @@ sub __TOKENIZER__on_char {
 		# $#foo < $bar
 		return 'Operator' if $prev and $prev->isa('PPI::Token::Symbol');
 		return 'Operator' if $prev and $prev->isa('PPI::Token::Magic');
-		return 'Operator' if $prev and $prev->isa('PPI::Token::Number');
+		return 'Operator' if $prev and $prev->isa('PPI::Token::Number')
+		  and !$t->_term_expected;   # use Mod 1.2 <a b>: the import list
 		return 'Operator' if $prev and $prev->isa('PPI::Token::ArrayIndex');
 
 		# If it is <<... it's a here-doc instead
@@ -314,9 +315,8 @@ sub __TOKENIZER__on_char {
 		# return <$fh>, $s .= <STDIN> -- a closed <...> is a readline or a
 		# glob, whatever it holds (toke.c yyl_leftpointy: PL_expect is not
 		# XOPERATOR).  A block's } is decided below.
-		pos $t->{line} = $t->{line_cursor};
 		return 'QuoteLike::Readline'
-		  if $t->{line} =~ m/\G<(?:>|[^<>=\s][^<>]*>)/gc
+		  if _closed_angle($t)
 		  and not ( $prev and $prev->isa('PPI::Token::Structure') and $prev->content eq '}' )
 		  and $t->_term_expected;
 
@@ -347,9 +347,8 @@ sub __TOKENIZER__on_char {
 			# word (map { ... } <op/*>, grep { ... } <$fh>) perl expects a
 			# term, so a closed <...> is a readline or a glob, whatever it
 			# holds.  After a subscript's } the < compares.
-			pos $t->{line} = $t->{line_cursor};
 			return 'QuoteLike::Readline'
-			  if $t->{line} =~ m/\G<(?:>|[^<>=\s][^<>]*>)/gc
+			  if _closed_angle($t)
 			  and $t->_after_statement_block;
 		}
 
@@ -494,6 +493,16 @@ sub __TOKENIZER__on_char {
 	# All the whitespaces are covered, so what to do
 	### For now, die
 	PPI::Exception->throw("Encountered unexpected character '$char'");
+}
+
+# True when the < at the tokenizer's cursor is closed by a > later on the
+# line: <>, or a < whose next character is not <, > or = (perl's
+# scan_inputsymbol reads to the first >, so whitespace inside counts as
+# any other character: < a b > is glob(" a b "), the words a and b).
+sub _closed_angle {
+	my $t = shift;
+	pos $t->{line} = $t->{line_cursor};
+	return $t->{line} =~ m/\G<(?:>|[^<>=][^<>]*>)/gc;
 }
 
 sub __TOKENIZER__on_line_end {

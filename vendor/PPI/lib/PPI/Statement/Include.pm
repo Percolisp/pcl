@@ -330,6 +330,15 @@ sub _decompose_argument {
 	  or $arg->isa("PPI::Statement::Expression");
 	my $as_text = $arg->can("literal") || $arg->can("string");
 	return $as_text->($arg) if $as_text;
+	# A word list written as a glob: <say signatures> is glob("say
+	# signatures"), the two words (perl reads a <...> that holds more than
+	# a filehandle name as a glob, and a pattern without a wildcard is
+	# itself); <say> alone reads the filehandle say and names nothing.
+	if ( $arg->isa("PPI::Token::QuoteLike::Readline") ) {
+		my ($inside) = $arg->content =~ /\A<(.*)>\z/s;
+		return if !defined $inside or $inside =~ /\A\$?[\w':]*\z/;
+		return split ' ', $inside if $inside !~ /[*?\[\]{}~\\"'\$\@]/;
+	}
 	return if $arg->isa("PPI::Token::Operator")
 	  or $arg->content eq ",";
 	warn "possibly unrecognized feature because of unknown arg decompose"

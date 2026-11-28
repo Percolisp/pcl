@@ -3324,6 +3324,70 @@ hands the rest back to the tokenizer, which reads the `x` after a term as the re
 PR: pending (`PR-BI.md`).  PCL needed no change.  Guard: the registry row §75, the twins' §75 rows (six
 + eight controls), `Pl/t/transpile-test-09.t`'s §75 row beside #1680's.
 
+## 76. `<...>` after the module name of `use` / `no` is lexed as `<` ... `>`: a word list written as a glob imports nothing (task #650)  [CONFIRMED 1.291 and PCL's branch 7fd02b75]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `93`):
+
+```perl
+use List::Util <max sum>; print max(3, 9), sum(1, 2), "\n";
+```
+
+**PPI tokens**: `Word(use) Word(List::Util) Operator(<) Word(max) Word(sum) Operator(>) Structure(;)` --
+also for `use Mod<a b>`, `no Mod <a b>`, `use Mod::Sub <a b>`, `use Mod 1.2 <a b>` (after a version) and
+`use lib <./x ./y>` (there the `/` started a match).  **Expected**: `QuoteLike::Readline(<max sum>)`.  After
+the module name, and after the version that may follow it, perl expects a TERM, the import list (toke.c
+`S_tokenize_use` sets `PL_expect = XTERM` before it forces the name and the version), so `<` opens
+`scan_inputsymbol`: `<max sum>` is `glob("max sum")`, the two words (a pattern without a wildcard is
+itself; `<a>` alone reads the filehandle `a`).  PPI's `_term_expected` could not know that the word before
+the `<` is a module name.  Its feature tracking (`Statement/Include.pm`) then also has to read the glob:
+`use feature <say signatures>` names `say` and `signatures`.
+
+**Impact on PCL**: LOUD -- nothing was imported and the first call died ("Undefined subroutine"):
+`Pl::PExpr::_fix_ppi_glob_after_block` rebuilt the run by joining the token contents WITHOUT the
+whitespace and emitted a READLINE of a filehandle named `maxsum`.  Six Rosetta programs (census B, s543q:
+`use List::Util <...>`, `use builtin <...>`, `use feature <...>`); `use Mod 1.2 <a b>` and
+`use lib <./x ./y>` dropped the statement.
+
+**FIXED on PCL's PPI branch** (s543w: group BJ, commit `d20ff42c` on branch `pcl-s543w`, vendored as
+vendor/PPI -- `Tokenizer::_term_expected` asks a new `_after_use_module` (the tokens before the `<` are a
+word and a `use` / `no` that opens its statement, with an optional Number between), the `<` arm of
+`Token/Whitespace.pm` asks it after a Number too, and `Statement/Include.pm`'s feature decomposition reads a
+word-list glob); upstream PR: pending (`PR-BJ.md`).  The PCL side: none -- a Readline in an import list was
+already globbed (`use Pm "x", <a b>` was right).  Guard: the registry row §76, the twins' §76 rows (seven +
+six controls), `Pl/t/` rows (s543w).
+
+## 77. A SPACED `<...>` where perl expects a term is lexed as `<` ... `>`: `[< 4 5 >]` (task #650)  [CONFIRMED 1.291 and PCL's branch 7fd02b75]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `6 7`):
+
+```perl
+my @r = ([< 4 5 >], [< 6 7 >]); print "@{$r[1]}\n";
+```
+
+**PPI tokens**: `Structure([) Operator(<) Number(4) Number(5) Operator(>) Structure(])`; the same after
+`{`, `=>`, `return`, `sort`, `?` / `:`, a binary operator (`$x . < a >`), `use Mod`, and after the block
+of `map` / `grep` (`map { $_ => 1 } < a b >`).  **Expected**: `QuoteLike::Readline(< 4 5 >)`.  Where perl
+expects a term, `<` opens `scan_inputsymbol` whatever character follows it (toke.c `yyl_leftpointy`: under
+any expectation but XOPERATOR), and scan_inputsymbol reads to the first `>`: `< 4 5 >` is
+`glob(" 4 5 ")`, the two words, and `< $s >` globs the words of `$s` (more than a filehandle name, so not
+a readline).  PPI's two readline tests of the `<` arm (`_term_expected`, `_after_statement_block`) asked
+for a `<...>` whose first character was not whitespace; only an older rule after `(` `;` `=` `,` and
+`while` took the spaced list.
+
+**Impact on PCL**: after `[` the statement DROPPED ("Handle single node of unknown type"; two Rosetta
+programs, a table of rows); after `{`, `=>`, `return`, `?`, `not`, `and` the list was SILENTLY empty or
+wrong; after a `map` / `grep` block silently empty; `sort < ./g-*.t >` dropped (#650 (b)).
+`Pl::Parser2::_repair_glob_pattern_cascade` takes only one contiguous pattern, by design.
+
+**FIXED on PCL's PPI branch** (s543w: group BK, commit `ea961bca` on branch `pcl-s543w`, vendored as
+vendor/PPI -- both readline tests of the `<` arm ask one helper, `_closed_angle`: `<>`, or a `<` whose next
+character is not `<`, `>` or `=`, closed by a `>` on the line; the term tests themselves are unchanged, so
+after a variable, a number, a call, a subscript, a method name or a builtin that takes no operand the `<`
+still compares); upstream PR: pending (`PR-BK.md`).  Over the 2,697 files of the wide list + the Rosetta
+corpus the token streams of BJ + BK differ from the base in exactly the 13 Rosetta programs that hold a
+word-list glob and nowhere else (s543w's token-signature A/B).  Guard: the registry row §77, the twins' §77
+rows (eleven + twelve controls), `Pl/t/` rows (s543w).
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting
