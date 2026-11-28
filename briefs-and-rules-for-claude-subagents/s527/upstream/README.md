@@ -218,3 +218,19 @@ digit-named variable ends at its last digit -- `@1x 2` is `@1 x 2`, `@12x3` is
 PPI program (docs/ppi-fix-at-source-s527.md §11): 72 catalogued mis-lexes are
 fixed on the branch, in 61 groups (A .. BI); a new PPI bug found from now on
 goes to the branch in the same two-commit shape from whichever batch finds it.
+
+## s543w (2026-11-28): the branch is now 157 commits, head eca93377 -- a Rosetta fix batch on the branch
+
+`0001-*.patch` .. `0157-*.patch` and `pcl-branch.bundle` are regenerated from
+the whole branch (`git format-patch origin/master..pcl`); pushed fast-forward
+to the BARE repo only (`7fd02b75` -> `eca93377`) at MERGE-READY; the fork's `pcl`
+is moved by the reviewing session.  Four groups, each "TODO tests, then the
+fix"; PPI's suite green after every commit, plain and AUTHOR_TESTING=1: **BJ**
+§76 a `<...>` after `use Module` (and its version) is the import list --
+`use List::Util <max sum>` (`PR-BJ.md`); **BK** §77 a spaced `<...>` where a
+term is expected is a glob -- `[< 4 5 >]`, `map { ... } < a b >` (`PR-BK.md`);
+**BL** §78 after an operator a `{` is an anonymous hash -- `not { ... }->{k}`;
+PPI's own `t/ppi_token_unknown.t` fixtures, marked "should be constructor",
+updated (`PR-BL.md`); **BM** §79 under the class feature the word after
+`method` is its name (`PR-BM.md`).  t/ppi_bugs_pcl.t: 628 -> 689 rows.  76
+catalogued mis-lexes are fixed on the branch, in 65 groups (A .. BM).

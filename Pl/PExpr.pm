@@ -7063,8 +7063,14 @@ sub _fix_ppi_negative_number_bug {
     # constant K => 3`) -- where PPI, which cannot know K, makes it the sigil
     # CAST of a glob / hash / code dereference (`f *$fh` passes a glob to a
     # list operator).  `K * $z` and `K*2` were right: PPI's own term rules.
+    # A perl keyword before the cast (`keys %$h`, `local *$g`) is never a
+    # term by declaration, and the prototype table is not asked (every
+    # question is a row of the unit's call-site table, Environment's
+    # _detect_note).
     if (ref($token) eq 'PPI::Token::Cast'
         && $OPERATOR_AFTER_DECLARED_TERM{$token->content}
+        && @result && ref($result[-1]) eq 'PPI::Token::Word'
+        && !Pl::PExpr::Config::is_core_keyword($result[-1]->content)
         && $self->_after_declared_term_word(\@result)) {
       push @result, bless { content => $token->content }, 'PPI::Token::Operator';
       next;
