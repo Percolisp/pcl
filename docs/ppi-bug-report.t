@@ -21,7 +21,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 702;
+use Test::More tests => 708;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2684,6 +2684,29 @@ for my $case ( [ q{my @s = sort $x - 1, 0;}, q{Operator=-} ],
                [ q{my @s = sort $x . "a";}, q{Operator=.} ],
                [ q{my @s = sort $by @l;}, q{Symbol=@l} ],
                [ q{my @s = sort $by x3();}, q{Word=x3} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), squash($code) . ": $want (control)" ) or diag "got: @t";
+}
+
+# §80, the readline -- in the same slot a < glued to an identifier starts the
+# list too (toke.c, case '$': < before an identifier start is XTERM there), so
+# `print $fh <DATA>` copies the DATA lines to $fh and `sort $by <FH>` sorts
+# the lines of FH.  PPI read the < after the scalar as a less-than.
+{
+    for my $case ( [ q{my @s = sort $by <FH>;}, q{QuoteLike::Readline=<FH>} ],
+                   [ q{print $fh <DATA>;}, q{QuoteLike::Readline=<DATA>} ],
+                   [ q{printf $fh <STDIN>;}, q{QuoteLike::Readline=<STDIN>} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: a spaced < and a < before a number or a variable stay the
+# less-than (perl: `print $fh <$in>` is a syntax error, `$x <4` compares).
+for my $case ( [ q{my @s = sort $x < 4;}, q{Operator=<} ],
+               [ q{my @s = sort $x <4;}, q{Operator=<} ],
+               [ q{print $x < $y;}, q{Operator=<} ] ) {
     my ( $code, $want ) = @$case;
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq $want, @t ), squash($code) . ": $want (control)" ) or diag "got: @t";

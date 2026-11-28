@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s543x
-branch-sha: f687c2ae945f63b456fb1d823f45def06bfae120
-lib-tree: 27ece9775ef90d4e75e99a9fbf250785680508e3
+branch-sha: a817863536d5f5d37f1493fc248a87c5ccea2336
+lib-tree: 517b8a7f76b01ac9ee1df7eb742c99c8d26a5f03
 date: 2026-11-28
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -90,6 +90,7 @@ fix: BK §77 ea961bca Whitespace: a spaced <...> where a term is expected is a g
 fix: BL §78 9a7338de Lexer: after an operator a { is an anonymous hash
 fix: BM §79 eca93377 Tokenizer: under the class feature the word after method is its name
 fix: BN §80 f687c2ae Tokenizer: sort's comparator slot is print's filehandle slot
+fix: BN §80 a8178635 Whitespace: a < glued to a name after the filehandle slot's scalar is a readline
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -249,3 +250,5 @@ commit: 39279909 TODO tests: a method's name may be spelled like an operator
 commit: eca93377 Tokenizer: under the class feature the word after method is its name
 commit: 787a5c35 TODO tests: sort's indirect-object slot reads the list as print's does
 commit: f687c2ae Tokenizer: sort's comparator slot is print's filehandle slot
+commit: 8a20d565 TODO tests: a readline after the filehandle slot's scalar
+commit: a8178635 Whitespace: a < glued to a name after the filehandle slot's scalar is a readline

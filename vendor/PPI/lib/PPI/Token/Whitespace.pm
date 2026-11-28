@@ -296,6 +296,16 @@ sub __TOKENIZER__on_char {
 		# Do some context stuff to guess which.
 		my $prev = $t->_last_significant_token;
 
+		# In the filehandle slot of print $fh LIST (and sort's comparator
+		# slot, sort $by LIST) a < glued to an identifier start opens a
+		# readline (toke.c, case '$': XTERM there): print $fh <DATA>,
+		# sort $by <FH>.  Before a $ or a digit it stays the less-than.
+		return 'QuoteLike::Readline'
+		  if $prev and $prev->isa('PPI::Token::Symbol')
+		  and $t->_after_scalar_filehandle
+		  and substr( $t->{line}, $t->{line_cursor} + 1, 1 ) =~ /\A[A-Za-z_]\z/
+		  and _closed_angle($t);
+
 		# The most common group of less-thans are used like
 		# $foo < $bar
 		# 1 < $bar

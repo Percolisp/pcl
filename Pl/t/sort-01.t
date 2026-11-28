@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 28;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -317,6 +317,17 @@ test_cl('sort $subref TERM ...: the comparator form, bare and parenthesised',
               [sort $by keys %h], [sort $nm @l], [reverse sort $by @l], [sort { $a <=> $b } $k > 0 ? (2, 1) : (9)]);
      print join("|", map { "@$_" } @r), "\n";',
     "3 2 1|3 2 1|3 2 1|3 2 1|3 2 1|0 -1|1 0|0.5 0.2|10 9|3 2 1|1 2 3|1 2\n");
+
+# A readline glued after the slot's scalar starts the LIST, in sort's slot as
+# in print's (§80's second pair): `sort $by <FH>` sorts FH's lines (it was
+# right only by accident, every scalar being the comparator), `print $fh <FH>`
+# copies them (a drop).
+test_cl('sort $subref <FH> / print $fh <FH>: a readline in the indirect-object slot',
+    'my $by = sub { $b cmp $a };
+     open FH, "<", \"b\na\nc\n" or die; my @s = sort $by <FH>; close FH;
+     print join(",", map { chomp; $_ } @s), "\n";
+     open G, "<", \"x\ny\n" or die; my $out = \*STDOUT; print $out <G>; close G;',
+    "c,b,a\nx\ny\n");
 
 # A comparator that names no sub dies as perl's sort does -- tidy, never the
 # raw `undefined-function NIL` the comparator's FUNCALL raised.

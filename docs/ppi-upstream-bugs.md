@@ -3475,11 +3475,15 @@ this fix `sort $by .5, .2` and `sort $by %h` would have become SILENT wrongs (a 
 
 **FIXED on PCL's PPI branch** (s543x: group BN, commit `f687c2ae` on branch `pcl-s543x` over `eca93377`,
 vendored as vendor/PPI -- `%FILEHANDLE_LISTOP` holds `sort`); the spaced operators (`sort $x - 1`, `% 2`,
-`* 2`, `/ 3`), the keyword `x` and `.` before a string keep their binary reading.  Not covered, as after
-print: a sign before a variable (`sort $by -$n`, `+1`: PPI's tokens are the same for the spaced and the glued
-form -- PCL's predicate reads the whitespace, #405) and `sort $by <FH>` (an Operator `<` after the slot, as
-after `print $fh`).  Upstream PR: pending.  Guard: the registry row §80, the twins' §80 rows (five + eight
-controls).
+`* 2`, `/ 3`), the keyword `x` and `.` before a string keep their binary reading.  **The readline half**
+(group BN's second pair, commit `a8178635`): in the slot -- print's as well as sort's -- a `<` glued to an
+identifier start is a readline (`print $fh <DATA>`, `sort $by <FH>`; the `<` arm of `Token/Whitespace.pm`
+asks `_after_scalar_filehandle` before it takes a `<` after a Symbol for a less-than); before a `$` or a digit
+it stays the less-than (`print $fh <$in>` is a perl syntax error).  `sort $by <FH>` had been right by accident
+on PCL (every scalar was the comparator); `print $fh <DATA>` (DBD-SQLite's t/rt_48393 holds it) was a drop.
+Not covered, as after print: a sign before a variable (`sort $by -$n`, `+1`: PPI's tokens are the same for the
+spaced and the glued form -- PCL's predicate reads the whitespace, #405).  Upstream PR: pending.  Guard: the
+registry row §80, the twins' §80 rows (five + eight controls, three readline rows + three controls).
 
 ---
 
