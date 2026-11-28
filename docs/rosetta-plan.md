@@ -182,6 +182,13 @@ beside its `EVERYDAY:` line.  The probe discipline stays (perl -> base ->
 tree, the shape the fix would break), but under the new rule a probe-found
 neighbour is filed with its frequency and left unless it is ordinary.
 
+* batch 1 (s543t, 2026-11-28): overloading as the big-number classes use it
+  and the bigint / bignum shims -- #5465 (a handler's scalar context), #5468
+  (an array operand's count), #5467 (`int`), #2560 (= #932's sub half: the
+  capture variables are scoped to the sub frame), #5500 (the import list),
+  #5501 (the assignment keys; with #5544, the `=` copy constructor) --
+  fourteen programs, **ROSETTA 547 -> 561 of 650**, buckets 0.
+
 **Step 4 -- beside it, one slot:** the ordinary silent wrongs that no Rosetta
 program holds but the board or perl's documentation does (the 21 of the first
 pass, less what s543l / s543m / s543n close).
