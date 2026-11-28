@@ -188,6 +188,13 @@ neighbour is filed with its frequency and left unless it is ordinary.
   capture variables are scoped to the sub frame), #5500 (the import list),
   #5501 (the assignment keys; with #5544, the `=` copy constructor) --
   fourteen programs, **ROSETTA 547 -> 561 of 650**, buckets 0.
+* batch 2 (s543w, 2026-11-28): the lexer's term position -- #650 (a word list
+  written as a glob: PPI groups BJ BK), #5508 (an anonymous hash after an
+  operator: BL), #5509 (`CONST*$var`: the prototype table), #1292 (a glob of
+  three interpolation pieces): eight programs, **ROSETTA 561 -> 569 of 650**
+  (547 -> 555 on its own base), buckets 0; the eight programs 0473
+  1011 1364 0316 0422 0493 0556 0445 `same`; 0119 0649 0710 keyed on what they
+  still hold (#5502, #5560, #5507).
 
 **Step 4 -- beside it, one slot:** the ordinary silent wrongs that no Rosetta
 program holds but the board or perl's documentation does (the 21 of the first
