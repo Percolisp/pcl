@@ -63,7 +63,6 @@ rosetta/0523-FizzBuzz	DIFF	1	LOUD	#1594 -- `(Bareword)[i]` in a list is called, 
 rosetta/0557-Gapful-numbers	DIFF	3	LOUD	#5517 -- a modifier foreach over `$start .. Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/0632-Host-introspection	DIFF	1	DROPPED	NS:ns-given-when -- refused, announced
 rosetta/0641-Idiomatically-determine-all-the-lowercas	DIFF	1	SILENT	#2440 -- POSIX bracket classes [[:lower:]] [[:upper:]] are ASCII ranges (perl: Unicode under unicode_strings)
-rosetta/0649-Inconsummate-numbers-in-base-10	DIFF	2	SILENT	#5560 -- `\K` in the table helper (the `use List::Util <...>` word list imports since s543w, #650)
 rosetta/0670-Integer-long-division	DIFF	4	SILENT	#1494 -- the \N{NAME} named-character escape is not implemented (literal text)
 rosetta/0672-Integer-overflow	DIFF	2	SILENT	NS:ns-integers-unbounded -- use integer arithmetic does not wrap at 64 bits (by design, #1513)
 rosetta/0710-Klarner-Rado-sequence	DIFF	2	SILENT	#5507 -- a state array of a signature sub is invisible to its nested subs (the `use List::Util <...>` word list imports since s543w, #650)
