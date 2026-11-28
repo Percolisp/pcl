@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 28;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -359,3 +359,11 @@ print $hi * U64::MAX32 + $lo, " ", U64::HI_1 - 1, "\n";},
            q{#3521 an overlay's second-package `()` constant is a TERM under an import list});
 both_agree(q{use IO::Compress::Base::Common qw(:Status); print STATUS_OK + 7, "\n";},
            q{#3521 an overlay's %EXPORT_TAGS expands `:Status`});
+# #5509 (s543w): after a word that is a term by DECLARATION a `*`, `%` or `&`
+# is the binary operator -- PPI, which cannot know the word, lexes `K*$z` as
+# the glob CAST `*$z` and the statement DROPPED; `K * $z` and `K*2` were
+# right.  A glob after a list operator (`print *STDOUT`, `f *$x`) stays one.
+both_agree(q{use constant K => 7; sub kd () { 2 } my ($z, $n, $m) = (2, 4, 3); my @a = (1, 2);
+print K*$z, " ", K%$n, " ", K&$m, " ", kd*$z**2, " ", 2*K*$z, " ", -K*$z, " ", K*@a, "\n";
+sub g { ref \$_[0] } my $x = \*STDOUT; print g(*$x), "\n";},
+           q{#5509 `*` `%` `&` after a declared constant are operators, not a glob / hash / code cast});

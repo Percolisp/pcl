@@ -1118,6 +1118,19 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => [],
    tasks => [650] },
+ { id => 78, kind => 'structure', dump => 'structure',
+   title => 'An anonymous-hash `{` right after an operator that is not in `_curly`\'s table (`not`, `!`, `-`, `~`, `and`, `.`, `*`, ...), after a `\\`, or after `defined` / `ref` is built as a BLOCK, where perl (under XTERM) always reads an anonymous hash',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'brace-class', shape => 'a { after an Operator (not a postfix ++ / --), a \\ cast, defined or ref, built as Block' },
+   fix => { kind => 'handler', handler => 'Pl::PExpr::_block_is_hash_constructor', changed => 'NONE deleted: PCL\'s content guess (`{ WORD => ... }`) STAYS for what PPI leaves ambiguous; it had missed a body that is not a pair head (`not { map { $_ => 1 } @l }->{k}` dereferenced the map\'s list); the branch now decides by the token before the `{`', commit => '9a7338de', group => 'BL', pr => undef },
+   repro => 'my @l = (3, 4); print "no\\n" if not { map { $_ => 1 } @l }->{5};',
+   perl => "no\n",
+   tokens => {
+     got  => ['Word=my', 'Symbol=@l', 'Operator==', 'Structure=( in Structure::List < Statement::Variable', 'Number=3', 'Operator=,', 'Number=4', 'Structure=) in Structure::List < Statement::Variable', 'Structure=;', 'Word=print', 'Quote::Double="no\\n"', 'Word=if', 'Operator=not', 'Structure={ in Structure::Block < Statement', 'Word=map', 'Structure={ in Structure::Block < Statement', 'Magic=$_', 'Operator==>', 'Number=1', 'Structure=} in Structure::Block < Statement', 'Symbol=@l', 'Structure=} in Structure::Block < Statement', 'Operator=->', 'Structure={ in Structure::Subscript < Statement', 'Number=5', 'Structure=} in Structure::Subscript < Statement', 'Structure=;'],
+     want => ['Word=my', 'Symbol=@l', 'Operator==', 'Structure=( in Structure::List < Statement::Variable', 'Number=3', 'Operator=,', 'Number=4', 'Structure=) in Structure::List < Statement::Variable', 'Structure=;', 'Word=print', 'Quote::Double="no\\n"', 'Word=if', 'Operator=not', 'Structure={ in Structure::Constructor < Statement', 'Word=map', 'Structure={ in Structure::Block < Statement', 'Magic=$_', 'Operator==>', 'Number=1', 'Structure=} in Structure::Block < Statement', 'Symbol=@l', 'Structure=} in Structure::Constructor < Statement', 'Operator=->', 'Structure={ in Structure::Subscript < Statement', 'Number=5', 'Structure=} in Structure::Subscript < Statement', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [5508] },
 );
 
 # The one accessor.

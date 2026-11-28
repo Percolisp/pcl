@@ -1362,6 +1362,10 @@ my %CURLY_CLASSES = (
 	'warn'   => 'PPI::Structure::Constructor',
 	'exists' => 'PPI::Structure::Constructor',
 	'delete' => 'PPI::Structure::Constructor',
+	# and after the named unary operators that take a reference
+	# (defined { ... }->{k}, ref { ... })
+	'defined' => 'PPI::Structure::Constructor',
+	'ref'     => 'PPI::Structure::Constructor',
 );
 
 my @CURLY_LOOKAHEAD_CLASSES = (
@@ -1464,6 +1468,16 @@ sub _curly {
 			return 'PPI::Structure::Constructor';
 		}
 	}
+
+	# After any other operator -- a unary one (not { ... }->{k}, !{ ... }),
+	# a binary one (1 and { ... }, $s . { ... }->{k}) -- and after a \ perl
+	# expects a term, and a { there is always an anonymous hash (toke.c
+	# yyl_leftcurly: under XTERM the { is HASHBRACK).  A postfix ++ or --
+	# ends a term instead; a sigil cast's { is its dereference block.
+	return 'PPI::Structure::Constructor'
+		if $Element
+		and ( ( $Element->isa('PPI::Token::Operator') and $content ne '++' and $content ne '--' )
+			or ( $Element->isa('PPI::Token::Cast') and $content eq '\\' ) );
 
 	# Unless we are at the start of the statement, everything else should be a block
 	### FIXME This is possibly a bad choice, but will have to do for now.

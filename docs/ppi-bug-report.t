@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 664;
+use Test::More tests => 687;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2592,4 +2592,41 @@ for my $case ( [ q{my $r = [<4 5>];}, q{QuoteLike::Readline=<4 5>} ],
     my ( $code, $want ) = @$case;
     my @t = map { short_class($_) } toks($code);
     ok( grep( $_ eq $want, @t ), squash($code) . ": $want (control)" ) or diag "got: @t";
+}
+
+# §78 -- after an operator, a \ or a named unary operator such as defined
+# and ref, perl expects a term, and a { there is always an anonymous hash
+# (toke.c yyl_leftcurly: under XTERM the { is HASHBRACK, whatever follows
+# it): `my @l = (3, 4); print "no" if not { map { $_ => 1 } @l }->{5}`
+# prints no.  PPI made the { a block after every operator but the few its
+# table names (= || && // ? : , => +), and after these words.
+{
+    for my $code ( 'print 1 if not { a => 1 }->{b};', 'my $y = !{ a => 1 }->{b};',
+                   'my $y = -{ a => 2 }->{a};', 'my $y = ~{ a => 2 }->{a};',
+                   'my $y = \{ a => 2 };', 'my $y = defined { a => 2 }->{a};',
+                   'my $y = ref { a => 2 };', 'my $y = 1 and { a => 1 }->{a};',
+                   'my $y = $x . { a => 1 }->{a};', 'my $y = not { map { $_ => 1 } @l }->{4};' ) {
+        my @c = bracket_classes( $code, '{' );
+        is( $c[0], 'PPI::Structure::Constructor', "$code: the { is an anonymous hash" );
+    }
+}
+# The controls: after do, sub, eval, map, grep and sort, after the ) of a
+# condition, at a statement's start and after a dereferencing sigil the {
+# opens a block; after + = and return it was already a hash.
+for my $case ( [ 'my $x = not do { 1 };', 'PPI::Structure::Block' ],
+               [ 'my $y = !sub { 0 }->();', 'PPI::Structure::Block' ],
+               [ 'my $y = !eval { 0 };', 'PPI::Structure::Block' ],
+               [ 'my @m = map { $_ * 2 } @l;', 'PPI::Structure::Block' ],
+               [ 'my @g = grep { $_ } @l;', 'PPI::Structure::Block' ],
+               [ 'my @s = sort { $b <=> $a } @l;', 'PPI::Structure::Block' ],
+               [ 'if ($x) { 1 }', 'PPI::Structure::Block' ],
+               [ '1; { print 1 }', 'PPI::Structure::Block' ],
+               [ 'my $n = 1 + @{$r};', 'PPI::Structure::Block' ],
+               [ '*{"x"} = sub { 1 };', 'PPI::Structure::Block' ],
+               [ 'my $y = +{ a => 2 }->{a};', 'PPI::Structure::Constructor' ],
+               [ 'my $y = { a => 2 };', 'PPI::Structure::Constructor' ],
+               [ 'return { a => 2 };', 'PPI::Structure::Constructor' ] ) {
+    my ( $code, $want ) = @$case;
+    my @c = bracket_classes( $code, '{' );
+    is( $c[0], $want, "$code: the first { is a " . short_class($want) . ' (control)' );
 }

@@ -6293,10 +6293,10 @@ sub gen_glob_form {
     $pattern_flat = Pl::CLForm::to_flat($pf);
     $call = ['p-glob', $pf];
   } elsif (@$kids > 1) {
-    my @parts  = map { $self->gen_node_form($_) } @$kids;
-    my $concat = ['p-.', @parts];
-    $pattern_flat = Pl::CLForm::to_flat($concat);
-    $call = ['p-glob', $concat];
+    # PExpr hands an interpolated pattern over as ONE string node (#1292,
+    # s543w); pieces joined here with the binary p-. were the bug.
+    die "PCL internal: a glob node holds " . scalar(@$kids)
+      . " pattern parts; the pattern is one string node (#1292)\n";
   } else {
     $pattern_flat = '"*"';
     $call = ['p-glob'];

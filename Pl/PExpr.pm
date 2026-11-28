@@ -1017,13 +1017,12 @@ sub parse {
           # (task #694) and the postderef_qq feature lookup both have to ask
           # the real document token.
           my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str, $e1);
-          # The interpolation returns a string_concat node, add its children
-          # (the override's call takes it whole: ONE pattern argument)
-          if (defined $govr) {
-            $self->add_child_to_node($node_id, $interp_id);
-          } else {
-            $self->add_child_flattening($node_id, $interp_id, 'string_concat');
-          }
+          # The interpolation's string_concat node is the ONE pattern argument,
+          # lowered by the string lowering as any "..." is (#1292, s543w): its
+          # pieces were flattened into the glob node, and the glob joined them
+          # with the BINARY p-. -- `<a${h}b>`, `< $s >` (three pieces) called it
+          # with three arguments and the program died at load.
+          $self->add_child_to_node($node_id, $interp_id);
         } else {
           # Static pattern - store as literal string
           my $str_token = PPI::Token::Quote::Double->new(qq{"$inner"});
@@ -7010,6 +7009,9 @@ sub _is_number_token {
   return ref($t) =~ /\APPI::Token::Number(?:::\w+)?\z/ ? 1 : 0;
 }
 
+# The sigil casts that are binary operators after a declared term (below).
+our %OPERATOR_AFTER_DECLARED_TERM = map { $_ => 1 } qw(* % &);
+
 sub _fix_ppi_negative_number_bug {
   my $self   = shift;
   my $tokens = shift;
@@ -7046,15 +7048,7 @@ sub _fix_ppi_negative_number_bug {
       # the declared term, s543i.  A NEGATED word (`-K -1`, `-foo -1`: one
       # Word until _split_negated_call_words below) is a term too -- the
       # negation of a term, or perl's string "-foo".
-      my $is_expr_end = 0;
-      if ($i > 0) {
-        my $prev = $result[-1];  # Use result array since we may have inserted
-        $is_expr_end = ref($prev) eq 'PPI::Token::Word'
-                    && ($prev->content =~ /\A-/
-                        || $self->_is_zero_arg_func($prev->content));
-      }
-
-      if ($is_expr_end) {
+      if ($self->_after_declared_term_word(\@result)) {
         # Split into minus operator and positive number
         my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
         my $pos_num  = bless { content => $positive_part }, ref($token);
@@ -7063,10 +7057,35 @@ sub _fix_ppi_negative_number_bug {
       }
     }
 
+    # THE SAME TERM, ANOTHER CHARACTER (#5509, s543w): after a word that is a
+    # term by declaration a `*`, `%` or `&` is the binary operator -- `K*$z` is
+    # K times $z, `K%$n` K modulo $n, `K&$m` a bitwise and (perl, after `use
+    # constant K => 3`) -- where PPI, which cannot know K, makes it the sigil
+    # CAST of a glob / hash / code dereference (`f *$fh` passes a glob to a
+    # list operator).  `K * $z` and `K*2` were right: PPI's own term rules.
+    if (ref($token) eq 'PPI::Token::Cast'
+        && $OPERATOR_AFTER_DECLARED_TERM{$token->content}
+        && $self->_after_declared_term_word(\@result)) {
+      push @result, bless { content => $token->content }, 'PPI::Token::Operator';
+      next;
+    }
+
     push @result, $token;
   }
 
   return @result;
+}
+
+# Is the last token of RESULT a word that ENDS A TERM by declaration -- a
+# constant or a `()`-prototyped sub, which only PCL's prototype table knows --
+# or a NEGATED word (`-K`, `-foo`: the negation of a term, or perl's string
+# "-foo")?  The one question both arms of _fix_ppi_negative_number_bug ask.
+sub _after_declared_term_word {
+  my ($self, $result) = @_;
+  my $prev = @$result ? $result->[-1] : undef;
+  return 0 if !$prev || ref($prev) ne 'PPI::Token::Word';
+  return 1 if $prev->content =~ /\A-/;
+  return $self->_is_zero_arg_func($prev->content) ? 1 : 0;
 }
 
 

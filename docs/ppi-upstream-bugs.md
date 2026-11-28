@@ -3388,6 +3388,40 @@ corpus the token streams of BJ + BK differ from the base in exactly the 13 Roset
 word-list glob and nowhere else (s543w's token-signature A/B).  Guard: the registry row §77, the twins' §77
 rows (eleven + twelve controls), `Pl/t/` rows (s543w).
 
+## 78. An anonymous hash right after an operator (`not { ... }->{k}`, `!{ ... }`, `\{ ... }`) is built as a BLOCK (task #5508)  [CONFIRMED 1.291 and PCL's branch 7fd02b75]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `no`):
+
+```perl
+my @l = (3, 4); print "no\n" if not { map { $_ => 1 } @l }->{5};
+```
+
+**PPI structure**: `Operator(not) Structure::Block({ map { ... } @l }) Operator(->) Structure::Subscript({5})`;
+the same after `!`, `-`, `~`, `and`, `.`, `*`, a `\` cast, `defined` and `ref`.  **Expected**:
+`Structure::Constructor`.  After an operator perl expects a TERM, and a `{` there is ALWAYS an anonymous hash
+(toke.c `yyl_leftcurly`: under XTERM it is HASHBRACK, whatever follows; `perl -MO=Deparse -e '$w = not
+{a=>1}->{a}'` prints `$w = !{'a', 1}->{'a'}`).  PPI's `Lexer::_curly` makes the `{` a Constructor only after
+the operators its `%CURLY_CLASSES` names (`=` `||=` `&&=` `//=` `||` `&&` `//` `?` `:` `,` `=>` `+`) and the
+words `scalar` `return` `bless` `die` `warn` `exists` `delete`; everything else after an element is a Block.
+PPI's own `t/ppi_token_unknown.t` recorded the bug: its `1*{2}` / `1 % {x=>2}` fixtures said "should be
+constructor".
+
+**Impact on PCL**: LOUD where the body is not a `WORD =>` pair head: `PExpr::_block_is_hash_constructor`
+re-reads such a Block as a hash by its first tokens (`!{ a => 1 }->{b}` was right), but a `map` body after
+`not` / `!` was dereferenced as the map's LIST ("Not a HASH reference"; Rosetta 0493, census B).
+
+**FIXED on PCL's PPI branch** (s543w: group BL, commit `9a7338de` on branch `pcl-s543w`, vendored as
+vendor/PPI -- `_curly` makes the `{` a Constructor after any Operator but a postfix `++` / `--`, and after a
+`\` cast; `%CURLY_CLASSES` learns `defined` and `ref`; a sigil cast's `{` stays its dereference block and the
+`{` of `do`, `sub`, `eval`, `map`, `grep`, `sort` their block); PPI's fixture rows updated in the fix commit
+under the four conjuncts (the `{$args}` fixture serves cast rows too, so its operator rows take a twin
+`@hashctor3_term`); upstream PR: pending (`PR-BL.md`).  The PCL side: none; `_block_is_hash_constructor`
+STAYS (it decides what PPI leaves ambiguous).  Over the 2,697-file wide list + Rosetta the structure changes
+in 9 files: 0493 (the target), `ref {}` in core CPAN/Mirrors.pm (twice), `\{}` in t/perf/opcount.t, `-l{0}`
+in t/base/lex.t (all perl's reading), and five t/class/*.t files where `method x { ... }` lexes `x` as the
+repetition operator (a separate mis-lex in a refused `class` statement: #5601).  Guard: the registry row
+§78, the twins' §78 rows (ten + thirteen controls), `Pl/t/anon-hash-term-01.t` (s543w).
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting

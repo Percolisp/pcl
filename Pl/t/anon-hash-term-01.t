@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 6;
 
 sub write_pl {
     my ($code) = @_;
@@ -110,6 +110,20 @@ my $v = ${ { %h, z => 9 } }{z}; print "$v\n";
 my @g = grep { { $_, 1 }->{$_} } 1 .. 2; print scalar(@g), "\n";
 my @k = map { # comment
   { id => $_, %h } } 1; print join(",", sort keys %{ $k[0] }), "\n";
+PL
+
+# #5508 (s543w): after ANY operator, a \ or defined / ref perl expects a term
+# (toke.c XTERM), so the { is an anonymous hash -- PPI made it a block after
+# all but the operators its table named, and PCL then dereferenced the map's
+# LIST (`Not a HASH reference`); `{ WORD => ... }` bodies were caught by
+# `_block_is_hash_constructor`, a map body was not.
+both_agree(<<'PL', 'PPI §78: not / ! / and / . / \ / defined / ref { ... } take an anonymous hash, a map body too');
+my @l = (3, 4);
+print "no\n" if not { map { $_ => 1 } @l }->{5};
+my $y = !{ map { $_ => 1 } @l }->{4}; my $z = (1 and { map { $_ => 2 } @l }->{3});
+my $c = "k" . { map { $_ => "v" } @l }->{4}; my $r = \{ map { $_ => 1 } @l };
+print "[$y] $z $c ", ref($r), " ", (defined { map { $_ => 1 } @l }->{3} ? "d" : "u"), " ", ref { map { $_ => 1 } @l }, "\n";
+my $x = not do { 1 }; my $s = !sub { 0 }->(); print "[$x] [$s]\n";
 PL
 
 both_agree(<<'PL', 'PPI §59 negatives: after map {; and inside do { } the { starts a statement (a block)');

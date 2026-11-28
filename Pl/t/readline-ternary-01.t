@@ -63,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 39;
+plan tests => 40;
 
 sub write_pl {
     my ($code) = @_;
@@ -292,6 +292,15 @@ agree_in_globdir(<<'PL', '#650: after a user sub the rebuild keeps the space bet
 sub g { @_ }
 my @x = g <g-*.t g-a.t>;
 print "[@x]\n";
+PL
+# #1292 (s543w): an interpolated pattern of THREE or more pieces called the
+# binary p-. with three arguments and the program died at load; the pattern
+# is now one string, lowered as any "..." is.
+agree_in_globdir(<<'PL', '#1292: <$a$b$c>, <g-${h}.t>, < $s > and <@list> glob the interpolated string');
+my ($a, $b, $c, $h) = ("g-", "a", ".t", "b");
+my @f = <$a$b$c>; my @g = <g-${h}.t>;
+my $s = "p q r"; my @w = < $s >; my @l = ("g-a.t", "z"); my @m = <@l>;
+print "[@f] [@g] [@w] [@m]\n";
 PL
 # The reverse error: PExpr's rebuild took `< 2*$n and 3 >` for a glob after
 # a subscript, a call, a method name, `time` or a declared constant -- only a
