@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 27;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -283,3 +283,48 @@ test_cl('sort K->new->names: a WORD before -> is the list, not the comparator',
      print join(",", sort K->new->names), "|", join(",", sort(K->new->names)), "|",
            join(",", sort { $b cmp $a } K->new->names), "|", join(",", sort foo @l), "\n";',
     "a,b,c|a,b,c|c,b,a|x,y,z\n");
+
+# #5510 (s543x): after `sort`, a scalar is the SUBREF only when a TERM follows
+# it (perly.y `LSTOP indirob listexpr`; toke.c reads the slot as print's
+# filehandle slot).  An infix operator, a comma or nothing makes it the first
+# element of the LIST -- each of these was a drop, a raw `NIL is undefined`, or
+# the first element silently gone.  Probed perl 5.40.3.
+test_cl('sort $scalar OP ...: an infix operator, a comma or nothing after the scalar starts the LIST',
+    'my $text = "b1 a2 c3"; my $n = 3; my ($p, $q) = ("b", "a"); my @r7;
+     my @r1 = sort $text =~ /\w\d/g;
+     my @r2 = sort $n > 0 ? (3, 1, 2) : (9);
+     my @r3 = sort $n + 1, 0;
+     my @r4 = sort $p, $q;
+     my @r5 = sort $n;
+     my @r6 = (sort $n);
+     for (3) { push @r7, sort $_ > 0 ? 1 .. $_ : $_ .. 1 }
+     my @r8 = sort $n . "a", "b";
+     my @r9 = sort $n x 2;
+     my @ra = sort($text =~ /\w\d/g);
+     my @rb = sort($p, $q);
+     print join("|", map { "@$_" } \@r1, \@r2, \@r3, \@r4, \@r5, \@r6, \@r7, \@r8, \@r9, \@ra, \@rb), "\n";',
+    "a2 b1 c3|1 2 3|0 4|a b|3|3|1 2 3|3a b|33|a2 b1 c3|a b\n");
+
+# The comparator form keeps its reading, bare and parenthesised, and with the
+# terms PPI now lexes in the slot as after `print $fh` (§80: `-1` a number,
+# `.5` a float; `+1` glued after a space is a term by the sign rule).
+test_cl('sort $subref TERM ...: the comparator form, bare and parenthesised',
+    'our ($a, $b);
+     sub desc { $b <=> $a }
+     my $by = sub { $b <=> $a }; my @l = (3, 1, 2); my %h = (9 => 1, 10 => 1); my $nm = "desc"; my $k = 2;
+     my @r = ([sort $by @l], [sort $by 3, 1, 2], [sort $by (3, 1, 2)], [sort($by @l)],
+              [sort($by 3, 1, 2)], [sort $by -1, 0], [sort $by +1, 0], [sort $by .5, .2],
+              [sort $by keys %h], [sort $nm @l], [reverse sort $by @l], [sort { $a <=> $b } $k > 0 ? (2, 1) : (9)]);
+     print join("|", map { "@$_" } @r), "\n";',
+    "3 2 1|3 2 1|3 2 1|3 2 1|3 2 1|0 -1|1 0|0.5 0.2|10 9|3 2 1|1 2 3|1 2\n");
+
+# A comparator that names no sub dies as perl's sort does -- tidy, never the
+# raw `undefined-function NIL` the comparator's FUNCALL raised.
+test_cl('sort $subref LIST: a comparator that names no sub dies perl-shaped',
+    'for my $c ([1], "nosuch", 7) {
+       my $x = $c;
+       my $ok = eval { my @s = sort $x 3, 1, 2; 1 };
+       (my $e = $@) =~ s/ at .*//s;
+       print $ok ? "lived\n" : "$e\n";
+     }',
+    "Not a subroutine reference\nUndefined sort subroutine \"main::nosuch\" called\nUndefined sort subroutine \"main::7\" called\n");

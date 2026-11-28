@@ -29477,7 +29477,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-17300"
+(defparameter *pcl-cache-generation* "v2-17350"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -33076,12 +33076,40 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun p-sort-get-fn (val)
   "Get a CL function from a Perl scalar sort comparator (coderef, string, glob, or glob ref).
-   Handles: \\&foo (double-boxed fn), *foo (typeglob), \\*foo (box of typeglob), 'name' (string)."
+   Handles: \\&foo (double-boxed fn), *foo (typeglob), \\*foo (box of typeglob), 'name' (string).
+   `sort $var LIST' is its only caller, and a VAL that names no sub dies as perl's
+   sort does (#5510) -- a reference to anything but code \"Not a subroutine
+   reference\", a name with no sub (a string, a number, undef) \"Undefined sort
+   subroutine \\\"PKG::NAME\\\" called\" -- where it used to answer NIL and the
+   comparator FUNCALLed it: a raw `undefined-function NIL'.  (perl checks at
+   sort entry, PCL at the first comparison: a list of fewer than two elements
+   is sorted without the check.)"
   (multiple-value-bind (fn direct) (%p-denoted-code val)
-    (if direct
-        fn
-        ;; String or anything else — look up sub by name in current package
-        (p-get-coderef val))))
+    (cond
+      (direct (or fn (%p-sort-undefined-comparator val)))
+      ;; String or anything else — look up sub by name in current package
+      ((p-get-coderef val))
+      (t (%p-sort-undefined-comparator val)))))
+
+(defun %p-sort-undefined-comparator (val)
+  "perl's die for a `sort $var LIST' comparator VAL that names no sub."
+  (let* ((v (unbox val))
+         (glob (cond ((p-typeglob-p v) v)
+                     ((and (p-box-p v) (p-typeglob-p (p-box-value v)))
+                      (p-box-value v)))))
+    (cond
+      (glob
+       (p-die (format nil "Undefined sort subroutine \"~A::~A\" called"
+                      (pcl-pkg-perl-name (p-typeglob-package glob))
+                      (p-typeglob-name glob))))
+      ((string/= (p-ref val) "")
+       (p-die "Not a subroutine reference"))
+      (t
+       (multiple-value-bind (perl-pkg bare-name)
+           (%p-split-symbolic-name (%p-tick-package-seps (to-string val))
+                                   *pcl-current-package*)
+         (p-die (format nil "Undefined sort subroutine \"~A::~A\" called"
+                        perl-pkg bare-name)))))))
 
 ;;; `sort NAME LIST` resolves its comparator on ENTRY (task #514).  perl dies
 ;;; "Undefined sort subroutine "main::nm" called" for a name with no body even

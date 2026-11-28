@@ -1145,6 +1145,19 @@ class C { method x { 1 } }',
    },
    unblocks => [],
    tasks => [5601] },
+ { id => 80, kind => 'token', dump => 'tokens',
+   title => 'In sort\'s indirect-object slot (`sort $by LIST`) what follows the scalar is lexed as after a term: `-1` a minus and a number, `.5` a concatenation, `%h` a modulo, `*STDOUT` a multiplication, `/re/` a division -- perl reads the slot as print\'s filehandle slot (toke.c case \'$\': one rule for every list operator that takes an indirect object), so each starts the LIST',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => undef, shape => 'an Operator right after `sort $scalar` and whitespace, glued to its operand' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE deleted: before s543x every `sort $scalar` was the comparator, so `-1` came out right by accident; the PCL half (#5510) asks the filehandle slot\'s predicate, which reads these tokens', commit => 'f687c2ae', group => 'BN', pr => undef },
+   repro => 'my $by = sub { $b <=> $a }; print join(",", sort $by -1, 0), "\n";',
+   perl => "0,-1\n",
+   tokens => {
+     got  => ['Word=my', 'Symbol=$by', 'Operator==', 'Word=sub', 'Structure={', 'Symbol=$b', 'Operator=<=>', 'Symbol=$a', 'Structure=}', 'Structure=;', 'Word=print', 'Word=join', 'Structure=(', 'Quote::Double=","', 'Operator=,', 'Word=sort', 'Symbol=$by', 'Operator=-', 'Number=1', 'Operator=,', 'Number=0', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Word=my', 'Symbol=$by', 'Operator==', 'Word=sub', 'Structure={', 'Symbol=$b', 'Operator=<=>', 'Symbol=$a', 'Structure=}', 'Structure=;', 'Word=print', 'Word=join', 'Structure=(', 'Quote::Double=","', 'Operator=,', 'Word=sort', 'Symbol=$by', 'Number=-1', 'Operator=,', 'Number=0', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+   },
+   unblocks => [],
+   tasks => [5510] },
 );
 
 # The one accessor.

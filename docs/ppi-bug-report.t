@@ -7,7 +7,8 @@
 #
 # PPI tokenizer/lexer bug report — the cases in docs/ppi-upstream-bugs.md.
 # Tested against PPI 1.291 / perl 5.40.3.  Every row that is not marked a CONTROL
-# currently FAILS — a failing row IS the bug.
+# currently FAILS — a failing row IS the bug (three of §80's five pass on 1.291:
+# they went wrong on PCL's branch, docs/ppi-upstream-bugs.md §80).
 #
 #   perl ppi-bug-report.t
 #
@@ -20,7 +21,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 689;
+use Test::More tests => 702;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2651,4 +2652,39 @@ for my $case ( [ 'my $x = not do { 1 };', 'PPI::Structure::Block' ],
     my $doc = PPI::Document->new( \$code );
     my @names = map { $_->name } @{ $doc->find('PPI::Statement::Sub') || [] };
     is( "@names", 'z x y', 'method z, sub x, sub y: subs by their names (control)' );
+}
+
+# §80 -- in the indirect-object slot of sort (sort SUBREF LIST) perl reads
+# what follows the scalar as it does in print's filehandle slot: toke.c's
+# case '$' has one rule for every list operator that takes an indirect
+# object, sort included, so a sign or a dot glued to a number, a % or a *
+# glued to a name and a / with no space after it start the list:
+# `my $by = sub { $b <=> $a }; print join ",", sort $by -1, 0` prints
+# 0,-1 and `sort $by .5, .2` sorts 0.5 and 0.2.  PPI applied the
+# rule after print, printf, say, exec and system, not after sort.
+{
+    for my $case ( [ q{my @s = sort $by -1, 0;}, q{Number=-1} ],
+                   [ q{my @s = sort $by .5, .2;}, q{Number::Float=.5} ],
+                   [ q{my @s = sort $by %h;}, q{Symbol=%h} ],
+                   [ q{my @s = sort $by *STDOUT;}, q{Symbol=*STDOUT} ],
+                   [ q{my @s = sort $by /(\w)(\w)/, 1;}, q{Regexp::Match=/(\w)(\w)/} ] ) {
+        my ( $code, $want ) = @$case;
+        my @t = map { short_class($_) } toks($code);
+        ok( grep( $_ eq $want, @t ), "$code: $want" ) or diag "got: @t";
+    }
+}
+# The controls: the spaced operators after the scalar, a dot before a
+# string, the keyword x, a list that starts with an array and a word
+# spelled x3 were right.
+for my $case ( [ q{my @s = sort $x - 1, 0;}, q{Operator=-} ],
+               [ q{my @s = sort $x % 2;}, q{Operator=%} ],
+               [ q{my @s = sort $x * 2;}, q{Operator=*} ],
+               [ q{my @s = sort $x / 3, 1;}, q{Operator=/} ],
+               [ q{my @s = sort $x x 3;}, q{Operator=x} ],
+               [ q{my @s = sort $x . "a";}, q{Operator=.} ],
+               [ q{my @s = sort $by @l;}, q{Symbol=@l} ],
+               [ q{my @s = sort $by x3();}, q{Word=x3} ] ) {
+    my ( $code, $want ) = @$case;
+    my @t = map { short_class($_) } toks($code);
+    ok( grep( $_ eq $want, @t ), squash($code) . ": $want (control)" ) or diag "got: @t";
 }

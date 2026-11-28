@@ -3450,6 +3450,39 @@ that switches it on); upstream PR: pending (`PR-BM.md`).  Guard: the registry ro
 
 ---
 
+## 80. In sort's indirect-object slot (`sort $by LIST`) the list's first token is lexed as after a term: `sort $by -1, 0` (task #5510)  [CONFIRMED 1.291 and PCL's branch eca93377]
+
+**Minimal repro** (valid perl; prints `0,-1`):
+
+```perl
+my $by = sub { $b <=> $a }; print join(",", sort $by -1, 0), "\n";
+```
+
+**PPI tokens**: `Word(sort) Symbol($by) Operator(-) Number(1) ...`.  **Expected**: `Word(sort) Symbol($by)
+Number(-1) ...`.  perl's `sort SUBREF LIST` is `LSTOP indirob listexpr`, and the lexer reads what follows the
+scalar exactly as it does after `print $fh` (toke.c, case '$': ONE rule for every list operator that takes an
+indirect object -- a sign or a dot glued to a number, a `%` / `*` / `&` glued to a name, a `/` with no space
+after it start a term).  PCL's branch applied that rule (`Tokenizer::_after_scalar_filehandle`, groups N and
+8955ba30) after print, printf, say, exec and system, not after sort.  On 1.291 `sort $by -1` and
+`sort $by /re/` are wrong; `sort $by .5`, `sort $by %h`, `sort $by *STDOUT` are RIGHT on 1.291 and went wrong
+on the branch with its term-end rule (group J: after a Symbol a term has ended), which print's slot was
+exempted from and sort's was not -- the twins keep all five rows.
+
+**Impact on PCL**: before s543x every `sort $scalar` was taken as the comparator, so `-1` came out right by
+accident and `.5`, `%h`, `*STDOUT` were statement drops.  s543x's PCL half (#5510) asks the filehandle slot's
+predicate (`Pl::PExpr::_sort_scalar_is_comparator` -> `_is_print_term_start`), which reads these tokens: without
+this fix `sort $by .5, .2` and `sort $by %h` would have become SILENT wrongs (a concatenation, a modulo).
+
+**FIXED on PCL's PPI branch** (s543x: group BN, commit `f687c2ae` on branch `pcl-s543x` over `eca93377`,
+vendored as vendor/PPI -- `%FILEHANDLE_LISTOP` holds `sort`); the spaced operators (`sort $x - 1`, `% 2`,
+`* 2`, `/ 3`), the keyword `x` and `.` before a string keep their binary reading.  Not covered, as after
+print: a sign before a variable (`sort $by -$n`, `+1`: PPI's tokens are the same for the spaced and the glued
+form -- PCL's predicate reads the whitespace, #405) and `sort $by <FH>` (an Operator `<` after the slot, as
+after `print $fh`).  Upstream PR: pending.  Guard: the registry row §80, the twins' §80 rows (five + eight
+controls).
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — **RESOLVED (s527d): the shape is §47 (the ternary MIDDLE operand after a named unary), fixed on PCL's branch by group S.** `Pl::PExpr::_fix_ppi_ternary_label_bug`

@@ -3621,6 +3621,19 @@ sub handle_subcalls {
             next;
           }
         }
+        # sort( $subref LIST ) — the scalar comparator in paren form: the same
+        # question and the same node as the bare `sort $subref LIST` below.
+        if ($func_name eq 'sort'
+            && $self->_sort_scalar_is_comparator($inner_ch[0], $inner_ch[1])) {
+          my($top_node, $top_id) = $self->make_node_insert('funcall');
+          my $node_id = $self->make_node($now);
+          $self->add_child_to_node($top_id, $node_id);
+          $self->add_child_to_node($top_id, $self->_sort_scalar_comparator($now, $inner_ch[0]));
+          my $rest_expr = $self->cleanup_for_parsing([@inner_ch[1 .. $#inner_ch]]);
+          $self->add_child_to_node($top_id, $_) for @{ $self->parse_list($rest_expr) };
+          splice @$e, $i, 2, $top_node;
+          next;
+        }
 
         # #153 FOLD chunk 2, paren spelling: grep({a=>1}->{a}, LIST) — the
         # brace group is an anon-hash TERM (see _ctor_deref_verdict), so
@@ -3991,30 +4004,15 @@ sub handle_subcalls {
 
     # Handle sort $scalar LIST — scalar variable as comparator (coderef, string, glob, glob ref)
     # e.g. sort $sortsub 4,1,3,2  →  (p-sort (lambda ($a $b) (funcall (p-sort-get-fn $sortsub) $a $b)) ...)
-    # But a scalar immediately followed by -> is one term (method call / postfix
-    # deref), NOT a bare comparator: sort $ar->@* sorts the elements of $ar, with
-    # no comparator. Skip the comparator form so it falls through to list parsing.
+    # Only when a TERM follows the scalar (_sort_scalar_is_comparator, the one
+    # question for this form and the parenthesised one): `sort $ar->@*`,
+    # `sort $text =~ /re/g`, `sort $p, $q` sort a LIST that starts with it.
     if ($now->isa('PPI::Token::Word') && $now->content() eq 'sort'
-        && $next->isa('PPI::Token::Symbol')
-        && substr($next->content(), 0, 1) eq '$'
-        && !($i + 2 <= $#$e
-             && $e->[$i + 2]->isa('PPI::Token::Operator')
-             && $e->[$i + 2]->content() eq '->')) {
+        && $self->_sort_scalar_is_comparator($next, $e->[$i + 2])) {
       my($top_node, $top_id) = $self->make_node_insert('funcall');
       my $sort_id = $self->make_node($now);
       $self->add_child_to_node($top_id, $sort_id);
-
-      my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-      $lambda_node->{params}     = $self->_sort_pair($now);
-      $lambda_node->{body_cl}    = 'nil';
-      $lambda_node->{for_func}   = 'sort';
-      $lambda_node->{scalar_cmp} = 1;  # flag: scalar comparator
-      # Parse the scalar as a child of the lambda (ExprToCL generates it)
-      my @scalar_tok = ($next);
-      my $scalar_clean = $self->cleanup_for_parsing(\@scalar_tok);
-      my $scalar_ids   = $self->parse_list($scalar_clean);
-      $self->add_child_to_node($lambda_id, $scalar_ids->[0]) if @$scalar_ids;
-      $self->add_child_to_node($top_id, $lambda_id);
+      $self->add_child_to_node($top_id, $self->_sort_scalar_comparator($now, $next));
 
       $self->_take_rest_as_args($e, $i, $top_id, $top_node);
       next;
@@ -5397,6 +5395,13 @@ sub _is_print_term_start {
     # term, and `_default_filetest_operand` must not splice `$_` into the
     # middle of a stacked run (`-f -d $x` is not `-f $_ -d $x`).
     return 1 if $op =~ /^-[A-Za-z]$/;
+    # A SIGN with whitespace before it and none after it starts the LIST
+    # (toke.c, case '$': `+`/`-` not followed by a space or `=` is XTERM in
+    # the indirect-object slot): `print $fh -$n` and `print $fh +(LIST)[0]`
+    # write to $fh, `sort $by -$n, 0` and `sort $by +1, 0` sort by $by; the
+    # spaced `print $x - 3` / `sort $x + 1, 0` stay binary (#405, #5510).
+    # (`-1` is PPI's Number in this slot already; `-=` / `->` are other ops.)
+    return 1 if ($op eq '-' || $op eq '+') && _sign_glued_after_space($token);
     return 0;  # All others: , . + - * / == && || etc.
   }
 
@@ -5409,6 +5414,18 @@ sub _is_print_term_start {
   #   QuoteLike (qw()), Structure::List ((expr)), Constructor ([]),
   #   and already-parsed internal nodes
   return 1;
+}
+
+# The adjacency half of _is_print_term_start's sign rule: TOK (a source
+# Operator) has whitespace right before it and none right after it.  A token
+# the parser built has no siblings and answers no.
+sub _sign_glued_after_space {
+  my ($tok) = @_;
+  return 0 unless $tok->can('previous_sibling');
+  my $before = $tok->previous_sibling;
+  my $after  = $tok->next_sibling;
+  return ($before && $before->isa('PPI::Token::Whitespace')
+          && $after && !$after->isa('PPI::Token::Whitespace')) ? 1 : 0;
 }
 
 
@@ -6732,6 +6749,39 @@ sub _sort_word_is_subname {
   return 0 if $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/ || $comp_name =~ /^CORE::/;
   return 0 if $after && $after->isa('PPI::Token::Operator') && $after->content() eq '->';
   return 1;
+}
+
+# Is TOK, the first thing after `sort` (bare or inside its parentheses), the
+# SUBREF comparator of `sort SUBREF LIST`?  perl's grammar is `LSTOP indirob
+# listexpr` with `indirob: scalar`, and perl takes the scalar for the indirob
+# exactly when what FOLLOWS it starts a term (toke.c, case '$': the one rule
+# for every list operator's indirect-object slot, print's filehandle
+# included).  An infix operator, a comma or nothing makes the scalar the
+# first element of the LIST: `sort $text =~ /re/g`, `sort $n > 0 ? A : B`,
+# `sort $p, $q`, `sort $x;` (#5510 -- each took the scalar as the comparator:
+# a drop, a raw `NIL is undefined`, or the first element silently gone).
+# ONE predicate for the two forms, and the filehandle slot's own two halves
+# (_is_scalar_fh_token, _is_print_term_start) -- no second answer.
+sub _sort_scalar_is_comparator {
+  my ($self, $tok, $after) = @_;
+  return 0 unless $self->_is_scalar_fh_token($tok);
+  return 0 unless defined $after;
+  return $self->_is_print_term_start($after) ? 1 : 0;
+}
+
+# The comparator node of `sort $subref LIST` (bare and parenthesised): an
+# inline lambda over the sort's pair whose one child is the scalar;
+# ExprToCL's scalar_cmp arm resolves it at run time.
+sub _sort_scalar_comparator {
+  my ($self, $sort_word, $tok) = @_;
+  my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+  $lambda_node->{params}     = $self->_sort_pair($sort_word);
+  $lambda_node->{body_cl}    = 'nil';
+  $lambda_node->{for_func}   = 'sort';
+  $lambda_node->{scalar_cmp} = 1;  # flag: scalar comparator
+  my $scalar_ids = $self->parse_list($self->cleanup_for_parsing([$tok]));
+  $self->add_child_to_node($lambda_id, $scalar_ids->[0]) if @$scalar_ids;
+  return $lambda_id;
 }
 
 sub _take_rest_as_args {

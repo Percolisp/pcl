@@ -818,9 +818,11 @@ sub _opcontext {
 # whitespace: there is some before the next character and none after it
 # (`print $fh % 2` and `print $fh%2` are a modulo).  True when the tokenizer
 # stands in that slot: the previous significant token is a $scalar right
-# after print, printf, say, exec or system, and whitespace separates it from
-# the current token.
-my %FILEHANDLE_LISTOP = map { $_ => 1 } qw( print printf say exec system );
+# after print, printf, say, exec, system or sort, and whitespace separates it
+# from the current token.  sort's comparator is the same slot (sort SUBREF
+# LIST: toke.c's case '$' has one rule for every list operator that takes an
+# indirect object), so `sort $by -1, 0` sorts -1 and 0 by $by.
+my %FILEHANDLE_LISTOP = map { $_ => 1 } qw( print printf say exec system sort );
 
 sub _after_scalar_filehandle {
 	my $self = shift;
