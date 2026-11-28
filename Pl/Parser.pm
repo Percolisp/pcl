@@ -743,15 +743,33 @@ sub _include_string_args {
              : $arg->isa('PPI::Node')
                ? @{ $arg->find(sub {
                      $_[1]->isa('PPI::Token::Quote')
-                  || $_[1]->isa('PPI::Token::QuoteLike::Words') }) || [] }
+                  || $_[1]->isa('PPI::Token::QuoteLike::Words')
+                  || $_[1]->isa('PPI::Token::QuoteLike::Readline') }) || [] }
              : ();
     for my $t (@toks) {
       push @out, $t->isa('PPI::Token::QuoteLike::Words') ? $t->literal
                : $t->isa('PPI::Token::Quote')            ? $t->string
-               : ();
+               : word_list_glob_words($t);
     }
   }
   return @out;
+}
+
+# The words of a WORD LIST written as a glob -- `use List::Util <max sum>`,
+# `use builtin <floor ceil>`: `<a b>` is glob("a b"), and a pattern without a
+# wildcard is itself, so it is the list of its words, a compile-time constant
+# as qw<a b> is (perlop "I/O Operators"; docs/ppi-upstream-bugs.md §76).  The
+# STATIC readers of an import list (the prototype merge, `use builtin`, the
+# feature list) ask it beside their qw arm; the run-time import list needs
+# nothing, it globs.  () for every other token: a readline (`<FH>`, `<$fh>`,
+# `<>`), a real pattern, a quote or an interpolation inside the brackets.
+sub word_list_glob_words {
+  my ($t) = @_;
+  return () if !$t->isa('PPI::Token::QuoteLike::Readline');
+  my ($in) = $t->content =~ /\A<(.*)>\z/s;
+  return () if !defined $in || $in =~ /\A\$?[\w':]*\z/;
+  return () if $in =~ /[*?\[\]{}~\\"'\$\@]/;
+  return split ' ', $in;
 }
 
 # THE PPI construction site.  Every document PCL parses is built here — the
@@ -8081,6 +8099,9 @@ sub _builtin_import_names {
       my $s = $child->string;
       push @names, $s if defined $s && length $s;
     }
+    else {
+      push @names, word_list_glob_words($child);
+    }
   }
   return grep { /\A(?::[\w.]+|[^\W\d]\w*)\z/ } @names;
 }
@@ -10226,6 +10247,10 @@ sub _parse_use_import_list {
       # only handled ([{< and silently passed e.g. qw/%Config/ through as the
       # literal token "qw/%Config/", breaking `use Config qw/%Config/`.
       push @imports, $child->literal;
+    }
+    elsif ($child->isa('PPI::Token::QuoteLike::Readline')) {
+      # <max sum> -- the qw list written as a glob (word_list_glob_words)
+      push @imports, word_list_glob_words($child);
     }
     elsif ($opt{bare_quote} && $child->isa('PPI::Token::Quote')) {
       # `use subs "readpipe";` — the UNPARENTHESISED single-name form; PPI

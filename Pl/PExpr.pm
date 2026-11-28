@@ -7168,18 +7168,19 @@ sub _fix_ppi_glob_after_block {
       # PPI misparses this as `< $fh >` (two operators) whenever it follows a
       # bareword that could take an operand — print/return/scalar/sort <$fh>.
       my $is_scalar_fh = _readline_scalar_name_p($glob_content);
-      my $prev = @result ? $result[-1] : undef;
-      # A simple value (symbol/number/string) before < means it's definitely lt, not glob.
-      # e.g. $a<$b?1:$a>$b: the < is less-than, not a glob opener.
-      # PPI::Structure (block/subscript) before < can still be a glob (e.g. sort { } <*.txt>).
-      my $prev_is_simple_value = $prev && ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/;
-      my $prev_is_value = $prev_is_simple_value || ($prev && ref($prev) =~ /^PPI::Structure/);
 
-      # If we found a valid-looking glob pattern or bare/scalar filehandle, reconstruct it
-      if ($found_close && !$prev_is_simple_value && ($has_glob_chars || (($is_bare_fh || $is_scalar_fh) && !$prev_is_value)) && $glob_content ne '') {
+      # If we found a valid-looking glob pattern or bare/scalar filehandle
+      # where only a declaration says a term is expected, reconstruct it --
+      # from the SOURCE text between the brackets, whitespace kept
+      # (`g <./a/*.t ./a/b.t>` is two patterns; a join of the contents made
+      # one impossible pattern, #650).
+      if ($found_close && $glob_content ne ''
+          && ($has_glob_chars || $is_bare_fh || $is_scalar_fh)
+          && $self->_glob_rebuild_position_p(\@result)) {
+        my $inner = _angle_source_text($token, $tokens->[$j]) // $glob_content;
         # Create a proper readline token
         my $glob_token = bless {
-          content => "<$glob_content>"
+          content => "<$inner>"
         }, 'PPI::Token::QuoteLike::Readline';
         push @result, $glob_token;
         $i = $j + 1;  # Skip past all the consumed tokens
@@ -7192,6 +7193,53 @@ sub _fix_ppi_glob_after_block {
   }
 
   return @result;
+}
+
+# Where `_fix_ppi_glob_after_block` may rebuild a `<` ... `>` run as one
+# glob: where only a DECLARATION says perl expects a term (§14's
+# declaration half, docs/ppi-fix-at-source-s527.md §11) -- right after a
+# user's word (`is <$fh>`, `ok <~>`, `print STDOUT <*.t>`: a sub or a handle
+# PPI cannot know), or at the start of the run.  Everywhere else PCL's PPI
+# has decided (groups AH, BJ, BK: after an operator, a builtin that takes an
+# operand, `use Module`, a statement or map / grep block a closed `<...>` is
+# already one Readline), and a `<` that reaches here is a LESS-THAN: after a
+# subscript, a call's `)`, a dereference block, a method name, a builtin
+# that takes no operand (`time`), or a declared term (`K` after `use
+# constant`) -- `$a[0] < 2*$n and 3 > 1` was rebuilt as the glob
+# `<2*$nand3>` and the statement dropped (s543w).
+sub _glob_rebuild_position_p {
+  my ($self, $result) = @_;
+  my $prev = @$result ? $result->[-1] : undef;
+  return 1 if !$prev;
+  return 0 if ref($prev) ne 'PPI::Token::Word';
+  my $before = @$result > 1 ? $result->[-2] : undef;
+  return 0 if $before && ref($before) eq 'PPI::Token::Operator' && $before->content eq '->';
+  (my $word = $prev->content) =~ s/\ACORE:://;
+  # A builtin is PPI's to decide -- unless it is spelled like an operator
+  # or a quote-like operator, which PPI reads as a user's sub (`sub y`).
+  return 0 if $PPI::Singletons::KEYWORDS{$word}
+           && !$PPI::Singletons::OPERATOR{$word} && !$PPI::Singletons::QUOTELIKE{$word};
+  return 0 if $self->_is_zero_arg_func($prev->content);
+  return 1;
+}
+
+# The source text between the `<` token $open and the token $close that
+# ends the run (a `>`, or the `*>` glob Symbol whose `*` is the pattern's
+# last character), whitespace included, read through the document the
+# tokens still belong to.  undef when a token of the run is not in a
+# document (a token another repair made), and the caller joins contents.
+sub _angle_source_text {
+  my ($open, $close) = @_;
+  my $text = '';
+  my $t = $open->can('next_token') ? $open->next_token : undef;
+  my $left = 1000;    # a <...> lies on one line: never walk the whole document
+  while ($t && $left--) {
+    return $text . ($close->content eq '*>' ? '*' : '')
+      if Scalar::Util::refaddr($t) == Scalar::Util::refaddr($close);
+    $text .= $t->content;
+    $t = $t->next_token;
+  }
+  return undef;
 }
 
 

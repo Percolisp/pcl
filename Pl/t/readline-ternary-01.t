@@ -63,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 39;
 
 sub write_pl {
     my ($code) = @_;
@@ -264,15 +264,40 @@ my @f = sort <g-*.t>;
 print "[@f]\n";
 PL
 
-# NOT here, deliberately: `sort < ./g-*.t >`.  perl's diamond may contain
-# whitespace (it is a LIST of patterns), but the repair requires the pattern to
-# be ONE CONTIGUOUS WORD — the belt to `_ends_term`'s braces — so the spaced
-# spelling keeps dropping LOUDLY, as it did before this repair existed.  Task
-# #650 has it, with the `<a b>` sibling that is silently wrong on the
-# non-derailed path.  (s543c, measured on 7ea827a6: whether the spaced
-# spelling is loud depends on the `/`s LATER in the file -- after a `chdir`
-# into this directory it becomes `(p-readline)` and swallows the next two
-# statements with no drop announced, so it can be silent too.)
+# #650 (s543w): perl's diamond may contain whitespace -- it is a LIST of
+# patterns, and a pattern without a wildcard is itself, so `<a b>` is a word
+# list.  PCL's PPI reads a spaced `<...>` where a term is expected as one
+# Readline (group BK, docs/ppi-upstream-bugs.md §77), and after `use Module`
+# (group BJ, §76).  The repair above still takes only ONE CONTIGUOUS WORD (the
+# belt to `_ends_term`'s braces); it is reached only after a user's sub now.
+agree_in_globdir(<<'PL', '#650: sort < ./g-*.t >, and two patterns <./g-*.t ./g-a.t>');
+my @f = sort < ./g-*.t >;
+my @g = sort <./g-*.t ./g-a.t>;
+my @s = < ./g-a.t >;
+print "[@f] [@g] [@s]\n";
+PL
+both_agree('use List::Util <max sum>; print max(3, 9, 4), " ", sum(1, 2, 3), "\n";',
+           '#650 §76: use Module <a b> imports both names (a word list written as a glob)');
+both_agree('use List::Util <first sum0>; my $f = first { $_ > 1 } 1, 2, 3; print $f, " ", sum0(4, 5), "\n";',
+           '#650 §76: the word list reaches the prototype merge (first BLOCK LIST)');
+both_agree('no warnings; use builtin <floor ceil>; print floor(2.5), ceil(2.5), "\n";',
+           '#650 §76: use builtin <a b> aliases both builtins');
+both_agree('my @r = ([< 4 5 >], [< 6 7 >]); my $h = { < a b > }; print "@{$r[1]} ", join(",", %$h), "\n";',
+           '#650 §77: a spaced word list after [ and {');
+both_agree('my %h = map { $_ => 1 } < a b >; my @g = grep { 1 } < c d >; print join(",", sort keys %h), " @g\n";',
+           '#650 §77: a spaced word list after a map / grep block');
+both_agree('sub f { return < a b > } my %k = (k => < x >); my @c = (0 ? < p > : < q r >); print f(), " $k{k} @c\n";',
+           '#650 §77: after return, =>, ? and :');
+agree_in_globdir(<<'PL', '#650: after a user sub the rebuild keeps the space between two patterns');
+sub g { @_ }
+my @x = g <g-*.t g-a.t>;
+print "[@x]\n";
+PL
+# The reverse error: PExpr's rebuild took `< 2*$n and 3 >` for a glob after
+# a subscript, a call, a method name, `time` or a declared constant -- only a
+# user's word can stand before a glob PPI did not lex (s543w).
+both_agree('my @a = (1); my $n = 1; sub f { 1 } print "a\n" if $a[0] < 2*$n and 3 > 1; print "b\n" if f() < 2*$n and 3 > 1; print "c\n" if time < 2**40 and 1 > 0;',
+           'negative: `X < 2*$n and 3 > 1` compares after a subscript, a call and time');
 
 agree_in_globdir(<<'PL', 'neighbour: after `=`, where PPI gets the Readline token right');
 my @f = sort(<./g-*.t>);
