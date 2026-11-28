@@ -45,7 +45,6 @@ rosetta/0119-Bifid-cipher	DIFF	1	LOUD	#5502 -- builtin::indexed is missing (the 
 rosetta/0129-Bioinformatics-Global-alignment	DIFF	11	SILENT	#5463 -- a bare builtin (length) as an array subscript is autoquoted to index 0
 rosetta/0188-Centre-and-radius-of-a-circle-passing-th	DIFF	1	LOUD	#5503 -- `my ((..), (..), (..)) = LIST` is not flattened, the wrong coordinates divide by zero
 rosetta/0193-Character-codes	DIFF	1	MODULE-MISSING	NS:ns-xs -- Unicode::Normalize is XS
-rosetta/0220-Closures-Value-capture	DIFF	1	LOUD	#5504 -- `map(sub { ... }, LIST)` runs the sub body per element instead of making code refs
 rosetta/0293-Count-the-coins	DIFF	1	EXHAUSTED	#1929 -- a 100,000-deep memoized recursion exhausts the binding stack at depth ~10,000 (raw dump: #2556)
 rosetta/0294-Countdown	DIFF	3	LOUD	#5502 -- builtin::indexed is not implemented
 rosetta/0306-Cumulative-standard-deviation	DIFF	1	LOUD	#5505 -- `my $x, $y;` in a block whose named sub uses $x refuses the file (possibly captured)
@@ -65,7 +64,6 @@ rosetta/0670-Integer-long-division	DIFF	4	SILENT	#1494 -- the \N{NAME} named-cha
 rosetta/0672-Integer-overflow	DIFF	2	SILENT	NS:ns-integers-unbounded -- use integer arithmetic does not wrap at 64 bits (by design, #1513)
 rosetta/0710-Klarner-Rado-sequence	DIFF	2	SILENT	#5507 -- a state array of a signature sub is invisible to its nested subs (the `use List::Util <...>` word list imports since s543w, #650)
 rosetta/0768-Longest-common-substring	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/0841-Merge-and-aggregate-datasets	DIFF	2	DROPPED	#5510 -- `sort $scalar =~ /re/gm` takes the scalar as the comparator, the statement drops
 rosetta/0903-Nested-templated-data	DIFF	1	SILENT	#1285 -- a paren-less call of a no-prototype sub with { "key" => ... } passes the block value, not an anon hash
 rosetta/0937-Numerical-and-alphabetical-suffixes	DIFF	2	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/0945-Odd-squarefree-semiprimes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
@@ -82,10 +80,8 @@ rosetta/1188-Roman-numerals-Decode	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks 
 rosetta/1259-Shoelace-formula-for-polygonal-area	DIFF	1	DROPPED	#5512 -- a `local` in a ternary arm is refused
 rosetta/1291-Smallest-square-that-begins-with-n	DIFF	1	LOUD	#5517 -- a modifier foreach over `1..Inf` (a constant) is materialized: out of memory (raw: #1427)
 rosetta/1300-Solve-the-no-connection-puzzle	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
-rosetta/1308-Sort-numbers-lexicographically	DIFF	1	DROPPED	#5510 -- `sort $_ > 0 ? ... : ...` takes $_ as the comparator, the statement drops
 rosetta/1336-Special-pythagorean-triplet	DIFF	1	SILENT	#5470 -- without use utf8, a high byte after an interpolated variable is read into its name
 rosetta/1342-Split-a-character-string-based-on-change	DIFF	5	SILENT	#2381 -- \X is base+marks, not UAX 29 (a regional-indicator flag splits)
-rosetta/1359-Stem-and-leaf-plot	DIFF	1	LOUD	#5513 -- `map split, LIST` emits a one-argument split call (raw arity condition: #1427)
 rosetta/1376-String-length	DIFF	1	SILENT	#2381 -- \X is base+marks, not UAX 29 (Hangul L+V+T jamo count one each)
 rosetta/1390-Substring-primes	DIFF	1	NOT-SUPPORTED	NS:ns-regex-code-blocks -- the (?{...}) block is stripped, announced
 rosetta/1432-Tarjan	DIFF	8	SILENT	#2644 -- a no-initialiser my in a sub, captured by a my sub, keeps the first call contents
@@ -97,5 +93,4 @@ rosetta/1495-Unicode-strings	DIFF	1	NOTICE	#1494 -- `\N{name}` is left as litera
 rosetta/1497-Unicode-variable-names	DIFF	1	LOUD	#5514 -- `$Δ++` emits an unescaped symbol, a raw unbound-variable condition
 rosetta/1498-Unicode-variable-names	DIFF	1	DROPPED	NS:ns-lvalue-subs -- an `:lvalue` sub assigned to (`NAME = 1`) is refused
 rosetta/1499-Unicode-variable-names	DIFF	1	DROPPED	NS:ns-lvalue-subs -- an `:lvalue` sub assigned to (`NAME = 1`) is refused
-rosetta/1502-Universal-Turing-machine	DIFF	2	LOUD	#5515 -- `state => VALUE` in a paren-less argument list drops the key, the sub sees no initial state
 rosetta/1551-Worthwhile-task-shaving	DIFF	5	DROPPED	NS:ns-given-when -- refused, announced
