@@ -6,11 +6,10 @@
 # pcl-shim: bigrat -- ANNOUNCED, not implemented (task #2874).
 #
 # bigint and bignum are built on the static constant-handler shape (see
-# lib/bigint.pm); bigrat would be the same three lines, but Math::BigRat
-# itself does not run under PCL yet (`Math::BigRat->new("1/3") +
-# Math::BigRat->new("1/6")` gives 2, and `* 2` dies), so turning literals
-# into Math::BigRat objects would trade a plain-number answer for a wrong
-# one.  Until it does, `use bigrat` says so ONCE on stderr (CLAUDE.md rule
+# lib/bigint.pm); bigrat would be the same three lines, and since s543t
+# Math::BigRat itself runs (#2560 / #3000 -- its "N/D" constructor read a
+# called sub's $2); shipping it is the open step.  Until then `use bigrat`
+# says so ONCE on stderr (CLAUDE.md rule
 # 12's effect-only boundary) and literals stay plain numbers
 # (docs/not-supported.md "bigint / bignum / bigrat").
 
