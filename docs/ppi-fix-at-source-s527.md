@@ -288,6 +288,10 @@ declaration says `ok` takes a list) and §69's quoted-terminator row (`1 << "EOT
 **s543w (2026-11-28), the first batch after the program's end (a Rosetta fix batch, §8's last paragraph):** 76
 catalogued mis-lexes fixed, 65 groups A .. BM, 80 fix commits, **157 commits** (branch `pcl-s543w` `eca93377`);
 the twins 689 rows, 684 ok (the same five left); the expect-state checker raw 149 -> **120**, pcl 137 -> **108**.
+**s543x (2026-11-28), a Rosetta fix batch (§(iv)'s way):** group BN, §80 -- sort's comparator slot is print's
+filehandle slot (`%FILEHANDLE_LISTOP` holds `sort`), and a `<` glued to a name after the slot's scalar is a readline in
+both; two pairs, 4 commits, **161 commits** (branch `pcl-s543x` `a8178635`); the twins 689 -> 708 rows, 703 ok (the
+same five left); PPI's suite PASS plain + AUTHOR_TESTING at every commit (71 files / 57,807 rows).
 
 **(ii) The repair passes still in `Pl/`, and why each is PCL's for good** (fires = s543d's counter, adapted:
 `scratch/s543i/instrument.pl`, over the 2,053-file wide list on the final tree; files / fires):
