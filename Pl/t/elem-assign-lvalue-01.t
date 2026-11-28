@@ -175,4 +175,27 @@ sub STORE { push @log, "S$_[1]"; $_[0]{$_[1]} = $_[2] } sub EXISTS { push @log, 
 PL
 is($pcl, $perl, 'a slice under ++ / op= / undef is an lvalue list: every element vivified, the last one modified (#5466)');
 
+# #5464 (s543v): the RIGHT operand of a compound assignment is in SCALAR
+# context whatever the target -- an ELEMENT target added a slice's COUNT
+# (`$C[0] += @v[1]` gave 1) and called a sub in void context, while a raw
+# scalar target was right (row 7, a control; `.=` was right too).  Every numeric,
+# bitwise and logical OP=, element / deref / nested / tied / `our` targets.
+# FAILS on 38420fae.
+($perl, $pcl) = both('compound-rhs', <<'PL');
+sub ctx { my $w = wantarray; push @::ctx, defined $w ? ($w ? "L" : "S") : "V"; (10, 20, 30) }
+my @v = (4, 5, 6); my @C = (0); my %h = (k => 0); my $r = [4, 5, 6];
+$C[0] += @v[1]; $h{k} += @v[2]; print "1 @C $h{k}\n";
+$C[0] = 0; $C[0] += $r->@[1]; $C[0] -= @v[0, 1]; print "2 @C\n";
+$C[0] = 0; $C[0] += ctx(); $h{k} ||= ctx(); $h{z} //= ctx(); our $g = 0; $g += ctx(); print "3 @C $h{k} $h{z} $g ", join(" ", @::ctx), "\n";
+my @o = (2, 20, 17, 2, 1, 64, 12, 8, 7, "ab");
+$o[0] *= @v[1]; $o[1] /= @v[0]; $o[2] %= @v[1]; $o[3] **= @v[0]; $o[4] <<= @v[0]; $o[5] >>= @v[0];
+$o[6] &= @v[0]; $o[7] |= @v[1]; $o[8] ^= @v[0]; $o[9] x= @v[0]; print "4 @o\n";
+my $q = [0]; $q->[0] += @v[1]; $$q[0] += @v[0]; my %n; $n{a}{b} += @v[1]; print "5 @$q $n{a}{b}\n";
+tie my %t, 'TT'; $t{k} = 1; $t{k} += @v[1]; print "6 $t{k} @TT::log\n";
+my $s = 0; $s += @v[1]; my $u = ""; $u .= @v[1]; print "7 $s $u\n";
+package TT; our @log;
+sub TIEHASH { bless {}, shift } sub FETCH { push @log, "F"; $_[0]{$_[1]} } sub STORE { push @log, "S"; $_[0]{$_[1]} = $_[2] }
+PL
+is($pcl, $perl, 'the right operand of a compound assignment is SCALAR context, whatever the target (#5464)');
+
 done_testing();

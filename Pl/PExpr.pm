@@ -5834,6 +5834,19 @@ sub child_context {
       return SCALAR_CTX;
     }
 
+    # THE RIGHT OPERAND OF EVERY COMPOUND ASSIGNMENT IS ONE SCALAR (#5464):
+    # perl evaluates it in scalar context whatever the target and whatever
+    # context the assignment itself sits in -- `$C[0] += @v[1]` adds the
+    # slice's LAST element, `$h{k} += f()` and `$x ||= f()` call f in SCALAR
+    # context (probed 5.40.3 for every OP=, `||=` `&&=` `//=` included).  Left
+    # to inherit, an ELEMENT target's right side took its statement's void /
+    # list context: the raw slice vector numified as its COUNT and f() saw an
+    # undef wantarray (a raw-slot scalar target was right only because
+    # Parser2 lowers that right side on its own).  `.=` answered above.
+    if ($child_index == 1 && Pl::PExpr::TokenUtils::is_compound_assign($op)) {
+      return SCALAR_CTX;
+    }
+
     # Logical NOT always forces scalar context: !expr, not expr.
     # !!($a && $b) passed as join() arg must not produce (vector ...) wrapper.
     if ($op eq '!' || $op eq 'not') {
