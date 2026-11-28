@@ -1,11 +1,11 @@
 # vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
 # carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
 # tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
-#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl-s543x
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
 upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
-branch: pcl-s543x
+branch: pcl
 branch-sha: a817863536d5f5d37f1493fc248a87c5ccea2336
 lib-tree: 517b8a7f76b01ac9ee1df7eb742c99c8d26a5f03
 date: 2026-11-28

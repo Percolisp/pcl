@@ -208,6 +208,14 @@ neighbour is filed with its frequency and left unless it is ordinary.
   0887 1198), **ROSETTA 561 -> 566 of 650** on its own base 38420fae,
   buckets 0 (three load TIMEOUTs re-run alone); **586 -> 591 of 650** on top of
   batches 1-3 (the session log, s543v).
+* batch 5 (s543x, 2026-11-28): A LIST OPERATOR'S FIRST OPERAND -- #5510 (after
+  `sort` a scalar is the comparator only when a term follows it: PPI group BN),
+  #5504 (an anonymous `sub { }` as map's / grep's EXPR is an expression),
+  #5513 (split's defaults have one owner: `map split, LIST`), #5515 (a
+  declarator word before `=>` is a string in a paren-less list; `f state => 7;`
+  had vanished without a word) -- five programs (0841 1308 0220 1359 1502),
+  **ROSETTA 591 -> 596 of 650** on top of batches 1-4 and s543t2, buckets 0
+  (the session log, s543x).
 
 **Step 4 -- beside it, one slot:** the ordinary silent wrongs that no Rosetta
 program holds but the board or perl's documentation does (the 21 of the first
