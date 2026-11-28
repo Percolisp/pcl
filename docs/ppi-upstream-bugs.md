@@ -11,10 +11,11 @@ carries.  It is meant to be sendable to the PPI maintainers as it stands.
   a newer PPI may have fixed it.
 * `docs/ppi-bug-report.t` is the same list as a runnable `Test::More` file:
   every row FAILS on the current PPI, so a passing row means the bug is gone.
-* **Fixed at the source (s543i, where PCL's PPI program ended):** 72 of the
-  catalogued mis-lexes are fixed on PCL's PPI branch (`vendor/PPI`: 61 groups
-  A .. BI, 149 commits over upstream master `455bfa73`, upstream pull request
-  #459); what stays PCL's and why is `docs/ppi-fix-at-source-s527.md` §11.
+* **Fixed at the source (s543i, where PCL's PPI program ended; s543w, the
+  Rosetta batch of the lexer's term position):** 76 of the catalogued
+  mis-lexes are fixed on PCL's PPI branch (`vendor/PPI`: 65 groups A .. BM,
+  157 commits over upstream master `455bfa73`, upstream pull request #459);
+  what stays PCL's and why is `docs/ppi-fix-at-source-s527.md` §11.
 
 > **Scope.**  Not every PCL parse problem is a PPI bug.  Counter-example:
 > `$$ref->()` mis-association is *PCL's* — PPI emits a faithful flat token

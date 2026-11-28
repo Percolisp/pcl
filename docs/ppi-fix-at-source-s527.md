@@ -283,6 +283,9 @@ A .. BI, 76 fix commits, **149 commits** over upstream master `455bfa73` (branch
 `t/ppi_bugs_pcl.t`): 628 rows, 623 ok on the vendored lib -- the five left are §11's four user-half rows (only a
 declaration says `ok` takes a list) and §69's quoted-terminator row (`1 << "EOT"`, kept for PPI's fuzz fixtures
 45 / 47).  The expect-state checker (all populations): raw 149, pcl 137 on the base and on the tree, the rows byte-identical (the population has no `@1x`; s543f took it from 205 / 151).
+**s543w (2026-11-28), the first batch after the program's end (a Rosetta fix batch, §8's last paragraph):** 76
+catalogued mis-lexes fixed, 65 groups A .. BM, 80 fix commits, **157 commits** (branch `pcl-s543w` `eca93377`);
+the twins 689 rows, 684 ok (the same five left); the expect-state checker raw 149 -> **120**, pcl 137 -> **108**.
 
 **(ii) The repair passes still in `Pl/`, and why each is PCL's for good** (fires = s543d's counter, adapted:
 `scratch/s543i/instrument.pl`, over the 2,053-file wide list on the final tree; files / fires):
@@ -309,7 +312,7 @@ name (`is`, `like`, `ok`), so a "sub declared above" rule on the branch would mo
 open / pending / in_progress, on 2026-11-22 after the s543g merge: 78 tasks):
 - **Done here (s543i):** #5233 (§75, group BI); #1679 (ExprToCL, not PPI); #5231 (`_repair_word_match` asks the print-slot handle question); #329 was done, its pass is the desugar now (member 1).
 - **The USER's decision:** #1649 (declared-ref / refaliasing foreach; `_repair_alias_foreach` waits on it), #4902 (an eval string's lone-CR here-doc lines), #1876 (`extra_paired_delimiters`: a FEATURE on the branch, designed in the task, not built -- rare; may be ruled OUT).
-- **Branch items LEFT (none planned; found by this census, not catalogued -- rule 13's § is owed by the batch that takes one):** #1686 (a quote-like operator name used as a package, `q::zyx` / `s:: eq s||`: perl's tokenizer reads the operator; t/comp/colon.t's 10 rows), #650 (a diamond glob holding whitespace, `sort < ./g-*.t >`: read right, dropped or a readline depending on later `/`s).
+- **Branch items LEFT (none planned; found by this census, not catalogued -- rule 13's § is owed by the batch that takes one):** #1686 (a quote-like operator name used as a package, `q::zyx` / `s:: eq s||`: perl's tokenizer reads the operator; t/comp/colon.t's 10 rows; **measured s543w**: the decision is the WORD SCAN's -- `Token/Word.pm` absorbs `::` into a quote-like word where toke.c's `word_takes_any_delimiter` opens the quote -- not the term test, so not taken; rare).  ~~#650~~ (a diamond glob holding whitespace): **done s543w**, groups BJ BK (§76 §77) -- the s543w paragraph of §8.
 - **PCL's side, the declaration PPI never sees (the prototype table):** #2774 (a user sub's `/a;b # x/`, `//`: LOUD by design, s543i), #822 (`_repair_word_match`'s close scan and a `;` inside a group), #662 (`f % 3` after a declared sub), #4901 (`x<digits>` after a user's list operator), #405 (`print $fh -$n`), #1479 (indirect object of a lower-case class), #478 #1509 #2610 #3024 #4324 #3920 (how and when prototypes reach the table), #2760 (a user's `sub say`).
 - **PCL's side, a lowering / InterpScan / runtime question (PPI named in passing or as history):** #340 #352 #382 #388 #415 #463 #479 #653 #693 #938 #1053 #1054 #1142 #1192 #1243 #1580 #1648 #1693 #1750 #2200 #2542 #3020 #3414 #3943 #3944 #4663 #4807 #5190 #5230 #5232 #271 #314.
 - **Tooling, plans, perf, infrastructure (PPI as a component, not a mis-lex):** #71 #379 #409 #434 #444 #582 #1034 #1035 #1501 #1511 #1833 #2196 #2423 #2647 #2740 #3694 #3697 #4087 #4480 #4501 #4503 #4523 #4524 #4903 (the checker's refinements) #4904.

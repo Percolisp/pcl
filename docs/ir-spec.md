@@ -1165,7 +1165,12 @@ word split) and returns `(STATUS, MATCH...)`, STATUS 0 or -2 (GLOB_ABEND,
 `err` stopped at an unreadable directory); an unknown flag name dies.  NOCASE
 applies only to a component holding a wildcard.  An IMPORTED `glob` overrides
 both `glob(...)` and `<PAT>`.  Example: `glob("{b,a}.txt")` with both files
-present → `("b.txt" "a.txt")`.
+present → `("b.txt" "a.txt")`.  The pattern of an INTERPOLATING `<...>` is ONE
+string, lowered as the double-quoted string of the same text (s543w, #1292):
+`<$a$b$c>` is `(p-glob (p-string-concat $a $b $c))`, `< $s >` globs the words
+of `" $s "`, an array piece is joined with spaces (`<@dirs>`: several
+patterns); `<...>` that holds a simple scalar or a filehandle name is a
+readline, not a glob.
 
 **A restricted hash is a hidden tie (normative, s514e, task #3163).**  A tie
 record carries a HIDDEN flag (`builtin::hide_tie(\%h)`); `tied` answers undef
