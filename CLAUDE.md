@@ -400,12 +400,13 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-28: main = MAIN-READY-118 `96bf714c` (generation v2-17100; twenty batches merged in
-this session, MAIN-READY-99 .. -118, each with its sha and content in `docs/session-log.md` s543; the four of 2026-11-27:
+**s543, 2026-11-28: main = MAIN-READY-119 `c6fc07d4` (generation v2-17300; twenty-one batches merged in
+this session, MAIN-READY-99 .. -119, each with its sha and content in `docs/session-log.md` s543; of 2026-11-27 / 28:
 s543n the filehandle family, s543o the Rosetta instrument, s543m the string-eval residue + the container drop flush,
-s543l the `local` residue + a signal handler's `die` no longer swallowed by a blocking read; 2026-11-28: s543t, THE FIRST
-ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures restored at a sub's return; s543w, the lexer's term position -- a word list written as a glob, on the PPI branch; s543u, the regex escapes -- `\K`, `\G` in a substitution, `\b{wb}`; s543v, the slice family -- and the right side of every `OP=` in scalar context).**  Gate
-**380 files / 12,608 rows `Result: PASS`** (measured on merged main); full
+s543l the `local` residue, s543t THE FIRST ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures
+restored at a sub's return; s543w the lexer's term position, on the PPI branch; s543u the regex escapes; s543v the slice
+family; s543t2 the capture scope only where a sub body can write the match state).**  Gate
+**381 files / 12,611 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,809**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
 (95.1 %)**; **ROSETTA 591 of 650 (90.9 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **29 live IN silent wrongs of ORDINARY code + 63 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
@@ -415,16 +416,14 @@ CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): 
 PASS / 136 PARTIAL / 23 FAIL / 67 SKIP of 896 files, 111,258 ok / 1,188 not
 ok** (five load timeouts counted by their one-file runs); the companion in the
 same round: `--all --quick` on -108 130 OK / 103 XDIFF / 237 DIFF of 528, the full
-run on -110 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST against the edited baselines (the round
-MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second run: one row flaked under load,
-#4904); PPI `pcl` =
+run on -110 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST against the edited baselines; PPI `pcl` =
 `eca93377` (157 commits over upstream, 65 groups, 76 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
-program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **THE CENSUS IS COMPLETE (2026-11-28): all 103 differing programs carry a cause (`docs/rosetta-plan.md` 6a / 6b; 86 ours).
-NOTHING RUNS (the USER ended the session 2026-11-28 10:4x).  NEXT ACTION = `briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`:
-TWO fix batches are STOPPED ON ORDER, to be resumed and merged in the order s543t2 (#5545: the capture scope only where a sub body can match,
-v2-17300), s543x (a list operator's first operand, v2-17200); two briefs are WRITTEN, not launched (s543y Unicode, s543z the runtime and shim
-singles), one is to write (the parser and scoping singles); THE ROUND is owed (eight code merges since the last).**  Line tracking costs a median
+program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **THE CENSUS IS COMPLETE: all 103 differing programs carry a cause (`docs/rosetta-plan.md` 6a / 6b; 86 ours).
+RESUMED 2026-11-28 15:2x (`briefs-and-rules-for-claude-subagents/s543/resume-1128.md`); the running state is the LAST section of `s543/PAUSE-s543.md`:
+s543x (a list operator's first operand, v2-17350) is stacked on -119 in its merge turn; the fix briefs in launch order: s543y (Unicode, v2-17400),
+s543z (the runtime and shim singles, v2-17500), s543aa (the expression and lowering singles, v2-17600), s543ab (the scoping singles, v2-17700);
+THE ROUND is owed (ten code merges since the last) and goes out as a batch after s543x merges.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
@@ -437,8 +436,8 @@ end (`docs/not-supported.md` ns-escaping-filehandle; the open half is
 #5407 #5412); `caller`, `croak` and a runtime die name perl's file and line since
 s543a, except from a BEGIN / END / `use` body (#5101).  Cost flags kept by the s536 rule (each with its numbers in `docs/session-log.md` s543 at its merge): s543g `local($h{k}) = g(...)` +29 %;
 s543j a valued `local` slice tail +58 % a call; s543n bareword `print OUT` +9.5 %, `<IN>` +6.7 %; s543m the drop flush's test, `@a = ()` +81 %,
-`$h{k} = undef` +36..47 % (#5540); s543l `local $a[1]` +12 %, `local %INC` +23 %; **s543t EVERY SUB CALL +3..8 % for the capture scope,
-a matching sub in a loop +15 % (#5545: s543t2 is on it)**; s543v a slice store from its own array +15.5 % (the copy).
+`$h{k} = undef` +36..47 % (#5540); s543l `local $a[1]` +12 %, `local %INC` +23 %; **s543t a sub that MATCHES +8.9 % in a loop (a sub
+without a match is back in noise since s543t2, #5545)**; s543v a slice store from its own array +15.5 % (the copy).
 
 **REPLACED IN PLACE at every merge (one paragraph); the previous paragraph
 moves to the top of `docs/claude-md/HISTORY.md` part 1.**  This is the only
