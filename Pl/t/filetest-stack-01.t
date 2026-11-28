@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 18;
 
 # Fixtures built by the HARNESS (real perl), with their paths interpolated into
 # the generated program — so the expectations below do not depend on anything
@@ -276,3 +276,17 @@ my @s = sort { $a <=> $b } -1, 2, -3; print "@s\n";
 { 1 } -d "/" and print "after-bare\n";
 PL
    'a - starting a term after print $fh and after a statement block (§22/§35, #405)');
+
+# #405's residue (s543x, with #5510's sort slot): a SIGN glued to its operand
+# after whitespace starts the LIST in the filehandle slot whatever follows it
+# -- `print $fh -$n` writes -4 to $fh, `print $fh +(LIST)[0]` the element --
+# while the spaced `print $x - 3` and `$a -3` outside print stay binary.  PPI's
+# tokens are the same for both spellings; PCL's ONE slot predicate
+# (PExpr::_is_print_term_start) reads the whitespace.  perl 5.40.3.
+is(run_cl(<<'PL'), "[-4|6|7]\n7\n6\n",
+my $n = 4; my $x = 10; my $a = 9;
+open my $fh, '>', \my $buf or die; print $fh -$n; print $fh "|"; print $fh +(5, 6)[1];
+print $fh "|"; printf $fh +"%d", 7; close $fh; print "[$buf]\n";
+print $x - 3; print "\n"; my $b = $a -3; print "$b\n";
+PL
+   'a sign glued after whitespace in the filehandle slot starts the list (#405)');

@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [`(*FAIL)` is `(?!)`, other control verbs die](#10-verb-fail-and-f-are--every-other-control-verb-dies-normative-s499k-task-2386) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049) · [the shape macros are the IR's assembler](#10d-the-shape-dispatching-macros-are-the-irs-assembler-normative-s525u-r4-of-docsruntime-review-s525md)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [a list operator's first operand](#10-listop-a-list-operators-first-operand-the-indirect-object-slot-maps-expr-splits-defaults-the-fat-comma-normative-s543x-tasks-5510-5504-5513-5515) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [`(*FAIL)` is `(?!)`, other control verbs die](#10-verb-fail-and-f-are--every-other-control-verb-dies-normative-s499k-task-2386) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049) · [the shape macros are the IR's assembler](#10d-the-shape-dispatching-macros-are-the-irs-assembler-normative-s525u-r4-of-docsruntime-review-s525md)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -3502,6 +3502,8 @@ time, so a *string* comparator name resolves in the user's package rather
 than in `:pcl`).
 
 **After `sort`, a WORD followed by `->` starts the LIST (normative, s520a, task #3403).**  It is a class name (`sort K->new->names` sorts what `K->new->names` returns), never `SUBNAME`; one predicate (`_sort_word_is_subname`) answers for the bare and the parenthesised form.  Example: `sort(K->new->names)` with `names` returning `("b", "a")` is `("a", "b")`.
+
+**After `sort`, a SCALAR is the comparator only when a TERM follows it (normative, s543x, task #5510).**  perl's `sort SUBREF LIST` is `LSTOP indirob listexpr`, and the scalar is the indirob exactly where print's would be the filehandle (§10-listop): `sort $by @l`, `sort $by 3, 1`, `sort $by (3, 1)`, `sort($by @l)`, `sort $by -1, 0` sort by `$by`; `sort $text =~ /re/g`, `sort $n > 0 ? A : B`, `sort $p, $q`, `sort $x;`, `sort $x->@*` sort a LIST that starts with the scalar.  One predicate (`_sort_scalar_is_comparator`) for the bare and the parenthesised form.  A comparator value that names no sub dies as perl's sort does -- "Not a subroutine reference" for a reference to anything but code, "Undefined sort subroutine \"PKG::NAME\" called" for a name (`p-sort-get-fn`) -- at the first comparison (perl checks at sort ENTRY: a list of fewer than two elements is sorted unchecked).  Example: `sort $n > 0 ? (3, 1, 2) : (9)` is `(p-sort (p-if …))`, `(1 2 3)`.
 
 **`sort NAME LIST` has no comparator-specific undefined-sub handling, and a
 translator must not add any** (s442d, task #501). Until then the named form
@@ -7131,6 +7133,34 @@ doing so (`$_++ for grep { 1 } @a` writes through to `@a`), and `map` still
 aliases `$_` to the element it reads (`map { $_ *= 2 } @d` modifies `@d`).
 The copy is a real per-element cost (+20 % on a map-only hot loop, measured
 s492b) and it is inherent: perl pays it too.
+
+### 10-listop. A list operator's FIRST OPERAND: the indirect-object slot, map's EXPR, split's defaults, the fat comma (normative, s543x, tasks #5510 #5504 #5513 #5515)
+
+* **The indirect-object slot.**  After `print` / `printf` / `say` / `sort`, a
+  simple scalar is the filehandle (the comparator, for `sort`: §5.4) only
+  when what follows it STARTS A TERM; an infix operator, a comma, `->`, a
+  subscript or nothing makes it the first element of the LIST.  That is
+  toke.c's one rule for the slot (case '$'), and PCL asks one predicate pair
+  for it (`Pl::PExpr::_is_scalar_fh_token` + `_is_print_term_start`): a `+`
+  / `-` with whitespace before it and none after it starts a term, a spaced
+  one is binary; PCL's PPI lexes `-1`, `.5`, `%h`, `*FH`, `/re/` in the slot
+  as terms (§80 of `docs/ppi-upstream-bugs.md`).  Example: `print $fh
+  +(LIST)[0]` writes to `$fh`; `print $x + 1` prints `$x + 1`; `sort $n > 0 ?
+  (3, 1, 2) : (9)` sorts the ternary's list.
+* **map / grep EXPR.**  Only the BLOCK (`{` right after `map` / `grep`, the
+  parser's inline lambda) runs per element; an anonymous `sub { }` in the
+  first slot is an EXPRESSION like any other.  Example: `map(sub { $_ + 1 },
+  1, 2)` is `(p-map (lambda ($_) (p-anon-sub …)) 1 2)` -- two code refs.
+* **split's defaults.**  A bare `split` is `split ' ', $_` and `split /PAT/`
+  is `split /PAT/, $_` in every position, from ONE owner
+  (`PExpr::add_implicit_default_param`).  Example: `map split, LIST` is
+  `(p-map (lambda ($_) (p-split " " $_)) LIST)`.
+* **The fat comma quotes the identifier on its left, whatever it spells.**
+  A declarator (`state` `my` `our` `local`), a statement keyword, a
+  quote-like operator's name before `=>` is a string, never read as its
+  keyword first, in every list, parenthesised or not; one predicate
+  (`PExpr::_fat_comma_quotes_word`) for the fat-comma rewrite and every
+  declarator strip.  Example: `f 1, state => 5` is `(pl-f 1 "state" 5)`.
 
 ### 10-name. The `p-` vocabulary is NOT reachable from a Perl identifier (normative, s492b, task #2100)
 

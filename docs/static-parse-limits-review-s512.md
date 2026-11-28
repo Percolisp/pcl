@@ -105,7 +105,7 @@ was added for the core feature, s405) or nothing.  `Inline::C` and friends defin
 ### F. Perl's own guessing, re-implemented by PPI and PCL
 These are not "dynamic" — perl guesses from the text too — but two guessers disagree at the edges.
 `/` regex vs divide after a word (#351, #484, #2774 — merlyn's `sin / 25 ; # / ; die`), `{` block vs
-anonymous hash (#286), `print $fh -1` (#405), `-bareword` (#476), `[`/`{` in a regex (`intuit_more`,
+anonymous hash (#286), `print $fh -1` (#405; `-$n`, `+(...)` and sort's comparator slot settled s543x, #5510: toke.c's one indirect-object rule, ONE PCL predicate reading the whitespace), `-bareword` (#476), `[`/`{` in a regex (`intuit_more`,
 #237), `<` glob vs less-than (fixed in PPI 1.291), the indirect object (`new Foo` works; the
 scalar-invocant spelling is MAYBE LATER, DECIDED s425), `y`/`s`/`q` as hash keys and the other PPI
 mis-lexes (`docs/ppi-upstream-bugs.md`).  Probed OK here: `sort bynum @l` with `bynum` defined below;
