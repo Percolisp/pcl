@@ -212,8 +212,10 @@ our %MATCH_STATE_HEAD = map { ($_ => 1) }
 sub _may_write_match_state {
   my ($acc, $all) = @_;
   return 1 if $acc->{FORM_HEAD};
-  for my $h (keys %MATCH_STATE_HEAD) { return 1 if $all->{$h} }
-  return 0;
+  # The bindings that are a literal tr/// (_note_special) write nothing.
+  my $n = 0;
+  $n += $all->{$_} // 0 for keys %MATCH_STATE_HEAD;
+  return $n > ($acc->{TR_BIND} // 0) ? 1 : 0;
 }
 
 # The fact for a body the caller has lowered (an anonymous sub's frame asks
@@ -321,6 +323,12 @@ sub _note_special {
   elsif ($h eq 'p-sub')     { $acc->{SUBS}++; _note_sub_facts($args->[2], $acc) }
   elsif ($h eq 'setf')      { $acc->{SETF_ELEM}++  if _is_elem_place($args->[0]) }
   elsif ($h eq 'p-setf')    { $acc->{PSETF_ELEM}++ if _is_elem_place($args->[0]) }
+  # `$x =~ tr///' binds through p-=~ but writes no match state (probed): a
+  # binding whose operation is a LITERAL (p-tr ...) form is not a writer (#5545).
+  elsif ($h eq 'p-=~' || $h eq 'p-!~') {
+    $acc->{TR_BIND}++
+      if ref $args->[1] eq 'ARRAY' && !ref $args->[1][0] && _canon($args->[1][0]) eq 'p-tr';
+  }
   # THE `local` SITE CORRECTION (see _scan_text) for the TREE spelling: since
   # s533c the `local` statement is a tree, `(p-local-cell $g (p-box-for-local
   # 2) …)` -- the same two heads for one site, the same shape test.
