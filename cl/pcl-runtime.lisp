@@ -41618,12 +41618,15 @@ would consume, so it dies naming the stream (rule 12)."
           (t (concatenate 'string "[\\p{" name "}]")))))
 
 (defun %pcl-has-hv-escape (pat)
-  "Does PAT contain a backslash followed by h H v V R X N p P K or G?  A cheap
-   pre-test: almost no pattern does, and the rewrite below is a full copying
-   scan."
+  "Does PAT contain a backslash followed by h H v V R X N p P K G or g, or a
+   `\\b{' `\\B{'?  A cheap pre-test: almost no pattern does, and the rewrite
+   below is a full copying scan."
   (loop for i from 0 below (max 0 (1- (length pat)))
         thereis (and (char= (char pat i) #\\)
-                     (find (char pat (1+ i)) "hHvVRXNpPKG") t)))
+                     (let ((c (char pat (1+ i))))
+                       (or (find c "hHvVRXNpPKGg")
+                           (and (find c "bB") (%pcl-rx-at pat (+ i 2) #\{))))
+                     t)))
 
 ;;; \K (keep) and \G (the pos() anchor) have no cl-ppcre counterpart, so the
 ;;; rewrite scan spells each as a MARK that cl-ppcre parses and nothing a perl
@@ -41703,9 +41706,10 @@ would consume, so it dies naming the stream (rule 12)."
                                                             :fill-pointer 0
                                                             :adjustable t)))))
   ;; A / ASTACK: the /a charset state and what each open group restores
-  ;; (task #2092), kept exactly like X / XSTACK.
+  ;; (task #2092), kept exactly like X / XSTACK.  NCAP: the capturing groups
+  ;; opened so far, which a relative \g{-N} counts back from (task #5562).
   pat n out (i 0) (in-class nil) (atom nil) (groups nil) (x nil) (xstack nil)
-  (a nil) (astack nil))
+  (a nil) (astack nil) (ncap 0))
 
 (defun %rxs-emit (s x)
   "Append the character or string X to the scan's output."
@@ -41763,7 +41767,7 @@ would consume, so it dies naming the stream (rule 12)."
                   ((char= c #\g) (digits (if (%pcl-rx-at pat k #\-) (1+ k) k)))
                   (t k)))))))
 
-(defun %pcl-rx-escape-text (pat i in-class)
+(defun %pcl-rx-escape-text (pat i in-class &optional (ncap 0))
   "The rewrite of the escape at PAT[I], and its end: (values TEXT END).
    \\h \\H \\v \\V become classes (a bare element list inside a class); a
    property escape is braced and, outside a class, made a class of its own;
@@ -41791,7 +41795,56 @@ would consume, so it dies naming the stream (rule 12)."
           ;; matches \"K\", `[\\G]' \"G\"), and is copied.
           ((and nx (char= nx #\K) (not in-class)) (values +p-keep-mark+ (+ i 2)))
           ((and nx (char= nx #\G) (not in-class)) (values +p-gpos-mark+ (+ i 2)))
+          ;; \b{wb} \b{gcb} and their \B (#5561): marks, or refused; inside a
+          ;; class \b is a backspace and the brace is text, as in perl.
+          ((and nx (find nx "bB") (not in-class) (%pcl-rx-at pat (+ i 2) #\{))
+           (%pcl-rx-bound-text pat i))
+          ;; \g in every spelling (#5562): cl-ppcre read the letter g.
+          ((and nx (char= nx #\g) (not in-class))
+           (%pcl-rx-backref-text pat i (%pcl-rx-escape-end pat i) ncap))
           (t (let ((e (%pcl-rx-escape-end pat i))) (values (subseq pat i e) e))))))
+
+(defun %pcl-rx-bound-text (pat i)
+  "The rewrite of the boundary escape `\\b{TYPE}' or `\\B{TYPE}' at PAT[I]
+   (outside a class) and its end: (values TEXT END).  wb (a word boundary)
+   and gcb / g (a grapheme cluster boundary) become marks %pcl-mark-walk
+   makes boundary filters (task #5561); sb and lb are refused, loud and
+   trappable, as is a type perl does not know (perl's own words)."
+  (let* ((close (position #\} pat :start (+ i 3)))
+         (letter (char pat (1+ i)))
+         (neg (char= letter #\B))
+         (name (and close (string-trim " " (subseq pat (+ i 3) close)))))
+    (cond ((null close)
+           (%p-die-error nil "Missing right brace on \\~C{} in regex" letter))
+          ((string= name "wb") (values (if neg "\\k<0Bw>" "\\k<0bw>") (1+ close)))
+          ((member name '("gcb" "g") :test #'string=)
+           (values (if neg "\\k<0Bg>" "\\k<0bg>") (1+ close)))
+          ((member name '("sb" "lb") :test #'string=)
+           (%p-die-error nil "PCL: \\~C{~A} is not supported (docs/not-supported.md ns-regex-escapes)"
+                         letter name))
+          (t (%p-die-error nil "'~A' is an unknown bound type in regex" name)))))
+
+(defun %pcl-rx-backref-text (pat i end ncap)
+  "The rewrite of the back-reference `\\gN' `\\g{N}' `\\g-N' `\\g{-N}' or
+   `\\g{NAME}' at PAT[I..END) (outside a class): (values TEXT END).  cl-ppcre
+   has no \\g and read the letter g (task #5562).  A number is `(?:\\N)' --
+   the group so that no digit after it joins the number; a NEGATIVE one is
+   the N-th group opened before this point, counted back from NCAP, the
+   capturing groups the scan has passed; a name is `\\k<NAME>', spelled as
+   the named-group pass spells names.  A reference to group 0 or before the
+   first group dies with perl's words."
+  (let* ((braced (%pcl-rx-at pat (+ i 2) #\{))
+         (body (subseq pat (if braced (+ i 3) (+ i 2)) (if braced (max (+ i 3) (1- end)) end)))
+         (num (and (plusp (length body))
+                   (every (lambda (c) (or (digit-char-p c) (char= c #\-))) body)
+                   (ignore-errors (parse-integer body)))))
+    (cond ((and num (zerop num)) (%p-die-error nil "Reference to invalid group 0 in regex"))
+          ((and num (minusp num) (< (+ ncap num) 0))
+           (%p-die-error nil "Reference to nonexistent or unclosed group in regex"))
+          (num (values (format nil "(?:\\~D)" (if (minusp num) (+ ncap num 1) num)) end))
+          ((and braced (plusp (length body)))
+           (values (concatenate 'string "\\k<" (substitute #\- #\_ body) ">") end))
+          (t (values (subseq pat i end) end)))))
 
 (defun %pcl-rx-counted-end (pat i)
   "If a COUNTED quantifier opens at the `{' at PAT[I], its end and its text as
@@ -41912,6 +41965,7 @@ would consume, so it dies naming the stream (rule 12)."
                (push (rxs-x s) (rxs-xstack s))
                (push (rxs-a s) (rxs-astack s))
                (setf (rxs-atom s) nil)
+               (when (%pcl-capturing-paren-p pat i (length pat)) (incf (rxs-ncap s)))
                (if flag-p
                    (progn (setf (rxs-x s) newx
                                 (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
@@ -41984,7 +42038,8 @@ would consume, so it dies naming the stream (rule 12)."
              (let ((ascii (and (rxs-a s) (%pcl-rx-ascii-escape-text pat i (rxs-in-class s)))))
                (if ascii
                    (progn (%rxs-emit s ascii) (setf (rxs-i s) (+ i 2)))
-                   (multiple-value-bind (text end) (%pcl-rx-escape-text pat i (rxs-in-class s))
+                   (multiple-value-bind (text end)
+                       (%pcl-rx-escape-text pat i (rxs-in-class s) (rxs-ncap s))
                      (%rxs-emit s text)
                      (setf (rxs-i s) end)))))
             ;; An inner `[:name:]' is ONE unit: its brackets neither open nor
@@ -43185,6 +43240,104 @@ would consume, so it dies naming the stream (rule 12)."
   (%p-die-error nil "PCL: a \\G that a match can bypass is not supported in //g or s///g (m/~A/)"
                 (%pcl-unmark-text pattern)))
 
+;;; THE BOUNDARY TYPES (task #5561, ir-spec §10-bound).  `\b{wb}' is perl's
+;;; Unicode WORD boundary: UAX #29's, which SBCL's sb-unicode:words computes,
+;;; with perl's tailoring (perlrebackslash): a span of white space is not
+;;; broken, except before the last of two or more horizontal spaces that an
+;;; Extend or Format character follows; and the regional indicators paired
+;;; from the start of each run (WB15/16 -- SBCL pairs them across the whole
+;;; string).  Measured against perl 5.40.3 on 17,514 random strings of
+;;; break-relevant characters: 17,511 identical; the three others are perl's
+;;; own WB6 look-ahead not skipping a ZWJ, which its WB7 does skip.
+;;; `\b{gcb}' (and `\b{g}') is the boundary of a cluster of \X as PCL matches
+;;; it (+p-grapheme-text+'s legacy rule; #2381 is the UAX #29 gap of both).
+;;; Each becomes a zero-width :filter that looks the position up in the
+;;; subject's boundary bits, computed once per subject (*p-bound-cache*).
+
+(defun %p-perl-hspace-p (c)
+  "Is C perl's horizontal white space (\\h)?"
+  (let ((x (char-code c)))
+    (or (= x 9) (= x 32) (= x #xa0) (= x #x1680) (<= #x2000 x #x200a)
+        (= x #x202f) (= x #x205f) (= x #x3000))))
+
+(defun %p-wb-tailor-spaces (s b)
+  "Perl's white-space tailoring of the UAX #29 word boundaries B (a bit
+   vector over 0..length of S): no boundary between two white-space
+   characters (\\s), except before the last of two horizontal spaces that an
+   Extend or Format character follows (perlrebackslash \\b{wb})."
+  (let ((n (length s)))
+    (loop for p from 1 below n
+          when (and (%perl-space-char-p (char s (1- p))) (%perl-space-char-p (char s p)))
+          do (setf (sbit b p) 0))
+    (loop for q from 2 below n
+          when (and (%p-perl-hspace-p (char s (1- q))) (%p-perl-hspace-p (char s (- q 2)))
+                    (member (sb-unicode:word-break-class (char s q)) '(:extend :format)))
+          do (setf (sbit b (1- q)) 1))
+    b))
+
+(defun %p-wb-pair-indicators (s b)
+  "WB15/16 on the boundaries B of S: between two ADJACENT regional
+   indicators the boundary is there exactly when an EVEN number of
+   indicators runs back from it (sb-unicode counts them across the string)."
+  (flet ((ri-p (c) (eq (sb-unicode:word-break-class c) :regional-indicator)))
+    (loop for p from 1 below (length s)
+          when (and (ri-p (char s p)) (ri-p (char s (1- p))))
+          do (let ((ri (loop for k downfrom (1- p) to 0
+                             while (ri-p (char s k)) count t)))
+               (setf (sbit b p) (if (evenp ri) 1 0))))
+    b))
+
+(defun %p-wb-bits (s)
+  "perl's \\b{wb} positions in the simple string S, as a bit vector over
+   0..length (see the comment above); none in an empty string."
+  (let* ((n (length s)) (b (make-array (1+ n) :element-type 'bit :initial-element 0)) (pos 0))
+    (when (plusp n)
+      (dolist (w (sb-unicode:words s)) (setf (sbit b pos) 1) (incf pos (length w)))
+      (setf (sbit b n) 1)
+      (%p-wb-pair-indicators s (%p-wb-tailor-spaces s b)))
+    b))
+
+(defun %p-gcb-bits (s)
+  "The \\b{gcb} positions in the simple string S: the starts of \\X's clusters
+   as PCL's \\X scanner finds them from 0, and the end; none in an empty
+   string.  ONE rule with \\X, whatever +p-grapheme-text+ says."
+  (let* ((n (length s)) (b (make-array (1+ n) :element-type 'bit :initial-element 0))
+         (scanner (%pcl-create-scanner +p-grapheme-text+ nil)) (pos 0))
+    (when (plusp n)
+      (loop while (< pos n)
+            do (setf (sbit b pos) 1)
+            (let ((me (nth-value 1 (%p-ppcre-scan scanner s pos n))))
+              (setf pos (if (and me (> me pos)) me (1+ pos)))))
+      (setf (sbit b n) 1))
+    b))
+
+(defvar *p-bound-cache* (list nil nil nil nil)
+  "The last subject a boundary filter read, per kind: (STRING-WB BITS-WB
+   STRING-GCB BITS-GCB).  A scan calls its filter at many positions of ONE
+   subject, so the bits are computed once per subject and kind.  PCL never
+   mutates a subject string in place (see the #477 note at *match-subject*).")
+
+(defun %p-bound-at-p (kind pos)
+  "Is POS a KIND (:wb or :gcb) boundary of the subject of the scan running
+   now (cl-ppcre binds *string* and *end-pos* around it)?"
+  (let* ((str cl-ppcre::*string*) (end cl-ppcre::*end-pos*)
+         (c *p-bound-cache*) (cell (if (eq kind :wb) c (cddr c))))
+    (unless (and (eq (first cell) str) (= (length (second cell)) (1+ end)))
+      (let ((s (if (= end (length str)) str (subseq str 0 end))))
+        (setf (first cell) str
+              (second cell) (if (eq kind :wb) (%p-wb-bits s) (%p-gcb-bits s)))))
+    (= 1 (sbit (second cell) pos))))
+
+(defun %pcl-bound-mark-node (node)
+  "The boundary filter for parse-tree NODE when it is a boundary mark of the
+   rewrite scan (%pcl-rx-bound-text), else NIL."
+  (flet ((filter (fn) (list :filter fn 0)))
+    (cond ((%pcl-rx-mark-p node "0bw") (filter (lambda (p) (and (%p-bound-at-p :wb p) p))))
+          ((%pcl-rx-mark-p node "0Bw") (filter (lambda (p) (and (not (%p-bound-at-p :wb p)) p))))
+          ((%pcl-rx-mark-p node "0bg") (filter (lambda (p) (and (%p-bound-at-p :gcb p) p))))
+          ((%pcl-rx-mark-p node "0Bg") (filter (lambda (p) (and (not (%p-bound-at-p :gcb p)) p))))
+          (t nil))))
+
 (defun %pcl-mark-walk (tree)
   "Replace each keep mark of parse TREE by an empty register and each \\G
    mark by the anchor filter.  Returns (values NEW-TREE MARKERS PROG GPOS-P):
@@ -43201,6 +43354,7 @@ would consume, so it dies naming the stream (rule 12)."
                      ((%pcl-rx-mark-p node "0G")
                       (setf gpos t)
                       (list :filter #'%p-gpos-filter 0))
+                     ((%pcl-bound-mark-node node))
                      ((atom node) node)
                      (t (case (car node)
                           ((:register :named-register)

@@ -871,5 +871,50 @@ EOP
     is($got, 'refused refused [X]', '#5461: a //g or s///g whose \G a match can bypass is refused trappably; a single match runs');
 }
 
+# #5561 (s543u): `\b{wb}` / `\B{wb}` are perl's Unicode word boundaries --
+# UAX #29 (SBCL's sb-unicode:words) with perl's white-space tailoring and the
+# regional indicators paired per run; `\b{gcb}` / `\b{g}` are the boundaries
+# of \X's clusters.  The rewrite scan spells each as a mark the parse tree
+# makes a filter.  Positions only are printed, the subjects are built with
+# chr(): nothing here reads the locale.  #5562: `\g` in every spelling
+# (`\gN` `\g{N}` `\g-N` `\g{-N}` `\g{name}`) is a back-reference.  Every row
+# FAILS on the 5d511ff8 extraction, where cl-ppcre read the letters.
+subst_agrees(<<'PL', "#5561: \\b{wb} and \\B{wb}: apostrophes, digit separators, white-space spans, a mark after spaces, indicator pairs, the empty string, //g, s///g");
+sub at { my ($s, $re) = @_; my @p; while ($s =~ /$re/g) { push @p, pos($s) } join(",", @p) }
+my ($acute, $ri1, $ri2) = (chr(0x301), chr(0x1F1FA), chr(0x1F1F8));
+my @s = ("ab cd", "don't stop", "1,000 x", "a.b", "a  b", "a \t b", "x-y", "3.14", "can't.", "a\n\nb",
+         "a  ${acute}b", "a ${acute}b", "$ri1$ri2$ri1$ri2!", "Hi! Yo.", "a_b 9z");
+my $i = 0;
+for my $s (@s) { $i++; print "$i ", at($s, qr/\b{wb}/), " | ", at($s, qr/\B{wb}/), "\n" }
+print "e ", ("" =~ /\b{wb}/ ? "y" : "n"), ("" =~ /\B{wb}/ ? "y" : "n"), "\n";
+print "w ", join("|", "ab cd" =~ /\b{wb}(\w+)/g), " ", join("|", "don't stop" =~ /\b{wb}(\S+?)\b{ wb }/g), "\n";
+(my $r = "don't stop now") =~ s/\b{wb}/|/g; print "r $r\n";
+PL
+subst_agrees(<<'PL', "#5561: \\b{gcb} / \\b{g} are \\X's cluster boundaries (combining marks, CRLF)");
+sub at { my ($s, $re) = @_; my @p; while ($s =~ /$re/g) { push @p, pos($s) } join(",", @p) }
+my $acute = chr(0x301);
+for my $s ("e${acute}x", "a\r\nb", "${acute}a", "ab${acute}${acute}c") {
+  my @x; my $p = 0; while ($s =~ /\X/g) { push @x, pos($s) }
+  print at($s, qr/\b{gcb}/), " | ", at($s, qr/\b{g}/), " | ", at($s, qr/\B{gcb}/), " | 0,", join(",", @x), "\n";
+}
+PL
+subst_agrees(<<'PL', "#5562: \\g as a back-reference: absolute, relative, named, braced or not, in s///");
+sub t { my ($s, $p) = @_; my $r = eval { $s =~ /$p/ ? "y[$&]" : "n" }; defined $r ? $r : "died" }
+print "1 ", t("aa", '(a)\g{-1}'), " ", t("abab", '(a)(b)\g{-2}\g{-1}'), " ", t("abcabc", '(a)(b)(c)\g{-3}\g{-2}\g{-1}'), "\n";
+print "2 ", t("aa", '(a)\g1'), " ", t("aa", '(a)\g{1}'), " ", t("aa", '(?<n>a)\g{n}'), " ", t("a_a", '(?<n_x>a)_\g{n_x}'), "\n";
+print "3 ", t("aa", '(a)\g-1'), " ", t("abb", '(a)(b)\g-1'), " ", t("aba", '(a)(b)\g{-2}'), " ", t("abba", '(a)(?:(b)\g{-1})\g{-2}'), "\n";
+print "4 ", t("a", '\g{-1}'), " ", t("aa", '(a\g{-1})'), " ", t("aa", '(a)(\g{-2})'), " ", t("aa0", '(a)\g{-1}0'), " ", t("x", '[\g1]'), "\n";
+(my $x = "abab") =~ s/(a)(b)\g{-2}/<$1>/; print "5 $x\n";
+PL
+{
+    # \b{sb} and \b{lb} are refused, loud and trappable (sentence and line
+    # boundaries; docs/not-supported.md ns-regex-escapes) -- never a silent no-match.
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh 'for my $p (\'a\b{sb}\', \'a \b{lb}\', \'\B{sb}\') { print eval { "a b" =~ /$p/; 1 } ? "lived " : ($@ =~ /is not supported/ ? "refused " : "other ") } print "\n";';
+    close $fh;
+    chomp(my $got = `$RealBin/../../runpcl $file 2>&1`);
+    is($got, 'refused refused refused ', '#5561: \b{sb} and \b{lb} are refused trappably');
+}
+
 
 done_testing();
