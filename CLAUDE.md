@@ -400,16 +400,16 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-28: main = MAIN-READY-119 `c6fc07d4` (generation v2-17300; twenty-one batches merged in
-this session, MAIN-READY-99 .. -119, each with its sha and content in `docs/session-log.md` s543; of 2026-11-27 / 28:
+**s543, 2026-11-28: main = MAIN-READY-120 `e7ba7cf6` (generation v2-17350; twenty-two batches merged in
+this session, MAIN-READY-99 .. -120, each with its sha and content in `docs/session-log.md` s543; of 2026-11-27 / 28:
 s543n the filehandle family, s543o the Rosetta instrument, s543m the string-eval residue + the container drop flush,
 s543l the `local` residue, s543t THE FIRST ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures
 restored at a sub's return; s543w the lexer's term position, on the PPI branch; s543u the regex escapes; s543v the slice
-family; s543t2 the capture scope only where a sub body can write the match state).**  Gate
-**381 files / 12,611 rows `Result: PASS`** (measured on merged main); full
+family; s543t2 the capture scope only where a sub body can write the match state; s543x a list operator's first operand).**  Gate
+**381 files / 12,621 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,809**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **ROSETTA 591 of 650 (90.9 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **29 live IN silent wrongs of ORDINARY code + 63 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
+(95.1 %)**; **ROSETTA 596 of 650 (91.7 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **27 live IN silent wrongs of ORDINARY code + 62 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -417,13 +417,13 @@ PASS / 136 PARTIAL / 23 FAIL / 67 SKIP of 896 files, 111,258 ok / 1,188 not
 ok** (five load timeouts counted by their one-file runs); the companion in the
 same round: `--all --quick` on -108 130 OK / 103 XDIFF / 237 DIFF of 528, the full
 run on -110 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST against the edited baselines; PPI `pcl` =
-`eca93377` (157 commits over upstream, 65 groups, 76 catalogued mis-lexes
+`a8178635` (161 commits over upstream, 66 groups, 77 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **THE CENSUS IS COMPLETE: all 103 differing programs carry a cause (`docs/rosetta-plan.md` 6a / 6b; 86 ours).
 RESUMED 2026-11-28 15:2x (`briefs-and-rules-for-claude-subagents/s543/resume-1128.md`); the running state is the LAST section of `s543/PAUSE-s543.md`:
-s543x (a list operator's first operand, v2-17350) is stacked on -119 in its merge turn; the fix briefs in launch order: s543y (Unicode, v2-17400),
+s543y (Unicode, v2-17400) and THE ROUND s543ac (the board and the companion on -120: ten code merges since the last) run; the fix briefs in launch order:
 s543z (the runtime and shim singles, v2-17500), s543aa (the expression and lowering singles, v2-17600), s543ab (the scoping singles, v2-17700);
-THE ROUND is owed (ten code merges since the last) and goes out as a batch after s543x merges.**  Line tracking costs a median
+then the plan's step 5, the fresh sample, run ONCE.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
