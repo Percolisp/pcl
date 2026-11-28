@@ -195,6 +195,12 @@ neighbour is filed with its frequency and left unless it is ordinary.
   (547 -> 555 on its own base), buckets 0; the eight programs 0473
   1011 1364 0316 0422 0493 0556 0445 `same`; 0119 0649 0710 keyed on what they
   still hold (#5502, #5560, #5507).
+* **batch 3 (s543u, 2026-11-28): regex escapes** -- `\K` #5560 (0107 0774 0818
+  0838 0923 0925 0927 0933 1050 1298 1306 0266), `\G` in s/// #5461 + a list
+  `\G//gc` keeps pos #5462 (0996 1297, and 0071: #5462 was its visible half,
+  #5460 no longer shows in it), `\b{wb}` #5561 (1561): sixteen programs
+  `same`; 0119 0710 keep their other cause (#5502, #5507): **ROSETTA 569 -> N
+  of 650** on top of batches 1 and 2 (the session log, s543u).
 
 **Step 4 -- beside it, one slot:** the ordinary silent wrongs that no Rosetta
 program holds but the board or perl's documentation does (the 21 of the first

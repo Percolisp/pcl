@@ -7270,7 +7270,78 @@ does not implement must not be passed to the engine as a literal letter.**
 because nothing says so.  The audit of the dispatch against perl 5.40.3 found
 seven escapes in that state; two are answered here, the properties
 (`\p{...}`, `\pM`) by §10-prop since s496a, and the remaining three (`\K`,
-`\g{-1}`, `\b{wb}`) are named in `not-supported.md` with their owners.
+`\g{-1}`, `\b{wb}`) by §10-keep, §10-gpos and §10-bound since s543u.  Since
+s543u the rule covers perl's WHOLE escape list (perlre, perlrebackslash): each
+escape and `(?...)` construct is passed through (cl-ppcre has it with perl's
+meaning), translated, or refused loud with a `not-supported.md` id; the table
+is in `not-supported.md` ns-regex-escapes.
+
+### 10-keep. `\K` moves the match's reported START; nothing else moves (normative, s543u, task #5560)
+
+After a match of a pattern holding `\K`, the match START every consumer reads
+-- `$&`, `` $` ``, `$-[0]`, `${^PREMATCH}`'s boundary, the span `s///`
+replaces, the string a list-context `//g` without groups returns, the
+separator `split` removes, and the zero-length test of the global advance rule
+(§10-gmatch: perl's `RXp_ZERO_LEN` reads the kept start) -- is the position of
+the LAST `\K` executed on the successful path; without one executed (a `\K` in
+an alternative or optional group that did not participate) it is the real
+start.  The groups, their NUMBERS and NAMES (`$1`, `\1`, `@-[1]`, `%+`, `$+`,
+`@{^CAPTURE}`, the count a list match returns), the match END, and `pos` do
+not move.  A `\K` inside a lookaround DIES at the compile, as in perl 5.32+.
+Mechanism: the rewrite scan spells `\K` as a mark; in cl-ppcre's parse tree it
+is an EMPTY REGISTER the engine restores on backtracking; every numeric
+back-reference and conditional test is renumbered past those registers, and
+the scanner %pcl-create-scanner hands out reports the rightmost keep register
+inside the match as its start and the program's registers only (a fifth value
+is the real start, which the `\G` start test reads).  A pattern without `\K`
+is never parsed for it.  Example: `"foo=bar" =~ /foo=\Kbar/` gives `$&` = `bar`,
+`$-[0]` = 4; `"aaa" =~ s/a\K/-/gr` is `a-a-a-`.
+
+### 10-gpos. `\G` is the TARGET's `pos()`, wherever it stands, in m// and s/// alike (normative, s543u, tasks #5461 #5462)
+
+`\G` asserts that the position is the target's `pos()` (0 when it has none)
+for a single match, a substitution and the first step of a `//g` / `s///g`;
+for every later step, that step's start (the previous match's end; perl's
+REXEC_IGNOREPOS).  The rewrite scan spells it as a mark that the parse tree
+makes a zero-width filter on `*p-gpos*`, which the op binds.  Three kinds,
+by where the `\G`s stand:
+* **anchored** -- every match begins with `\G` (the m// lexer idiom
+  `/\G.../gc`): the m// compile drops that `\G` and the match must start at
+  `pos()` (one start test, the scan from `pos()`; unchanged since #1719);
+* **leading** -- each `\G` stands at the match's start but an alternative
+  bypasses it (`m{(?:\A|\G/)...}g`, `/\Ga|b/`): perl's gofs is 0, a `//g` step
+  scans from `pos()` as usual, `\G` a filter at the step's start;
+* **floating** -- a `\G` at an offset (`/-\G/`, `s/.\G/!/`): a `//g` step scans
+  from 0 with the match's end at or past `pos()` (past it after a zero-length
+  match), and a match ending at its `\G` counts as zero-length (perl's
+  `start + gofs == end`).  A floating `\G` that a match can BYPASS
+  (`/X\G|b/g`) is REFUSED under `/g` and `s///g` (perl advances it by an
+  offset it computes for the whole pattern); without `/g` it runs.
+A list-context `\G//gc` keeps `pos` at the last match's end, or where it was
+on a miss (#5462, §10-gmatch's `/c` rule).  Example: `$_ = "q00r00";
+/r(?=00)/g and print s/\G00/X/r` prints `q00rX`.
+
+### 10-bound. `\b{wb}` is perl's word boundary; `\b{gcb}` is `\X`'s; `\b{sb}` `\b{lb}` DIE (normative, s543u, task #5561)
+
+`\b{wb}` / `\B{wb}`: UAX #29's word boundaries (SBCL's `sb-unicode:words`)
+with perl's tailoring -- no boundary inside a span of white space (`\s`),
+except before the last of two or more horizontal spaces that an Extend or
+Format character follows -- and the regional indicators paired from the start
+of each run; none in an empty string (so `\B{wb}` matches there).  `\b{gcb}` /
+`\b{g}` / `\B{gcb}`: the boundaries of `\X`'s clusters as PCL's `\X` scanner
+finds them from 0 (ONE rule with `\X`; #2381 is the UAX #29 gap of both).
+Each is a zero-width filter reading the subject's boundary bits, computed
+once per subject.  `\b{sb}` and `\b{lb}` (and `\B{...}`) DIE when the pattern
+compiles, naming the escape; an unknown type dies with perl's words.  Measured
+on 17,514 random strings of break-relevant characters (s543u): 17,511
+identical to perl 5.40.3; the three others are perl's own WB6 look-ahead not
+skipping a ZWJ.  Example: `"don't stop" =~ /\b{wb}(\S+?)\b{wb}/g` is
+`(don't, stop)`.
+
+`\g` is a back-reference in every spelling: `\gN` `\g{N}` absolute, `\g-N`
+`\g{-N}` the N-th group opened before it (the scan counts them), `\g{name}`
+= `\k<name>`; `\g0` and a reference before the first group die with perl's
+words (task #5562).
 
 ### 10-poss. A POSSESSIVE quantifier is perl's own ATOMIC GROUP (normative, s499e, task #2380)
 

@@ -137,7 +137,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Regex extended character classes `(?[ … ])`](#regex-extended-character-classes---)
 * [`reset()` for one-match `?pattern?` and named captures](#reset-for-one-match-pattern-and-named-captures)
 * [Regex control verbs: `(*SKIP)`, `(*FAIL)`, `(*MARK:name)`, `(*PRUNE)`, …](#regex-control-verbs-skip-fail-markname-prune-)
-* [Regex escapes that are still passed through untranslated](#regex-escapes-that-are-still-passed-through-untranslated)
+* [Regex escapes and constructs: passed through, translated, or refused (the audit table)](#ns-regex-escapes)
 
 <a id="ns-index-subs"></a>
 ### Subroutines, arguments and closures
@@ -4667,23 +4667,60 @@ value:
 `lib/Fcntl.pm`'s and `lib/Errno.pm`'s; that portability gap is unchanged here.
 
 <a id="ns-regex-escapes"></a>
-## Regex escapes that are still passed through untranslated
+## Regex escapes and constructs: what is passed through, translated, or refused (the audit table)
 
-The escape rewriter (`%pcl-rewrite-scan`, named `%pcl-expand-hv-escapes` until s499e) translates `\h \H \v \V \R`,
-since s492c (task #2050) `\X` and `\N`, and since s496a (task #2060) the
-Unicode properties `\pX` `\p{…}` `\PX` `\P{…}`.  An AUDIT of the dispatch against
-perl 5.40.3 found the rest, and every one of them SILENTLY NEVER MATCHES
-rather than saying so — which is rule 12's worst case, and the reason it is
-written down here:
+The escape rewriter (`%pcl-rewrite-scan`, named `%pcl-expand-hv-escapes` until
+s499e) translates what cl-ppcre lacks; a construct cl-ppcre has with perl's
+meaning is passed through; one it cannot run is REFUSED, loud and trappable.
+Rule 12's worst case is an escape handed to the engine as a LETTER, which
+silently never matches.  The AUDIT of s543u (the rule-12 read against perlre and
+perlrebackslash, every escape and `(?...)` construct probed perl 5.40.3 ->
+5d511ff8 -> the s543u tree) leaves ONE cell in that state, `\N{NAME}`, owned
+by #1494:
 
-| escape | perl | PCL |
+| escape / construct | PCL | how |
 |---|---|---|
-| `\X` | one grapheme cluster (UAX #29) | a base character with its combining marks, or a CRLF pair (see below) |
-| `\N` | any character but newline | same |
-| `\K` | keep (drop what is before it from `$&`) | never matches |
-| `\p{…}` / `\P{…}` / `\pM` | Unicode properties | perl's own sets (s496a); an ungenerated enumerated property DIES (above) |
-| `\g{-1}` | relative backreference | never matches |
-| `\b{wb}` etc. | boundary variants | never matches |
+| `\a \e \f \n \r \t \cX \0 \012 \x41` | perl's | passed |
+| `\x{HHHH}`, `\o{OOO}` | perl's | translated (`\o{}` since s543u; it read the letter o) |
+| `\N{U+HHHH}` `\N{NAME}` | **never matches** | #1494 (ordinary; the Unicode batch) |
+| `\w \d \s \W \D \S` | perl's on ASCII | passed; wide-string gaps #2440 |
+| `\h \H \v \V \R`, `\N` | perl's | translated (#1713, #2050) |
+| `\X` | an APPROXIMATION (below) | translated (#2050, #2381) |
+| `\pX \p{…} \PX \P{…} \p{^…}` | perl's own sets | translated (#2060); an ungenerated enumerated property DIES (above) |
+| `\A \z \Z \b \B` | perl's | passed |
+| `\K` | perl's | translated (s543u, #5560; ir-spec §10-keep) |
+| `\G` | perl's | translated (s543u, #5461; §10-gpos); a floating `\G` a match can bypass is REFUSED under `//g` / `s///g` |
+| `\b{wb} \B{wb} \b{gcb} \b{g} \B{gcb}` | perl's (wb measured 17,511 / 17,514; gcb = `\X`'s) | translated (s543u, #5561; §10-bound) |
+| `\b{sb} \b{lb} \B{sb} \B{lb}` | — | REFUSED at the compile (sentence / line-break boundaries: SBCL's sentence segmentation differs from perl on 7 % of random strings, line breaking has no boundary iterator) |
+| `\1` .. `\9`, `\10` (backref or octal by perl's rule) | perl's | passed |
+| `\gN \g{N} \g-N \g{-N} \g{name}` | perl's | translated (s543u, #5562) |
+| `\k<n>`, `\k'n'`, `\k{n}`, `(?<n>…)`, `(?'n'…)`, `(?P<n>…)`, `(?P=n)` | perl's | translated (`\k'n'` `\k{n}` silently never matched, `(?'n'` `(?P<n>` `(?P=n)` died: s543u) |
+| `\Q \E \U \L \u \l \F` in a RUN-TIME pattern | the letters, as perl reads them there | passed (the compiler applies them at a literal, #3510) |
+| an unknown escape (`\y \_ \- \#`) | the character | passed |
+| `(?#…) (?:…) (?imsx-imsx:…) (?^…:…)` | perl's | passed / translated (#2443) |
+| `(?a) (?aa)` | perl's | translated (#2092) |
+| `(?u) (?d) (?l)` | ignored | ns-regex-charset-modifiers |
+| `(?p)` | refused (cl-ppcre's syntax error) | #2635 |
+| `(?n)` | refused | ns-regex-n-modifier |
+| `(?= …) (?! …) (?<= …) (?<! …) (?> …)`, possessive `a++` | perl's | passed / translated (#2380) |
+| `(*pla:` `(*plb:` `(*nla:` `(*nlb:` `(*positive_lookahead:` … `(*atomic:` | perl's | translated (s543u: they died) |
+| `(*sr:` `(*script_run:` `(*asr:` | refused | ns-regex-script-run |
+| `(?[ … ])` | refused | ns-regex-extended-class |
+| `(?\|…)` branch reset | refused (cl-ppcre's syntax error) | #5564 (rare) |
+| `(?(1)…)`, `(?(?=…)…)` | perl's | passed |
+| `(?(<n>)…)` `(?('n')…)` named condition | refused (cl-ppcre's syntax error) | #5565 (rare) |
+| `(?R) (?1) (?+1) (?-1) (?&n) (?P>n) (?(DEFINE)…)` | refused | ns-regex-recursion |
+| `(*FAIL) (*F)` | perl's | translated (#2386) |
+| `(*PRUNE) (*SKIP) (*MARK:…) (*THEN) (*COMMIT) (*ACCEPT)` | refused | ns-regex-control-verbs |
+| `(?{…}) (??{…})` | stripped, announced | ns-regex-code-blocks |
+| `[[.a.]] [[=a=]]` | no match (perl DIES: invalid Perl, rule 9) | — |
+
+Known divergences inside the translated rows (rare, listed): perl's own
+`/\b{wb}/g` on a ONE-character string reports only the start (its optimizer;
+`/\b{wb}|x/g` reports both), PCL both; perl's WB6 look-ahead does not skip a
+ZWJ where its WB7 does (`"\x{915}.\x{200d}b"`: perl breaks before the period),
+PCL follows UAX #29; a `\K` inside an ATOMIC group whose continuation failed
+can leave a stale keep register, as cl-ppcre leaves a stale capture there.
 
 **`\X` is an APPROXIMATION.** perl's is UAX #29 extended grapheme clusters.
 Since s496a PCL uses the legacy rule `(?>\r\n|\P{M}\p{M}*|\p{M}+)` — a base
