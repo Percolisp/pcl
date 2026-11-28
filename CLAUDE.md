@@ -421,9 +421,10 @@ MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second ru
 `eca93377` (157 commits over upstream, 65 groups, 76 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **THE CENSUS IS COMPLETE (2026-11-28): all 103 differing programs carry a cause (`docs/rosetta-plan.md` 6a / 6b; 86 ours).
-RUNNING (the default of two again: the usage limit cut the batches twice): the ROSETTA FIX BATCHES s543t2 (#5545: the capture scope only where a body can
-match: in its merge turn), s543x (a list operator's first operand); WRITTEN, waiting: `s543/s543y-prompt.md` (Unicode in names, strings, patterns).
-State, the written and the next briefs: `s543/PAUSE-s543.md`, last section.**  Line tracking costs a median
+NOTHING RUNS (the USER ended the session 2026-11-28 10:4x).  NEXT ACTION = `briefs-and-rules-for-claude-subagents/s543/resume-after-stop.md`:
+TWO fix batches are STOPPED ON ORDER, to be resumed and merged in the order s543t2 (#5545: the capture scope only where a sub body can match,
+v2-17300), s543x (a list operator's first operand, v2-17200); two briefs are WRITTEN, not launched (s543y Unicode, s543z the runtime and shim
+singles), one is to write (the parser and scoping singles); THE ROUND is owed (eight code merges since the last).**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
 flagged to the USER: `DESTROY` runs at program exit only; a filehandle that
