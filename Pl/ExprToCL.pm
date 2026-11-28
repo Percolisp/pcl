@@ -3255,17 +3255,23 @@ sub gen_funcall_form {
   }
 
   # grep/map EXPRESSION form: grep EXPR, LIST → (p-grep (lambda ($_) EXPR) LIST).
-  # The BLOCK/lambda form (first arg is inline_lambda/func_ref/anon_sub) is NOT
-  # handled here — it is a plain funcall that rides the generic tail, which
-  # gen_node_form's the lambda child (the inline_lambda emitter's output,
-  # embedded as a raw atom until THAT emitter is converted — E2's final step —
-  # at which point grep/map go structural with no change here).  Exactly the
-  # text emitter's split: only the non-lambda first arg gets the lambda wrap.
+  # The BLOCK/lambda form (first arg is the block's inline_lambda, or the
+  # parser-less anon_sub) is NOT handled here — it is a plain funcall that
+  # rides the generic tail, which gen_node_form's the lambda child (the
+  # inline_lambda emitter's output, embedded as a raw atom until THAT emitter
+  # is converted — E2's final step — at which point grep/map go structural
+  # with no change here).  Exactly the text emitter's split: only the
+  # non-lambda first arg gets the lambda wrap.
+  # An anonymous `sub { … }` is a func_ref, and for map / grep it is an
+  # EXPRESSION, never the block (perl: `map BLOCK LIST` needs the `{` right
+  # after `map`): `map(sub { $_ + 1 }, LIST)` is a list of code refs, and
+  # `grep(sub { 0 }, LIST)` keeps every element, a code ref being true
+  # (#5504 -- the sub's BODY ran per element).  A user (&@) sub's `sub { }`
+  # argument is its block argument, but that is a call, not this arm.
   if (($func_name eq 'grep' || $func_name eq 'map') && @$kids >= 2) {
     my $first_arg_node = $self->expr_o->get_a_node($kids->[1]);
     my $is_lambda_form = $self->expr_o->is_internal_node_type($first_arg_node) &&
                          ($first_arg_node->{type} eq 'inline_lambda' ||
-                          $first_arg_node->{type} eq 'func_ref' ||
                           $first_arg_node->{type} eq 'anon_sub');
     if (!$is_lambda_form) {
       my $expr_form = $self->gen_node_form($kids->[1]);

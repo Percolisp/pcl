@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -118,3 +118,20 @@ test_cl('\(@array) is still a reference per element',
              my @l; push @l, \@a, \@b; print join(",", map { ref } @l), "\n";
              sub cnt { scalar(@_) } print cnt(\@a, \@b), "\n";',
     "SCALAR,SCALAR\nARRAY,ARRAY\n2\n");
+
+# #5504 (s543x): an anonymous `sub { }` as map's / grep's EXPR is an
+# EXPRESSION -- a code ref per element, a true value for grep -- never the
+# block (`map BLOCK LIST` needs the `{` right after `map`).  The sub's BODY
+# ran per element.  The subs read the GLOBAL $_ when they are called, as in
+# perl (the index loop's).  The block form and `+sub` are the controls.
+# Probed perl 5.40.3.
+test_cl('map(sub { ... }, LIST) / grep(sub { ... }, LIST): the sub is the value',
+    'my @s = map(sub { $_ + 10 }, 1 .. 3);
+     print scalar(@s), " ", ref($s[0]), " ", join(",", map { $s[$_]() } 0 .. 2), "\n";
+     my @t = map sub { "t$_" }, 1, 2; print scalar(@t), ref($t[1]), "\n";
+     my @g = grep(sub { 0 }, 1, 2); print scalar(@g), "\n";
+     my @p = map((sub { 1 }), 1, 2); print ref($p[0]), "\n";
+     my @c = map(sub { "[$_[0]]" }->($_), 1, 2); print "@c\n";
+     my @k = map { sub { 5 } } 1; print ref($k[0]), "\n";
+     my @q = map +sub { 6 }, 1; print $q[0]->(), "\n";',
+    "3 CODE 10,11,12\n2CODE\n2\nCODE\n[1] [2]\nCODE\n6\n");
