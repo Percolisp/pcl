@@ -518,8 +518,6 @@ kvhslice.t	13		undef	^\%h\{"i"\} in scalar context better written as \$h\{"i"\}	
 sort.t	26	redefinition should not take effect during the sort			#1491 CATALOG sort.t "in-file interaction only -- does not reproduce in isolation (review s464 §1c)"
 sort.t	162	overload compare called once	'0'	'1'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	164	overload string called twice	'0'	'2'	#1021 (sort default comparator ignores an overloaded cmp)
-sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
-sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 bop.t	465	|= doesn't break string overload	'0'	'z'	#960 half (a): the binary overload REFUSAL is not implemented (#972, the three prerequisites, shipped s464aw; re-run s543c on 7ea827a6: still failing)
 reset.t	42	check $^W has been zeroed	'1'	'0'	NS:`reset()` for one-match `?pattern?` and named captures (s506f: exposed when $^W became assignable)
 readline.t	35	error after trying to readline file opened for write			#3531 (a failed readline does not set the handle error flag; reached since s521b #3326)

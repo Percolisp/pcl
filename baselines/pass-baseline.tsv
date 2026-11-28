@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s543t (2026-11-28, Opus, EDITED BY HAND): sort.t 184/5 -> 186/3 -- rows 174 175 "Match vars do not leak from one plain / $$ sort sub to the next" pass: #932's sub half (a sort SUB is a sub frame, so its match no longer reaches the next comparator); the full sweep on the s543t tree 18808 -> 18810, GATE clean
 # s543j (2026-11-22, Opus, EDITED BY HAND): local.t 305/8 -> 306/7 -- the row `local %ENV = %ENV; is(dump of %ENV, dump before)` (perl-tests/local.t line 592) passes: `local %ENV` keeps the environment's magic (#5210, p-local-env); before it bound a plain copy
 # s543e (2026-11-21, Opus, EDITED BY HAND): magic.t 159/30 -> 158/30 -- row 194 "not exists $ENV{existing} during local $ENV{existing}" is a TODO row ("exists on %ENV should reflect real env") that PERL FAILS (`local $ENV{K}` keeps the key: exists 1, the value undef, a child sees ""); PCL passed it because its `local $ENV{K}` UNSET the variable.  #1030's value layer makes the localised element perl's (exists, undef, exported as ""), so PCL now prints perl's `not ok 194 # TODO` -- a row that was passing on a wrong answer, not a regression; it moves to the row shortfall (19 -> 20).  One-file runs (scratch/s543e/sweep1.pl, the sweep's command): base a5a60b62 `ok 194`, tree `not ok 194 # TODO`, every other row identical.  TOTAL 18,808 -> 18,807.
 # s543a (2026-11-16, Opus, EDITED BY HAND): caller.t 32/79 -> 36/76 -- line tracking on by default (the USER, s543): three rows pass, "[perl #115768] caller gets line numbers from nulled cops" + "(2)" and "check large line numbers are preserved" (caller's LINE is the call site, after `# line`), and the file's own TODO row 50 (RT #7165) is produced and passes (PCL answers the multi-line call's first line, what the test wants; perl 5.40.3 fails its TODO -- the row-shortfall row leaves); full sweep scratch/s543a/sweep.log.  method.t PARTIAL 78/21 -> 79/20 -- "no crash with undef method name on unblessed ref" passes (its runperl child's die reads `at - line 1.`, was `at (eval 0) line 0.`; one-file runs base / tree / tree under -line-track: 78 / 79 / 78).  ("$pvlv_glob->method" fails on the base the same way: the sweep's UNSTABLE bucket, not this batch.)
@@ -602,7 +603,7 @@ reverse.t	OK	25	0	25
 scalar.t	OK	91	25	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
-sort.t	OK	184	5	205
+sort.t	OK	186	3	205
 splice.t	OK	34	0	34
 split.t	OK	179	5	219
 sprintf.t	OK	532	25	559
