@@ -1304,6 +1304,12 @@ sub __current_token_is_forced_word {
 			return 1 if not $USUALLY_FORCES{$prevprev->content} and $prevprev->content ne '->';
 			return;
 		}
+
+		# Under the class feature method names a method as sub names a
+		# sub: method x { ... } and method y { ... } declare x and y
+		return 1 if $content eq 'method' and $prev->isa('PPI::Token::Word')
+			and $t->{feature_set} and $t->{feature_set}{class}
+			and !( $prevprev and $prevprev->content eq '->' );
 	}
 	# pos on $t->{line} is guaranteed to be set at this point.
 

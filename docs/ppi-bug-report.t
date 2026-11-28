@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 687;
+use Test::More tests => 689;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -2629,4 +2629,26 @@ for my $case ( [ 'my $x = not do { 1 };', 'PPI::Structure::Block' ],
     my ( $code, $want ) = @$case;
     my @c = bracket_classes( $code, '{' );
     is( $c[0], $want, "$code: the first { is a " . short_class($want) . ' (control)' );
+}
+
+# §79 -- under the class feature `method NAME` declares a method, and perl
+# reads the word after method as its name whatever it is spelled like
+# (toke.c: KEY_method forces the next word, as KEY_sub does), so a method
+# named x, y or s is a Statement::Sub: `use feature "class"; class C {
+# method x { 7 } } print C->new->x` prints 7.  PPI read the x as the
+# repetition operator after a word and the y and s as a transliteration and
+# a substitution, which swallowed the method body.
+{
+    my $code = qq{use feature "class";\nclass C { method x { 1 } method y { 2 } method s { 3 } method q { 4 } }};
+    my $doc = PPI::Document->new( \$code );
+    my @names = map { $_->name } @{ $doc->find('PPI::Statement::Sub') || [] };
+    is( "@names", 'x y s q', 'method x / y / s / q { ... }: four methods, by those names' );
+}
+# The controls: a method named like a plain word, and sub x / sub y outside
+# a class, were right.
+{
+    my $code = qq{use feature "class";\nclass C { method z { 4 } } sub x { 1 } sub y { 2 }};
+    my $doc = PPI::Document->new( \$code );
+    my @names = map { $_->name } @{ $doc->find('PPI::Statement::Sub') || [] };
+    is( "@names", 'z x y', 'method z, sub x, sub y: subs by their names (control)' );
 }

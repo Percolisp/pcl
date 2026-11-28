@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl-s543w
-branch-sha: 9a7338de72b6deb4d083dd6441d70f5f24ab451e
-lib-tree: c0d51a7b2a9cabf66191fc1c95c744462956289f
+branch-sha: eca93377086b086e6464732b7db241bf836fd3e1
+lib-tree: baadf954e155aa77c64709dca5fd7dee035d06a0
 date: 2026-11-28
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -88,6 +88,7 @@ fix: BI §75 7fd02b75 Symbol: a digit-named variable ends at its last digit
 fix: BJ §76 d20ff42c Tokenizer: <...> after use Module is the import list
 fix: BK §77 ea961bca Whitespace: a spaced <...> where a term is expected is a glob
 fix: BL §78 9a7338de Lexer: after an operator a { is an anonymous hash
+fix: BM §79 eca93377 Tokenizer: under the class feature the word after method is its name
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -243,3 +244,5 @@ commit: 48f53347 TODO tests: a spaced <...> where a term is expected is a glob
 commit: ea961bca Whitespace: a spaced <...> where a term is expected is a glob
 commit: fabedb61 TODO tests: an anonymous hash after a unary operator
 commit: 9a7338de Lexer: after an operator a { is an anonymous hash
+commit: 39279909 TODO tests: a method's name may be spelled like an operator
+commit: eca93377 Tokenizer: under the class feature the word after method is its name

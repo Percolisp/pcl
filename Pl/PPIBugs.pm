@@ -1131,6 +1131,20 @@ print join(",", sort keys %K), "\\n";',
    },
    unblocks => [],
    tasks => [5508] },
+ { id => 79, kind => 'token', dump => 'tokens',
+   title => 'Under the class feature the NAME after `method` is lexed by its spelling: `method x { ... }` as the repetition operator, `method y { ... }` / `method s { ... }` as a transliteration / substitution that swallows the body -- perl reads the word after `method` as the name, as after `sub`',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { check => 'x-as-repetition', shape => 'Operator x (or a quote-like) right after a method Word under the class feature' },
+   fix => { kind => 'relex', handler => undef, changed => 'NONE: PCL refuses class statements (Pl::Parser::feature_statement_refusal); found by s543w when group BL changed the class of the { after the mis-lexed x (five t/class/*.t files, the expect checker\'s brace-class cascades)', commit => 'eca93377', group => 'BM', pr => undef },
+   repro => 'use feature "class";
+class C { method x { 1 } }',
+   perl => "",
+   tokens => {
+     got  => ['Word=use', 'Word=feature', 'Quote::Double="class"', 'Structure=;', 'Word=class', 'Word=C', 'Structure={', 'Word=method', 'Operator=x', 'Structure={', 'Number=1', 'Structure=}', 'Structure=}'],
+     want => ['Word=use', 'Word=feature', 'Quote::Double="class"', 'Structure=;', 'Word=class', 'Word=C', 'Structure={', 'Word=method', 'Word=x', 'Structure={', 'Number=1', 'Structure=}', 'Structure=}'],
+   },
+   unblocks => [],
+   tasks => [5601] },
 );
 
 # The one accessor.

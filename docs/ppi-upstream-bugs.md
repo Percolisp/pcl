@@ -3419,8 +3419,33 @@ under the four conjuncts (the `{$args}` fixture serves cast rows too, so its ope
 STAYS (it decides what PPI leaves ambiguous).  Over the 2,697-file wide list + Rosetta the structure changes
 in 9 files: 0493 (the target), `ref {}` in core CPAN/Mirrors.pm (twice), `\{}` in t/perf/opcount.t, `-l{0}`
 in t/base/lex.t (all perl's reading), and five t/class/*.t files where `method x { ... }` lexes `x` as the
-repetition operator (a separate mis-lex in a refused `class` statement: #5601).  Guard: the registry row
-§78, the twins' §78 rows (ten + thirteen controls), `Pl/t/anon-hash-term-01.t` (s543w).
+repetition operator (a separate mis-lex in a refused `class` statement: #5601, §79 below).  Guard: the
+registry row §78, the twins' §78 rows (ten + thirteen controls), `Pl/t/anon-hash-term-01.t` (s543w).
+
+## 79. Under the class feature the name after `method` is lexed by its spelling: `method x { ... }` (task #5601)  [CONFIRMED PCL's branch 7fd02b75; 1.291 has no class feature]
+
+**Minimal repro** (valid perl 5.38+; `use feature "class"; no warnings; class C { method x { 7 } } print
+C->new->x` prints `7`):
+
+```perl
+use feature "class";
+class C { method x { 1 } method y { 2 } }
+```
+
+**PPI tokens**: `Word(method) Operator(x) Structure({) ...` and `Word(method) Regexp::Transliterate(y { 2 } })`
+-- the method body is swallowed.  **Expected**: `Word(method) Word(x)`, a `Statement::Sub` per method (group
+AN's shape).  perl reads the word after `method` as the name, as after `sub`; PPI's
+`__current_token_is_forced_word` forces the word after `sub` `package` `use` `no` only.
+
+**Impact on PCL**: none at run time (PCL refuses `class` statements, `Pl::Parser::feature_statement_refusal`).
+Found when group BL (§78) changed the class of the `{` after the mis-lexed `x` in five of perl's own
+t/class/*.t files: the expect checker's brace-class kind rose by those cascades.
+
+**FIXED on PCL's PPI branch** (s543w: group BM, commit `eca93377` on branch `pcl-s543w`, vendored as
+vendor/PPI -- the word after a `method` Word is forced while the tokenizer's feature set has `class` on, not
+after `->`); the feature is on from the line after its `use` (the tokenizer reads a line ahead of the lexer
+that switches it on); upstream PR: pending (`PR-BM.md`).  Guard: the registry row §79, the twins' §79 rows
+(one + one control).
 
 ---
 
