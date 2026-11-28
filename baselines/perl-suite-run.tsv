@@ -2022,7 +2022,7 @@ op/sigsystem.t	4	0	4	0	OK	s502e #2537: a list-valued `use constant TRUE => ($^X,
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	57	293	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
-op/sort.t	205	0	185	20	DIFF	s501t #155: 183/22 -> 185/20 (overload sort result; EXTEND by pp_sort on a tied array)	0
+op/sort.t	205	0	187	18	DIFF	s543t #932's sub half (a sort SUB is a sub frame: its match is not the next comparator's): 185/20 -> 187/18, rows 174 175; was s501t #155: 183/22 -> 185/20 (overload sort result; EXTEND by pp_sort on a tied array)	0
 op/splice.t	34	0	34	0	OK		0
 op/split.t	219	0	214	5	DIFF	s506f: 213/6 -> 214/5, split.t line 99 (-D: perl's non-debugging message)	0
 op/split_unicode.t	147	0	107	40	DIFF		0

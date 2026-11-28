@@ -3643,8 +3643,17 @@ each literal in scope becomes `NAME('TEXT')`), and `lib/bigint.pm` /
 EVAL is not converted; `hex` / `oct` from `use bigint` are exported into the
 importing PACKAGE (perl makes them lexical); bignum's upgrade/downgrade is set
 globally and not undone by `no bignum`; the `q` (string) kind is ignored.
-**`use bigrat` is ANNOUNCED** once on stderr and literals stay plain numbers —
-Math::BigRat itself does not run under PCL yet (task #3000).  A user module
+**The import list is perl's** (s543t, task #5500; `bigint::_import_options`):
+`a` / `accuracy`, `p` / `precision`, `round_mode`, `l` / `lib` / `try` / `only`,
+bignum's `upgrade` / `downgrade`, `v`, `t` are taken, and `PI e bpi bexp` exported on
+request; the library options are handed to Math::BigInt->import, which under PCL
+always runs the pure-Perl Math::BigInt::Calc (as perl does on a box without the
+GMP / Pari backends).  Under a NON-EMPTY import list `hex` / `oct` stay the
+built-ins (perl overrides them lexically whatever the list says; the transpiler
+reads the Exporter rule).
+**`use bigrat` is ANNOUNCED** once on stderr and literals stay plain numbers.
+Math::BigRat itself runs since s543t (#2560 / #3000: its `"N/D"` constructor read
+a called sub's `$2`, #932) -- shipping bigrat as bignum's three lines is open.  A user module
 whose handler is an ANONYMOUS sub (or computed) cannot be honoured: the
 handler is code that would have to run while PCL parses — the static-parse
 family of #2610 — and its literals stay plain numbers, silently.

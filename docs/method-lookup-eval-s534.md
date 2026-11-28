@@ -322,6 +322,13 @@ misses, the ancestry), #4524 (the overload half), #4525 (the one-line guard).**
 * **Not in this lever:** `p-call-overload`'s two fresh argument boxes per call
   (part of `ovlbool`'s "other" in §2, not measured on its own), `SUPER::` (uncached, unchanged), and PPI's
   string-eval matcher -- each its own measurement.
+  **Since s543t** `p-call-overload` also binds `*wantarray*` to scalar around
+  the handler (#5465) and takes the scalar value of the other operand and of
+  the result (#5468: two type tests that leave at once for a box / number /
+  string), and an assignment key (`+=` .. `^=`) reaches the handler through
+  `%p-assign-op`, which may first call the class's `=` copy constructor
+  (#5501 #5544) -- ir-spec 3.4 is the contract; the per-call cost is in the
+  s543t session-log section.
 
 ## 7. What NOT to retry
 
