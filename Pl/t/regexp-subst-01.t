@@ -854,6 +854,8 @@ $s = "aaab"; pos($s) = 0; print "4 ", ($s =~ /(?:\Ga)+/ ? "[$&]" : "no"), " ", (
 $s = "a.b.c"; my @o; while ($s =~ /\./g) { push @o, ($s =~ /.\G/ ? $& : "-") } print "5 @o\n";
 $s = "aab"; pos($s) = 0; @l = $s =~ /\Ga/gc; print "6 ", pos($s) // 'u'; pos($s) = 1; @l = $s =~ /\Gq/gc; print " ", pos($s) // 'u', "\n";
 $s = "ab"; pos($s) = 1; print "7 ", ($s =~ /\Gb\K/ ? "[$&]" : "no"), " ", ($s =~ s/\G\Kb/B/r), "\n";
+my @parts = "a/b\\/c/d" =~ m{(?:\A|\G/)((?:[^/\\]|\\.)*)}g; $s = "xab"; pos($s) = 0; @l = $s =~ /\Ga|b/g;
+my @f; $s = "a,b,,c"; while ($s =~ /(?:\A|\G,)([^,]*)/g) { push @f, "[$1]" } print "8 ", join("|", @parts), " @l @f\n";
 PL
 {
     # A //g or s///g whose \G a match can BYPASS (`X\G|b`) is refused, loud and
@@ -905,6 +907,18 @@ print "2 ", t("aa", '(a)\g1'), " ", t("aa", '(a)\g{1}'), " ", t("aa", '(?<n>a)\g
 print "3 ", t("aa", '(a)\g-1'), " ", t("abb", '(a)(b)\g-1'), " ", t("aba", '(a)(b)\g{-2}'), " ", t("abba", '(a)(?:(b)\g{-1})\g{-2}'), "\n";
 print "4 ", t("a", '\g{-1}'), " ", t("aa", '(a\g{-1})'), " ", t("aa", '(a)(\g{-2})'), " ", t("aa0", '(a)\g{-1}0'), " ", t("x", '[\g1]'), "\n";
 (my $x = "abab") =~ s/(a)(b)\g{-2}/<$1>/; print "5 $x\n";
+PL
+# s543u, the rule-12 read of the rewriter against perlre / perlrebackslash: the
+# spellings cl-ppcre read as letters (`\o{}` `\k'n'` `\k{n}`: silently never
+# matched) or refused (`(?'n'...)` `(?P<n>...)` `(?P=n)`, the alphabetic
+# assertions `(*pla:` .. `(*atomic:`) are translated to the forms it has.  Every
+# row FAILS on the 5d511ff8 extraction.
+subst_agrees(<<'PL', "s543u: \\o{} \\k'n' \\k{n} (?'n') (?P<n>) (?P=n) and the alphabetic assertions (*pla: (*plb: (*nla: (*nlb: (*atomic:");
+sub t { my ($s, $p) = @_; my $r = eval { $s =~ /$p/ ? "y[$&]" : "n" }; defined $r ? $r : "died" }
+print "1 ", t("A", '\o{101}'), " ", t("xA", '[\o{101}]'), " ", t("ab", 'a\o{142}'), "\n";
+print "2 ", t("aa", "(?<n>a)\\k'n'"), " ", t("aa", '(?<n>a)\k{n}'), " ", t("aXa", "(?'q'a)X\\k<q>"), " ", t("aa", '(?P<q>a)(?P=q)'), " ", t("a_a", '(?P<q_r>a)_\k<q_r>'), "\n";
+print "3 ", t("ab", 'a(*pla:b)'), " ", t("ab", '(*plb:a)b'), " ", t("ac", 'a(*nla:b)'), " ", t("cb", '(*nlb:a)b'), " ", t("ab", 'a(*positive_lookahead:b)'), " ", t("ab", '(*negative_lookbehind:x)b'), "\n";
+print "4 ", t("aab", '(*atomic:a+)b'), " ", t("aaa", '(*atomic:a+)a'), " ", t("ab", '(*pla:(a))\1b'), "\n";
 PL
 {
     # \b{sb} and \b{lb} are refused, loud and trappable (sentence and line

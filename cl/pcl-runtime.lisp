@@ -41625,7 +41625,9 @@ would consume, so it dies naming the stream (rule 12)."
         thereis (and (char= (char pat i) #\\)
                      (let ((c (char pat (1+ i))))
                        (or (find c "hHvVRXNpPKGg")
-                           (and (find c "bB") (%pcl-rx-at pat (+ i 2) #\{))))
+                           (and (find c "bBo") (%pcl-rx-at pat (+ i 2) #\{))
+                           (and (char= c #\k) (< (+ i 2) (length pat))
+                                (find (char pat (+ i 2)) "'{"))))
                      t)))
 
 ;;; \K (keep) and \G (the pos() anchor) have no cl-ppcre counterpart, so the
@@ -41802,6 +41804,22 @@ would consume, so it dies naming the stream (rule 12)."
           ;; \g in every spelling (#5562): cl-ppcre read the letter g.
           ((and nx (char= nx #\g) (not in-class))
            (%pcl-rx-backref-text pat i (%pcl-rx-escape-end pat i) ncap))
+          ;; \k'NAME' and \k{NAME} are \k<NAME> (s543u, the rule-12 read:
+          ;; cl-ppcre read the letter k); \k<NAME> was renamed before the scan.
+          ((and nx (char= nx #\k) (not in-class) (find (char pat (min (+ i 2) (1- n))) "'{")
+                (> (%pcl-rx-escape-end pat i) (+ i 3)))
+           (let ((e (%pcl-rx-escape-end pat i)))
+             (values (concatenate 'string "\\k<" (substitute #\- #\_ (subseq pat (+ i 3) (1- e))) ">")
+                     e)))
+          ;; \o{OCTAL} is a code point (s543u: cl-ppcre read the letter o);
+          ;; written as \x{HEX}, which the pass after the scan makes the character.
+          ((and nx (char= nx #\o) (%pcl-rx-at pat (+ i 2) #\{)
+                (> (%pcl-rx-escape-end pat i) (+ i 3)))
+           (let* ((e (%pcl-rx-escape-end pat i))
+                  (code (ignore-errors (parse-integer pat :start (+ i 3) :end (1- e) :radix 8))))
+             (if code
+                 (values (format nil "\\x{~X}" code) e)
+                 (values (subseq pat i e) e))))
           (t (let ((e (%pcl-rx-escape-end pat i))) (values (subseq pat i e) e))))))
 
 (defun %pcl-rx-bound-text (pat i)
@@ -41936,8 +41954,28 @@ would consume, so it dies naming the stream (rule 12)."
         return e))
 
 (defun %pcl-has-fail-verb (pat)
-  "The cheap pre-test for %pcl-rx-fail-verb-end: does `(*F' occur in PAT?"
-  (and (search "(*F" pat) t))
+  "The cheap pre-test for %pcl-rx-fail-verb-end and %pcl-rx-alpha-opener:
+   does `(*' occur in PAT?"
+  (and (search "(*" pat) t))
+
+(defparameter +p-alpha-assertions+
+  '(("(*pla:" . "(?=") ("(*positive_lookahead:" . "(?=")
+    ("(*plb:" . "(?<=") ("(*positive_lookbehind:" . "(?<=")
+    ("(*nla:" . "(?!") ("(*negative_lookahead:" . "(?!")
+    ("(*nlb:" . "(?<!") ("(*negative_lookbehind:" . "(?<!")
+    ("(*atomic:" . "(?>"))
+  "perl 5.28+'s alphabetic assertions (perlre \"Extended Patterns\") and the
+   group each is: cl-ppcre has the groups, not the spellings (s543u, the
+   rule-12 read).  `(*sr:' `(*asr:' `(*script_run:' are not here:
+   docs/not-supported.md ns-regex-script-run.")
+
+(defun %pcl-rx-alpha-opener (pat i)
+  "If an alphabetic assertion opens at PAT[I], (values END OPENER): the index
+   after its colon and the cl-ppcre group opener it is; else NIL."
+  (loop for (name . opener) in +p-alpha-assertions+
+        for e = (+ i (length name))
+        when (and (<= e (length pat)) (string= name pat :start2 i :end2 e))
+        return (values e opener)))
 
 (defun %pcl-rx-scan-open-group (s)
   "A `(' outside a class.  A `(?#…)' comment is copied whole and changes no
@@ -41953,24 +41991,31 @@ would consume, so it dies naming the stream (rule 12)."
     (multiple-value-bind (flag-p end emit term newx)
         (and (not close) (not fail-end) (%pcl-parse-x-flag-group pat i (rxs-x s)))
       (declare (ignore emit))
-      (cond (close (%rxs-copy s (1+ close)))
-            ;; `(*FAIL)' `(*F)' IS `(?!)' (perlre), which cl-ppcre has (#2386).
-            (fail-end (setf (rxs-atom s) nil (rxs-i s) fail-end)
-                      (%rxs-emit s "(?!)"))
-            ((and flag-p (char= term #\)))
-             (setf (rxs-x s) newx (rxs-atom s) nil
-                   (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
-             (%rxs-copy s end))
-            (t (push (fill-pointer (rxs-out s)) (rxs-groups s))
-               (push (rxs-x s) (rxs-xstack s))
-               (push (rxs-a s) (rxs-astack s))
-               (setf (rxs-atom s) nil)
-               (when (%pcl-capturing-paren-p pat i (length pat)) (incf (rxs-ncap s)))
-               (if flag-p
-                   (progn (setf (rxs-x s) newx
-                                (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
-                          (%rxs-copy s end))
-                   (%rxs-copy s (1+ i))))))))
+      (multiple-value-bind (alpha-end opener) (%pcl-rx-alpha-opener pat i)
+        (cond (close (%rxs-copy s (1+ close)))
+              ;; `(*FAIL)' `(*F)' IS `(?!)' (perlre), which cl-ppcre has (#2386).
+              (fail-end (setf (rxs-atom s) nil (rxs-i s) fail-end)
+                        (%rxs-emit s "(?!)"))
+              ;; `(*pla:' & co. open the group they are (s543u).
+              (alpha-end (push (fill-pointer (rxs-out s)) (rxs-groups s))
+                         (push (rxs-x s) (rxs-xstack s))
+                         (push (rxs-a s) (rxs-astack s))
+                         (setf (rxs-atom s) nil (rxs-i s) alpha-end)
+                         (%rxs-emit s opener))
+              ((and flag-p (char= term #\)))
+               (setf (rxs-x s) newx (rxs-atom s) nil
+                     (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
+               (%rxs-copy s end))
+              (t (push (fill-pointer (rxs-out s)) (rxs-groups s))
+                 (push (rxs-x s) (rxs-xstack s))
+                 (push (rxs-a s) (rxs-astack s))
+                 (setf (rxs-atom s) nil)
+                 (when (%pcl-capturing-paren-p pat i (length pat)) (incf (rxs-ncap s)))
+                 (if flag-p
+                     (progn (setf (rxs-x s) newx
+                                  (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
+                            (%rxs-copy s end))
+                     (%rxs-copy s (1+ i)))))))))
 
 (defun %pcl-rx-group-a-flag (pat i cur-a)
   "The /a state a MODE group header at PAT[I] (`(?a:' `(?^:' `(?u)' …, one
@@ -42142,19 +42187,24 @@ would consume, so it dies naming the stream (rule 12)."
          ;; populating %+ (set-capture-groups).  Covers (?<name>) and the
          ;; \k<name> backref; the name charset excludes the (?<= (?<!
          ;; lookbehind heads.
+         ;; perl's other spellings of a named group, `(?'name'...)' and
+         ;; `(?P<name>...)', are `(?<name>...)' to cl-ppcre, which refused
+         ;; them (s543u, the rule-12 read of the escapes).
          (pat (cl-ppcre:regex-replace-all
-               "\\(\\?<([a-zA-Z_][a-zA-Z0-9_]*)>"
+               "\\(\\?(?:<|P<|')([a-zA-Z_][a-zA-Z0-9_]*)(?:>|')"
                pat
                (lambda (match name)
                  (declare (ignore match))
                  (concatenate 'string "(?<" (substitute #\- #\_ name) ">"))
                :simple-calls t))
+         ;; ...and `(?P=name)' is `\k<name>' (`\k'name'' and `\k{name}' are
+         ;; the rewrite scan's, %pcl-rx-escape-text).
          (pat (cl-ppcre:regex-replace-all
-               "\\\\k<([a-zA-Z_][a-zA-Z0-9_]*)>"
+               "\\\\k<([a-zA-Z_][a-zA-Z0-9_]*)>|\\(\\?P=([a-zA-Z_][a-zA-Z0-9_]*)\\)"
                pat
-               (lambda (match name)
+               (lambda (match name pname)
                  (declare (ignore match))
-                 (concatenate 'string "\\k<" (substitute #\- #\_ name) ">"))
+                 (concatenate 'string "\\k<" (substitute #\- #\_ (or name pname)) ">"))
                :simple-calls t))
          ;; NO \Q...\E pass (task #3510, #2501): \Q is a double-quoted-string
          ;; operator, applied by the COMPILER where the pattern literal is
@@ -43215,6 +43265,37 @@ would consume, so it dies naming the stream (rule 12)."
                     (values node nil))))
              (t (values node nil))))))
 
+(defun %pcl-gpos-at-start-p (node &optional (start t))
+  "Does every \\G mark of parse-tree NODE stand at the START of the match --
+   nothing that consumes before it, no repetition around it, no
+   lookbehind?  START says whether NODE itself begins at the match start.
+   perl's gofs is then 0 and a //g step scans from pos() like any other
+   pattern, the \\G a filter at the step's start (`(?:\\A|\\G/)', `\\Ga|b')."
+  (labels ((walk (n st)
+             ;; returns the at-start state after N, or :bad
+             (cond ((%pcl-rx-mark-p n "0G") (if st st :bad))
+                   ((%pcl-gpos-neutral-p n)
+                    (let ((inner (and (consp n) (not (eq (car n) :flags))
+                                      (walk (second n)
+                                            (and (member (car n) '(:positive-lookahead
+                                                                   :negative-lookahead))
+                                                 st)))))
+                      (if (eq inner :bad) :bad st)))
+                   ((atom n) nil)
+                   (t (case (car n)
+                        (:sequence (loop with s = st for x in (cdr n)
+                                         do (setf s (walk x s))
+                                         when (eq s :bad) return :bad
+                                         finally (return s)))
+                        ((:group :register :named-register :standalone)
+                         (walk (car (last n)) st))
+                        (:alternation (if (some (lambda (b) (eq (walk b st) :bad)) (cdr n)) :bad nil))
+                        ((:greedy-repetition :non-greedy-repetition)
+                         (if (eq (walk (fourth n) nil) :bad) :bad nil))
+                        (:branch (if (some (lambda (b) (eq (walk b nil) :bad)) (cddr n)) :bad nil))
+                        (t nil))))))
+    (not (eq (walk node start) :bad))))
+
 (defun %pcl-gpos-every-path-p (node)
   "Does every match of parse-tree NODE pass a \\G mark?  A //g or s///g
    step then advances by perl's rule exactly (%p-gpos-zero-len-p); a \\G
@@ -43399,9 +43480,11 @@ would consume, so it dies naming the stream (rule 12)."
    true (the m// compile) and every match must begin with \\G and no other
    \\G is left, that leading \\G is dropped for the start test.  Returns
    (values NEW-TREE MARKERS PROG GPOS-KIND); MARKERS is NIL when TREE holds
-   no keep mark; GPOS-KIND is :anchored (the leading \\G dropped), :floating
-   (a filter planted, and every match passes one), :partial (a filter
-   planted that a match can bypass: refused under /g) or NIL (no \\G)."
+   no keep mark; GPOS-KIND is :anchored (the leading \\G dropped), :leading
+   (filters planted, each at the match's start: a //g step scans from pos()
+   as usual), :floating (filters planted at an offset, and every match passes
+   one: a //g step scans from 0, %p-floating-gpos-scan), :partial (a filter
+   at an offset that a match can bypass: refused under /g) or NIL (no \\G)."
   (multiple-value-bind (lead led) (if anchor (%pcl-gpos-lead tree) (values tree nil))
     (multiple-value-bind (new markers prog gpos) (%pcl-mark-walk lead)
       (when (and led gpos)
@@ -43413,7 +43496,8 @@ would consume, so it dies naming the stream (rule 12)."
                   (%pcl-renumber-backrefs new prog (length markers)))
               (and (plusp (length markers)) markers)
               prog
-              (cond ((and gpos (%pcl-gpos-every-path-p tree)) :floating)
+              (cond ((and gpos (%pcl-gpos-at-start-p tree)) :leading)
+                    ((and gpos (%pcl-gpos-every-path-p tree)) :floating)
                     (gpos :partial)
                     (led :anchored))))))
 
@@ -44237,13 +44321,25 @@ would consume, so it dies naming the stream (rule 12)."
   (eql (or real ms) pos))
 
 (declaim (inline %p-gpos-zero-len-p))
-(defun %p-gpos-zero-len-p (ms me gpos floating-g)
+(defun %p-gpos-zero-len-p (ms me gpos gkind)
   "Was a //g match ZERO-LENGTH for perl's advance rule (MGf_MINMATCH, task
    #1719)?  perl's RXp_ZERO_LEN is `start + gofs == end', gofs being a
-   floating \\G's distance from the match start, so with FLOATING-G a match
-   that ENDS at its \\G position GPOS counts as zero-length too (#5461):
-   `/-\\G/g' then matches once at a pos(), never again at the same one."
-  (or (= ms me) (and floating-g (= me gpos))))
+   floating \\G's distance from the match start, so for a :floating GKIND a
+   match that ENDS at its \\G position GPOS counts as zero-length too
+   (#5461): `/-\\G/g' then matches once at a pos(), never again at it."
+  (or (= ms me) (and (eq gkind :floating) (= me gpos))))
+
+(declaim (ftype function %p-floating-gpos-scan))
+(declaim (inline %p-g-step))
+(defun %p-g-step (gkind scanner minend-key str pos end empty)
+  "One //g attempt at POS, by the pattern's \\G kind (%pcl-mark-tree): a
+   :floating \\G scans from 0 (%p-floating-gpos-scan), a :leading one binds
+   \\G to POS, and every other pattern -- no \\G, or the :anchored one whose
+   \\G the compile dropped -- is %p-global-scan, as before (task #5461)."
+  (case gkind
+    (:floating (%p-floating-gpos-scan minend-key str pos empty))
+    (:leading (let ((*p-gpos* pos)) (%p-global-scan scanner minend-key str pos end empty)))
+    (t (%p-global-scan scanner minend-key str pos end empty))))
 
 (defun %p-floating-gpos-scan (minend-key str gpos empty)
   "One //g attempt (scalar or list) of a pattern whose \\G is NOT leading
@@ -44296,13 +44392,14 @@ would consume, so it dies naming the stream (rule 12)."
 (defun %p-regex-compiled (op)
   "The compiled form of match op OP: the simple-vector
    #(scanner reg-names closers anchored-g global-p cont-p minend-key
-   floating-g), computed ONCE and cached in the struct's %compiled slot
+   gpos-kind), computed ONCE and cached in the struct's %compiled slot
    (task #680).
    ANCHORED-G is true when every match must begin with \\G: the compile
    dropped that \\G (it asks with :pcl-gpos-anchor, %pcl-mark-tree) and the
    match is required to START at pos() instead (%p-starts-at-p).
-   FLOATING-G is true when a \\G stands anywhere else: the pattern holds the
-   anchor filter, and the op binds *p-gpos* (task #5461).
+   GPOS-KIND is %pcl-mark-tree's for a \\G anywhere else (:leading,
+   :floating or :partial): the pattern holds the anchor filter, and the op
+   binds *p-gpos* (task #5461); NIL otherwise, :anchored with ANCHORED-G.
    MINEND-KEY is the (pattern . options) cons %p-global-scan needs to reach
    the minend variant of the same pattern (task #1719).
    Before this cache the ppcre options plist, the scanner-cache format key
@@ -44322,7 +44419,7 @@ would consume, so it dies naming the stream (rule 12)."
                 (vector scanner reg-names closers (eq gkind :anchored)
                         (getf modifiers :g) (getf modifiers :c)
                         (cons pattern options)
-                        (and (member gkind '(:floating :partial)) t)))))))
+                        gkind))))))
 
 (defun %p-single-match (string scan end subject c)
   "ONE match (no /g) of the compiled regex C over SCAN's characters [0, END):
@@ -44338,7 +44435,8 @@ would consume, so it dies naming the stream (rule 12)."
         (anchored-g (svref c 3)))
     (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
       (multiple-value-bind (match-start match-end reg-starts reg-ends real)
-          (%p-with-gpos ((svref c 7) (or (%p-match-pos-state string) 0))
+          (%p-with-gpos ((let ((k (svref c 7))) (and k (not (eq k :anchored))))
+                         (or (%p-match-pos-state string) 0))
                         (%p-ppcre-scan scanner scan start end))
         (when (and anchored-g match-start (not (%p-starts-at-p match-start real start)))
           (setf match-start nil))
@@ -44422,7 +44520,7 @@ would consume, so it dies naming the stream (rule 12)."
            (global-p   (svref c 4))
            (cont-p     (svref c 5))
            (minend-key (svref c 6))
-           (floating-g (svref c 7)))
+           (gkind      (svref c 7)))
       ;; NOTE (task #1804): perl does NOT clear %+/%- on a FAILED attempt —
       ;; probed 5.40.3, `"ab" =~ /(?<f>a)(?<s>b)/; "zz" =~ /(q)/` leaves
       ;; both keys in %+, exactly as it leaves $1 alone.  PCL used to
@@ -44465,12 +44563,10 @@ would consume, so it dies naming the stream (rule 12)."
                (slen (length str)) (empty nil))
            (loop
             (multiple-value-bind (ms me rs re)
-                (if floating-g
-                    (%p-floating-gpos-scan minend-key str pos empty)
-                    (%p-global-scan scanner minend-key str pos slen empty))
+                (%p-g-step gkind scanner minend-key str pos slen empty)
               (unless ms (return))
               (setf last-rs rs last-re re last-ms ms last-me me
-                    empty (%p-gpos-zero-len-p ms me pos floating-g) pos me)
+                    empty (%p-gpos-zero-len-p ms me pos gkind) pos me)
               (if (> (length rs) 0)
                   (dotimes (i (length rs))
                     ;; An unmatched group is perl UNDEF, never raw nil: raw
@@ -44503,10 +44599,7 @@ would consume, so it dies naming the stream (rule 12)."
                  ;; set it was zero-length — perl's MGf_MINMATCH (task #1719).
                  ;; Without the second half this loop repeated the same empty
                  ;; match for ever: `while ($s =~ /(\\w*)/g)` never terminated.
-                 (if floating-g
-                     (%p-floating-gpos-scan minend-key str start empty)
-                     (%p-global-scan scanner minend-key str start (length str)
-                                     empty))
+                 (%p-g-step gkind scanner minend-key str start (length str) empty)
                ;; \G: the match must begin exactly at the start position.
                (when (and anchored-g match-start
                           (not (%p-starts-at-p match-start real start)))
@@ -44515,7 +44608,7 @@ would consume, so it dies naming the stream (rule 12)."
                    (progn
                      (%p-set-match-pos string match-end
                                        (%p-gpos-zero-len-p match-start match-end
-                                                           start floating-g))
+                                                           start gkind))
                      (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
                      t)
                    (progn
