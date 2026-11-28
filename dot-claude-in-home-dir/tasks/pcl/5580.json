@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543v (Opus 5.5, 2026-11-28, base 38420fae = MAIN-READY-115 + records, v2-16600; found while writing #5464's guard row).\n\nTHE SHAPE (neutral reproducer, perl 5.40.3 vs PCL on the base and the s543v tree):\n\n    our @x = (1, 2);\n    print \"a @::x b @main::x c @x\\n\";     # perl a 1 2 b 1 2 c 1 2    PCL a @::x b 1 2 c 1 2\n    print \"d $::x[1] e ${::x}[0]\\n\";      # both d 2 e 1\n\nOnly the ARRAY spelling `@::name` inside a double-quoted string is left as text; the scalar `$::x[1]`, the braced `${::x}[0]` and the qualified `@main::x` interpolate.  Where to look: the string scanner's array-name arm (Pl/InterpScan.pm -- interpolation scanning happens there or not at all, docs/interp-scan.md): the `::` package-less qualifier is accepted for `$` but not for `@`.\n\nCHEAP DISCRIMINATING MEASUREMENT (not taken): `./pl2cl` of the one line -- if the emitted string is the literal `\"a @::x b \"`, it is the scanner, not the runtime.\n\nLABEL: silent (rare).\n",
+   "frequency" : "rare",
+   "frequency_reason" : "found by s543v's own guard row; no Rosetta program, no lib/ or everyday/ file holds the spelling (grep -F '\"@::'); the `::` short form of main is unusual inside a string",
+   "id" : "5580",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `\"@::name\"` (the main-package array written with the empty package) is not interpolated in a string -- `our @x = (1,2); print \"@::x\"` prints the text `@::x` where perl prints `1 2`; `\"@main::x\"`, `\"$::x[1]\"` and `\"${::x}[0]\"` are right",
+   "triage" : "in",
+   "triage_reason" : "string interpolation of a package array is core language (perlop \"Gory details of parsing quoted constructs\"); IN by docs/supported-subset.md section 3"
+}

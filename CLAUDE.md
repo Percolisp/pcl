@@ -400,15 +400,15 @@ from the review rounds".
 
 ## Test Status -- CURRENT NUMBERS
 
-**s543, 2026-11-28: main = MAIN-READY-115 `5f3d1cb3` (generation v2-16600; seventeen batches merged in
-this session, MAIN-READY-99 .. -115, each with its sha and content in `docs/session-log.md` s543; the four of 2026-11-27:
+**s543, 2026-11-28: main = MAIN-READY-116 `ac66f5b4` (generation v2-16900; eighteen batches merged in
+this session, MAIN-READY-99 .. -116, each with its sha and content in `docs/session-log.md` s543; the four of 2026-11-27:
 s543n the filehandle family, s543o the Rosetta instrument, s543m the string-eval residue + the container drop flush,
 s543l the `local` residue + a signal handler's `die` no longer swallowed by a blocking read; 2026-11-28: s543t, THE FIRST
-ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures restored at a sub's return).**  Gate
-**380 files / 12,573 rows `Result: PASS`** (measured on merged main); full
+ROSETTA FIX BATCH -- overloading as the big-number classes use it, captures restored at a sub's return; s543w, the lexer's term position -- a word list written as a glob, on the PPI branch).**  Gate
+**380 files / 12,590 rows `Result: PASS`** (measured on merged main); full
 sweep **TOTAL passing 18,810**, GATE clean; corpus-diff population 111
 files; ir-conform 337 / 0; ir-host-leak 31; **EVERYDAY 116 of 122
-(95.1 %)**; **ROSETTA 561 of 650 (86.3 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **36 live IN silent wrongs of ORDINARY code + 63 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
+(95.1 %)**; **ROSETTA 569 of 650 (87.5 %; the held-out corpus, `tools/rosetta-corpus run`; 547 before the fix batches)**; **35 live IN silent wrongs of ORDINARY code + 64 of rare spellings** (the census moves tasks to ordinary: a rise is the census working) (the two numbers
 `tools/task-triage.pl` prints; exit criterion 1 counts the FIRST since the USER's ruling of 2026-11-24, the
 rare ones are listed known divergences; the split is a first pass from the subjects);
 CPAN board (the round s543s, measured on MAIN-READY-108, the oracle refreshed): **670
@@ -418,11 +418,11 @@ same round: `--all --quick` on -108 130 OK / 103 XDIFF / 237 DIFF of 528, the fu
 run on -110 131 OK / 104 XDIFF / 240 DIFF, 0 NEW / 1 FIXED / 0 LOST against the edited baselines (the round
 MERGED as records, `c5c87f33`; the gate on it 380 / 12,490 PASS at the second run: one row flaked under load,
 #4904); PPI `pcl` =
-`7fd02b75` (149 commits over upstream, 61 groups, 72 catalogued mis-lexes
+`eca93377` (157 commits over upstream, 65 groups, 76 catalogued mis-lexes
 fixed at the source; the fork pushed, pull request #459 refreshed; the PPI
 program is CLOSED: `docs/ppi-fix-at-source-s527.md` section 11 says what is left and whose it is).  **THE CENSUS IS COMPLETE (2026-11-28): all 103 differing programs carry a cause (`docs/rosetta-plan.md` 6a / 6b; 86 ours).
-RUNNING (three at a time FOR THIS SESSION on the USER's word; the default is two): the ROSETTA FIX BATCHES s543t2 (#5545: the capture
-scope only where a body can match), s543u (`\K`, `\G` in s///, `\b{wb}`, 19), s543w (the lexer's term position, #650 on the PPI branch, 11).
+RUNNING (the default of two again: the usage limit cut the batches twice): the ROSETTA FIX BATCHES s543u (`\K`, `\G` in s///, `\b{wb}`: in its
+merge turn, expected 585), s543t2 (#5545: the capture scope only where a body can match; after s543u), s543v (the slice family).
 State, the written and the next briefs: `s543/PAUSE-s543.md`, last section.**  Line tracking costs a median
 +0.8 % on the bench (the counting loops +16 %: #5103) and +11 % emitted text
 (`docs/caller-implementation.md` "What it costs").  Known default-build limits
