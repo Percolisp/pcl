@@ -189,7 +189,7 @@ my %TIER_HEAD = map { ($_ => 1) }
 # without a sub frame of its own in between.  The ops that can, by NAME:
 #   p-=~ p-!~        every m// and s/// is (p-=~ TARGET OP) or (p-!~ ...): the
 #                    runtime's ONE writer, %p-match-record, is reachable from
-#                    no other exported op -- Pl/t/match-scope-registry-01.t
+#                    no other exported op -- Pl/t/match-scope-01.t row 1
 #                    derives the call graph from cl/pcl-runtime.lisp and fails
 #                    when a new exported caller is not listed here;
 #   p-eval p-eval-thunk p-evalbytes   a string eval runs its text INLINE;
