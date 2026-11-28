@@ -346,3 +346,22 @@ sort, #5504 / #5513 map's EXPR form, #5515 the paren-less list: 5 programs,
 one parser area); **the shims' missing names** (#5502 builtin::indexed, #5506
 POSIX: 4); then the singles, and the two resource tasks for the criterion-4
 decision.
+
+### 6c. How many of the causes were new (the reviewing session, 2026-11-28; counted from the table as it stood at the census's end, `749eaf0e`)
+
+103 differing programs, **51 distinct causes** (a program can hold two or three, so the program column adds up to more than 103):
+
+| what the cause was | causes | programs |
+|---|---:|---:|
+| NEW, not in the task store -- a silent wrong | 19 | 28 |
+| NEW, not in the task store -- loud, dropped or a resource | 11 | 18 |
+| a row of the not-supported AUDIT with no task and no owner (`\K`, `\b{wb}`) -- silent | 2 | 16 |
+| a task existed -- silent | 6 | 16 |
+| a task existed -- loud or other | 7 | 9 |
+| a not-supported id, out of the subset | 6 | 22 |
+
+* **30 of the 45 causes that are ours were not known at all** (32 with the two audit rows), 19 of them silent wrongs of ordinary code that the gate, perl's own tests and the CPAN board had never shown.
+* The largest single cause, `\K` (15 programs), was "known" only as a row of an audit table; the second, the word list written as a glob (8), was marked rare.  Of the 13 causes that had a task, 8 were marked rare or carried no frequency.
+* The tail is long: 34 of the 51 causes break exactly one program.
+* The fix batches found MORE while fixing (eleven tasks): two ordinary bugs fixed on the spot (#5544 `use bigint` and a C-style loop; #5600 a comparison rebuilt as a glob), the core bug behind #2560 (captures leaking out of a called sub, #932's sub half), eight rare ones filed (#5541 #5542 #5543 #5563 #5564 #5565 #5601 #5602) and one cost (#5545).
+* What it says about the method: the count of open silent wrongs had stood at about 105 for six weeks while batches fixed and filed in step; one night on programs nobody here had written named about forty bugs that were in nobody's list.  That is the case for the plan's step 5 (the fresh sample) and for running a held-out corpus as a standing instrument.
