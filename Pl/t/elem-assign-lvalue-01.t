@@ -193,6 +193,7 @@ $o[6] &= @v[0]; $o[7] |= @v[1]; $o[8] ^= @v[0]; $o[9] x= @v[0]; print "4 @o\n";
 my $q = [0]; $q->[0] += @v[1]; $$q[0] += @v[0]; my %n; $n{a}{b} += @v[1]; print "5 @$q $n{a}{b}\n";
 tie my %t, 'TT'; $t{k} = 1; $t{k} += @v[1]; print "6 $t{k} @TT::log\n";
 my $s = 0; $s += @v[1]; my $u = ""; $u .= @v[1]; print "7 $s $u\n";
+my $f = 0; $f += 1 .. 3; my @F = (0); $F[0] += 2 .. 4; print "8 [$f] [@F]\n";   # a FLIP-FLOP there, $. undef: no stderr line
 package TT; our @log;
 sub TIEHASH { bless {}, shift } sub FETCH { push @log, "F"; $_[0]{$_[1]} } sub STORE { push @log, "S"; $_[0]{$_[1]} = $_[2] }
 PL

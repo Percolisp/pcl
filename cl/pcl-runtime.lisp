@@ -14116,12 +14116,16 @@ per element."
 
 (defun %p-flipflop-lineno ()
   "Get current line number ($.) for numeric flip-flop.
-   Returns integer, treating undef as 0 (with uninitialized warning)."
+   Returns integer, treating undef as 0.  SILENTLY: perl's `Use of
+   uninitialized value $. in range (or flip)' is a `use warnings' diagnostic,
+   and a default-off diagnostic stays ABSENT, never emitted always
+   (docs/not-supported.md \"Warnings-gated diagnostics are absent\").  The
+   unconditional warning this used to print surfaced when #5464 (s543v) made
+   a compound assignment's right side scalar context, so `$m += 1 .. 3' is
+   perl's flip-flop: it put a stderr line into a program perl runs quietly."
   (let ((v (unbox $\.)))
     (if (or (null v) (eq v *p-undef*))
-        (progn
-          (p-warn "Use of uninitialized value $. in numeric eq (==)")
-          0)
+        0
         (truncate (to-number v)))))
 
 ;;; ONE STATE MACHINE, SIX ENTRY POINTS (s525u, docs/runtime-review-s525.md
