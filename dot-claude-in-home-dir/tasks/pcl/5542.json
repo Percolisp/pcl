@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543t (Opus 5.5, 2026-11-28, on the s543t tree = main 394a0012 + the batch) while probing #5467 (member 3, the function-like key table: scratch/s543t/p/m3-keys.pl in the s543t worktree -- every other key in the table reaches its handler since s543t).\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    package Q0; use overload 'qr' => sub { qr/b+/ }; sub new { bless {}, shift }\n    package main;\n    print +(\"abbbc\" =~ Q0->new ? \"match:$&\" : \"nomatch\"), \"\\n\";   # perl match:bbb   PCL nomatch\n\nThe object is stringified (Q0=HASH(0x...)) and that text is the pattern.  perlovl: `qr` is used whenever the object is interpolated into or used as a regexp; its handler must return a qr// object.\n\nWHERE: the regex operand's coercion (the place a non-qr operand of =~ / a pattern interpolation is stringified) would ask p-find-overload for `qr` on a blessed operand first.  Related, different: #2340 (a qr// object re-blessed into a class with a `\"\"` overload).\n",
+   "frequency" : "rare",
+   "frequency_reason" : "no Rosetta program, no board dist, nothing under lib/ / everyday/ overloads `qr` (the grep hits in ~/.cpan/build are hash keys named qr, not overload keys)",
+   "id" : 5542,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: the `qr` overload key is never dispatched -- `$str =~ $obj` (and an interpolated `/$obj/`) matches against the object's STRING where perl matches the regex the class's `qr` handler returns",
+   "triage" : "in",
+   "triage_reason" : "overload (perlovl: `qr` is an overloadable key); the core overload pragma is IN by docs/supported-subset.md section 3"
+}

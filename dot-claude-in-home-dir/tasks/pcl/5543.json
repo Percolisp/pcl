@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543t (Opus 5.5, 2026-11-28, on the s543t tree = main 394a0012 + the batch) while probing #2560 / #932's sub half (member 4: scratch/s543t/p/m4-scope.pl row 9 in the s543t worktree).\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    sub deep { my $n = shift; \"d$n\" =~ /(d)(\\d+)/; return $n ? deep($n - 1) . \",$2\" : \"$2\" }\n    print deep(3), \"\\n\";\n    perl: 0,0,0,0     s543t: 0,1,2,3     the base (cababb9d): 0,0,0,0 (by accident: its captures were one global)\n\nperl's model: $1..$N read PL_curpm, the last successful match OP in scope, and the offsets live in that op's regexp.  A sub's exit restores PL_curpm (which op), not the op's data; a recursive call matching through the same op overwrote the data, so the caller reads the inner call's $2.  s543t restores the caller's match STATE (a snapshot taken at the frame's first match, docs/ir-spec.md \"Match variables\"), which is right for every non-recursive shape (Math::BigRat::new, Text::Wrap, any helper sub) and differs here.\n\nTO MATCH perl exactly the record would have to live on the match op (the p-regex-match struct) and the frame restore the CURRENT-OP pointer -- a representation change of the match state; not worth it for this shape unless a real program needs it.  Flagged in s543t's report as the one shape the #932 fix moved away from perl.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "known only from s543t's probe; reading $1 AFTER recursing through the same match is perl's surprising answer (perlre warns to copy captures first) -- a working program copies them",
+   "id" : 5543,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a capture variable read after a RECURSIVE call that matched through the SAME pattern op -- perl reads the inner call's match (the captures belong to the op's regexp; only which op is current is restored at sub exit), PCL since s543t the caller's own match",
+   "triage" : "in",
+   "triage_reason" : "match variables (perlvar) in ordinary sub code; the capture scoping of #932 is IN"
+}

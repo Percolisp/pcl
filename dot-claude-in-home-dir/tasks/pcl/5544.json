@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543t (Opus 5.5, 2026-11-28, on the s543t tree = main 394a0012 + the batch) while probing #5501 (member 6b: scratch/s543t/p/m6b-keys.pl / m6b-loop.pl in the s543t worktree).\n\nREPRODUCER (perl 5.40.3 vs the base cababb9d):\n\n    use bigint;\n    my @a; for (my $i = 0; $i < 5; $i++) { push @a, $i } print \"@a\\n\";   # perl 0 1 2 3 4   base 5 5 5 5 5\n    my %h; my $k = 10; $h{a} = $k; $k--; print \"$h{a} $k\\n\";              # perl 10 9        base 9 9\n    use Math::BigInt; my $x = Math::BigInt->new(5); my $y = $x; $x++; print \"$x $y\\n\";   # perl 6 5   base 6 6\n\nperl runs the class's `=' copy constructor before a mutator when the object is SHARED (its refcount > 1); Math::BigInt has `=' => copy and `++' => binc.  PCL never consulted `='.\n\n=== DONE (s543t) === fixed in the same place as #5501: %p-mutator-operand copies through the class's `=' handler before every mutator (own `++' / `--' and every OP= key); PCL has no reference counts, so it copies whenever the class HAS `=' (an unshared object gets one extra `=' call -- #1006's residue).  Guard Pl/t/bigint-01.t row 20, Pl/t/overload-01.t row 55 (inverse-verified on cababb9d).\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "a C-style for loop under `use bigint` pushing its counter (the bigint documentation's own idiom of counting with literals); `my $y = $x; $x++` on any Math::BigInt",
+   "id" : 5544,
+   "status" : "completed",
+   "subject" : "SILENT WRONG: an object's own `++` / `--` overload (a MUTATOR) ran on a SHARED object without the `=` copy constructor -- `use bigint; for (my $i = 0; $i < 5; $i++) { push @a, $i }` gave 5 5 5 5 5 (perl 0 1 2 3 4): Math::BigInt's `++` is binc in place",
+   "triage" : "in",
+   "triage_reason" : "overload copy constructor (perlovl \"Copy Constructor\") under bigint / Math::BigInt, IN by docs/supported-subset.md section 3"
+}

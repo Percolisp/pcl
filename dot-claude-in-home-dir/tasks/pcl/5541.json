@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543t (Opus 5.5, 2026-11-28, on the s543t tree = main 394a0012 + the batch) while probing #5465 (member 1, the context table: scratch/s543t/p/m1-break.pl in the s543t worktree).\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    package It;\n    use overload '<>' => sub { my $s = shift; wantarray ? (\"L1\", \"L2\") : ($s->{n}++ < 2 ? \"it$s->{n}\" : undef) };\n    sub new { bless { n => 0 }, shift }\n    package main;\n    my $x = It->new;\n    my $s = <$x>;  print \"$s\\n\";      # perl it1\n    my @l = <$x>;  print \"@l\\n\";      # perl L1 L2   (the handler is called in LIST context)\n    PCL: dies `Not a GLOB reference at ... line 6.` (exit 255) -- the runtime has no `<>` key at all (grep `\"<>\"` in cl/pcl-runtime.lisp: none); a class that also overloads `\"\"` sees its `\"\"` handler called instead (the readline of the stringified name).\n\nWHERE: the readline entry (p-readline and its iterator twin) would ask p-find-overload for `<>` on a blessed operand before treating it as a handle.  NOTE for the fix: p-call-overload binds *wantarray* to scalar since s543t (#5465: every other key is G_SCALAR); `<>` is perl's ONE exception (pp.h tryAMAGICunTARGETlist, AMGf_want_list): in list context perl calls it in list context and spreads the list -- the dispatch must bind list context itself around its own call.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "no Rosetta program, no board dist and nothing under lib/ / everyday/ overloads `<>` (grep `'<>' *=>`): only Unicode::GCString (XS) in ~/.cpan/build",
+   "id" : 5541,
+   "status" : "pending",
+   "subject" : "LOUD: the `<>` overload key is never dispatched -- `<$obj>` on an object whose class overloads `<>` dies \"Not a GLOB reference\" (perl calls the handler; in LIST context it is the one key perl calls in list context)",
+   "triage" : "in",
+   "triage_reason" : "overload (perlovl: `<>` is an overloadable key); the core overload pragma is IN by docs/supported-subset.md section 3"
+}
