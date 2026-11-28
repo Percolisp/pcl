@@ -11478,6 +11478,14 @@ sub announce_unlocalized_local {
 # silent here as it is there.
 my %announced_regex;   # "file:line:construct" seen this process — announce ONCE
 
+# perl 5.28+'s alphabetic assertions, which the runtime TRANSLATES to the group
+# each is (cl/pcl-runtime.lisp +p-alpha-assertions+, s543u): not control verbs,
+# so _regex_gap_hits does not announce them.  THE SAME LIST as the runtime's:
+# Pl/t/transpile-test-10.t compares the two (rule 11 across the language seam).
+our %REGEX_ALPHA_ASSERTION = map { $_ => 1 } qw(
+  pla positive_lookahead plb positive_lookbehind
+  nla negative_lookahead nlb negative_lookbehind atomic);
+
 sub _announce_regex_gaps {
   my ($self, $doc) = @_;
   return if $self->collect_prototypes_only;
@@ -11515,9 +11523,12 @@ sub _regex_gap_hits {
              . '(docs/not-supported.md "Regex code blocks")']
     if $content =~ /(?<!\\)\((?:\?\??|\*)\{/;       # (*{...}) too: stripped alike (s496a)
   my %verbs;
-  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+|:)(\))?/g) {
+  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+|:)(\)|:)?/g) {
     # The bare (*FAIL) / (*F) IS (?!) and the runtime translates it (#2386).
-    next if defined $2 && ($1 eq 'FAIL' || $1 eq 'F');
+    next if defined $2 && $2 eq ')' && ($1 eq 'FAIL' || $1 eq 'F');
+    # An alphabetic ASSERTION `(*pla:` .. `(*atomic:` is the group it names,
+    # and the runtime translates it (s543u): no verb.
+    next if defined $2 && $2 eq ':' && $REGEX_ALPHA_ASSERTION{$1};
     $verbs{$1 eq ':' ? 'MARK' : $1} = 1;
   }
   push @hits, ['control verb (*' . join('/', sort keys %verbs) . ') is NOT supported',

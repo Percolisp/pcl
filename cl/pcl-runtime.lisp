@@ -43917,10 +43917,13 @@ would consume, so it dies naming the stream (rule 12)."
       (let* ((retry (and prev-empty-at (eql start (1+ prev-empty-at))))
              (pos (if retry prev-empty-at start)))
         (multiple-value-bind (ms me rs re)
-            (if (and partial (not first))
-                (%p-subst-underflow-scan minend-key str pos (or retry always))
-                (%p-with-gpos (gpos0 (if first gpos0 pos))
-                              (%p-global-scan scanner minend-key str pos end (or retry always))))
+            ;; GPOS0 is set whenever PARTIAL is: a plain pattern pays one test.
+            (if gpos0
+                (if (and partial (not first))
+                    (%p-subst-underflow-scan minend-key str pos (or retry always))
+                    (let ((*p-gpos* (if first gpos0 pos)))
+                      (%p-global-scan scanner minend-key str pos end (or retry always))))
+                (%p-global-scan scanner minend-key str pos end (or retry always)))
           (setf prev-empty-at (and ms (= ms me) ms) first nil)
           (when (and ms counter) (incf (car counter)))
           (values ms me rs re))))))
@@ -44338,19 +44341,29 @@ would consume, so it dies naming the stream (rule 12)."
    floating \\G's distance from the match start, so for a :floating GKIND a
    match that ENDS at its \\G position GPOS counts as zero-length too
    (#5461): `/-\\G/g' then matches once at a pos(), never again at it."
-  (or (= ms me) (and (eq gkind :floating) (= me gpos))))
+  (if gkind
+      (or (= ms me) (and (eq gkind :floating) (= me gpos)))
+      (= ms me)))
 
 (declaim (ftype function %p-floating-gpos-scan))
-(declaim (inline %p-g-step))
-(defun %p-g-step (gkind scanner minend-key str pos end empty)
-  "One //g attempt at POS, by the pattern's \\G kind (%pcl-mark-tree): a
-   :floating \\G scans from 0 (%p-floating-gpos-scan), a :leading one binds
-   \\G to POS, and every other pattern -- no \\G, or the :anchored one whose
-   \\G the compile dropped -- is %p-global-scan, as before (task #5461)."
+(defun %p-g-step-gpos (gkind scanner minend-key str pos end empty)
+  "%p-g-step for a pattern WITH a \\G kind, out of line so that the plain
+   pattern's step stays the inline %p-global-scan it was: a :floating \\G
+   scans from 0 (%p-floating-gpos-scan), a :leading one binds \\G to POS, the
+   :anchored one (whose \\G the compile dropped) is %p-global-scan."
   (case gkind
     (:floating (%p-floating-gpos-scan minend-key str pos empty))
     (:leading (let ((*p-gpos* pos)) (%p-global-scan scanner minend-key str pos end empty)))
     (t (%p-global-scan scanner minend-key str pos end empty))))
+
+(declaim (inline %p-g-step))
+(defun %p-g-step (gkind scanner minend-key str pos end empty)
+  "One //g attempt at POS, by the pattern's \\G kind (%pcl-mark-tree, task
+   #5461): a pattern without one -- every program's -- pays one test and is
+   the inline %p-global-scan, as before; the others go to %p-g-step-gpos."
+  (if gkind
+      (%p-g-step-gpos gkind scanner minend-key str pos end empty)
+      (%p-global-scan scanner minend-key str pos end empty)))
 
 (defun %p-floating-gpos-scan (minend-key str gpos empty)
   "One //g attempt (scalar or list) of a pattern whose \\G is NOT leading
@@ -44420,7 +44433,8 @@ would consume, so it dies naming the stream (rule 12)."
    match is required to START at pos() instead (%p-starts-at-p).
    GPOS-KIND is %pcl-mark-tree's for a \\G anywhere else (:leading,
    :floating or :partial): the pattern holds the anchor filter, and the op
-   binds *p-gpos* (task #5461); NIL otherwise, :anchored with ANCHORED-G.
+   binds *p-gpos* (task #5461); NIL otherwise -- also for the :anchored kind,
+   which is ANCHORED-G's -- so a plain pattern's //g step pays one test.
    MINEND-KEY is the (pattern . options) cons %p-global-scan needs to reach
    the minend variant of the same pattern (task #1719).
    Before this cache the ppcre options plist, the scanner-cache format key
@@ -44440,7 +44454,9 @@ would consume, so it dies naming the stream (rule 12)."
                 (vector scanner reg-names closers (eq gkind :anchored)
                         (getf modifiers :g) (getf modifiers :c)
                         (cons pattern options)
-                        gkind))))))
+                        ;; :anchored is ANCHORED-G's (slot 3); slot 7 names
+                        ;; only a kind that plants a filter, NIL otherwise.
+                        (and (not (eq gkind :anchored)) gkind)))))))
 
 (defun %p-single-match (string scan end subject c)
   "ONE match (no /g) of the compiled regex C over SCAN's characters [0, END):
@@ -44456,8 +44472,7 @@ would consume, so it dies naming the stream (rule 12)."
         (anchored-g (svref c 3)))
     (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
       (multiple-value-bind (match-start match-end reg-starts reg-ends real)
-          (%p-with-gpos ((let ((k (svref c 7))) (and k (not (eq k :anchored))))
-                         (or (%p-match-pos-state string) 0))
+          (%p-with-gpos ((svref c 7) (or (%p-match-pos-state string) 0))
                         (%p-ppcre-scan scanner scan start end))
         (when (and anchored-g match-start (not (%p-starts-at-p match-start real start)))
           (setf match-start nil))
@@ -44797,10 +44812,13 @@ would consume, so it dies naming the stream (rule 12)."
          ;; do-scans arranges (bound around the scan only -- the /e
          ;; replacement runs user code with its own matches).
          (let ((cl-ppcre::*real-start-pos* 0))
-           (if (and partial (plusp count))
-               (%p-subst-underflow-scan minend-key str pos minend)
-               (%p-with-gpos (gpos0 (if (zerop count) gpos0 pos))
-                             (%p-global-scan scanner minend-key str pos n minend))))
+           ;; GPOS0 is set whenever PARTIAL is: a plain pattern pays one test.
+           (if gpos0
+               (if (and partial (plusp count))
+                   (%p-subst-underflow-scan minend-key str pos minend)
+                   (let ((*p-gpos* (if (zerop count) gpos0 pos)))
+                     (%p-global-scan scanner minend-key str pos n minend)))
+               (%p-global-scan scanner minend-key str pos n minend)))
        (when (null ms) (return))
        (let ((r (if (stringp rep) rep (funcall rep str 0 n ms me rs re))))
          (when (< copied ms)
@@ -44818,6 +44836,9 @@ would consume, so it dies naming the stream (rule 12)."
             (incf total (- n copied)))
           (values (%p-subst-pieces-string str pieces total) count)))))
 
+;; INLINE (s543u review, U2): it is do-regex-subst's own body, split out for the
+;; *p-gpos* binding; a call and two values per s/// was +6 % on `s/a/b/g`.
+(declaim (inline %p-subst-apply))
 (defun %p-subst-apply (c str raw-replacement gpos0)
   "The matching half of do-regex-subst: every replacement compiled record C
    calls for in STR, as (values RESULT COUNT) -- RESULT the new string, or

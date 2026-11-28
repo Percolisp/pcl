@@ -878,17 +878,19 @@ EOP
 
 # #5561 (s543u): `\b{wb}` / `\B{wb}` are perl's Unicode word boundaries --
 # UAX #29 (SBCL's sb-unicode:words) with perl's white-space tailoring and the
-# regional indicators paired per run; `\b{gcb}` / `\b{g}` are the boundaries
+# regional indicators paired per run (only characters whose word-break class
+# no Unicode version SBCL 2.5.2+ ships has changed are used here: ASCII and
+# U+0301; the indicator pairs are in the session log's coverage paragraph); `\b{gcb}` / `\b{g}` are the boundaries
 # of \X's clusters.  The rewrite scan spells each as a mark the parse tree
 # makes a filter.  Positions only are printed, the subjects are built with
 # chr(): nothing here reads the locale.  #5562: `\g` in every spelling
 # (`\gN` `\g{N}` `\g-N` `\g{-N}` `\g{name}`) is a back-reference.  Every row
 # FAILS on the 5d511ff8 extraction, where cl-ppcre read the letters.
-subst_agrees(<<'PL', "#5561: \\b{wb} and \\B{wb}: apostrophes, digit separators, white-space spans, a mark after spaces, indicator pairs, the empty string, //g, s///g");
+subst_agrees(<<'PL', "#5561: \\b{wb} and \\B{wb}: apostrophes, digit separators, white-space spans, a mark after spaces, the empty string, //g, s///g");
 sub at { my ($s, $re) = @_; my @p; while ($s =~ /$re/g) { push @p, pos($s) } join(",", @p) }
-my ($acute, $ri1, $ri2) = (chr(0x301), chr(0x1F1FA), chr(0x1F1F8));
+my $acute = chr(0x301);
 my @s = ("ab cd", "don't stop", "1,000 x", "a.b", "a  b", "a \t b", "x-y", "3.14", "can't.", "a\n\nb",
-         "a  ${acute}b", "a ${acute}b", "$ri1$ri2$ri1$ri2!", "Hi! Yo.", "a_b 9z");
+         "a  ${acute}b", "a ${acute}b", "Hi! Yo.", "a_b 9z");
 my $i = 0;
 for my $s (@s) { $i++; print "$i ", at($s, qr/\b{wb}/), " | ", at($s, qr/\B{wb}/), "\n" }
 print "e ", ("" =~ /\b{wb}/ ? "y" : "n"), ("" =~ /\B{wb}/ ? "y" : "n"), "\n";

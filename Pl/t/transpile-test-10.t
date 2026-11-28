@@ -1141,6 +1141,38 @@ PERL
          '#874: …and the stripped block on the same pattern is announced too');
 }
 
+# s543u: the ALPHABETIC ASSERTIONS `(*pla:` .. `(*atomic:` and their long
+# spellings are translated by the runtime (+p-alpha-assertions+) to the group
+# each is, so the compile-time verb notice must not name them; a real verb
+# still announces.  Before s543u every one of them was announced as a verb (the
+# 5d511ff8 extraction prints `control verb (*atomic/*nlb/...)`).  And the
+# announcer's list is THE SAME as the runtime's (rule 11 across the seam).
+{
+    my $prog = <<'PERL';
+my $s = "aab";
+print $s =~ /a(*pla:a)/ ? 1 : 0, $s =~ /(*positive_lookbehind:a)b/ ? 1 : 0, $s =~ /(*atomic:a+)b/ ? 1 : 0, $s =~ /(*nlb:x)b/ ? 1 : 0, "\n";
+my $t = eval { "ab" =~ /a(*SKIP)b/ };
+PERL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $terr = `$pl2cl $pl_file 2>&1 >/dev/null`;
+    unlike($terr, qr/control verb \(\*(?:[^)]*\b)?(?:pla|positive_lookbehind|atomic|nlb)\b/,
+           's543u: an alphabetic assertion is not announced as a control verb');
+    like($terr, qr/^PCL: regex control verb \(\*SKIP\) is NOT supported at .* line 3 --/m,
+         's543u: a real control verb still is');
+    open my $rt, '<', "$project_root/cl/pcl-runtime.lisp" or die $!;
+    my $src = do { local $/; <$rt> };
+    my ($tab) = $src =~ /\(defparameter \+p-alpha-assertions\+\s*'\((.*?)\)\s*"/s;
+    my @found = ($tab // '') =~ /"\(\*(\w+):"/g;
+    my @lisp = sort { $a cmp $b } @found;
+    my $pm = do { local $/; open my $h, '<', "$project_root/Pl/Parser.pm" or die $!; <$h> };
+    my ($list) = $pm =~ /our %REGEX_ALPHA_ASSERTION = map \{ \$_ => 1 \} qw\(([^)]*)\)/;
+    my @names = split ' ', ($list // '');
+    my @perl = sort { $a cmp $b } @names;
+    is("@perl", "@lisp", 's543u: the announcer and the runtime name the same alphabetic assertions');
+    ok(@lisp == 9, 's543u: nine alphabetic assertion spellings in the runtime table');
+}
+
 # ── #851: a capture variable above the pre-declared specials ─────────────────
 # $1..$20 are runtime defvars emitted as bare symbols; $21 and up had no
 # defvar, so `open $99, "foo"` (t/io/open.t:362) left the whole FILE dead at
