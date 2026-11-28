@@ -3,6 +3,7 @@
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
 # files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
 # "12 not ok" for months with nothing naming it.
+# s543u (2026-11-28, Opus 5.5, EDITED BY HAND -- one-file runs --jobs 1, base 5d511ff8 extraction vs tree, scratch/s543u/companion-base.log / companion-tree2.log): re/subst.t 35 rows REMOVED (216/60 -> 248/33; the file no longer aborts: #5563 the template $N, #5461 \G in s///): t-lines 402-433 (8, `s/\Ga/x/g` after pos), the 24 `..\G` rows, `Match vars reflect ... without /e` (200, produced now), `#RT 126260 gofs` (270), the *summary* renumbering; 2 rows ADDED: 260 261 `\b{sb}` fresh_perl rows, refused at the compile by design (they passed on nothing).
 # s543s FULL RUN (2026-11-24, Opus 5.5, EDITED BY HAND -- the round's FULL companion `PCL_SESSION=s543s tools/run-perl-suite.pl --all --jobs 4 --bless-stamps` on MAIN-READY-110 26d0dac4 (s543k, v2-16000; extraction ~/pcl-agent-scratch/s543/round2/mr110-tree = the round's rebased HEAD 448131ae with every edited baseline), 20:53-21:37, round2/comp-full-all.log: ROW DIFF 0 NEW / 1 FIXED / 77 UNVERIFIED / 0 LOST; the runner re-ran the 5 snapshot movers ALONE: 2 REAL MOVE, 2 contention, 1 THREE-WAY; the two attributed by one-file runs on MR-108 / MR-109 cbcc9165 / MR-110, round2/specs/comp2.log): ONE row REMOVED -- op/attrproto.t 39 "Sanity checking that eval of anonymous sub didn't croak" (#5310, added by the round on -108) PASSES: fixed by s543k (MAIN-READY-110; one-file MR-108 23/25, MR-109 23/25 -> MR-110 24/24; the probe `eval 'package Q; my $a = sub(bar) {}; 1'` = 1 on MR-110, dies on MR-109).  #5310 stays OPEN for its FILE-LEVEL face (`{ package Q; my $r = sub(bar) {}; }` still fails to transpile on MR-110).  Nothing else moved.
 # s543s (2026-11-23, Opus 5.5; THE ROUND on MAIN-READY-108 4a0fd0ec = code ee197b1c: `tools/run-perl-suite.pl --all --quick --jobs 4` on the extraction, ~/pcl-agent-scratch/s543/round2/comp-quick-all.log; ROW DIFF 7 NEW / 4 FIXED / 639 UNVERIFIED / 2 LOST; the movers attributed by one-file runs --jobs 1 on archive extractions MR-102 .. MR-107, round2/specs/comp1.log + comp1/<tag>/) -- EDITED BY HAND:
 #   FOUR rows REMOVED = s543e (MAIN-READY-104 8959afae; MR-103 -> MR-104): io/dup.t *summary* + [at t/io/dup.t line 140] (28/0 -> 29/0: the three unnamed `is` rows of dup.t:138-140 are produced and paired); op/avhv.t [at t/op/avhv.t line 29] (39/1 -> 40/0);
@@ -8304,7 +8305,6 @@ re/rxcode.t	39	ok	not ok	/a++(?{})+$code_block/	NS:Regex code blocks: `(?{code})
 re/rxcode.t	40	ok	(missing)	[perl \#78194] \$_ == \$_ when $_ aliases "$x"	NS:Regex code blocks: `(?{code})` and `(??{code})`
 re/rxcode.t	41	ok	(missing)	qr/@a(?{})/	NS:Regex code blocks: `(?{code})` and `(??{code})`
 re/rxcode.t	42	ok	(missing)	qr/\Q(?{/	NS:Regex code blocks: `(?{code})` and `(??{code})`
-re/subst.t	0	(none)	renumbered	*summary*	#1719
 re/subst.t	3	ok	not ok	s///r with COW constant	#1719
 re/subst.t	11	ok	not ok	s///r !~ operator gives error	#1719
 re/subst.t	12	ok	not ok	s///r with undef input	#1719
@@ -8312,44 +8312,12 @@ re/subst.t	13	ok	not ok	s///r Uninitialized warning	#1719
 re/subst.t	14	ok	not ok	s///r void context warning	#1719
 re/subst.t	29	ok	not ok	[at t/re/subst.t line 119]	NS:Error message text and format
 re/subst.t	92	ok	not ok	[at t/re/subst.t line 385]	NS:Error message text and format
-re/subst.t	96	ok	not ok	[at t/re/subst.t line 402]	NS:Error message text and format
-re/subst.t	97	ok	not ok	[at t/re/subst.t line 407]	NS:Error message text and format
-re/subst.t	98	ok	not ok	[at t/re/subst.t line 412]	NS:Error message text and format
-re/subst.t	99	ok	not ok	[at t/re/subst.t line 417]	NS:Error message text and format
-re/subst.t	100	ok	not ok	[at t/re/subst.t line 421]	NS:Error message text and format
-re/subst.t	101	ok	not ok	[at t/re/subst.t line 425]	NS:Error message text and format
-re/subst.t	102	ok	not ok	[at t/re/subst.t line 429]	NS:Error message text and format
-re/subst.t	103	ok	not ok	[at t/re/subst.t line 433]	NS:Error message text and format
 re/subst.t	105	ok	not ok	[at t/re/subst.t line 440]	NS:Error message text and format
 re/subst.t	149	ok	not ok	\#20684 s/// with (??{..}) inside	#1719
 re/subst.t	153	ok	not ok	[perl \#34171]	#1719
 re/subst.t	159	ok	not ok	RT\#52104: 65	#1719
 re/subst.t	160	ok	not ok	RT\#52104: 163	#1719
 re/subst.t	161	ok	not ok	RT\#52104: 1040	#1719
-re/subst.t	165	ok	not ok	..\G count (short)	#1719
-re/subst.t	166	ok	not ok	..\G s (short)	#1719
-re/subst.t	167	ok	not ok	..\G count (equal)	#1719
-re/subst.t	168	ok	not ok	..\G s (equal)	#1719
-re/subst.t	169	ok	not ok	..\G count (long)	#1719
-re/subst.t	170	ok	not ok	..\G s (long)	#1719
-re/subst.t	171	ok	not ok	..\G count (short code)	#1719
-re/subst.t	172	ok	not ok	..\G s (short code)	#1719
-re/subst.t	173	ok	not ok	..\G count (equal code)	#1719
-re/subst.t	174	ok	not ok	..\G s (equal code)	#1719
-re/subst.t	175	ok	not ok	..\G count (long code)	#1719
-re/subst.t	176	ok	not ok	..\G s (long code)	#1719
-re/subst.t	177	ok	not ok	..\G count (lookahead short)	#1719
-re/subst.t	178	ok	not ok	..\G s (lookahead short)	#1719
-re/subst.t	179	ok	not ok	..\G count (lookahead equal)	#1719
-re/subst.t	180	ok	not ok	..\G s (lookahead equal)	#1719
-re/subst.t	181	ok	not ok	..\G count (lookahead long)	#1719
-re/subst.t	182	ok	not ok	..\G s (lookahead long)	#1719
-re/subst.t	183	ok	not ok	..\G count (lookahead short code)	#1719
-re/subst.t	184	ok	not ok	..\G s (lookahead short code)	#1719
-re/subst.t	185	ok	not ok	..\G count (lookahead equal code)	#1719
-re/subst.t	186	ok	not ok	..\G s (lookahead equal code)	#1719
-re/subst.t	187	ok	not ok	..\G count (lookahead long code)	#1719
-re/subst.t	188	ok	not ok	..\G s (lookahead long code)	#1719
 re/subst.t	190	ok	not ok	Verify that string isn't initially utf8	#1719
 re/subst.t	193	ok	not ok	Verify that string isn't initially utf8	#1719
 re/subst.t	194	ok	not ok	Verify that failed substitute doesn't change string's utf8ness	#1719
@@ -8357,7 +8325,6 @@ re/subst.t	196	ok	(missing)	Verify that handles s/foo/\400/	#1664 (perl's consta
 re/subst.t	197	ok	(missing)	Verify that handles s/foo/\600/	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	198	ok	(missing)	Verify that handles s/foo/\777/	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	199	ok	(missing)	s/// sets PL_curpm for each iteration even when the RHS has set it	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
-re/subst.t	200	ok	(missing)	Match vars reflect the last match after s/pat/$a{m|pat|}/ without /e	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	217	ok	not ok [PCL #212]	now 0 objects	#1719
 re/subst.t	218	ok	not ok [PCL #213]	1 object	#1719
 re/subst.t	221	ok	not ok [PCL #216]	still 1 object	#1719
@@ -8366,10 +8333,11 @@ re/subst.t	227	ok	not ok [PCL #222]	logop in s/// repl does not result in "const
 re/subst.t	228	ok	not ok [PCL #223]	s/pat/$alias_to_match_var/	#1719
 re/subst.t	229	ok	not ok [PCL #224]	s/pat/foo$alias_to_match_var/	#1719
 re/subst.t	230	ok	not ok [PCL #225]	last-used pattern disables constant repl optimisation	#1719
-re/subst.t	270	ok	not ok [PCL #265]	\#RT 126260 gofs	#1719
 re/subst.t	245	ok	not ok [PCL #240]	\b matches Latin1 before string, mid, and end, /d	#1719
 re/subst.t	235	ok	not ok [PCL #230]	err msg: Modification of a read-only value attempted at t/re/subst.t line 993.	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	236	ok	not ok [PCL #231]	vivifying stash elem in $that::{elem} =~ s//.../e	#1719
+re/subst.t	260	ok	not ok	[perl \#126319: Segmentation fault in Perl_sv_catpvn_flags with \b{sb}	NS:ns-regex-escapes -- s543u: \b{sb} is refused at the compile (it passed on nothing: never matched)
+re/subst.t	261	ok	not ok	[perl \#126319: Segmentation fault in Perl_sv_catpvn_flags with \b{sb}	NS:ns-regex-escapes -- s543u: \b{sb} is refused at the compile (it passed on nothing: never matched)
 re/subst_amp.t	2	ok	not ok	[at t/re/subst_amp.t line 22]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_amp.t	3	ok	not ok	[at t/re/subst_amp.t line 28]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_amp.t	4	ok	not ok	[at t/re/subst_amp.t line 34]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
