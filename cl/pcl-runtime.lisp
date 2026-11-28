@@ -1444,6 +1444,16 @@
         (shadow sym-name target-pkg))
       (intern sym-name target-pkg))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-sub-facts-no-match-p (facts)
+    "True when the p-sub FACTS plist carries `:needs' and its classes lack
+     `:match' -- the compiler's proof that the body writes no match state, so
+     its frame omits the capture scope (task #5545, s543t2; p-sub-frame's
+     :no-match).  An absent `:needs' is NO proof: the frame keeps its scope."
+    (loop for (k v) on facts by #'cddr
+          when (eq k :needs)
+          return (not (member :match v)))))
+
 (defmacro p-sub (name params facts &body body)
   ;; FACTS is the compiler's proven-facts plist (task #1035 step 3), at a FIXED
   ;; position after the lambda list so a consumer reads it by position: always
@@ -1489,6 +1499,8 @@
                                    (let ((*pcl-current-package* %%home-pkg)
                                          (*pcl-caller-wantarray* *wantarray*))
                                      (p-sub-frame
+                                      ,@(when (%p-sub-facts-no-match-p facts)
+                                          '(:no-match))
                                       ,@body)))))
              (%p-record-sub-name (symbol-function local-sym) %%perl-name)
              ,@register
@@ -16056,8 +16068,19 @@ create the key on a read-only call, which perl does not.
    capture variables are DYNAMICALLY SCOPED, so a match inside the sub leaves
    the caller's $1 / $& / @- as they were once the sub returns
    (%p-match-scope; the return VALUE is copied first, so `return $1' is the
-   callee's capture)."
-  `(p-loc-save (%p-match-scope (%p-leavesub (catch :p-return ,@body)))))
+   callee's capture).
+
+   A LEADING :NO-MATCH omits that scope (task #5545, s543t2): the compiler
+   writes it only when its walk PROVES the body cannot write the match state
+   inline (Pl::Manifest::%MATCH_STATE_HEAD -- no m// / s///, no string eval,
+   no file load; a call is not a writer, the callee has its own frame).  The
+   scope costs every call a special binding, and most subs never match.  The
+   DEFAULT is the scope: a frame spelled without the flag -- the v1 seam, a
+   hand-written form -- keeps it (rule 12 turned around: an unproven body
+   pays the cost, never the silent wrong)."
+  (if (eq (first body) :no-match)
+      `(p-loc-save (%p-leavesub (catch :p-return ,@(rest body))))
+      `(p-loc-save (%p-match-scope (%p-leavesub (catch :p-return ,@body))))))
 
 (defun p-cloned-sub (f)
   "Return a code ref that CALLS F but is a DISTINCT OBJECT from every other
@@ -29454,7 +29477,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-17100"
+(defparameter *pcl-cache-generation* "v2-17300"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

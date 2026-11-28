@@ -236,8 +236,8 @@ PERL
          '#1035: an old-style prototype prints its text (and, since #2860, its proven :writes-args)');
     like($cl, qr/\(p-sub pl-protow\s+\(&rest %_args\)\s+\(:writes-args t :prototype "\$" :needs \(\)\)/,
          '#2860: a prototyped sub that writes @_ says so -- the fact its call sites box on');
-    like($cl, qr/\(p-sub pl-evaler\s+\(&rest %_args\)\s+\(:writes-args nil :string-eval t :needs \(:string_eval\.eval\)\)/,
-         '#1035: a body containing a string eval says so');
+    like($cl, qr/\(p-sub pl-evaler\s+\(&rest %_args\)\s+\(:writes-args nil :string-eval t :needs \(:string_eval\.eval :match\)\)/,
+         '#1035: a body containing a string eval says so (and, since #5545, that it may write the match state: :match)');
     # (`ctx()` sits in a print LIST, so wantarray is true there -- probed
     # against perl 5.40.3, which prints the same line.)
     is(run_cl($src), "3list4542\n9\n",

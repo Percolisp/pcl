@@ -181,6 +181,52 @@ my %ELEM_PLACE = map { ($_ => 1) } qw(p-aref p-gethash);
 my %TIER_HEAD = map { ($_ => 1) }
   qw(p-regex p-qr p-regex-from-parts p-subst p-qr-from-parts);
 
+# ── THE MATCH-STATE WRITERS (task #5545, s543t2; docs/ir-spec.md "Match
+# variables") ─────────────────────────────────────────────────────────────
+# A SUB FRAME is the scope of the match variables ($1.., $&, @-, %+: s543t,
+# p-sub-frame's %p-match-scope), and the scope costs every call a special
+# binding.  A body needs it only if running it can WRITE the match state
+# without a sub frame of its own in between.  The ops that can, by NAME:
+#   p-=~ p-!~        every m// and s/// is (p-=~ TARGET OP) or (p-!~ ...): the
+#                    runtime's ONE writer, %p-match-record, is reachable from
+#                    no other exported op -- Pl/t/match-scope-registry-01.t
+#                    derives the call graph from cl/pcl-runtime.lisp and fails
+#                    when a new exported caller is not listed here;
+#   p-eval p-eval-thunk p-evalbytes   a string eval runs its text INLINE;
+#   p-require p-require-file p-do p-use p-require-parent   a file's top level
+#                    is not a sub frame (require / do FILE / use at run time);
+#   p-write          a format's lines run inline.
+# Not writers (probed perl 5.40.3 = PCL): split (with or without a capture
+# group), tr, pos(), qr, a FAILED match, a READ of $1.  A sort / map / grep
+# block, an eval BLOCK, an s///e replacement are inline in the body, so the
+# walk sees their p-=~; a call is not a writer -- the callee has its own frame.
+# RULE 12 TURNED AROUND: a shape the walk does not recognise answers TRUE (the
+# scope's cost), never FALSE (a silent wrong) -- a form whose head is itself a
+# form (see _may_write_match_state).  v1 TEXT is not such a shape: _scan_text
+# reads every `(HEAD` in it, so a writer in text is counted like one in the tree
+# (an over-count, a head inside a string literal, only costs the scope).
+our %MATCH_STATE_HEAD = map { ($_ => 1) }
+  qw(p-=~ p-!~ p-eval p-eval-thunk p-evalbytes p-require p-require-file p-do
+     p-use p-require-parent p-write);
+
+sub _may_write_match_state {
+  my ($acc, $all) = @_;
+  return 1 if $acc->{FORM_HEAD};
+  for my $h (keys %MATCH_STATE_HEAD) { return 1 if $all->{$h} }
+  return 0;
+}
+
+# The fact for a body the caller has lowered (an anonymous sub's frame asks
+# it; a named sub's reads `:match` off its `:needs`): true when running FORMS
+# may write the match state inline.  The same walk as needs_of_form.
+sub may_write_match_state {
+  my (@forms) = @_;
+  my $acc = _new_acc();
+  _walk($_, $acc) for @forms;
+  my ($all) = _all_heads($acc);
+  return _may_write_match_state($acc, $all);
+}
+
 # ── Collection ────────────────────────────────────────────────────────────
 
 # Called from Pl::Passes::run — the one place a lowered top-level form is
@@ -259,6 +305,9 @@ sub _walk {
       # Nothing to count as an op; its members are walked below.
     }
   }
+  # A head that is itself a form ((lambda ...) ARGS) is not walked: the
+  # match-state fact must not read it as "no writer" (#5545).
+  else { $acc->{FORM_HEAD}++ }
   _walk($_, $acc) for @args;
   return;
 }
@@ -427,6 +476,10 @@ sub needs_of_form {
   }
   # The regex TIERS this sub's literals need, from the same walk.
   push @classes, map { ":regex.$_" } grep { $acc->{TIER}{$_} } sort keys %{ $acc->{TIER} };
+  # `:match` -- running the body may write the match state inline, so its
+  # frame needs the capture scope (task #5545; %MATCH_STATE_HEAD above).  The
+  # p-sub macro builds the scope unless `:needs` is PRESENT and lacks `:match`.
+  push @classes, ':match' if _may_write_match_state($acc, $all);
   return @classes;
 }
 

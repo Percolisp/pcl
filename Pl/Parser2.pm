@@ -13618,7 +13618,7 @@ sub _lower_embedded_anon {
                      ['list', '@_', ['p-flatten-args', '%_args']],
                      $self->_anon_home_pkg_binding,
                      ['list', '*pcl-caller-wantarray*', '*wantarray*']],
-             ['p-sub-frame',
+             ['p-sub-frame', ':no-match',
               ['block', 'nil', ['p-return-empty']]]]]);
   }
 
@@ -13672,12 +13672,16 @@ sub _lower_embedded_anon {
     _ppi_state_restore($ppi_snap);
     return undef;
   }
+  # The capture scope only where the body can write the match state (task
+  # #5545): Pl::Manifest's walk, the one a named sub's `:needs` comes from;
+  # an unproven body keeps the frame's default scope.
+  my @no_match = Pl::Manifest::may_write_match_state(@$forms) ? () : (':no-match');
   my $lambda = ['lambda', ['list', '&rest', '%_args'],
                 ['let', ['list',
                          ['list', '@_', ['p-flatten-args', '%_args']],
                          $self->_anon_home_pkg_binding,
                          ['list', '*pcl-caller-wantarray*', '*wantarray*']],
-                 ['p-sub-frame',
+                 ['p-sub-frame', @no_match,
                   ['block', 'nil', @$forms]]]];
   $lambda = $self->_anon_sub_named($lambda, $block);
   return _anon_compiles_at_runtime($block) ? ['p-cloned-sub', $lambda] : $lambda;
