@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FOUND s543w (Opus 5.5, 2026-11-28, base 749eaf0e) while probing #650's `no Mod <a b>`; the same with qw, so not #650's.\n\n    # plib/Pm.pm: package Pm; sub import { shift; print \"import: [@_]\\n\" } sub unimport { shift; print \"unimport: [@_]\\n\" } 1;\n    use lib 'plib';\n    BEGIN { print \"begin\\n\" }\n    no Pm qw(a b);\n    print \"x\\n\";\n\n    perl: begin / unimport: [a|b] / x\n    PCL : begin / x                  (exit 0, nothing on stderr)\n\n`./pl2cl` emits no form for the `no Pm qw(a b)` statement at all (the `use lib` before it is there).  perl's `no Module\nLIST` is `BEGIN { require Module; Module->unimport(LIST) }`; PCL has `p-unimport` (DECIDED: `no lib LIST` = `(p-unimport\n\"lib\" LIST)`, #2464; `no builtin`, `no autodie` #2873) but the general `no` of a module that is not a pragma reaches no\nlowering.  Where: Pl/Parser.pm's include processing (the `use` arm emits `p-use`; find what a `no` of a non-pragma does).\nNOT TAKEN by s543w (rare; a different cause from #650).\n",
+   "frequency" : "rare",
+   "frequency_reason" : "found by s543w's probe of #650 (`no Pm <a b>`); no `no Module` of a user module in the Rosetta corpus, everyday/ or the board dists' lib/ (grep for `^\\s*no [A-Z]...`); Moose-style `no Moose;` exists in the wild but not in anything we hold",
+   "id" : 5602,
+   "status" : "pending",
+   "subject" : "SILENT: `no Module LIST` for a user (non-pragma) module emits NOTHING -- the module is not required and its unimport is never called (perl: BEGIN { require Module; Module->unimport(LIST) })",
+   "triage" : "in",
+   "triage_reason" : "`no` is core syntax and calls the module's unimport (perlfunc \"use\"); PCL already lowers `no lib` / `no builtin` / `no autodie` through p-unimport"
+}

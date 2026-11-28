@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FOUND s543w (Opus 5.5, 2026-11-28, base 749eaf0e = CODE 6a1301ed) while measuring #650's rebuild, and FIXED in the same batch.\n\nTHE SHAPE (neutral, perl 5.40.3 vs PCL on main):\n\n    my @a = (1); my $n = 1; sub f { 1 }\n    print \"a\\n\" if $a[0] < 2*$n and 3 > 1;\n    print \"b\\n\" if f() < 2*$n and 3 > 1;\n    print \"c\\n\" if time < 2**40 and 1 > 0;\n\n    perl: a b c\n    PCL : PCL: statement dropped ... Bug. Fell through. Missing case: [... Token::QuoteLike::Readline<<2*$nand3>> ...]\n\n    The same after `$h{k}`, `$o->size`, `K` (use constant), `@{$r}`, `scalar(@a)`.  `X < 5 and 1 > 0` (no\n    `*`) and `X < 2*$n && 3 > 1` (`&&` stops the scan) were right.\n\nCAUSE: `Pl::PExpr::_fix_ppi_glob_after_block` rebuilt any `<` ... `>` run that held a glob metacharacter\n(`*`) as ONE Readline unless the token before the `<` was a Symbol / Number / Quote -- a Structure (a\nsubscript, a call's list, a dereference block), a method name, a builtin without an operand and a declared\nterm all let it through, and the token contents were joined without the whitespace.\n\nFIX (s543w, PCL side of #650): the rebuild fires only where only a DECLARATION says a term is expected --\nright after a user's word that is not after `->`, not a PPI keyword (unless spelled like an operator /\nquote-like operator) and not a declared nullary term (`_is_zero_arg_func`), or at the start of the run --\nand it takes the SOURCE text between the brackets (`_angle_source_text`).  Everywhere else PCL's PPI has\ndecided (groups AH, BJ, BK).  Guard: Pl/t/readline-ternary-01.t \"negative: `X < 2*$n and 3 > 1` compares\nafter a subscript, a call and time\" (fails on main).\n\n=== DONE (s543w) ===  The fire count of the rebuild over 2,703 files (wide list + Rosetta + shapes): base\n9 files / 24 fires (5 of them the Rosetta `use List::Util <...>` readlines, #650) -> tree: see the s543w\nsession-log; no fire ever came from the reverse shape.\n",
+   "frequency" : "ordinary",
+   "frequency_reason" : "an ordinary compound condition (`$a[$i] < 2*$n and $j > 0`); found by a probe, no program of the four populations or the Rosetta corpus holds it (0 fires of the rebuild on such a shape over 2,703 files) -- written ordinary because nothing about the spelling is unusual",
+   "id" : 5600,
+   "status" : "pending",
+   "subject" : "DROP: a comparison `X < ...*... and Y > ...` after a subscript, a call, a method name, `time` or a declared constant was REBUILT AS A GLOB by PExpr::_fix_ppi_glob_after_block and the statement dropped (FIXED s543w)",
+   "triage" : "in",
+   "triage_reason" : "numeric comparisons are core (docs/supported-subset.md): a less-than must stay a less-than"
+}

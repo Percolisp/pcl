@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543u (Opus 5.5, 2026-11-28) by member 4 (the rule-12 read of the escape rewriter).\n\nTHE SHAPE (perl 5.40.3 vs the s543u tree):\n    print \"ab\" =~ /(?<n>a)(?(<n>)b|c)/ ? \"y[$&]\" : \"n\", \"\\n\";     # perl y[ab]\n    print \"ab\" =~ /(?<n>a)(?('n')b|c)/ ? \"y[$&]\" : \"n\", \"\\n\";     # perl y[ab]\n    PCL: both die \"Branch test must be look-ahead, look-behind or number\" (trappable).\n\nA fix: the rewrite scan knows the group numbers as it opens them (its NCAP counter, s543u); a name -> number table built there turns `(?(<name>)` into `(?(N)`.  Listed in docs/not-supported.md ns-regex-escapes.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "no Rosetta program, board dist, everyday program or lib/ shim holds `(?(<` or `(?('` (grepped s543u)",
+   "id" : 5565,
+   "status" : "pending",
+   "subject" : "LOUD: a NAMED condition `(?(<name>)yes|no)` / `(?('name')yes|no)` dies at the compile with cl-ppcre's \"Branch test must be look-ahead, look-behind or number\"; the numeric `(?(1)...)` works",
+   "triage" : "in",
+   "triage_reason" : "perlre \"Conditional expressions\"; a one-pass rename to the group number is within the rewriter"
+}

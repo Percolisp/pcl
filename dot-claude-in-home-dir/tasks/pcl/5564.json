@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-11-28",
+   "description" : "FILED s543u (Opus 5.5, 2026-11-28) by member 4 (the rule-12 read of the escape rewriter against perlre / perlrebackslash).\n\nTHE SHAPE (perl 5.40.3 vs the s543u tree):\n    print \"ab\" =~ /(?|(a)|(b))\\1/ ? \"y\" : \"n\", \"\\n\";     # perl n\n    print \"ab\" =~ /(?|(a)|(c))b/ ? \"y[$&] [$1]\" : \"n\", \"\\n\";  # perl y[ab] [a]\n    PCL: both die \"Character '|' may not follow '(?' in regex\" (trappable, one line).\n\nLOUD, not silent: the pattern refuses to compile.  A fix: in the parse tree (%pcl-mark-tree's renumbering), give each alternative of the group the same register numbers -- cl-ppcre numbers registers in tree order, so the alternatives' registers must be remapped onto the first alternative's, and the scanner wrapper (%pcl-keep-scanner's compaction) must merge them.  Listed in docs/not-supported.md ns-regex-escapes.\n",
+   "frequency" : "rare",
+   "frequency_reason" : "no Rosetta program, board dist, everyday program or lib/ shim holds `(?|` (grepped s543u); perlre documents it",
+   "id" : 5564,
+   "status" : "pending",
+   "subject" : "LOUD: a branch-reset group `(?|...)` dies at the compile with cl-ppcre's \"Character '|' may not follow '(?'\" where perl numbers each alternative's groups from the same number",
+   "triage" : "in",
+   "triage_reason" : "perlre \"Extended Patterns\"; within reach of a rewrite that renumbers (the s543u keep registers already renumber back-references in the parse tree)"
+}
