@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s543v (2026-11-28, Opus, EDITED BY HAND): flip.t 13/1 -> 12/2 -- flip.t's `like($warn, qr/uninitialized/)` under `use warnings` (perl row 10) passed only because %p-flipflop-lineno printed its uninitialized warning UNCONDITIONALLY; WIP 4 makes that default-off diagnostic absent (docs/not-supported.md "Warnings-gated diagnostics are absent", #221) after #5464 made `$m += 1 .. 3` a flip-flop and Pl/t/transpile-test-07.t row 31 (no warnings) saw the stderr line.  Cause of the row now: #221.
 # s543t (2026-11-28, Opus, EDITED BY HAND): sort.t 184/5 -> 186/3 -- rows 174 175 "Match vars do not leak from one plain / $$ sort sub to the next" pass: #932's sub half (a sort SUB is a sub frame, so its match no longer reaches the next comparator); the full sweep on the s543t tree 18808 -> 18810, GATE clean
 # s543j (2026-11-22, Opus, EDITED BY HAND): local.t 305/8 -> 306/7 -- the row `local %ENV = %ENV; is(dump of %ENV, dump before)` (perl-tests/local.t line 592) passes: `local %ENV` keeps the environment's magic (#5210, p-local-env); before it bound a plain copy
 # s543e (2026-11-21, Opus, EDITED BY HAND): magic.t 159/30 -> 158/30 -- row 194 "not exists $ENV{existing} during local $ENV{existing}" is a TODO row ("exists on %ENV should reflect real env") that PERL FAILS (`local $ENV{K}` keeps the key: exists 1, the value undef, a child sees ""); PCL passed it because its `local $ENV{K}` UNSET the variable.  #1030's value layer makes the localised element perl's (exists, undef, exported as ""), so PCL now prints perl's `not ok 194 # TODO` -- a row that was passing on a wrong answer, not a regression; it moves to the row shortfall (19 -> 20).  One-file runs (scratch/s543e/sweep1.pl, the sweep's command): base a5a60b62 `ok 194`, tree `not ok 194 # TODO`, every other row identical.  TOTAL 18,808 -> 18,807.
@@ -502,7 +503,7 @@ errno_test.t	OK	2	0	2
 eval.t	PARTIAL	136	24	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
-flip.t	OK	13	1	14
+flip.t	OK	12	2	14
 for.t	OK	130	0	132
 grent.t	OK	3	0	3
 grep.t	OK	71	0	77

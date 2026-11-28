@@ -201,6 +201,13 @@ neighbour is filed with its frequency and left unless it is ordinary.
   #5460 no longer shows in it), `\b{wb}` #5561 (1561), and 0649 (its last cause after s543w was `\K`): SEVENTEEN
   programs `same`; 0119 0710 keep their other cause (#5502, #5507): **ROSETTA 569 -> 586
   of 650** on top of batches 1 and 2, buckets 0 (the session log, s543u).
+* batch 4 (s543v, 2026-11-28): THE SLICE FAMILY -- #5466 (a slice under a
+  modifying scalar operator is its last element, every element vivified),
+  #5464 (the right operand of every `OP=` is scalar context), #5469 (a slice
+  store from the same array copies it first) -- five programs (0190 0243 0808
+  0887 1198), **ROSETTA 561 -> 566 of 650** on its own base 38420fae,
+  buckets 0 (three load TIMEOUTs re-run alone); **586 -> 591 of 650** on top of
+  batches 1-3 (the session log, s543v).
 
 **Step 4 -- beside it, one slot:** the ordinary silent wrongs that no Rosetta
 program holds but the board or perl's documentation does (the 21 of the first
