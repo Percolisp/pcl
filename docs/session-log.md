@@ -147,6 +147,34 @@ The PPI / parser queue was the parser program (#3694) on both halves: the PPI ha
 
 **Gate at the end:** 346 files / 11,660 rows PASS; sweep 18,761 +0; EVERYDAY 116 of 122; CI green on every push.
 
+## Session s543u (Opus agent, 2026-11-28) -- the second Rosetta fix batch, REGEX ESCAPES the engine never saw translated: `\K` (#5560), `\G` wherever it stands, in s/// too (#5461, #5462), `\b{wb}` `\b{gcb}` (#5561), `\g` (#5562), the rule-12 read of the rewriter against perl's whole escape list; #5563-#5565 filed; cl/ only, no generation bump
+
+The brief: `briefs-and-rules-for-claude-subagents/s543/s543u-prompt.md`; base = main `5d511ff8` (CODE MAIN-READY-114 `2f85209e` + records, v2-16500).  Cut by an account usage limit at 00:50, resumed 03:0x.  Beside it: s543t (overloading), s543q (census B, merged during the batch), s543w.
+
+**Bars:** `ROSETTA: 547 -> 563 of 650` (NEW 0 / FIXED 0 / UNEXPLAINED 0 / STALE 0; MOVED 1: 0033 DIFF -> TIMEOUT at load 7.6, DIFF alone; sixteen programs `same`: 0107 0774 0818 0838 0923 0925 0927 0933 1050 1298 1306 0266 by `\K`, 0071 0996 1297 by `\G`, 1561 by `\b{wb}`); OWED-BARS.
+
+**Member 1, `\K` (#5560).**  The measurement first: the consumers of a match's start are eleven scan sites (the single m//, the list / scalar / anchored-list //g, the s///g loop, s///e's and s///'s single `regex-replace`, s///'s pre-scan, the s///g template loop, the s/// count scan, split) and the record readers of `$&` `` $` `` `@-[0]` -- and every one of them takes the start from ONE producer, the scanner closure `%pcl-create-scanner` makes.  So no refactor commit: the rewrite scan spells `\K` as a mark (`\k<0K>`, a name perl cannot write), the parse tree gets an EMPTY REGISTER in its place (restored by the engine on backtracking), numeric back-references and `(?(N))` are renumbered past those registers, and `%pcl-keep-scanner` hands every consumer the rightmost keep register inside the match as the start and the program's registers only; the `\G` start test reads the real start (a fifth value).  `\K` in a lookaround dies, as in perl 5.32+.  Probes 37/38 + 28/29 perl = tree (the two others: `${^MATCH}` #2635, `\N{U+4B}` #1494).  Found on the way, fixed in the same function: a template `$N` past the pattern's groups was a cl-ppcre Lisp error (#5563; re/subst.t aborted on it).  Checkpoint sweep: 18,808 +0.
+
+**Member 2, `\G` (#5461, #5462).**  `\G` is a second mark that the tree makes a filter on `*p-gpos*`, bound by every op -- the target's pos() for a single match, s/// and a first //g step, each later step's start -- so s/// joins m//'s reading; m//'s scan-from-pos fast path stays for the lexer idiom (a `\G` every match begins with is dropped and the start tested), and `%pcl-strip-gpos`, which stripped every `\G` (`/-\G/`, `/\Ga|b/` and `(?:\Ga)+` were wrong in m// too), is deleted.  A `\G` at the match start that an alternative bypasses (Pod::Simple's `m{(?:\A|\G/)...}g`, found by the board grep) is the `leading` kind: perl's gofs 0, a //g step scans from pos; a `\G` at an offset (`s/-\G/../er`, 0996's shape) is `floating`: a //g step scans from 0 with the end at or past pos and a match ending at its `\G` counts as zero-length (perl's `start + gofs == end`); a floating `\G` a match can bypass is refused under //g, while s///g stops where perl's REXEC_FAIL_ON_UNDERFLOW does (the companion's re/subst.t asked for both: `s/bc|(.)\G(.)/../ge`, `s/\d\d(?=\d\G)/7/g`).  #5462: the anchored list arm keeps pos under /c.  Probes 30/30, 19/20 (the refusal), 7/7.
+
+**Member 3, `\b{wb}` (#5561) and `\g` (#5562).**  The ten-row measurement, then a random harness (17,514 strings of break-relevant characters, perl vs SBCL): UAX #29 (`sb-unicode:words`) with perl's white-space tailoring and the regional indicators paired per run is identical to perl on 17,511; the three others are perl's own WB6 look-ahead not skipping a ZWJ.  `\b{gcb}` / `\b{g}` are the boundaries of PCL's `\X` (one rule; `sb-unicode:graphemes` equals perl's real `\b{gcb}` on all 17,514 -- for #2381).  `\b{sb}` (SBCL differs on 1,246 of the 17,514) and `\b{lb}` are refused at the compile.  `\g`: every spelling read the letter g, absolute ones too; now `(?:\N)`, counted back by the scan for `\g{-N}`, `\k<name>` for a name.
+
+**Member 4, the rule-12 read** (the table: `docs/not-supported.md` ns-regex-escapes): every escape and `(?...)` construct of perlre / perlrebackslash, perl -> base -> tree, is passed through, translated, or refused with an id; the one silently-never-matching cell left is `\N{NAME}` (#1494, the Unicode batch's).  Translated here, one arm each: `\o{}` `\k'n'` `\k{n}` (silent before), `(?'n'...)` `(?P<n>...)` `(?P=n)` and the alphabetic assertions `(*pla:` .. `(*atomic:` (they died); filed `(?|...)` #5564 and `(?(<n>)...)` #5565 (rare, loud).
+
+| escape / construct | perl | base | tree |
+|---|---|---|---|
+| `\K` / `\G` in s/// / floating `\G` | match | never / letter G / wrong start | perl's |
+| `\b{wb} \B{wb} \b{gcb} \b{g}` | boundaries | never | perl's (wb 17,511/17,514; gcb = `\X`) |
+| `\b{sb} \b{lb}` | boundaries | never | refused |
+| `\gN \g{N} \g-N \g{-N} \g{name}` | back-reference | never | perl's |
+| `\o{}` `\k'n'` `\k{n}` | char / back-reference | never | perl's |
+| `(?'n'..) (?P<n>..) (?P=n)`, `(*pla:` .. `(*atomic:` | perl's | died | perl's |
+| `\N{U+..} \N{NAME}` | char | never | never (#1494) |
+| `(?\|..)`, `(?(<n>)..)` | perl's | died | died (#5564 #5565) |
+| recursion, verbs, `(*sr:`, `(?[ ])`, `(?n)`, `(?p)`, code blocks | perl's | refused / stripped | the same (ns ids, #2635) |
+| everything else of perlrebackslash (char escapes, classes, anchors, `\1`, groups, lookarounds, `(?>)`, possessive, counted, POSIX) | perl's | perl's | perl's |
+
+**Member 5.**  The nineteen programs re-run: sixteen `same`; 0119 0649 0710 still differ by their other cause (#650, the word list after `use Module`), re-keyed at the rebase.
 ## Session s543w (Opus agent, 2026-11-28) -- PCL's PPI batch 13, a Rosetta fix batch: the lexer's term position -- a word list written as a glob (#650: `use Module <a b>` = group BJ §76, a spaced `[< a b >]` = BK §77), an anonymous hash after an operator (#5508 = BL §78), `method x` under the class feature (#5601 = BM §79); `CONST*$var` (#5509) and a glob of three interpolation pieces (#1292) on PCL's side; #5600-#5602 filed; generation v2-16900
 
 The brief: `briefs-and-rules-for-claude-subagents/s543/s543w-prompt.md` (with its "MEMBERS ADDED AT LAUNCH"); base = main `749eaf0e` (CODE `6a1301ed` = MAIN-READY-114, v2-16500), PPI clone branch `pcl-s543w` from the bare mirror's `pcl` `7fd02b75`.  Cut by an account usage limit at 00:50, resumed 03:0x (the clone and the vendored copy re-checked: both pairs then complete; re-vendored from the committed branch).

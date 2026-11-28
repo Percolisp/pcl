@@ -43297,11 +43297,12 @@ would consume, so it dies naming the stream (rule 12)."
     (not (eq (walk node start) :bad))))
 
 (defun %pcl-gpos-every-path-p (node)
-  "Does every match of parse-tree NODE pass a \\G mark?  A //g or s///g
-   step then advances by perl's rule exactly (%p-gpos-zero-len-p); a \\G
-   that a match can bypass (`X\\G|b', `(?:\\G)?') is refused there, because
-   perl advances such a pattern by an offset it computes for the whole
-   pattern (%pcl-gpos-partial-refuse)."
+  "Does every match of parse-tree NODE pass a \\G mark?  A //g step then
+   advances by perl's rule exactly (%p-gpos-zero-len-p); a \\G that a match
+   can bypass (`X\\G|b', `(?:\\G)?') is refused under //g, because perl
+   advances such a pattern by an offset it computes for the whole pattern
+   (%pcl-gpos-partial-refuse), and an s///g step stops at perl's underflow
+   (%p-subst-underflow-scan)."
   (cond ((%pcl-rx-mark-p node "0G") t)
         ((atom node) nil)
         (t (case (car node)
@@ -43311,14 +43312,19 @@ would consume, so it dies naming the stream (rule 12)."
              (:alternation (every #'%pcl-gpos-every-path-p (cdr node)))
              ((:greedy-repetition :non-greedy-repetition)
               (and (plusp (second node)) (%pcl-gpos-every-path-p (fourth node))))
+             ;; a positive lookahead is on every path it stands on
+             ;; (`\d\d(?=\d\G)', perl's t/re/subst.t)
+             (:positive-lookahead (%pcl-gpos-every-path-p (second node)))
              (t nil)))))
 
 (defun %pcl-gpos-partial-refuse (pattern)
-  "Die, perl-shaped and trappable, for a //g or s///g whose \\G a match can
-   bypass (%pcl-gpos-every-path-p; docs/not-supported.md ns-regex-escapes):
-   its steps would advance by a rule PCL does not reproduce, a wrong list
-   or replacement rather than a refusal (rule 12)."
-  (%p-die-error nil "PCL: a \\G that a match can bypass is not supported in //g or s///g (m/~A/)"
+  "Die, perl-shaped and trappable, for a //g whose \\G at an offset a match
+   can bypass (%pcl-gpos-every-path-p; docs/not-supported.md
+   ns-regex-escapes): its steps would advance by perl's whole-pattern gofs,
+   which PCL does not reproduce -- a wrong list rather than a refusal (rule
+   12).  s///g runs: its later steps stop at perl's underflow
+   (%p-subst-underflow-scan)."
+  (%p-die-error nil "PCL: a \\G that a match can bypass is not supported in //g (m/~A/)"
                 (%pcl-unmark-text pattern)))
 
 ;;; THE BOUNDARY TYPES (task #5561, ir-spec §10-bound).  `\b{wb}' is perl's
@@ -43886,7 +43892,8 @@ would consume, so it dies naming the stream (rule 12)."
                           (%p-minend-scan scanner minend-key str pos end)
                           (funcall (the function scanner) str pos end))))
 
-(defun %p-global-scanner (scanner minend-key &optional counter always gpos0)
+(declaim (ftype function %p-subst-underflow-scan))
+(defun %p-global-scanner (scanner minend-key &optional counter always gpos0 partial)
   "A cl-ppcre scanner closure that iterates the way perl's global match does,
    for the loops cl-ppcre drives itself (regex-replace-all, do-scans, split).
    Those loops advance one character past a zero-length match; this closure
@@ -43902,14 +43909,18 @@ would consume, so it dies naming the stream (rule 12)."
    the retry that must come first.
    GPOS0, when given, is the target's pos() for a pattern holding a \\G
    filter (task #5461): the first attempt's \\G is there, every later one's
-   at the attempt's start, as in perl's s///g loop (REXEC_IGNOREPOS)."
+   at the attempt's start, as in perl's s///g loop (REXEC_IGNOREPOS).
+   PARTIAL true (a \\G a match can bypass): a later attempt stops at perl's
+   underflow (%p-subst-underflow-scan)."
   (let ((prev-empty-at nil) (first t))
     (lambda (str start end)
       (let* ((retry (and prev-empty-at (eql start (1+ prev-empty-at))))
              (pos (if retry prev-empty-at start)))
         (multiple-value-bind (ms me rs re)
-            (%p-with-gpos (gpos0 (if first gpos0 pos))
-                          (%p-global-scan scanner minend-key str pos end (or retry always)))
+            (if (and partial (not first))
+                (%p-subst-underflow-scan minend-key str pos (or retry always))
+                (%p-with-gpos (gpos0 (if first gpos0 pos))
+                              (%p-global-scan scanner minend-key str pos end (or retry always))))
           (setf prev-empty-at (and ms (= ms me) ms) first nil)
           (when (and ms counter) (incf (car counter)))
           (values ms me rs re))))))
@@ -44355,6 +44366,16 @@ would consume, so it dies naming the stream (rule 12)."
                                         (list* :pcl-minend-mode t (cdr minend-key)))
                    str 0)))
 
+(defun %p-subst-underflow-scan (minend-key str pos minend)
+  "A LATER s///g step at POS of a pattern whose \\G a match can bypass
+   (task #5461): perl starts it before POS (by the \\G's offset) with \\G at
+   POS and its end at or past POS, and a match that would START before POS
+   ends the loop (REXEC_FAIL_ON_UNDERFLOW: `s/bc|(.)\\G(.)/../ge' on
+   \"abcdef\" replaces once).  The leftmost such match from 0 is perl's; one
+   starting before POS answers NIL, no match."
+  (multiple-value-bind (ms me rs re) (%p-floating-gpos-scan minend-key str pos minend)
+    (if (and ms (< ms pos)) nil (values ms me rs re))))
+
 (defun %pcl-scan-anchored-list (scanner minend-key str reg-names start
                                 &optional closers)
   "Emulate /\\G.../g in list context: collect contiguous matches starting at
@@ -44711,8 +44732,6 @@ would consume, so it dies naming the stream (rule 12)."
                                 (when (member :x modifiers) '(:extended-mode t)))))
           (multiple-value-bind (scanner reg-names closers gkind)
               (%pcl-create-scanner pattern options)
-            (when (and (eq gkind :partial) (member :g modifiers))
-              (%pcl-gpos-partial-refuse pattern))
             (setf (car holder)
                   (vector pattern
                           ;; CLOSERS has one entry per capturing group the
@@ -44729,10 +44748,12 @@ would consume, so it dies naming the stream (rule 12)."
                           ;; (task #1719): how %p-global-scan reaches the minend
                           ;; variant of this pattern.
                           (cons pattern options)
-                          ;; GPOS-P (task #5461): the pattern holds a \G
-                          ;; filter (s/// never asks for the m// fast path),
-                          ;; so the op binds *p-gpos*.
-                          (and gkind t))))))))
+                          ;; GPOS-KIND (task #5461): NIL, or the kind of the
+                          ;; \G filter the pattern holds (s/// never asks for
+                          ;; the m// fast path), so the op binds *p-gpos*;
+                          ;; :partial also makes a later s///g step stop at
+                          ;; perl's underflow (%p-subst-underflow-scan).
+                          gkind)))))))
 
 (defun %p-subst-pieces-string (str pieces total)
   "The string made of PIECES (newest first): a string is itself, a cons
@@ -44749,7 +44770,7 @@ would consume, so it dies naming the stream (rule 12)."
             (decf pos len)
             (%pcl-str-blit out pos (the string p) len))))))
 
-(defun %p-subst-replace-all (scanner minend-key str rep &optional gpos0)
+(defun %p-subst-replace-all (scanner minend-key str rep &optional gpos0 partial)
   "s///g's loop, driven here instead of by cl-ppcre's regex-replace-all
    (perf round 43, task #2981): every match of SCANNER in STR, found by
    perl's global-match rule (%p-global-scan: after an empty match the next
@@ -44761,7 +44782,9 @@ would consume, so it dies naming the stream (rule 12)."
    pre-sized string instead of through a string output stream.
    GPOS0, when given, is the target's pos() for a pattern holding a \\G
    filter: the first attempt's \\G is there, every later one's at the
-   attempt's start (perl's REXEC_IGNOREPOS, task #5461)."
+   attempt's start (perl's REXEC_IGNOREPOS, task #5461).  PARTIAL true (a
+   \\G a match can bypass): a later attempt stops at perl's underflow
+   (%p-subst-underflow-scan)."
   (let* ((str (if (simple-string-p str) str (coerce str 'simple-string)))
          (n (length str)) (pos 0) (copied 0) (count 0) (total 0)
          (minend nil) (pieces '()))
@@ -44774,8 +44797,10 @@ would consume, so it dies naming the stream (rule 12)."
          ;; do-scans arranges (bound around the scan only -- the /e
          ;; replacement runs user code with its own matches).
          (let ((cl-ppcre::*real-start-pos* 0))
-           (%p-with-gpos (gpos0 (if (zerop count) gpos0 pos))
-                         (%p-global-scan scanner minend-key str pos n minend)))
+           (if (and partial (plusp count))
+               (%p-subst-underflow-scan minend-key str pos minend)
+               (%p-with-gpos (gpos0 (if (zerop count) gpos0 pos))
+                             (%p-global-scan scanner minend-key str pos n minend))))
        (when (null ms) (return))
        (let ((r (if (stringp rep) rep (funcall rep str 0 n ms me rs re))))
          (when (< copied ms)
@@ -44806,6 +44831,7 @@ would consume, so it dies naming the stream (rule 12)."
         (reg-names         (svref c 6))
         (closers           (svref c 7))
         (minend-key        (svref c 8))
+        (partial           (eq (svref c 9) :partial))
         (count 0)
         (result nil))
     (if eval-p
@@ -44831,7 +44857,7 @@ would consume, so it dies naming the stream (rule 12)."
                 (if global-p
                     ;; /g: cl-ppcre drives the loop, so it gets a scanner
                     ;; that advances the way perl does (task #1719).
-                    (%p-subst-replace-all scanner minend-key str rep-fn gpos0)
+                    (%p-subst-replace-all scanner minend-key str rep-fn gpos0 partial)
                     (cl-ppcre:regex-replace scanner str rep-fn))))
         ;; Normal s///: string replacement
         (progn
@@ -44848,11 +44874,11 @@ would consume, so it dies naming the stream (rule 12)."
                   ;; a template (\N, \&): cl-ppcre builds it
                   (let ((n (list 0)))
                     (setf result (cl-ppcre:regex-replace-all
-                                  (%p-global-scanner scanner minend-key n nil gpos0)
+                                  (%p-global-scanner scanner minend-key n nil gpos0 partial)
                                   str replacement))
                     (when (stringp result) (setf count (car n))))
                   (multiple-value-setq (result count)
-                    (%p-subst-replace-all scanner minend-key str replacement gpos0)))
+                    (%p-subst-replace-all scanner minend-key str replacement gpos0 partial)))
               (progn
                 (setf result (cl-ppcre:regex-replace scanner str replacement))
                 (when (and (stringp result) (cl-ppcre:scan scanner str))

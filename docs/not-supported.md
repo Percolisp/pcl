@@ -4689,7 +4689,7 @@ by #1494:
 | `\pX \p{…} \PX \P{…} \p{^…}` | perl's own sets | translated (#2060); an ungenerated enumerated property DIES (above) |
 | `\A \z \Z \b \B` | perl's | passed |
 | `\K` | perl's | translated (s543u, #5560; ir-spec §10-keep) |
-| `\G` | perl's | translated (s543u, #5461; §10-gpos); a floating `\G` a match can bypass is REFUSED under `//g` / `s///g` |
+| `\G` | perl's | translated (s543u, #5461; §10-gpos); a floating `\G` a match can bypass is REFUSED under `//g` (s///g follows perl's underflow stop) |
 | `\b{wb} \B{wb} \b{gcb} \b{g} \B{gcb}` | perl's (wb measured 17,511 / 17,514; gcb = `\X`'s) | translated (s543u, #5561; §10-bound) |
 | `\b{sb} \b{lb} \B{sb} \B{lb}` | — | REFUSED at the compile (sentence / line-break boundaries: SBCL's sentence segmentation differs from perl on 7 % of random strings, line breaking has no boundary iterator) |
 | `\1` .. `\9`, `\10` (backref or octal by perl's rule) | perl's | passed |

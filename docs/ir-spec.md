@@ -7315,8 +7315,12 @@ by where the `\G`s stand:
   from 0 with the match's end at or past `pos()` (past it after a zero-length
   match), and a match ending at its `\G` counts as zero-length (perl's
   `start + gofs == end`).  A floating `\G` that a match can BYPASS
-  (`/X\G|b/g`) is REFUSED under `/g` and `s///g` (perl advances it by an
-  offset it computes for the whole pattern); without `/g` it runs.
+  (`/X\G|b/g`) is REFUSED under `//g` (perl advances it by an offset it
+  computes for the whole pattern); without `/g` it runs, and under `s///g` a
+  later step whose leftmost match (from 0, ending at or past the step's start)
+  would START before the step's start ends the loop -- perl's
+  REXEC_FAIL_ON_UNDERFLOW (`s/bc|(.)\G(.)/../ge` on "abcdef" is `aXXdef`).
+  A `\G` inside a lookahead on every path is floating (`s/\d\d(?=\d\G)/7/g`).
 A list-context `\G//gc` keeps `pos` at the last match's end, or where it was
 on a miss (#5462, §10-gmatch's `/c` rule).  Example: `$_ = "q00r00";
 /r(?=00)/g and print s/\G00/X/r` prints `q00rX`.

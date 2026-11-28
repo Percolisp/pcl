@@ -845,6 +845,8 @@ my $f = "aaa"; pos($f) = 1; $f =~ s/\Ga/b/; print "8 ", pos($f) // 'u', " $f\n";
 my $w = "aaab"; my $n = 0; while ($w =~ s/\Ga/x/) { last if ++$n > 9 } print "9 $w $n\n";
 my $v = "1 2 3"; pos($v) = 2; print "10 ", $v =~ s/\G(\d)/<$1>/gr, " ", "aGb" =~ s/[\G]/!/r, " ", "a\\Gb" =~ s/\\G/!/r, "\n";
 my $q = qr/\Gb/; my $x = "abc"; pos($x) = 1; print "11 ", $x =~ s/$q/B/r, "\n";
+my $d = "123456"; pos($d) = 4; my $nd = ($d =~ s/\d\d(?=\d\G)/78/g); my $e = "abcdef"; $e =~ s/bc|(.)\G(.)/$1 ? "[$1-$2]" : "XX"/ge;
+(my $y = "aaXbb") =~ s/X\G|b/-/g; my $z = "aaXbb"; pos($z) = 3; my $nz = ($z =~ s/X\G|b/-/g); print "12 $nd $d $e $y $nz $z\n";
 PL
 subst_agrees(<<'PL', "#5461 #5462: a floating \\G in m// and //g, a quantified or alternated \\G, \\G with \\K, a list \\G//gc keeps pos");
 my $s = "abc"; pos($s) = 1; print "1 ", ($s =~ /b\G/ ? "y" : "n"), ($s =~ /a\G/ ? "y[$&]" : "n"), "\n";
@@ -858,19 +860,20 @@ my @parts = "a/b\\/c/d" =~ m{(?:\A|\G/)((?:[^/\\]|\\.)*)}g; $s = "xab"; pos($s) 
 my @f; $s = "a,b,,c"; while ($s =~ /(?:\A|\G,)([^,]*)/g) { push @f, "[$1]" } print "8 ", join("|", @parts), " @l @f\n";
 PL
 {
-    # A //g or s///g whose \G a match can BYPASS (`X\G|b`) is refused, loud and
-    # trappable: perl advances it by an offset it computes for the whole
-    # pattern (docs/not-supported.md ns-regex-escapes); without /g it runs.
+    # A //g whose \G at an offset a match can BYPASS (`X\G|b`) is refused, loud
+    # and trappable: perl advances it by an offset it computes for the whole
+    # pattern (docs/not-supported.md ns-regex-escapes); without /g it runs, and
+    # s///g stops where perl's REXEC_FAIL_ON_UNDERFLOW does (row 73).
     my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh <<'EOP';
 my $s = "aaXbb"; pos($s) = 3;
-for my $code (sub { my @l = $s =~ /X\G|b/g }, sub { (my $t = $s) =~ s/X\G|b/-/g }) {
+for my $code (sub { my @l = $s =~ /X\G|b/g }, sub { my $n = 0; $n++ while $s =~ /X\G|b/g }) {
   print eval { $code->(); 1 } ? "lived " : ($@ =~ /bypass is not supported/ ? "refused " : "other ") }
 pos($s) = 3; print $s =~ /X\G|b/ ? "[$&]" : "no", "\n";
 EOP
     close $fh;
     chomp(my $got = `$RealBin/../../runpcl $file 2>&1`);
-    is($got, 'refused refused [X]', '#5461: a //g or s///g whose \G a match can bypass is refused trappably; a single match runs');
+    is($got, 'refused refused [X]', '#5461: a //g whose \G a match can bypass is refused trappably; a single match runs');
 }
 
 # #5561 (s543u): `\b{wb}` / `\B{wb}` are perl's Unicode word boundaries --
